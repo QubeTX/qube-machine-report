@@ -10,8 +10,19 @@ echo "TR-100 Machine Report Installation"
 echo "=========================================="
 echo ""
 
-# Detect OS
-if [ -f /etc/os-release ]; then
+# Detect OS type
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    OS_TYPE="macos"
+    OS_NAME="macos"
+    if command -v sw_vers &> /dev/null; then
+        MACOS_VERSION=$(sw_vers -productVersion 2>/dev/null)
+        echo "✓ Detected OS: macOS ${MACOS_VERSION}"
+    else
+        echo "✓ Detected OS: macOS (version unknown)"
+    fi
+    IS_RPI=0
+elif [ -f /etc/os-release ]; then
+    OS_TYPE="linux"
     . /etc/os-release
     OS_NAME="${ID}"
     OS_VERSION="${VERSION_ID}"
@@ -30,6 +41,7 @@ if [ -f /etc/os-release ]; then
         IS_RPI=0
     fi
 else
+    OS_TYPE="unknown"
     echo "⚠ Warning: Could not detect OS. Proceeding anyway..."
     OS_NAME="unknown"
     IS_RPI=0
@@ -38,6 +50,32 @@ fi
 # Check architecture
 ARCH=$(uname -m)
 echo "✓ Architecture: ${ARCH}"
+
+# Check Bash version
+BASH_MAJOR="${BASH_VERSINFO[0]}"
+BASH_MINOR="${BASH_VERSINFO[1]}"
+echo "✓ Bash version: ${BASH_VERSION}"
+
+if [ "$BASH_MAJOR" -lt 4 ]; then
+    echo ""
+    echo "⚠ WARNING: Bash 4.0+ is recommended for best compatibility"
+    echo "  Current version: ${BASH_VERSION}"
+    if [ "$OS_TYPE" = "macos" ]; then
+        echo ""
+        echo "  macOS ships with Bash 3.2 by default."
+        echo "  For full compatibility, install Bash 4+ via Homebrew:"
+        echo "    brew install bash"
+        echo ""
+        echo "  The script will still work but may show some fields differently."
+    fi
+    echo ""
+    read -p "Continue anyway? (y/N): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installation cancelled."
+        exit 1
+    fi
+fi
 echo ""
 
 # Check if script exists in current directory
@@ -54,7 +92,19 @@ echo "Installing Dependencies"
 echo "=========================================="
 echo ""
 
-if [[ "$OS_NAME" == "debian" ]] || [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "raspbian" ]]; then
+if [ "$OS_TYPE" = "macos" ]; then
+    echo "macOS detected - no package installation needed"
+    echo "✓ macOS has all required built-in commands (sysctl, vm_stat, etc.)"
+    echo ""
+    echo "Note: The script will use native macOS commands for system info."
+    if [ "$BASH_MAJOR" -lt 4 ]; then
+        echo ""
+        echo "  Optional: For best experience, install Bash 4+:"
+        echo "    brew install bash"
+    fi
+    echo "✓ Dependencies check complete"
+
+elif [[ "$OS_NAME" == "debian" ]] || [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "raspbian" ]]; then
     echo "Installing lastlog2 for Debian/Ubuntu/Raspberry Pi OS..."
 
     # Check if lastlog2 is already installed
@@ -91,9 +141,20 @@ if [[ "$OS_NAME" == "debian" ]] || [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME"
     fi
 
     echo "✓ Dependencies check complete"
+
+elif [[ "$OS_NAME" == "arch" ]] || [[ "$OS_NAME" == "manjaro" ]]; then
+    echo "Arch-based system detected - no special packages needed"
+    echo "✓ Script will use standard Linux commands"
+    echo "✓ Dependencies check complete"
+
 else
-    echo "⚠ Non-Debian system detected. Skipping lastlog2 installation."
-    echo "  The script will work with legacy 'lastlog' if available."
+    echo "⚠ Unknown/Other Linux system detected"
+    echo "  The script should still work with standard commands."
+    echo "  If you encounter issues, check that these are available:"
+    echo "    - lscpu (or fallback to /proc/cpuinfo)"
+    echo "    - df"
+    echo "    - uptime"
+    echo "✓ Dependencies check complete"
 fi
 
 echo ""
@@ -180,12 +241,22 @@ echo "  2. Open a new terminal to see it run automatically"
 echo "  3. Customize by editing: nano ~/.machine_report.sh"
 echo ""
 
-# Raspberry Pi specific tips
+# Platform-specific tips
 if [ "$IS_RPI" -eq 1 ]; then
     echo "Raspberry Pi Specific Notes:"
-    echo "  • CPU frequency may show blank - this is normal on some RPi models"
+    echo "  • CPU frequency now shows correctly (thanks to sysfs fallback)"
     echo "  • Script optimized for ARM64 architecture"
     echo "  • Perfect for monitoring your Pi over SSH!"
+    echo ""
+elif [ "$OS_TYPE" = "macos" ]; then
+    echo "macOS Specific Notes:"
+    echo "  • Script uses native macOS commands (sysctl, vm_stat, scutil)"
+    echo "  • All system info displayed using macOS APIs"
+    echo "  • Last login info may not be available (macOS limitation)"
+    if [ "$BASH_MAJOR" -lt 4 ]; then
+        echo "  • Running with Bash 3.2 - some formatting may differ"
+        echo "  • Install Bash 4+ for best experience: brew install bash"
+    fi
     echo ""
 fi
 
@@ -197,12 +268,18 @@ echo "Installed to: $TARGET_FILE"
 echo "Configured in: $BASHRC"
 echo ""
 
-# Customization suggestions for Raspberry Pi
+# Customization suggestions
 if [ "$IS_RPI" -eq 1 ]; then
     echo "Raspberry Pi Customization Tips:"
-    echo "  • Edit line 15 to change header: report_title=\"YOUR RPI NAME\""
+    echo "  • Edit line 20 to change header: report_title=\"YOUR RPI NAME\""
     echo "  • Consider showing temperature (requires vcgencmd)"
     echo "  • Check CLAUDE.md for customization guidance"
+    echo ""
+elif [ "$OS_TYPE" = "macos" ]; then
+    echo "macOS Customization Tips:"
+    echo "  • Edit line 20 to change header: report_title=\"YOUR MAC NAME\""
+    echo "  • Script respects macOS's built-in commands"
+    echo "  • Check CLAUDE.md for platform-specific customization"
     echo ""
 fi
 
