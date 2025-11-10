@@ -299,19 +299,42 @@ else
 fi
 
 # Last login and Uptime
-last_login=$(lastlog -u "$USER")
-last_login_ip=$(echo "$last_login" | awk 'NR==2 {print $3}')
+# Try lastlog2 first (modern Debian), fall back to lastlog if available
+if command -v lastlog2 &> /dev/null; then
+    last_login=$(lastlog2 -u "$USER" 2>/dev/null)
+    last_login_ip=$(echo "$last_login" | awk 'NR==2 {print $3}')
 
-# Check if last_login_ip is an IP address
-if [[ "$last_login_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    last_login_ip_present=1
-    last_login_time=$(echo "$last_login" | awk 'NR==2 {print $6, $7, $10, $8}')
-else
-    last_login_time=$(echo "$last_login" | awk 'NR==2 {print $4, $5, $8, $6}')
-    # Check for **Never logged in** edge case
-    if [ "$last_login_time" = "in**" ]; then
-        last_login_time="Never logged in"
+    # Check if last_login_ip is an IP address
+    if [[ "$last_login_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        last_login_ip_present=1
+        last_login_time=$(echo "$last_login" | awk 'NR==2 {print $4, $5, $6, $7, $8}' | sed 's/  */ /g')
+    else
+        last_login_time=$(echo "$last_login" | awk 'NR==2 {print $4, $5, $6, $7, $8}' | sed 's/  */ /g')
+        # Check for never logged in edge case
+        if [ -z "$last_login_time" ] || [ "$last_login_time" = "in**" ]; then
+            last_login_time="Never logged in"
+        fi
     fi
+elif command -v lastlog &> /dev/null; then
+    last_login=$(lastlog -u "$USER" 2>/dev/null)
+    last_login_ip=$(echo "$last_login" | awk 'NR==2 {print $3}')
+
+    # Check if last_login_ip is an IP address
+    if [[ "$last_login_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        last_login_ip_present=1
+        last_login_time=$(echo "$last_login" | awk 'NR==2 {print $6, $7, $10, $8}')
+    else
+        last_login_time=$(echo "$last_login" | awk 'NR==2 {print $4, $5, $8, $6}')
+        # Check for **Never logged in** edge case
+        if [ "$last_login_time" = "in**" ]; then
+            last_login_time="Never logged in"
+        fi
+    fi
+else
+    # Neither command available
+    last_login_time="Login tracking unavailable"
+    last_login_ip=""
+    last_login_ip_present=0
 fi
 
 sys_uptime=$(uptime -p | sed 's/up\s*//; s/\s*day\(s*\)/d/; s/\s*hour\(s*\)/h/; s/\s*minute\(s*\)/m/')

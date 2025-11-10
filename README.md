@@ -1,19 +1,37 @@
 # TR-100 Machine Report
 SKU: TR-100, filed under Technical Reports (TR).
 
-What is it?
+## What is it?
 A machine information report used at [United States Graphics Company](https://x.com/usgraphics)
 
 "Machine Report" is similar to Neofetch, but very basic. It's a bash script that's linked in the user's login startup script, `.bashrc` or `.bash_profile`; it displays useful machine information right in the terminal session. Typically, at U.S. Graphics Company, we use it for remote servers and Machine Report is displayed when a user logs into the server over ssh. See installation instructions on how to do this.
 
 <img src="https://github.com/usgraphics/TR-100/assets/8161031/2a8412dd-09de-45ff-8dfb-e5c6b6f19212" width="500" />
 
-‼️*** WARNING ***‼️
+## 🎉 RealEmmettS Fork Enhancements
 
-Alpha release, only compatible with Debian systems with ZFS root partition running as `root` user. This is not ready for public use *at all*. But you should totally try to use it. The worst that's going to happen is it'll destroy your system. Your help is appreciated in making this project production worthy.
+This fork includes improvements for broader compatibility:
 
-# Software Philosophy
-Since it is a bash script, you've got the source code. Just modify that for your needs. No need for any abstractions, directly edit the code. No modules, no DSL, no config files, none of it. Single file for easy deployment. Only abstraction that's acceptable is variables at the top of the script to customize the system, but it should stay minimal. 
+- ✅ **lastlog2 Support** - Works with modern Debian/Raspberry Pi OS (Trixie+)
+- ✅ **Graceful Fallback** - Automatically detects `lastlog2` or legacy `lastlog`
+- ✅ **Non-ZFS Support** - Works on standard ext4/other filesystems
+- ✅ **Raspberry Pi Tested** - Fully working on ARM64 systems
+- ✅ **Claude Code Optimized** - Installation instructions designed for AI automation
+
+### Status Update
+
+~~‼️*** WARNING ***‼️~~
+
+~~Alpha release, only compatible with Debian systems with ZFS root partition running as `root` user. This is not ready for public use *at all*.~~
+
+**✅ This fork is stable and tested on:**
+- Raspberry Pi OS (Debian Trixie)
+- Standard Debian systems (with or without ZFS)
+- Non-root user installations
+- ARM64 and x86_64 architectures
+
+## Software Philosophy
+Since it is a bash script, you've got the source code. Just modify that for your needs. No need for any abstractions, directly edit the code. No modules, no DSL, no config files, none of it. Single file for easy deployment. Only abstraction that's acceptable is variables at the top of the script to customize the system, but it should stay minimal.
 
 Problem with providing tools with a silver spoon is that you kill the creativity of the users. Remember MySpace? Let people customize the hell out of it and share it. Central theme as you'll see is this:
 
@@ -25,31 +43,188 @@ When you build a templating engine, a config file, a bunch of switches, etc; it 
 
 Another consideration is to avoid abstracting the source code at the expense of direct 1:1 readability. For e.g., the section "Machine Report" at the end of the bash script prints the output using `printf`—a whole bunch load of `printf` statements. There is no need to add loops or functions returning functions. What you see is roughly what will print. 1:1 mapping is important here for visual ID.
 
-# Design Philosophy
+## Design Philosophy
 Tabular, short, clear and concise. The tool's job is to inform the user of the current state of the system they are logging in or are operating. No emojis (except for the one used as a warning sign). No colors (as default, might add an option to add colors).
 
-# Assumed Setup
-This script is designed for us, for our internal use.
+## System Compatibility
 
+### Originally Designed For
 - AMD EPYC CPU
 - Debian OS
 - ZFS installed on root partition
 - VMWare Hypervisor
 
-# Dependencies
-- `lscpu`
+### Now Also Works On
+- **Raspberry Pi** (ARM64 Cortex-A72)
+- **Standard Linux** filesystems (ext4, btrfs, xfs, etc.)
+- **Bare metal** and virtualized systems
+- **Non-root** user installations
+
+## Dependencies
+- `lscpu` (usually pre-installed)
+- `lastlog2` (modern Debian/Raspberry Pi OS) **OR** `lastlog` (legacy systems)
 
 If your system is different, things might break. Look up the offending line and you can try to fix it for your specific system.
 
+---
+
 # Installation
+
+## ⚡ Super Quick Install (install.sh)
+
+**Simplest method - fully automated!**
+
+```bash
+cd ~/git-projects && gh repo clone RealEmmettS/usgc-machine-report && \
+cd RealEmmettS-usgc-machine-report && ./install.sh
+```
+
+The `install.sh` script handles everything:
+- Detects your OS and architecture
+- Installs dependencies (lastlog2)
+- Backs up existing installations
+- Copies and configures the script
+- Tests everything works
+- Sets up the `report` alias
+
+**That's it! Type `report` or open a new terminal to see it in action.**
+
+---
+
+## 🤖 Claude Code Automated Installation
+
+**Best for:** Using with [Claude Code](https://claude.ai/code) AI assistant
+
+Ask Claude Code:
+
+```
+Install usgc-machine-report from RealEmmettS/usgc-machine-report using install.sh
+```
+
+Or provide these specific instructions:
+
+```bash
+cd ~/git-projects && \
+gh repo clone RealEmmettS/usgc-machine-report && \
+cd RealEmmettS-usgc-machine-report && \
+./install.sh
+```
+
+Claude Code will automatically:
+1. Clone this repository
+2. Install `lastlog2` if on Debian/Raspberry Pi OS
+3. Copy script to `~/.machine_report.sh`
+4. Add to `.bashrc` with automatic run on login
+5. Create convenient `report` alias
+
+**Or provide these specific instructions to Claude Code:**
+
+```bash
+# 1. Clone the repository
+cd ~/git-projects
+gh repo clone RealEmmettS/usgc-machine-report
+
+# 2. Install dependencies (Debian/Ubuntu/Raspberry Pi OS)
+sudo apt install -y lastlog2
+
+# 3. Install the script
+cp ~/git-projects/RealEmmettS-usgc-machine-report/machine_report.sh ~/.machine_report.sh
+chmod +x ~/.machine_report.sh
+
+# 4. Add to .bashrc
+cat >> ~/.bashrc << 'EOF'
+
+# Machine Report alias - run anytime with 'report' command
+alias report='~/.machine_report.sh'
+
+# Run Machine Report only when in interactive mode
+if [[ $- == *i* ]]; then
+    ~/.machine_report.sh
+fi
+EOF
+
+# 5. Test installation
+~/.machine_report.sh
+```
+
+---
+
+## 📦 Quick Install (Manual - Raspberry Pi OS / Debian)
+
+**One-liner installation:**
+
+```bash
+cd ~/git-projects && gh repo clone RealEmmettS/usgc-machine-report && \
+sudo apt install -y lastlog2 && \
+cp ~/git-projects/RealEmmettS-usgc-machine-report/machine_report.sh ~/.machine_report.sh && \
+chmod +x ~/.machine_report.sh && \
+cat >> ~/.bashrc << 'EOF'
+
+# Machine Report alias - run anytime with 'report' command
+alias report='~/.machine_report.sh'
+
+# Run Machine Report only when in interactive mode
+if [[ $- == *i* ]]; then
+    ~/.machine_report.sh
+fi
+EOF
+echo "✅ Installation complete! Type 'report' or open a new terminal."
+```
+
+**Step-by-step installation:**
+
+1. **Clone the repository**:
+   ```bash
+   cd ~/git-projects
+   gh repo clone RealEmmettS/usgc-machine-report
+   ```
+
+2. **Install dependencies** (for modern Debian/Raspberry Pi OS):
+   ```bash
+   sudo apt install -y lastlog2
+   ```
+
+   *Note: On systems with the legacy `lastlog` command, this step is optional. The script automatically detects and uses whichever is available.*
+
+3. **Copy the script to your home directory**:
+   ```bash
+   cp ~/git-projects/RealEmmettS-usgc-machine-report/machine_report.sh ~/.machine_report.sh
+   chmod +x ~/.machine_report.sh
+   ```
+
+4. **Add to `.bashrc` for automatic display on login**:
+   ```bash
+   cat >> ~/.bashrc << 'EOF'
+
+# Machine Report alias - run anytime with 'report' command
+alias report='~/.machine_report.sh'
+
+# Run Machine Report only when in interactive mode
+if [[ $- == *i* ]]; then
+    ~/.machine_report.sh
+fi
+EOF
+   ```
+
+5. **Test the installation**:
+   ```bash
+   ~/.machine_report.sh
+   ```
+
+---
+
+## 🛠️ Manual Installation (Advanced)
 
 For login sessions over ssh, reference the script `~/.machine_report.sh` in your `.bashrc` file. Make sure the script is executable by running `chmod +x ~/.machine_report.sh`.
 
-Copy `machine_report.sh` from this repository and add it to `~/.machine_report.sh` ('.' for hidden file if you wish). Reference it in your `.bashrc` file as follows (example bashrc file):
+Copy `machine_report.sh` from this repository and add it to `~/.machine_report.sh` ('.' for hidden file if you wish). Reference it in your `.bashrc` file as follows:
 
 ```bash
-# This is your .bashrc file. 
+# This is your .bashrc file.
 # Add the following lines anywhere in the file.
+
+# Machine Report alias - run anytime with 'report' command
+alias report='~/.machine_report.sh'
 
 # Run Machine Report only when in interactive mode
 if [[ $- == *i* ]]; then
@@ -57,5 +232,111 @@ if [[ $- == *i* ]]; then
 fi
 ```
 
-# License
-BSD 3 Clause License, Copyright © 2024, U.S. Graphics, LLC. See [`LICENSE`](https://github.com/usgraphics/machine-report-staging/blob/master/LICENSE) file for license information.
+---
+
+## 🚀 Using the Report Command
+
+Once installed, you can run the machine report anytime with:
+
+```bash
+report
+```
+
+Or directly:
+
+```bash
+~/.machine_report.sh
+```
+
+**Automatic display:** Machine Report will automatically appear when you open a new terminal or SSH into the machine.
+
+---
+
+## 🔧 Customization
+
+Following the project's philosophy, **directly edit the source** to customize:
+
+```bash
+nano ~/.machine_report.sh
+```
+
+**Common customizations:**
+- Line 15: `report_title` - Change the header text
+- Line 18: `zfs_filesystem` - Set your ZFS pool name
+- Lines 6-11: Adjust column widths and padding
+
+---
+
+## ✅ Compatibility Matrix
+
+| System | Architecture | Filesystem | Status |
+|--------|-------------|------------|--------|
+| Raspberry Pi OS (Trixie) | ARM64 | ext4 | ✅ Tested |
+| Debian 13 (Trixie) | x86_64 | ext4/ZFS | ✅ Working |
+| Debian 12 (Bookworm) | x86_64 | ext4/ZFS | ✅ Working |
+| Ubuntu 24.04+ | x86_64 | ext4/ZFS | ✅ Should work |
+| Debian w/ ZFS | x86_64 | ZFS | ✅ Original target |
+| Other Linux | Any | Any | ⚠️ May need tweaks |
+
+---
+
+## 🐛 Troubleshooting
+
+### lastlog command not found
+
+**Solution:** Install `lastlog2` package:
+```bash
+sudo apt install -y lastlog2
+```
+
+This fork automatically handles both `lastlog2` (modern) and `lastlog` (legacy).
+
+### CPU frequency shows blank
+
+This is normal on some ARM systems where CPU frequency isn't exposed via `/proc/cpuinfo`. The script continues to work normally.
+
+### Disk usage shows wrong partition
+
+Edit `~/.machine_report.sh` and modify:
+- Line 293: `root_partition="/"` to your desired partition
+
+For ZFS systems, edit:
+- Line 18: `zfs_filesystem="zroot/ROOT/os"` to your pool name
+
+---
+
+## 📝 Changelog (Fork-specific)
+
+### v1.1.0-RealEmmettS (2025-11-10)
+- Added `lastlog2` support for modern Debian systems
+- Added graceful fallback between `lastlog2` and `lastlog`
+- Improved non-ZFS filesystem support
+- Tested and verified on Raspberry Pi OS (ARM64)
+- Added comprehensive installation documentation
+- Added Claude Code optimized installation instructions
+- Added `report` alias for convenient on-demand execution
+
+### v1.0.0 (Original - US Graphics)
+- Initial release
+- Designed for Debian + ZFS + VMWare environments
+
+---
+
+## 🤝 Contributing
+
+This is a personal fork maintained by [@RealEmmettS](https://github.com/RealEmmettS).
+
+For the original project, see: [usgraphics/usgc-machine-report](https://github.com/usgraphics/usgc-machine-report)
+
+Feel free to:
+- Fork this fork!
+- Submit issues
+- Customize for your own needs (that's the philosophy!)
+
+---
+
+## 📄 License
+
+BSD 3 Clause License, Copyright © 2024, U.S. Graphics, LLC. See [`LICENSE`](LICENSE) file for license information.
+
+Fork modifications Copyright © 2025, Emmett Shaughnessy (RealEmmettS).
