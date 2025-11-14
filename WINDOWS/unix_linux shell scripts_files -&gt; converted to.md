@@ -450,7 +450,7 @@ $parts = "one123two456three" -split "\d+"
 
 ```bash
 arr=(one two three)
-echo ${arr[^0]}
+echo ${arr[0]}
 echo ${#arr[@]}  # Length
 ```
 
@@ -461,7 +461,7 @@ $arr = @("one", "two", "three")
 # Or shorthand:
 $arr = "one", "two", "three"
 
-$arr[^0]         # Access element
+$arr[0]         # Access element
 $arr.Count      # Length
 $arr += "four"  # Append (creates new array)
 ```
@@ -571,7 +571,7 @@ fi
 # -match operator (case-insensitive by default)
 if ($str -match "^\d+$") {
     Write-Host "Is number"
-    Write-Host $Matches[^0]  # Full match
+    Write-Host $Matches[0]  # Full match
 }
 
 # -cmatch for case-sensitive
@@ -937,7 +937,7 @@ cat log.txt | grep "ERROR" | awk '{print $1}' | sort | uniq
 ```powershell
 Get-Content log.txt |
     Where-Object { $_ -match "ERROR" } |
-    ForEach-Object { ($_ -split "\s+")[^0] } |
+    ForEach-Object { ($_ -split "\s+")[0] } |
     Sort-Object -Unique
 ```
 
