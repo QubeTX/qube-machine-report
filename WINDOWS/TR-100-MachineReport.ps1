@@ -79,17 +79,27 @@ function Get-TR100UptimeString {
     param()
 
     try {
+        $uptimeSpan = $null
+
         if (Get-Command Get-Uptime -ErrorAction SilentlyContinue) {
-            $uptime = Get-Uptime
-        } else {
-            $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
-            $bootTime = $os.LastBootUpTime
-            $uptime = (Get-Date) - $bootTime
+            $uptimeResult = Get-Uptime
+            if ($uptimeResult -is [TimeSpan]) {
+                $uptimeSpan = $uptimeResult
+            } elseif ($uptimeResult -and $uptimeResult.PSObject.Properties['Uptime']) {
+                # PowerShell 7+: Get-Uptime returns an object with an Uptime TimeSpan property
+                $uptimeSpan = $uptimeResult.Uptime
+            }
         }
 
-        $days  = [int]$uptime.Days
-        $hours = [int]$uptime.Hours
-        $mins  = [int]$uptime.Minutes
+        if (-not $uptimeSpan) {
+            $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+            $bootTime = $os.LastBootUpTime
+            $uptimeSpan = (Get-Date) - $bootTime
+        }
+
+        $days  = [int]$uptimeSpan.Days
+        $hours = [int]$uptimeSpan.Hours
+        $mins  = [int]$uptimeSpan.Minutes
 
         $parts = @()
         if ($days  -gt 0) { $parts += "${days}d" }

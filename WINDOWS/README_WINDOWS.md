@@ -13,6 +13,12 @@ Features:
 
 ---
 
+## Quick installer executable
+
+Official release zips now include an `install_windows.exe` that you can double-click from Explorer. It is generated from `WINDOWS/TR-100-MachineReport.ps1` via `ps2exe`, so it performs the exact same steps as `install_windows.ps1` but works even when the PowerShell execution policy would otherwise block scripts. If you are building releases yourself, run `./tools/package_release.sh` on a Windows machine (with `pwsh` + `ps2exe` installed) to regenerate the executable automatically.
+
+---
+
 ## Files
 
 All Windows-specific files live in the `WINDOWS/` folder:

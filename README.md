@@ -91,6 +91,30 @@ The `install.sh` script handles everything:
 
 ---
 
+## 🧳 Downloadable Installer Bundle (GUI-friendly)
+
+Prefer not to touch the terminal? Download the pre-packaged zip (hosted soon at a friendly URL like `https://…/tr-100-machine-report.zip`), extract it anywhere, and double-click one of these launchers inside the extracted folder:
+
+| Platform | Launcher | What it does |
+| --- | --- | --- |
+| Windows | `install_windows.exe` | Runs the PowerShell installer via the bundled ps2exe executable so it works from Explorer |
+| macOS | `install_mac.command` | Opens Terminal automatically and runs `install.sh` with full macOS detection |
+| Linux (Debian/Ubuntu/Arch/Fedora/etc.) | `install_linux.sh` | Finds your terminal emulator, launches it, and runs `install.sh` with all the existing distro detection |
+
+Each launcher simply calls the same `install.sh`/`install_windows.ps1` logic already in this repo, so you get identical results without typing commands manually. Keep the extracted directory structure intact so the launchers can find the scripts.
+
+### Building the zip yourself
+
+Maintainers can regenerate the bundle with:
+
+```bash
+./tools/package_release.sh
+```
+
+The script creates `dist/tr-100-machine-report.zip` containing the launchers, `machine_report.sh`, documentation, and the latest Windows assets. If `pwsh` + `ps2exe` are available it also builds `install_windows.exe` automatically; otherwise it leaves the PowerShell installer in place with a warning so you can build the executable later on Windows.
+
+---
+
 ## 🤖 Claude Code Automated Installation
 
 **Best for:** Using with [Claude Code](https://claude.ai/code) AI assistant
