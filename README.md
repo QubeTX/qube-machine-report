@@ -1,22 +1,24 @@
-# TR-100 Machine Report
-SKU: TR-100, filed under Technical Reports (TR).
+# TR-200 Machine Report
+SKU: TR-200, filed under Technical Reports (TR).
 
 ## What is it?
-A machine information report used at [United States Graphics Company](https://x.com/usgraphics)
+A machine information report by **SHAUGHNESSY V DEVELOPMENT INC.** (originally from [United States Graphics Company](https://x.com/usgraphics))
 
-"Machine Report" is similar to Neofetch, but very basic. It's a bash script that's linked in the user's login startup script, `.bashrc` or `.bash_profile`; it displays useful machine information right in the terminal session. Typically, at U.S. Graphics Company, we use it for remote servers and Machine Report is displayed when a user logs into the server over ssh. See installation instructions on how to do this.
+"Machine Report" is similar to Neofetch, but very basic. It's a bash script (or PowerShell on Windows) that's linked in the user's login startup script (`.bashrc`, `.zshrc`, or PowerShell profile); it displays useful machine information right in the terminal session. The report automatically displays when a user logs in, opens a new terminal, or SSHs into the machine. See installation instructions below.
 
-<img src="https://github.com/usgraphics/TR-100/assets/8161031/2a8412dd-09de-45ff-8dfb-e5c6b6f19212" width="500" />
+<img src="https://github.com/usgraphics/TR-200/assets/8161031/2a8412dd-09de-45ff-8dfb-e5c6b6f19212" width="500" />
 
-## 🎉 RealEmmettS Fork Enhancements
+## 🎉 Key Features
 
-This fork includes improvements for broader compatibility:
+This version includes major enhancements:
 
-- ✅ **lastlog2 Support** - Works with modern Debian/Raspberry Pi OS (Trixie+)
-- ✅ **Graceful Fallback** - Automatically detects `lastlog2` or legacy `lastlog`
-- ✅ **Non-ZFS Support** - Works on standard ext4/other filesystems
-- ✅ **Raspberry Pi Tested** - Fully working on ARM64 systems
-- ✅ **Claude Code Optimized** - Installation instructions designed for AI automation
+- ✅ **Cross-Platform**: Linux, macOS, Windows (PowerShell), BSD (partial)
+- ✅ **Multi-Shell Support**: bash, zsh (macOS default), PowerShell
+- ✅ **Auto-Run Everywhere**: Boot, login, SSH, new terminal windows
+- ✅ **Clean Uninstall**: `uninstall` command removes all configurations
+- ✅ **lastlog2 Support**: Works with modern Debian/Raspberry Pi OS (Trixie+)
+- ✅ **Non-ZFS Support**: Works on standard ext4/APFS/NTFS/other filesystems
+- ✅ **Raspberry Pi Tested**: Fully working on ARM64 systems
 
 ### Status Update
 
@@ -70,6 +72,35 @@ If your system is different, things might break. Look up the offending line and 
 
 # Installation
 
+## 📦 npm Install (Recommended - All Platforms)
+
+**The easiest way to install TR-200 on any platform:**
+
+```bash
+npm install -g tr200
+```
+
+**That's it!** Now you can run:
+
+```bash
+tr200
+# or
+report
+```
+
+**Requirements:**
+- Node.js 14.0.0 or later
+- bash (Linux/macOS) or PowerShell (Windows)
+
+**What this does:**
+- Downloads the TR-200 package from npm
+- Creates global `tr200` and `report` commands
+- Automatically detects your OS and runs the appropriate script
+
+**Note:** The npm version is for on-demand use. If you want TR-200 to auto-run on terminal startup, use one of the install scripts below instead.
+
+---
+
 ## ⚡ Super Quick Install (install.sh)
 
 **Simplest method - fully automated!**
@@ -93,7 +124,7 @@ The `install.sh` script handles everything:
 
 ## 🧳 Downloadable Installer Bundle (GUI-friendly)
 
-Prefer not to touch the terminal? Download the pre-packaged zip (hosted soon at a friendly URL like `https://…/tr-100-machine-report.zip`), extract it anywhere, and double-click one of these launchers inside the extracted folder:
+Prefer not to touch the terminal? Download the pre-packaged zip (hosted soon at a friendly URL like `https://…/tr-200-machine-report.zip`), extract it anywhere, and double-click one of these launchers inside the extracted folder:
 
 | Platform | Launcher | What it does |
 | --- | --- | --- |
@@ -111,7 +142,7 @@ Maintainers can regenerate the bundle with:
 ./tools/package_release.sh
 ```
 
-The script creates `dist/tr-100-machine-report.zip` containing the launchers, `machine_report.sh`, documentation, and the latest Windows assets. If `pwsh` + `ps2exe` are available it also builds `install_windows.exe` automatically; otherwise it leaves the PowerShell installer in place with a warning so you can build the executable later on Windows.
+The script creates `dist/tr-200-machine-report.zip` containing the launchers, `machine_report.sh`, documentation, and the latest Windows assets. If `pwsh` + `ps2exe` are available it also builds `install_windows.exe` automatically; otherwise it leaves the PowerShell installer in place with a warning so you can build the executable later on Windows.
 
 ---
 
@@ -401,6 +432,47 @@ For ZFS systems, edit:
 
 ## 📝 Changelog (Fork-specific)
 
+### v2.0.0 (2026-01-30) - **SHAUGHV REBRAND + NPM RELEASE**
+**Complete Rebrand + Auto-Run Enhancements + npm Publishing**
+
+- 📦 **Published to npm**: Install globally with `npm install -g tr200`
+  - Package name: `tr200` (https://www.npmjs.com/package/tr200)
+  - Commands: `tr200` and `report` work globally after npm install
+  - Cross-platform Node.js wrapper auto-detects OS and runs appropriate script
+- 🎨 **Rebranded to SHAUGHNESSY V DEVELOPMENT INC.**: New company branding throughout
+- 🎨 **TR-200 MACHINE REPORT**: Updated product line designation
+- 📜 **Copyright Updated**: Now under ES Development LLC (https://emmetts.dev)
+- 🔄 **`uninstall` Command**: Clean removal of all configurations on all platforms
+- 🐚 **zsh Support**: Full support for macOS default shell (Catalina+)
+- 🔐 **Login Shell Support**: Auto-runs on SSH/console login via `.profile`/`.zprofile`
+- ⚡ **Boot-Time Execution (Linux)**: systemd user service runs report at boot
+- ⚡ **Boot-Time Execution (macOS)**: LaunchAgent runs report at login
+- ⚡ **Boot-Time Execution (Windows)**: Task Scheduler runs report at login
+- 🧹 **Clear Screen**: Screen cleared before auto-run for clean display
+- 🗂️ **File Renames**: TR-100-MachineReport.ps1 → TR-200-MachineReport.ps1
+- 📁 **Install Directory**: Windows now uses `$HOME\TR200` instead of `$HOME\TR100`
+- 🛠️ **Enhanced Windows Installer**: Task Scheduler integration, uninstall support
+- 🤖 **GitHub Actions**: Automated npm publishing on GitHub release
+
+**npm Packaging Details:**
+- Node.js wrapper (`bin/tr200.js`) detects OS and spawns bash/PowerShell
+- Package includes: `machine_report.sh`, `WINDOWS/TR-200-MachineReport.ps1`
+- Requires Node.js 14+ (uses `child_process.spawn()` with `stdio: 'inherit'`)
+- Supports: Windows, macOS, Linux, FreeBSD, OpenBSD
+
+**Breaking Changes:**
+- Windows install directory changed from `TR100` to `TR200`
+- PowerShell function names changed from `Show-TR100Report` to `Show-TR200Report`
+- Users upgrading should run `uninstall` first, then reinstall
+
+**Tested On:**
+- Windows 11 (PowerShell 7+)
+- Raspberry Pi OS (Debian Trixie, ARM64)
+- macOS (zsh and bash shells)
+- Linux (bash and zsh shells)
+
+---
+
 ### v1.2.0-RealEmmettS (2025-11-10) - **PRODUCTION READY**
 **Cross-Platform Compatibility Release**
 
@@ -439,12 +511,12 @@ For ZFS systems, edit:
 
 ## 🤝 Contributing
 
-This is a personal fork maintained by [@RealEmmettS](https://github.com/RealEmmettS).
+This project is maintained by **ES Development LLC** (https://emmetts.dev).
 
-For the original project, see: [usgraphics/usgc-machine-report](https://github.com/usgraphics/usgc-machine-report)
+For the original upstream project, see: [usgraphics/usgc-machine-report](https://github.com/usgraphics/usgc-machine-report)
 
 Feel free to:
-- Fork this fork!
+- Fork this repository
 - Submit issues
 - Customize for your own needs (that's the philosophy!)
 
@@ -452,6 +524,6 @@ Feel free to:
 
 ## 📄 License
 
-BSD 3 Clause License, Copyright © 2024, U.S. Graphics, LLC. See [`LICENSE`](LICENSE) file for license information.
+BSD 3 Clause License. Copyright 2026, ES Development LLC (https://emmetts.dev). See [`LICENSE`](LICENSE) file for license information.
 
-Fork modifications Copyright © 2025, Emmett Shaughnessy (RealEmmettS).
+Based on original work by U.S. Graphics, LLC.

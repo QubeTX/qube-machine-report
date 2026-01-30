@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**TR-100 Machine Report** is a system information tool that displays machine stats in a tabular format using Unicode box-drawing characters. Originally a bash script for Unix systems, it now includes a native Windows PowerShell implementation.
+**TR-200 Machine Report** is a system information tool that displays machine stats in a tabular format using Unicode box-drawing characters. Originally a bash script for Unix systems, it now includes a native Windows PowerShell implementation.
 
 **Primary use case:** Runs automatically on terminal/SSH login to show system status; can also be invoked on-demand with the `report` command.
 
@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Linux (Debian/Ubuntu/Arch/Fedora) | `machine_report.sh` | Full support |
 | Raspberry Pi OS (ARM64) | `machine_report.sh` | Primary target, tested |
 | macOS (10.13+, Bash 4+ recommended) | `machine_report.sh` | Full support |
-| Windows (PowerShell 5.1+/7+) | `WINDOWS/TR-100-MachineReport.ps1` | Full support |
+| Windows (PowerShell 5.1+/7+) | `WINDOWS/TR-200-MachineReport.ps1` | Full support |
 | BSD (FreeBSD/OpenBSD) | `machine_report.sh` | Partial support |
 
 ## Repository Structure
@@ -44,13 +44,20 @@ usgc-machine-report/
 ├── install.sh                 # Automated installer (Unix)
 ├── install_linux.sh           # Linux GUI-friendly launcher
 ├── install_mac.command        # macOS double-clickable launcher
+├── package.json               # npm package configuration
+├── bin/
+│   └── tr200.js               # Node.js CLI wrapper for npm
 ├── WINDOWS/
-│   ├── TR-100-MachineReport.ps1   # Native PowerShell implementation
+│   ├── TR-200-MachineReport.ps1   # Native PowerShell implementation
 │   ├── install_windows.ps1        # Windows installer script
-│   ├── build_tr100_exe.ps1        # Builds .exe from ps2exe
+│   ├── build_tr200_exe.ps1        # Builds .exe from ps2exe
 │   └── install_windows.exe        # Pre-built executable launcher
 ├── tools/
 │   └── package_release.sh     # Creates distributable zip bundle
+├── .github/
+│   └── workflows/
+│       └── npm-publish.yml    # Auto-publish to npm on release
+├── .npmignore                 # Excludes dev files from npm package
 ├── CLAUDE.md                  # This file
 ├── README.md                  # User documentation
 └── LICENSE                    # BSD 3-Clause
@@ -58,7 +65,13 @@ usgc-machine-report/
 
 ## Installation Commands
 
-### Unix (Linux/macOS) - Recommended
+### npm (All Platforms - Simplest)
+```bash
+npm install -g tr200
+```
+Then run `tr200` or `report` from anywhere.
+
+### Unix (Linux/macOS) - With Auto-Run
 ```bash
 cd ~/git-projects && \
 gh repo clone RealEmmettS/usgc-machine-report && \
@@ -84,7 +97,7 @@ report
 # Windows (PowerShell)
 report
 # or directly
-& "$HOME\TR100\TR-100-MachineReport.ps1"
+& "$HOME\TR200\TR-200-MachineReport.ps1"
 ```
 
 ## Script Architecture
@@ -134,13 +147,13 @@ report
 
 **Lines 635-684:** Final output rendering
 
-### Windows Script (`WINDOWS/TR-100-MachineReport.ps1`)
+### Windows Script (`WINDOWS/TR-200-MachineReport.ps1`)
 
 **Architecture:**
-- `Get-TR100Report`: Collects all system data via CIM/WMI
-- `Show-TR100Report`: Renders the table output
-- `New-TR100BarGraph`: Creates visual usage bars
-- `Get-TR100UptimeString`: Formats uptime display
+- `Get-TR200Report`: Collects all system data via CIM/WMI
+- `Show-TR200Report`: Renders the table output
+- `New-TR200BarGraph`: Creates visual usage bars
+- `Get-TR200UptimeString`: Formats uptime display
 
 **Data sources:**
 - OS: `Win32_OperatingSystem`
@@ -151,9 +164,9 @@ report
 - Hypervisor: `Win32_ComputerSystem.HypervisorPresent`
 
 **Installation locations:**
-- Script: `$HOME\TR100\TR-100-MachineReport.ps1`
-- CMD shim: `$HOME\TR100\report.cmd`
-- PATH: `$HOME\TR100` added to user PATH
+- Script: `$HOME\TR200\TR-200-MachineReport.ps1`
+- CMD shim: `$HOME\TR200\report.cmd`
+- PATH: `$HOME\TR200` added to user PATH
 
 ## Common Customizations
 
@@ -165,7 +178,7 @@ When users ask to customize, guide them to edit specific lines:
 report_title="YOUR CUSTOM HEADER"
 ```
 
-**Windows:** Line 278 in `TR-100-MachineReport.ps1`
+**Windows:** Line 278 in `TR-200-MachineReport.ps1`
 ```powershell
 ReportTitle = 'YOUR CUSTOM HEADER'
 ```
@@ -212,7 +225,7 @@ Edit line 524 (`root_partition`) for non-ZFS, or line 23 (`zfs_filesystem`) for 
 ### Script doesn't run on login
 1. Verify `.bashrc` (or `.zshrc` on macOS) has the configuration
 2. Check script is executable: `chmod +x ~/.machine_report.sh`
-3. For Windows: verify PowerShell profile contains TR-100 configuration
+3. For Windows: verify PowerShell profile contains TR-200 configuration
 
 ### Windows: Box-drawing characters garbled
 Ensure terminal supports UTF-8. The script sets `[Console]::OutputEncoding = UTF8` automatically.
@@ -226,6 +239,51 @@ Ensure terminal supports UTF-8. The script sets `[Console]::OutputEncoding = UTF
 4. Update README.md changelog
 5. Update this CLAUDE.md if line numbers change significantly
 6. Tag releases with `vX.Y.Z-RealEmmettS` format
+
+### IMPORTANT: Version Bump Before Release
+
+**Before committing and pushing changes to main that should be published to npm:**
+
+1. **Update version in `package.json`** - Increment the version number following semver:
+   - Patch (x.y.Z): Bug fixes, minor tweaks
+   - Minor (x.Y.0): New features, backwards compatible
+   - Major (X.0.0): Breaking changes
+
+2. **Update version in `bin/tr200.js`** - The `--version` flag output (around line 97)
+
+3. **Update README.md changelog** - Add entry for the new version
+
+4. **Update CLAUDE.md version info** - The "Current version" line in Version Information section
+
+**Publishing to npm:**
+- **Automatic:** Create a GitHub release with tag `vX.Y.Z` - GitHub Actions will publish to npm
+- **Manual:** Run `npm login` then `npm publish --access public --provenance`
+
+The GitHub Actions workflow (`.github/workflows/npm-publish.yml`) triggers on release creation.
+
+### npm Trusted Publishers Setup (OIDC)
+
+After the first publish, configure Trusted Publishers for more secure, tokenless publishing:
+
+1. Go to https://www.npmjs.com/package/tr200/access
+2. Scroll to "Trusted Publishers" section
+3. Click "Add trusted publisher" → Select "GitHub Actions"
+4. Enter:
+   - **Owner:** `RealEmmettS`
+   - **Repository:** `usgc-machine-report`
+   - **Workflow:** `npm-publish.yml`
+   - **Environment:** (leave blank)
+
+Once configured:
+- Publishes use OIDC authentication (no token needed)
+- Provenance attestations are automatically generated
+- Package shows verified build origin on npmjs.com
+
+**Note on NPM_TOKEN:** The granular token in GitHub secrets expires after 90 days (npm security policy). This is fine—it's only needed for the initial publish. Once Trusted Publishers is configured, OIDC handles all future authentication and the token becomes irrelevant. No need to rotate it.
+
+**References:**
+- [npm Trusted Publishers docs](https://docs.npmjs.com/trusted-publishers/)
+- [Generating provenance statements](https://docs.npmjs.com/generating-provenance-statements/)
 
 ### Testing Checklist
 - Linux with `lastlog2` (modern Debian)
@@ -268,26 +326,53 @@ fi
 
 ## Building Release Package
 
+### Zip Bundle (for direct download)
 To create a distributable zip with cross-platform launchers:
 ```bash
 ./tools/package_release.sh
 ```
-Output: `dist/tr-100-machine-report.zip`
+Output: `dist/tr-200-machine-report.zip`
+
+### npm Package
+The package is automatically published to npm when you create a GitHub release.
+
+**Test locally before publishing:**
+```bash
+# Preview what will be included
+npm pack --dry-run
+
+# Test the package locally
+npm link
+tr200
+npm unlink -g tr200
+```
+
+**npm package includes:**
+- `bin/tr200.js` - Node.js wrapper that detects OS
+- `machine_report.sh` - Unix bash script
+- `WINDOWS/TR-200-MachineReport.ps1` - Windows PowerShell script
+
+**npm package excludes (via .npmignore):**
+- Install scripts (install.sh, install_windows.ps1, etc.)
+- Build tools and dist folder
+- Documentation (CLAUDE.md, AGENTS.md)
+- GitHub workflows
 
 ## Version Information
 
 - **Upstream:** usgraphics/usgc-machine-report (original)
-- **This fork:** RealEmmettS/usgc-machine-report (enhanced)
-- **Current version:** v1.2.0-RealEmmettS (2025-11-10)
+- **This repo:** RealEmmettS/usgc-machine-report (enhanced)
+- **Current version:** v2.0.0 (2026-01-30) - SHAUGHV REBRAND + NPM
+- **npm package:** https://www.npmjs.com/package/tr200
 
 ## License
 
 BSD 3-Clause License
-- Original: Copyright 2024, U.S. Graphics, LLC
-- Fork modifications: Copyright 2025, Emmett Shaughnessy (RealEmmettS)
+- Copyright 2026, ES Development LLC (https://emmetts.dev)
+- Based on original work by U.S. Graphics, LLC
 
 ## Resources
 
-- Fork: https://github.com/RealEmmettS/usgc-machine-report
-- Original: https://github.com/usgraphics/usgc-machine-report
-- Maintainer: @RealEmmettS (github@emmetts.dev)
+- Repository: https://github.com/RealEmmettS/usgc-machine-report
+- Original (upstream): https://github.com/usgraphics/usgc-machine-report
+- Website: https://emmetts.dev

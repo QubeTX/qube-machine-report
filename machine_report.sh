@@ -1,7 +1,7 @@
 #!/bin/bash
-# TR-100 Machine Report
-# Copyright © 2024, U.S. Graphics, LLC. BSD-3-Clause License.
-# Fork enhancements © 2025, Emmett Shaughnessy (RealEmmettS)
+# TR-200 Machine Report
+# Copyright 2026, ES Development LLC (https://emmetts.dev)
+# Based on original work by U.S. Graphics, LLC (BSD-3-Clause)
 #
 # Cross-platform system information tool
 # Supports: Linux (all major distros), macOS 10.13+, partial BSD support
@@ -17,7 +17,7 @@ MAX_DATA_LEN=32
 BORDERS_AND_PADDING=7
 
 # Basic configuration, change as needed
-report_title="UNITED STATES GRAPHICS COMPANY"
+report_title="SHAUGHNESSY V DEVELOPMENT INC."
 last_login_ip_present=0
 zfs_present=0
 zfs_filesystem="zroot/ROOT/os"
@@ -635,7 +635,7 @@ fi
 # Machine Report
 PRINT_HEADER
 PRINT_CENTERED_DATA "$report_title"
-PRINT_CENTERED_DATA "TR-100 MACHINE REPORT"
+PRINT_CENTERED_DATA "TR-200 MACHINE REPORT"
 PRINT_DIVIDER "top"
 PRINT_DATA "OS" "$os_name"
 PRINT_DATA "KERNEL" "$os_kernel"

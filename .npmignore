@@ -1,0 +1,51 @@
+# Development and documentation files
+CLAUDE.md
+AGENTS.md
+.claude/
+
+# Install scripts (not needed for npm - npm handles installation)
+install.sh
+install_linux.sh
+install_mac.command
+WINDOWS/install_windows.ps1
+WINDOWS/install_windows.exe
+WINDOWS/build_tr200_exe.ps1
+
+# Legacy scripts
+WINDOWS/TR-100-MachineReport.ps1
+WINDOWS/build_tr100_exe.ps1
+
+# Build tools and distribution
+tools/
+dist/
+
+# GitHub workflows (not needed in package)
+.github/
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Misc
+*.log
+*.tmp
+*.bak

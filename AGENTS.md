@@ -1,4 +1,4 @@
-# AGENTS.md - TR-100 Machine Report (usgc-machine-report)
+# AGENTS.md - TR-200 Machine Report (usgc-machine-report)
 
 This file is a comprehensive, implementation-level description of what this
 program is, what machines it is configured to run on, what it does, and how it
@@ -8,7 +8,7 @@ need precise operational context.
 ---------------------------------------------------------------------------
 PROGRAM OVERVIEW
 ---------------------------------------------------------------------------
-Name: TR-100 Machine Report (usgc-machine-report)
+Name: TR-200 Machine Report (usgc-machine-report)
 Type: Lightweight system information report that renders a fixed, tabular
       "machine report" in the terminal.
 Goal: Provide an immediate snapshot of OS, network, CPU, disk, memory, last
@@ -18,7 +18,7 @@ Philosophy: Single-file script per platform, no config files, direct source
 
 Core implementations:
 1) Unix/macOS: machine_report.sh (bash)
-2) Windows: WINDOWS/TR-100-MachineReport.ps1 (PowerShell)
+2) Windows: WINDOWS/TR-200-MachineReport.ps1 (PowerShell)
 
 Installers and launchers:
 - install.sh: main cross-platform installer for Unix/macOS/Linux.
@@ -72,7 +72,7 @@ Both implementations render a box-drawn table with a fixed layout. The report
 is intended to be shown on login and on-demand.
 
 Common output sections (conceptual):
-- Header: report title and "TR-100 MACHINE REPORT"
+- Header: report title and "TR-200 MACHINE REPORT"
 - OS and kernel
 - Network: hostname, machine IP, client IP (SSH), DNS servers, current user
 - CPU: model, cores/sockets, hypervisor, frequency, load/usage graphs
@@ -111,7 +111,7 @@ Linux/macOS/BSD details (machine_report.sh):
   - sysctl kern.boottime on macOS
   - fallback: uptime parsing
 
-Windows details (TR-100-MachineReport.ps1):
+Windows details (TR-200-MachineReport.ps1):
 - OS name and kernel: Win32_OperatingSystem (CIM)
 - Hostname: Win32_ComputerSystem
 - Machine IP: Get-NetIPAddress (IPv4 preferred, IPv6 fallback), WMI fallback
@@ -151,9 +151,9 @@ Runtime behavior:
 ---------------------------------------------------------------------------
 DEFAULT CONFIGURATION (WINDOWS)
 ---------------------------------------------------------------------------
-Key defaults in TR-100-MachineReport.ps1:
+Key defaults in TR-200-MachineReport.ps1:
 - ReportTitle = "UNITED STATES GRAPHICS COMPANY"
-- ReportSubtitle = "TR-100 MACHINE REPORT"
+- ReportSubtitle = "TR-200 MACHINE REPORT"
 - Column sizing:
   - min label width 5, max label width 13
   - min data width 20, max data width 32
@@ -180,12 +180,12 @@ Linux/macOS GUI launchers:
   (if needed) and run install.sh in-place.
 
 Windows default installation (WINDOWS/install_windows.ps1):
-1) Copies the PowerShell script to: %USERPROFILE%\TR100\TR-100-MachineReport.ps1
-2) Creates a batch shim: %USERPROFILE%\TR100\report.cmd
-3) Adds %USERPROFILE%\TR100 to the user PATH
+1) Copies the PowerShell script to: %USERPROFILE%\TR200\TR-200-MachineReport.ps1
+2) Creates a batch shim: %USERPROFILE%\TR200\report.cmd
+3) Adds %USERPROFILE%\TR200 to the user PATH
 4) Updates the PowerShell profile (CurrentUserAllHosts):
-   - Dot-sources TR-100-MachineReport.ps1
-   - Defines a report function that calls Show-TR100Report
+   - Dot-sources TR-200-MachineReport.ps1
+   - Defines a report function that calls Show-TR200Report
    - Auto-runs the report for interactive or SSH sessions
 5) Executes a test run at the end of installation
 
@@ -205,9 +205,9 @@ After a standard install:
 
 Direct execution behavior:
 - Running machine_report.sh directly prints the report once.
-- Running TR-100-MachineReport.ps1 directly prints the report once.
+- Running TR-200-MachineReport.ps1 directly prints the report once.
 - Dot-sourcing the PowerShell script only loads functions (no auto-run) unless
-  the profile or a wrapper invokes Show-TR100Report.
+  the profile or a wrapper invokes Show-TR200Report.
 
 ---------------------------------------------------------------------------
 CUSTOMIZATION MODEL (IMPORTANT)
@@ -215,7 +215,7 @@ CUSTOMIZATION MODEL (IMPORTANT)
 There is intentionally no config file. Customization is done by editing the
 source directly:
 - Change report_title in machine_report.sh for Unix/macOS.
-- Change ReportTitle/ReportSubtitle in TR-100-MachineReport.ps1 for Windows.
+- Change ReportTitle/ReportSubtitle in TR-200-MachineReport.ps1 for Windows.
 - Change zfs_filesystem or root_partition to target different disks.
 - Adjust column width constants for layout changes.
 
@@ -228,7 +228,7 @@ REPOSITORY ENTRY POINTS (FILES OF INTEREST)
 - install.sh                        (primary Unix/macOS installer)
 - install_linux.sh                  (GUI-friendly Linux launcher)
 - install_mac.command               (GUI-friendly macOS launcher)
-- WINDOWS/TR-100-MachineReport.ps1  (Windows report generator)
+- WINDOWS/TR-200-MachineReport.ps1  (Windows report generator)
 - WINDOWS/install_windows.ps1       (Windows installer)
 - WINDOWS/README_WINDOWS.md         (Windows-specific docs)
 - README.md                         (general project documentation)

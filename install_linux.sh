@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# TR-100 Machine Report Linux launcher
+# TR-200 Machine Report Linux launcher
+# Copyright 2026, ES Development LLC (https://emmetts.dev)
 # Attempts to open a terminal window when double-clicked, then runs install.sh
 
 set -euo pipefail
@@ -10,7 +11,7 @@ LAUNCHED_IN_TERMINAL=0
 
 function usage_note() {
   echo "This script expects install.sh to live in the same folder."
-  echo "If you extracted the TR-100 zip elsewhere, keep the directory structure intact."
+  echo "If you extracted the TR-200 zip elsewhere, keep the directory structure intact."
 }
 
 if [[ "${1:-}" == "--already-in-terminal" ]]; then
@@ -58,7 +59,7 @@ fi
 chmod +x "$INSTALLER" >/dev/null 2>&1 || true
 
 echo "=========================================="
-echo "TR-100 Machine Report Linux Installer"
+echo "TR-200 Machine Report Linux Installer"
 echo "=========================================="
 echo ""
 echo "Running $(basename "$INSTALLER") from:"

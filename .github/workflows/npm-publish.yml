@@ -1,0 +1,49 @@
+# Publish to npm when a GitHub release is created
+#
+# This workflow uses npm Trusted Publishers (OIDC) for secure, tokenless publishing.
+# Provenance attestations are automatically generated.
+#
+# Setup on npmjs.com:
+# 1. Go to https://www.npmjs.com/package/tr200/access (after first publish)
+# 2. Scroll to "Trusted Publishers" section
+# 3. Click "Add trusted publisher"
+# 4. Select "GitHub Actions"
+# 5. Enter:
+#    - Owner: RealEmmettS
+#    - Repository: usgc-machine-report
+#    - Workflow: npm-publish.yml
+#    - Environment: (leave blank)
+#
+# Fallback: If trusted publishing isn't configured, uses NPM_TOKEN secret
+
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC trusted publishing & provenance
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'  # Node 24+ includes npm 11.5.1+ required for trusted publishing
+          registry-url: 'https://registry.npmjs.org'  # Must be explicit for OIDC
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Publish to npm (with provenance)
+        run: npm publish --access public --provenance
+        env:
+          # Uses OIDC trusted publishing if configured on npmjs.com
+          # Falls back to NPM_TOKEN if trusted publisher not set up
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

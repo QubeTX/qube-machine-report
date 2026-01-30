@@ -1,9 +1,9 @@
 <#!
 .SYNOPSIS
-    TR-100 Machine Report for Windows (PowerShell implementation).
+    TR-200 Machine Report for Windows (PowerShell implementation).
 
 .DESCRIPTION
-    Windows-native implementation of the TR-100 Machine Report originally written
+    Windows-native implementation of the TR-200 Machine Report originally written
     as a cross-platform bash script. This script collects system information
     using Windows APIs (CIM/WMI, performance counters, network cmdlets) and
     renders a Unicode box-drawing report very similar to the Unix version.
@@ -15,9 +15,8 @@
         immediately show the report.
 
 .NOTES
-    Author  : TR-100 original by U.S. Graphics, LLC
-              Windows port and enhancements by Emmett Shaughnessy (RealEmmettS)
-    License : BSD-3-Clause
+    Copyright 2026, ES Development LLC (https://emmetts.dev)
+    Based on original work by U.S. Graphics, LLC (BSD-3-Clause)
     Tested  : Windows PowerShell 5.1 and PowerShell 7+
 #>
 
@@ -33,7 +32,7 @@ try {
 }
 
 # Box-drawing characters and bar fill characters
-$script:TR100Chars = [pscustomobject]@{
+$script:TR200Chars = [pscustomobject]@{
     TopLeft      = [char]0x250C  # ┌
     TopRight     = [char]0x2510  # ┐
     BottomLeft   = [char]0x2514  # └
@@ -53,7 +52,7 @@ $script:TR100Chars = [pscustomobject]@{
 
 #region Utility helpers
 
-function New-TR100BarGraph {
+function New-TR200BarGraph {
     [CmdletBinding()]
     param(
         [double]$Used,
@@ -62,19 +61,19 @@ function New-TR100BarGraph {
     )
 
     if ($Total -le 0) {
-        return ($TR100Chars.BarEmpty * [math]::Max($Width, 1))
+        return ($TR200Chars.BarEmpty * [math]::Max($Width, 1))
     }
 
     $percent    = [math]::Max([math]::Min(($Used / $Total) * 100.0, 100.0), 0.0)
     $filledBars = [int]([math]::Round(($percent / 100.0) * $Width))
     if ($filledBars -gt $Width) { $filledBars = $Width }
 
-    $filled = $TR100Chars.BarFilled * $filledBars
-    $empty  = $TR100Chars.BarEmpty * ([math]::Max($Width,0) - $filledBars)
+    $filled = $TR200Chars.BarFilled * $filledBars
+    $empty  = $TR200Chars.BarEmpty * ([math]::Max($Width,0) - $filledBars)
     return "$filled$empty"
 }
 
-function Get-TR100UptimeString {
+function Get-TR200UptimeString {
     [CmdletBinding()]
     param()
 
@@ -115,7 +114,7 @@ function Get-TR100UptimeString {
 
 #region Data collection
 
-function Get-TR100Report {
+function Get-TR200Report {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param()
@@ -146,7 +145,7 @@ function Get-TR100Report {
 
     $lastLoginTime    = 'Login tracking unavailable'
 
-    $uptimeString     = Get-TR100UptimeString
+    $uptimeString     = Get-TR200UptimeString
 
     try {
         $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
@@ -275,8 +274,8 @@ function Get-TR100Report {
     } catch { }
 
     [pscustomobject]@{
-        ReportTitle      = 'UNITED STATES GRAPHICS COMPANY'
-        ReportSubtitle   = 'TR-100 MACHINE REPORT'
+        ReportTitle      = 'SHAUGHNESSY V DEVELOPMENT INC.'
+        ReportSubtitle   = 'TR-200 MACHINE REPORT'
 
         OSName           = $osName
         OSKernel         = $osKernel
@@ -311,11 +310,11 @@ function Get-TR100Report {
 
 #region Rendering
 
-function Show-TR100Report {
+function Show-TR200Report {
     [CmdletBinding()]
     param()
 
-    $data = Get-TR100Report
+    $data = Get-TR200Report
 
     # Build list of label/value pairs in order
     $rows = @()
@@ -386,10 +385,10 @@ function Show-TR100Report {
 
     # Now that we know bar width, generate bar strings and substitute placeholders
     $cpuUsed = if ($data.CPUUsagePercent -ne $null) { $data.CPUUsagePercent } else { 0 }
-    $cpuBar  = New-TR100BarGraph -Used $cpuUsed -Total 100 -Width $barWidth
+    $cpuBar  = New-TR200BarGraph -Used $cpuUsed -Total 100 -Width $barWidth
 
-    $diskBar = New-TR100BarGraph -Used $data.DiskUsedGiB -Total $data.DiskTotalGiB -Width $barWidth
-    $memBar  = New-TR100BarGraph -Used $data.MemUsedGiB -Total $data.MemTotalGiB -Width $barWidth
+    $diskBar = New-TR200BarGraph -Used $data.DiskUsedGiB -Total $data.DiskTotalGiB -Width $barWidth
+    $memBar  = New-TR200BarGraph -Used $data.MemUsedGiB -Total $data.MemTotalGiB -Width $barWidth
 
     $rows = $rows | ForEach-Object {
         if ($_ -is [string]) { return $_ }
@@ -408,40 +407,40 @@ function Show-TR100Report {
     $innerWidth = 2 + $labelWidth + 3 + $dataWidth + 2  # "│ <label> │ <value> │"
 
     # Helper to write the top header and borders
-    function Write-TR100TopHeader {
+    function Write-TR200TopHeader {
         param()
-        $top = $TR100Chars.TopLeft + ($TR100Chars.Horizontal * ($innerWidth)) + $TR100Chars.TopRight
+        $top = $TR200Chars.TopLeft + ($TR200Chars.Horizontal * ($innerWidth)) + $TR200Chars.TopRight
         Write-Host $top
-        $mid = $TR100Chars.TRight + ($TR100Chars.TDown * ($innerWidth)) + $TR100Chars.TLeft
+        $mid = $TR200Chars.TRight + ($TR200Chars.TDown * ($innerWidth)) + $TR200Chars.TLeft
         Write-Host $mid
     }
 
-    function Write-TR100Divider {
+    function Write-TR200Divider {
         param([string]$Position)
 
-        $left  = $TR100Chars.TRight
-        $right = $TR100Chars.TLeft
-        $mid   = if ($Position -eq 'Bottom') { $TR100Chars.TUp } else { $TR100Chars.Cross }
+        $left  = $TR200Chars.TRight
+        $right = $TR200Chars.TLeft
+        $mid   = if ($Position -eq 'Bottom') { $TR200Chars.TUp } else { $TR200Chars.Cross }
 
         $line = $left
         for ($i = 0; $i -lt $innerWidth; $i++) {
             if ($i -eq ($labelWidth + 2)) {
                 $line += $mid
             } else {
-                $line += $TR100Chars.Horizontal
+                $line += $TR200Chars.Horizontal
             }
         }
         $line += $right
         Write-Host $line
     }
 
-    function Write-TR100Footer {
+    function Write-TR200Footer {
         param()
-        $bottom = $TR100Chars.BottomLeft + ($TR100Chars.Horizontal * ($innerWidth)) + $TR100Chars.BottomRight
+        $bottom = $TR200Chars.BottomLeft + ($TR200Chars.Horizontal * ($innerWidth)) + $TR200Chars.BottomRight
         Write-Host $bottom
     }
 
-    function Write-TR100CenteredLine {
+    function Write-TR200CenteredLine {
         param([string]$Text)
         $totalWidth = $innerWidth
         $text = $Text
@@ -451,10 +450,10 @@ function Show-TR100Report {
         $padding = $totalWidth - $text.Length
         $leftPad  = [int]([math]::Floor($padding / 2.0))
         $rightPad = $padding - $leftPad
-        Write-Host ("{0}{1}{2}{3}{4}" -f $TR100Chars.Vertical, ' ' * $leftPad, $text, ' ' * $rightPad, $TR100Chars.Vertical)
+        Write-Host ("{0}{1}{2}{3}{4}" -f $TR200Chars.Vertical, ' ' * $leftPad, $text, ' ' * $rightPad, $TR200Chars.Vertical)
     }
 
-    function Write-TR100Row {
+    function Write-TR200Row {
         param(
             [string]$Label,
             [string]$Value
@@ -477,27 +476,27 @@ function Show-TR100Report {
             $val = $val.PadRight($dataWidth)
         }
 
-        Write-Host ("{0} {1} {2} {3} {4}" -f $TR100Chars.Vertical, $lbl, $TR100Chars.Vertical, $val, $TR100Chars.Vertical)
+        Write-Host ("{0} {1} {2} {3} {4}" -f $TR200Chars.Vertical, $lbl, $TR200Chars.Vertical, $val, $TR200Chars.Vertical)
     }
 
     # Render table
-    Write-TR100TopHeader
-    Write-TR100CenteredLine -Text $data.ReportTitle
-    Write-TR100CenteredLine -Text $data.ReportSubtitle
-    Write-TR100Divider -Position 'Top'
+    Write-TR200TopHeader
+    Write-TR200CenteredLine -Text $data.ReportTitle
+    Write-TR200CenteredLine -Text $data.ReportSubtitle
+    Write-TR200Divider -Position 'Top'
 
     foreach ($row in $rows) {
         if ($row -is [string]) {
             if ($row -eq 'DIVIDER') {
-                Write-TR100Divider -Position 'Middle'
+                Write-TR200Divider -Position 'Middle'
             }
         } else {
-            Write-TR100Row -Label $row.Label -Value ($row.Value.ToString())
+            Write-TR200Row -Label $row.Label -Value ($row.Value.ToString())
         }
     }
 
-    Write-TR100Divider -Position 'Bottom'
-    Write-TR100Footer
+    Write-TR200Divider -Position 'Bottom'
+    Write-TR200Footer
 }
 
 #endregion Rendering
@@ -506,7 +505,7 @@ function Show-TR100Report {
 try {
     if ($MyInvocation.InvocationName -ne '.') {
         # Only auto-run when invoked as a script, not when dot-sourced from a profile
-        Show-TR100Report
+        Show-TR200Report
     }
 } catch {
     Write-Error $_

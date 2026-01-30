@@ -1,40 +1,41 @@
 <#
 .SYNOPSIS
-    Helper script to build a TR-100 Machine Report .exe on Windows using PS2EXE.
+    Helper script to build a TR-200 Machine Report .exe on Windows using PS2EXE.
 
 .DESCRIPTION
     This script is intended to be run on a Windows machine from the WINDOWS
     directory of the usgc-machine-report repo. It looks for the PS2EXE module
-    (Invoke-ps2exe). If available, it compiles TR-100-MachineReport.ps1 into a
-    standalone TR-100-MachineReport.exe.
+    (Invoke-ps2exe). If available, it compiles TR-200-MachineReport.ps1 into a
+    standalone TR-200-MachineReport.exe.
 
     If PS2EXE is not installed, it prints clear instructions for installing it.
 
 .EXAMPLE
-    pwsh -File .\build_tr100_exe.ps1
+    pwsh -File .\build_tr200_exe.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\build_tr100_exe.ps1
+    powershell -ExecutionPolicy Bypass -File .\build_tr200_exe.ps1
 
 .NOTES
+    Copyright 2026, ES Development LLC (https://emmetts.dev)
     This does not modify PATH or profiles; it just builds the .exe.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$OutputFile = 'TR-100-MachineReport.exe'
+    [string]$OutputFile = 'TR-200-MachineReport.exe'
 )
 
 $ErrorActionPreference = 'Stop'
 
 Write-Host '=========================================='
-Write-Host 'TR-100 Machine Report - EXE Builder (PS2EXE)'
+Write-Host 'TR-200 Machine Report - EXE Builder (PS2EXE)'
 Write-Host '=========================================='
 Write-Host ''
 
 # Resolve paths relative to this script
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$inputFile  = Join-Path $scriptRoot 'TR-100-MachineReport.ps1'
+$inputFile  = Join-Path $scriptRoot 'TR-200-MachineReport.ps1'
 
 if (-not (Test-Path $inputFile)) {
     Write-Error "Input script not found: $inputFile"
@@ -50,9 +51,9 @@ if (-not $ps2exeCmd) {
     Write-Host  '  Install-Module -Name ps2exe -Scope CurrentUser' -ForegroundColor Yellow
     Write-Host  ''
     Write-Host  'Then re-run this script:'
-    Write-Host  '  pwsh      -File .\build_tr100_exe.ps1' -ForegroundColor Yellow
+    Write-Host  '  pwsh      -File .\build_tr200_exe.ps1' -ForegroundColor Yellow
     Write-Host  '  # or' -ForegroundColor Yellow
-    Write-Host  '  powershell -ExecutionPolicy Bypass -File .\build_tr100_exe.ps1' -ForegroundColor Yellow
+    Write-Host  '  powershell -ExecutionPolicy Bypass -File .\build_tr200_exe.ps1' -ForegroundColor Yellow
     exit 1
 }
 

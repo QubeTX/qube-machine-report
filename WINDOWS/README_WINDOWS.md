@@ -1,6 +1,6 @@
-# TR-100 Machine Report for Windows
+# TR-200 Machine Report for Windows
 
-This is the Windows-native implementation of the **TR-100 Machine Report**, originally written as a cross-platform bash script (`machine_report.sh`). It collects detailed system information using Windows APIs and renders a Unicode box-drawing report similar to the Unix version.
+This is the Windows-native implementation of the **TR-200 Machine Report**, originally written as a cross-platform bash script (`machine_report.sh`). It collects detailed system information using Windows APIs and renders a Unicode box-drawing report similar to the Unix version.
 
 Features:
 
@@ -15,7 +15,7 @@ Features:
 
 ## Quick installer executable
 
-Official release zips now include an `install_windows.exe` that you can double-click from Explorer. It is generated from `WINDOWS/TR-100-MachineReport.ps1` via `ps2exe`, so it performs the exact same steps as `install_windows.ps1` but works even when the PowerShell execution policy would otherwise block scripts. If you are building releases yourself, run `./tools/package_release.sh` on a Windows machine (with `pwsh` + `ps2exe` installed) to regenerate the executable automatically.
+Official release zips now include an `install_windows.exe` that you can double-click from Explorer. It is generated from `WINDOWS/TR-200-MachineReport.ps1` via `ps2exe`, so it performs the exact same steps as `install_windows.ps1` but works even when the PowerShell execution policy would otherwise block scripts. If you are building releases yourself, run `./tools/package_release.sh` on a Windows machine (with `pwsh` + `ps2exe` installed) to regenerate the executable automatically.
 
 ---
 
@@ -23,9 +23,9 @@ Official release zips now include an `install_windows.exe` that you can double-c
 
 All Windows-specific files live in the `WINDOWS/` folder:
 
-- `TR-100-MachineReport.ps1` – core PowerShell implementation
-  - `Get-TR100Report` – gathers system metrics and returns a PSCustomObject
-  - `Show-TR100Report` – renders the Unicode table to the console
+- `TR-200-MachineReport.ps1` – core PowerShell implementation
+  - `Get-TR200Report` – gathers system metrics and returns a PSCustomObject
+  - `Show-TR200Report` – renders the Unicode table to the console
   - Auto-runs the report when executed directly as a script
 - `install_windows.ps1` – installer for Windows
   - Installs the script to a per-user directory
@@ -84,13 +84,13 @@ powershell -ExecutionPolicy Bypass -File .\WINDOWS\install_windows.ps1
 By default, the installer:
 
 1. Creates an install directory under your home:
-   - `C:\Users\YourUser\TR100` (per-user, no admin required)
-2. Copies `TR-100-MachineReport.ps1` there
-3. Creates a **batch shim** at `C:\Users\YourUser\TR100\report.cmd`
+   - `C:\Users\YourUser\TR200` (per-user, no admin required)
+2. Copies `TR-200-MachineReport.ps1` there
+3. Creates a **batch shim** at `C:\Users\YourUser\TR200\report.cmd`
 4. Adds that directory to your **user PATH**
 5. Updates your **PowerShell profile** to:
    - Dot-source the installed script so its functions are always available
-   - Define a `report` function that runs `Show-TR100Report`
+   - Define a `report` function that runs `Show-TR200Report`
    - **Auto-run** the report when you start an interactive session or connect via SSH
 6. Runs a **test report** once at the end
 
@@ -117,10 +117,10 @@ After installing (and opening a **new** terminal so PATH/profile changes apply):
 report          # preferred, from profile
 
 # Or directly
-Show-TR100Report
+Show-TR200Report
 
 # Or execute the installed script directly
-& "$HOME\TR100\TR-100-MachineReport.ps1"
+& "$HOME\TR200\TR-200-MachineReport.ps1"
 ```
 
 ### Command Prompt (cmd.exe)
@@ -129,13 +129,13 @@ Show-TR100Report
 C:\> report
 ```
 
-Because the installer adds the TR100 directory to your **user PATH** and places `report.cmd` there, `report` should work in both **cmd.exe** and **PowerShell**.
+Because the installer adds the TR200 directory to your **user PATH** and places `report.cmd` there, `report` should work in both **cmd.exe** and **PowerShell**.
 
 ### SSH / Remote sessions
 
 If you connect to the Windows machine via **SSH** (OpenSSH), the installer’s profile snippet checks for `$env:SSH_CLIENT` / `$env:SSH_CONNECTION` and treats those sessions as remote:
 
-- On SSH connection, your PowerShell profile will load and automatically run `Show-TR100Report`.
+- On SSH connection, your PowerShell profile will load and automatically run `Show-TR200Report`.
 - The report should appear **at the top of the SSH terminal** immediately after login.
 
 This mirrors the behavior of the Unix bash installer and is suitable for quick remote checks.
@@ -149,30 +149,30 @@ If you used `-NoAutoRun`, the report will not auto-run on SSH; you can still typ
 The installer appends a clearly marked block to your PowerShell profile (CurrentUserAllHosts) similar to:
 
 ```powershell
-# >>> TR-100 Machine Report configuration >>>
-if (Test-Path 'C:\Users\YourUser\TR100\TR-100-MachineReport.ps1') {
+# >>> TR-200 Machine Report configuration >>>
+if (Test-Path 'C:\Users\YourUser\TR200\TR-200-MachineReport.ps1') {
     try {
-        . 'C:\Users\YourUser\TR100\TR-100-MachineReport.ps1'
+        . 'C:\Users\YourUser\TR200\TR-200-MachineReport.ps1'
 
         function report {
             [CmdletBinding()]
             param()
-            Show-TR100Report
+            Show-TR200Report
         }
 
-        # Auto-run TR-100 on interactive or SSH sessions
+        # Auto-run TR-200 on interactive or SSH sessions
         $isSSH = $env:SSH_CLIENT -or $env:SSH_CONNECTION
         $isInteractiveHost = $Host.Name -ne 'ServerRemoteHost'
         if ($isSSH -or $isInteractiveHost) {
-            try { Show-TR100Report } catch { }
+            try { Show-TR200Report } catch { }
         }
     } catch {
-        Write-Warning 'Failed to load TR-100 Machine Report script from profile.'
+        Write-Warning 'Failed to load TR-200 Machine Report script from profile.'
     }
 } else {
-    Write-Warning 'TR-100 Machine Report script not found at C:\Users\YourUser\TR100.'
+    Write-Warning 'TR-200 Machine Report script not found at C:\Users\YourUser\TR200.'
 }
-# <<< TR-100 Machine Report configuration <<<
+# <<< TR-200 Machine Report configuration <<<
 ```
 
 You can adjust behavior by editing your profile:
@@ -180,7 +180,7 @@ You can adjust behavior by editing your profile:
 - To **disable auto-run** but keep `report`:
   - Comment out or remove the `if ($isSSH -or $isInteractiveHost) { ... }` block.
 - To **disable everything**:
-  - Remove the entire TR-100 block between the marker comments.
+  - Remove the entire TR-200 block between the marker comments.
 
 To open your profile quickly:
 
@@ -221,8 +221,8 @@ powershell -ExecutionPolicy Bypass -File .\build_tr100_exe.ps1
 By default this will:
 
 - Look for `ps2exe` (specifically `Invoke-ps2exe`)
-- If available, build `TR-100-MachineReport.exe` in the same folder
-- Use `TR-100-MachineReport.ps1` as the input script
+- If available, build `TR-200-MachineReport.exe` in the same folder
+- Use `TR-200-MachineReport.ps1` as the input script
 
 You can then copy the resulting `.exe` anywhere on your Windows PATH or run it directly.
 
@@ -235,8 +235,8 @@ Once `ps2exe` is installed, you can also run it yourself:
 ```powershell
 Import-Module ps2exe
 
-Invoke-ps2exe -inputFile .\WINDOWS\TR-100-MachineReport.ps1 `
-              -outputFile .\WINDOWS\TR-100-MachineReport.exe `
+Invoke-ps2exe -inputFile .\WINDOWS\TR-200-MachineReport.ps1 `
+              -outputFile .\WINDOWS\TR-200-MachineReport.exe `
               -noConfigFile
 ```
 
@@ -246,16 +246,16 @@ Refer to the `ps2exe` documentation for additional options (icons, version info,
 
 ## Uninstalling
 
-To remove the Windows TR-100 installation:
+To remove the Windows TR-200 installation:
 
 1. **Delete the installed files**:
-   - Remove `C:\Users\YourUser\TR100` (or wherever you installed it)
+   - Remove `C:\Users\YourUser\TR200` (or wherever you installed it)
 2. **Remove PATH entry**:
    - Open *Environment Variables* → *User variables* → edit `Path`
-   - Remove the `TR100` directory entry
+   - Remove the `TR200` directory entry
 3. **Clean your PowerShell profile**:
    - Edit `$PROFILE`
-   - Remove the block between `# >>> TR-100 Machine Report configuration >>>` and `# <<< TR-100 Machine Report configuration <<<`
+   - Remove the block between `# >>> TR-200 Machine Report configuration >>>` and `# <<< TR-200 Machine Report configuration <<<`
 
 After doing this and opening a new terminal, the `report` command and auto-run behavior will no longer be present.
 
@@ -270,11 +270,11 @@ After doing this and opening a new terminal, the `report` command and auto-run b
 
 - **`report` not found in cmd.exe or PowerShell**
   - Open a **new** terminal – PATH is read when the process starts
-  - Check that `C:\Users\YourUser\TR100` is in your user PATH
+  - Check that `C:\Users\YourUser\TR200` is in your user PATH
   - Ensure `report.cmd` exists in that directory
 
 - **Profile errors on startup**
   - Open `$PROFILE` in a text editor
-  - Temporarily comment out the TR-100 block to verify the rest of your profile is fine
+  - Temporarily comment out the TR-200 block to verify the rest of your profile is fine
 
 If you run into issues or want behavior tweaked (different install path, different auto-run rules, etc.), you can adjust the installer and profile snippets directly or ask for a tailored variant.

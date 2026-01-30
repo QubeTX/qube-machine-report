@@ -1,5 +1,6 @@
 #!/bin/bash
-# TR-100 Machine Report macOS launcher
+# TR-200 Machine Report macOS launcher
+# Copyright 2026, ES Development LLC (https://emmetts.dev)
 # Double-click friendly wrapper that opens Terminal and runs install.sh
 
 set -euo pipefail
@@ -18,7 +19,7 @@ fi
 chmod +x "$INSTALLER" >/dev/null 2>&1 || true
 
 echo "=========================================="
-echo "TR-100 Machine Report macOS Installer"
+echo "TR-200 Machine Report macOS Installer"
 echo "=========================================="
 echo ""
 echo "Running $(basename "$INSTALLER") from:"

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Build the cross-platform installer zip for TR-100 Machine Report
+# Build the cross-platform installer zip for TR-200 Machine Report
+# Copyright 2026, ES Development LLC (https://emmetts.dev)
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
-RELEASE_NAME="tr-100-machine-report"
+RELEASE_NAME="tr-200-machine-report"
 RELEASE_ROOT="$DIST_DIR/$RELEASE_NAME"
 
 function log() {
@@ -28,7 +29,7 @@ function copy_core_files() {
 function copy_windows_assets() {
   log "Copying Windows assets"
   mkdir -p "$RELEASE_ROOT/WINDOWS"
-  cp "$REPO_ROOT/WINDOWS/TR-100-MachineReport.ps1" "$RELEASE_ROOT/WINDOWS/"
+  cp "$REPO_ROOT/WINDOWS/TR-200-MachineReport.ps1" "$RELEASE_ROOT/WINDOWS/"
   cp "$REPO_ROOT/WINDOWS/install_windows.ps1" "$RELEASE_ROOT/WINDOWS/"
   cp "$REPO_ROOT/WINDOWS/README_WINDOWS.md" "$RELEASE_ROOT/WINDOWS/"
   cp "$REPO_ROOT/WINDOWS/build_tr100_exe.ps1" "$RELEASE_ROOT/WINDOWS/"

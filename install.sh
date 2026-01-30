@@ -1,12 +1,12 @@
 #!/bin/bash
-# TR-100 Machine Report - Automated Installation Script
-# Copyright © 2025, Emmett Shaughnessy (RealEmmettS)
+# TR-200 Machine Report - Automated Installation Script
+# Copyright 2026, ES Development LLC (https://emmetts.dev)
 # Based on original work by U.S. Graphics, LLC (BSD-3-Clause)
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "TR-100 Machine Report Installation"
+echo "TR-200 Machine Report Installation"
 echo "=========================================="
 echo ""
 
@@ -166,6 +166,7 @@ echo "=========================================="
 echo ""
 
 TARGET_FILE="$HOME/.machine_report.sh"
+UNINSTALL_FILE="$HOME/.machine_report_uninstall.sh"
 
 if [ -f "$TARGET_FILE" ]; then
     echo "⚠ Warning: $TARGET_FILE already exists"
@@ -185,35 +186,324 @@ chmod +x "$TARGET_FILE"
 echo "✓ Script installed and made executable"
 echo ""
 
-# Configure .bashrc
+# ============================================================================
+# CONFIGURE .bashrc (interactive bash shells)
+# ============================================================================
 echo "=========================================="
-echo "Configuring .bashrc"
+echo "Configuring Shell Profiles"
 echo "=========================================="
 echo ""
 
 BASHRC="$HOME/.bashrc"
 
-# Check if already configured
-if grep -q "alias report=" "$BASHRC" 2>/dev/null && grep -q ".machine_report.sh" "$BASHRC" 2>/dev/null; then
-    echo "✓ .bashrc already configured for Machine Report"
+# Check if already configured with TR-200
+if grep -q "# TR-200 Machine Report" "$BASHRC" 2>/dev/null; then
+    echo "✓ .bashrc already configured for TR-200 Machine Report"
 else
-    echo "Adding Machine Report configuration to $BASHRC..."
+    # Remove any old TR-100 configuration first
+    if grep -q "# Machine Report alias" "$BASHRC" 2>/dev/null; then
+        echo "  Removing old Machine Report configuration from .bashrc..."
+        # Use temporary file for sed compatibility across platforms
+        grep -v -E "(# Machine Report|alias report=|\.machine_report\.sh)" "$BASHRC" > "${BASHRC}.tmp" 2>/dev/null || true
+        mv "${BASHRC}.tmp" "$BASHRC"
+    fi
+
+    echo "Adding TR-200 Machine Report configuration to $BASHRC..."
     cat >> "$BASHRC" << 'EOF'
 
-# Machine Report alias - run anytime with 'report' command
+# TR-200 Machine Report configuration
 alias report='~/.machine_report.sh'
+alias uninstall='~/.machine_report_uninstall.sh'
 
-# Run Machine Report only when in interactive mode
+# Auto-run on interactive bash shell (clear screen first)
 if [[ $- == *i* ]]; then
+    clear
     ~/.machine_report.sh
 fi
 EOF
     echo "✓ .bashrc configured"
 fi
 
+# ============================================================================
+# CONFIGURE .zshrc (interactive zsh shells - macOS default since Catalina)
+# ============================================================================
+ZSHRC="$HOME/.zshrc"
+
+if [ -f "$ZSHRC" ] || [ "$OS_TYPE" = "macos" ]; then
+    if grep -q "# TR-200 Machine Report" "$ZSHRC" 2>/dev/null; then
+        echo "✓ .zshrc already configured for TR-200 Machine Report"
+    else
+        # Remove any old configuration first
+        if grep -q "# Machine Report" "$ZSHRC" 2>/dev/null; then
+            echo "  Removing old Machine Report configuration from .zshrc..."
+            grep -v -E "(# Machine Report|alias report=|\.machine_report\.sh)" "$ZSHRC" > "${ZSHRC}.tmp" 2>/dev/null || true
+            mv "${ZSHRC}.tmp" "$ZSHRC"
+        fi
+
+        echo "Adding TR-200 Machine Report configuration to $ZSHRC..."
+        cat >> "$ZSHRC" << 'EOF'
+
+# TR-200 Machine Report configuration
+alias report='~/.machine_report.sh'
+alias uninstall='~/.machine_report_uninstall.sh'
+
+# Auto-run on interactive zsh shell (clear screen first)
+if [[ -o interactive ]]; then
+    clear
+    ~/.machine_report.sh
+fi
+EOF
+        echo "✓ .zshrc configured"
+    fi
+fi
+
+# ============================================================================
+# CONFIGURE LOGIN SHELL (.profile/.zprofile for SSH/console login)
+# ============================================================================
+echo ""
+echo "Configuring login shell profiles..."
+
+if [ "$OS_TYPE" = "linux" ]; then
+    LOGIN_PROFILE="$HOME/.profile"
+elif [ "$OS_TYPE" = "macos" ]; then
+    # zsh uses .zprofile for login shells
+    LOGIN_PROFILE="$HOME/.zprofile"
+else
+    LOGIN_PROFILE=""
+fi
+
+if [ -n "$LOGIN_PROFILE" ]; then
+    if grep -q "# TR-200 Machine Report" "$LOGIN_PROFILE" 2>/dev/null; then
+        echo "✓ $LOGIN_PROFILE already configured"
+    else
+        echo "Adding TR-200 login configuration to $LOGIN_PROFILE..."
+        cat >> "$LOGIN_PROFILE" << 'EOF'
+
+# TR-200 Machine Report - run on login (SSH/console)
+if [ -x "$HOME/.machine_report.sh" ]; then
+    clear
+    "$HOME/.machine_report.sh"
+fi
+EOF
+        echo "✓ $LOGIN_PROFILE configured"
+    fi
+fi
+
+# Also configure .bash_profile for bash login shells on macOS
+if [ "$OS_TYPE" = "macos" ]; then
+    BASH_PROFILE="$HOME/.bash_profile"
+    if [ -f "$BASH_PROFILE" ] || [ ! -f "$HOME/.profile" ]; then
+        if ! grep -q "# TR-200 Machine Report" "$BASH_PROFILE" 2>/dev/null; then
+            echo "Adding TR-200 login configuration to $BASH_PROFILE..."
+            cat >> "$BASH_PROFILE" << 'EOF'
+
+# TR-200 Machine Report - run on bash login
+if [ -x "$HOME/.machine_report.sh" ]; then
+    clear
+    "$HOME/.machine_report.sh"
+fi
+EOF
+            echo "✓ $BASH_PROFILE configured"
+        fi
+    fi
+fi
+
+# ============================================================================
+# CONFIGURE SYSTEMD USER SERVICE (Linux boot-time execution)
+# ============================================================================
+echo ""
+if [ "$OS_TYPE" = "linux" ] && command -v systemctl &> /dev/null; then
+    echo "Configuring systemd user service for boot-time execution..."
+    SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_USER_DIR"
+
+    cat > "$SYSTEMD_USER_DIR/tr200-report.service" << EOF
+[Unit]
+Description=TR-200 Machine Report at Boot
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=$HOME/.machine_report.sh
+StandardOutput=journal
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable tr200-report.service 2>/dev/null || true
+    echo "✓ Systemd user service enabled (runs at boot)"
+    echo "  View with: systemctl --user status tr200-report"
+fi
+
+# ============================================================================
+# CONFIGURE MACOS LAUNCHD AGENT (login-time execution)
+# ============================================================================
+if [ "$OS_TYPE" = "macos" ]; then
+    echo "Configuring macOS LaunchAgent for login-time execution..."
+    LAUNCHD_DIR="$HOME/Library/LaunchAgents"
+    mkdir -p "$LAUNCHD_DIR"
+
+    cat > "$LAUNCHD_DIR/com.tr200.report.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tr200.report</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$HOME/.machine_report.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/tr200-report.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/tr200-report.err</string>
+</dict>
+</plist>
+EOF
+
+    # Load the agent (may fail if already loaded, that's OK)
+    launchctl unload "$LAUNCHD_DIR/com.tr200.report.plist" 2>/dev/null || true
+    launchctl load "$LAUNCHD_DIR/com.tr200.report.plist" 2>/dev/null || true
+    echo "✓ macOS LaunchAgent configured (runs at login)"
+fi
+
+# ============================================================================
+# CREATE UNINSTALL SCRIPT
+# ============================================================================
+echo ""
+echo "Creating uninstall script..."
+
+cat > "$UNINSTALL_FILE" << 'UNINSTALL_EOF'
+#!/bin/bash
+# TR-200 Machine Report Uninstaller
+# Copyright 2026, ES Development LLC (https://emmetts.dev)
+
+echo "=========================================="
+echo "TR-200 Machine Report Uninstaller"
+echo "=========================================="
 echo ""
 
-# Test installation
+read -p "Are you sure you want to uninstall TR-200 Machine Report? (y/N): " -n 1 -r
+echo ""
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Uninstallation cancelled."
+    exit 0
+fi
+
+echo "Uninstalling TR-200 Machine Report..."
+echo ""
+
+# Detect OS type
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    OS_TYPE="macos"
+else
+    OS_TYPE="linux"
+fi
+
+# Remove main script
+if [ -f "$HOME/.machine_report.sh" ]; then
+    rm -f "$HOME/.machine_report.sh"
+    echo "✓ Removed ~/.machine_report.sh"
+fi
+
+# Remove from .bashrc
+if [ -f "$HOME/.bashrc" ]; then
+    # Create temp file without TR-200 config
+    sed '/# TR-200 Machine Report/,/^fi$/d' "$HOME/.bashrc" > "$HOME/.bashrc.tmp" 2>/dev/null || true
+    sed -i.bak '/alias report=/d' "$HOME/.bashrc.tmp" 2>/dev/null || \
+        sed '/alias report=/d' "$HOME/.bashrc.tmp" > "$HOME/.bashrc.tmp2" && mv "$HOME/.bashrc.tmp2" "$HOME/.bashrc.tmp"
+    sed -i.bak '/alias uninstall=/d' "$HOME/.bashrc.tmp" 2>/dev/null || \
+        sed '/alias uninstall=/d' "$HOME/.bashrc.tmp" > "$HOME/.bashrc.tmp2" && mv "$HOME/.bashrc.tmp2" "$HOME/.bashrc.tmp"
+    mv "$HOME/.bashrc.tmp" "$HOME/.bashrc"
+    rm -f "$HOME/.bashrc.tmp.bak" "$HOME/.bashrc.bak"
+    echo "✓ Cleaned .bashrc"
+fi
+
+# Remove from .zshrc
+if [ -f "$HOME/.zshrc" ]; then
+    sed '/# TR-200 Machine Report/,/^fi$/d' "$HOME/.zshrc" > "$HOME/.zshrc.tmp" 2>/dev/null || true
+    sed -i.bak '/alias report=/d' "$HOME/.zshrc.tmp" 2>/dev/null || \
+        sed '/alias report=/d' "$HOME/.zshrc.tmp" > "$HOME/.zshrc.tmp2" && mv "$HOME/.zshrc.tmp2" "$HOME/.zshrc.tmp"
+    sed -i.bak '/alias uninstall=/d' "$HOME/.zshrc.tmp" 2>/dev/null || \
+        sed '/alias uninstall=/d' "$HOME/.zshrc.tmp" > "$HOME/.zshrc.tmp2" && mv "$HOME/.zshrc.tmp2" "$HOME/.zshrc.tmp"
+    mv "$HOME/.zshrc.tmp" "$HOME/.zshrc"
+    rm -f "$HOME/.zshrc.tmp.bak" "$HOME/.zshrc.bak"
+    echo "✓ Cleaned .zshrc"
+fi
+
+# Remove from .profile
+if [ -f "$HOME/.profile" ]; then
+    sed '/# TR-200 Machine Report/,/^fi$/d' "$HOME/.profile" > "$HOME/.profile.tmp" 2>/dev/null || true
+    mv "$HOME/.profile.tmp" "$HOME/.profile"
+    echo "✓ Cleaned .profile"
+fi
+
+# Remove from .zprofile (macOS)
+if [ -f "$HOME/.zprofile" ]; then
+    sed '/# TR-200 Machine Report/,/^fi$/d' "$HOME/.zprofile" > "$HOME/.zprofile.tmp" 2>/dev/null || true
+    mv "$HOME/.zprofile.tmp" "$HOME/.zprofile"
+    echo "✓ Cleaned .zprofile"
+fi
+
+# Remove from .bash_profile (macOS)
+if [ -f "$HOME/.bash_profile" ]; then
+    sed '/# TR-200 Machine Report/,/^fi$/d' "$HOME/.bash_profile" > "$HOME/.bash_profile.tmp" 2>/dev/null || true
+    mv "$HOME/.bash_profile.tmp" "$HOME/.bash_profile"
+    echo "✓ Cleaned .bash_profile"
+fi
+
+# Remove systemd service (Linux)
+if [ "$OS_TYPE" = "linux" ] && command -v systemctl &> /dev/null; then
+    if [ -f "$HOME/.config/systemd/user/tr200-report.service" ]; then
+        systemctl --user disable tr200-report.service 2>/dev/null || true
+        systemctl --user stop tr200-report.service 2>/dev/null || true
+        rm -f "$HOME/.config/systemd/user/tr200-report.service"
+        systemctl --user daemon-reload 2>/dev/null || true
+        echo "✓ Removed systemd user service"
+    fi
+fi
+
+# Remove launchd agent (macOS)
+if [ "$OS_TYPE" = "macos" ]; then
+    PLIST="$HOME/Library/LaunchAgents/com.tr200.report.plist"
+    if [ -f "$PLIST" ]; then
+        launchctl unload "$PLIST" 2>/dev/null || true
+        rm -f "$PLIST"
+        echo "✓ Removed macOS LaunchAgent"
+    fi
+fi
+
+# Remove backup file if exists
+rm -f "$HOME/.machine_report.sh.backup"
+
+# Remove self (the uninstall script)
+SELF_PATH="$HOME/.machine_report_uninstall.sh"
+echo ""
+echo "=========================================="
+echo "TR-200 Machine Report Uninstalled"
+echo "=========================================="
+echo ""
+echo "Note: You may need to restart your shell or log out/in"
+echo "      for all changes to take effect."
+echo ""
+
+# Remove self last
+rm -f "$SELF_PATH"
+UNINSTALL_EOF
+
+chmod +x "$UNINSTALL_FILE"
+echo "✓ Created uninstall script: $UNINSTALL_FILE"
+echo "  Run 'uninstall' command to remove TR-200 Machine Report"
+
+# ============================================================================
+# TEST INSTALLATION
+# ============================================================================
+echo ""
 echo "=========================================="
 echo "Testing Installation"
 echo "=========================================="
@@ -235,10 +525,16 @@ echo "=========================================="
 echo "Installation Complete!"
 echo "=========================================="
 echo ""
-echo "Next steps:"
-echo "  1. Type 'report' to run the machine report anytime"
-echo "  2. Open a new terminal to see it run automatically"
-echo "  3. Customize by editing: nano ~/.machine_report.sh"
+echo "The TR-200 Machine Report will now run:"
+echo "  • At system boot (via systemd/launchd)"
+echo "  • At every login (SSH or local terminal)"
+echo "  • On every new terminal window"
+echo ""
+echo "Available commands:"
+echo "  report    - Run the machine report manually"
+echo "  uninstall - Remove TR-200 Machine Report completely"
+echo ""
+echo "Customize by editing: nano ~/.machine_report.sh"
 echo ""
 
 # Platform-specific tips
@@ -251,7 +547,7 @@ if [ "$IS_RPI" -eq 1 ]; then
 elif [ "$OS_TYPE" = "macos" ]; then
     echo "macOS Specific Notes:"
     echo "  • Script uses native macOS commands (sysctl, vm_stat, scutil)"
-    echo "  • All system info displayed using macOS APIs"
+    echo "  • LaunchAgent runs report on login"
     echo "  • Last login info may not be available (macOS limitation)"
     if [ "$BASH_MAJOR" -lt 4 ]; then
         echo "  • Running with Bash 3.2 - some formatting may differ"
@@ -265,25 +561,4 @@ echo "  • README.md - Full documentation"
 echo "  • CLAUDE.md - Claude Code automation guide"
 echo ""
 echo "Installed to: $TARGET_FILE"
-echo "Configured in: $BASHRC"
-echo ""
-
-# Customization suggestions
-if [ "$IS_RPI" -eq 1 ]; then
-    echo "Raspberry Pi Customization Tips:"
-    echo "  • Edit line 20 to change header: report_title=\"YOUR RPI NAME\""
-    echo "  • Consider showing temperature (requires vcgencmd)"
-    echo "  • Check CLAUDE.md for customization guidance"
-    echo ""
-elif [ "$OS_TYPE" = "macos" ]; then
-    echo "macOS Customization Tips:"
-    echo "  • Edit line 20 to change header: report_title=\"YOUR MAC NAME\""
-    echo "  • Script respects macOS's built-in commands"
-    echo "  • Check CLAUDE.md for platform-specific customization"
-    echo ""
-fi
-
-echo "To uninstall:"
-echo "  rm ~/.machine_report.sh"
-echo "  # Then manually remove lines from ~/.bashrc"
 echo ""

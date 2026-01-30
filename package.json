@@ -1,0 +1,47 @@
+{
+  "name": "tr200",
+  "version": "2.0.0",
+  "description": "Cross-platform system information report with Unicode box-drawing display",
+  "author": "shaughv",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RealEmmettS/usgc-machine-report.git"
+  },
+  "homepage": "https://github.com/RealEmmettS/usgc-machine-report#readme",
+  "bugs": {
+    "url": "https://github.com/RealEmmettS/usgc-machine-report/issues"
+  },
+  "keywords": [
+    "system-info",
+    "machine-report",
+    "neofetch",
+    "cli",
+    "terminal",
+    "cross-platform",
+    "powershell",
+    "bash",
+    "sysinfo",
+    "hardware",
+    "diagnostics"
+  ],
+  "bin": {
+    "tr200": "./bin/tr200.js",
+    "report": "./bin/tr200.js"
+  },
+  "files": [
+    "bin/",
+    "machine_report.sh",
+    "WINDOWS/TR-200-MachineReport.ps1"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32",
+    "freebsd",
+    "openbsd"
+  ]
+}
