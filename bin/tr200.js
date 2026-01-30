@@ -105,10 +105,10 @@ function getProfilePaths() {
             path.join(homeDir, '.bash_profile')
         ];
     } else {
-        // Linux/BSD
+        // Linux/BSD - only .bashrc needed
+        // .profile sources .bashrc on most distros, so adding to both causes duplicates
         return [
-            path.join(homeDir, '.bashrc'),
-            path.join(homeDir, '.profile')
+            path.join(homeDir, '.bashrc')
         ];
     }
 }
@@ -342,7 +342,7 @@ function runReport() {
 // Handle help flag
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log(`
-TR-200 Machine Report v2.0.4
+TR-200 Machine Report v2.0.5
 
 Usage: tr200 [options]
        report [options]
@@ -362,7 +362,7 @@ More info: https://github.com/RealEmmettS/usgc-machine-report
 
 // Handle version flag
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
-    console.log('2.0.4');
+    console.log('2.0.5');
     process.exit(0);
 }
 
