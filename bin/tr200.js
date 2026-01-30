@@ -300,7 +300,7 @@ More info: https://github.com/RealEmmettS/usgc-machine-report
 
 // Handle version flag
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
-    console.log('2.0.1');
+    console.log('2.0.2');
     process.exit(0);
 }
 
