@@ -460,7 +460,9 @@ function Show-TR200Report {
     }
 
     # Total inner width of table (excluding outer borders)
-    $innerWidth = 2 + $labelWidth + 3 + $dataWidth + 2  # "│ <label> │ <value> │"
+    # Row format: "│ <label> │ <value> │" = 1+1+label+1+1+1+data+1+1 = label+data+7
+    # Inner width is between outer │ chars: " <label> │ <value> " = label+data+5
+    $innerWidth = $labelWidth + $dataWidth + 5
 
     # Convert chars to strings for multiplication (PS 5.1 compatibility)
     $hzLine = [string]$TR200Chars.Horizontal

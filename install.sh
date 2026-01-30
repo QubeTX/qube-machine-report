@@ -201,11 +201,16 @@ if grep -q "# TR-200 Machine Report" "$BASHRC" 2>/dev/null; then
     echo "✓ .bashrc already configured for TR-200 Machine Report"
 else
     # Remove any old TR-100 configuration first
-    if grep -q "# Machine Report alias" "$BASHRC" 2>/dev/null; then
-        echo "  Removing old Machine Report configuration from .bashrc..."
-        # Use temporary file for sed compatibility across platforms
-        grep -v -E "(# Machine Report|alias report=|\.machine_report\.sh)" "$BASHRC" > "${BASHRC}.tmp" 2>/dev/null || true
-        mv "${BASHRC}.tmp" "$BASHRC"
+    # TR-100 uses: "# Run Machine Report only when in interactive mode"
+    if grep -q "# Run Machine Report only when in interactive mode" "$BASHRC" 2>/dev/null || \
+       grep -q "# Machine Report alias" "$BASHRC" 2>/dev/null; then
+        echo "  Removing old TR-100/Machine Report configuration from .bashrc..."
+        # Remove TR-100 block: comment + if/fi block
+        sed '/# Run Machine Report only when in interactive mode/,/^fi$/d' "$BASHRC" > "${BASHRC}.tmp" 2>/dev/null || cp "$BASHRC" "${BASHRC}.tmp"
+        # Also remove any other Machine Report lines (but not TR-200)
+        grep -v -E "^(# Machine Report alias|alias report=.*machine_report)" "${BASHRC}.tmp" > "${BASHRC}.tmp2" 2>/dev/null || mv "${BASHRC}.tmp" "${BASHRC}.tmp2"
+        mv "${BASHRC}.tmp2" "$BASHRC"
+        rm -f "${BASHRC}.tmp"
     fi
 
     echo "Adding TR-200 Machine Report configuration to $BASHRC..."
@@ -233,11 +238,17 @@ if [ -f "$ZSHRC" ] || [ "$OS_TYPE" = "macos" ]; then
     if grep -q "# TR-200 Machine Report" "$ZSHRC" 2>/dev/null; then
         echo "✓ .zshrc already configured for TR-200 Machine Report"
     else
-        # Remove any old configuration first
-        if grep -q "# Machine Report" "$ZSHRC" 2>/dev/null; then
-            echo "  Removing old Machine Report configuration from .zshrc..."
-            grep -v -E "(# Machine Report|alias report=|\.machine_report\.sh)" "$ZSHRC" > "${ZSHRC}.tmp" 2>/dev/null || true
-            mv "${ZSHRC}.tmp" "$ZSHRC"
+        # Remove any old TR-100 configuration first
+        # TR-100 uses: "# Run Machine Report only when in interactive mode"
+        if grep -q "# Run Machine Report only when in interactive mode" "$ZSHRC" 2>/dev/null || \
+           grep -q "# Machine Report alias" "$ZSHRC" 2>/dev/null; then
+            echo "  Removing old TR-100/Machine Report configuration from .zshrc..."
+            # Remove TR-100 block: comment + if/fi block
+            sed '/# Run Machine Report only when in interactive mode/,/^fi$/d' "$ZSHRC" > "${ZSHRC}.tmp" 2>/dev/null || cp "$ZSHRC" "${ZSHRC}.tmp"
+            # Also remove any other Machine Report lines (but not TR-200)
+            grep -v -E "^(# Machine Report alias|alias report=.*machine_report)" "${ZSHRC}.tmp" > "${ZSHRC}.tmp2" 2>/dev/null || mv "${ZSHRC}.tmp" "${ZSHRC}.tmp2"
+            mv "${ZSHRC}.tmp2" "$ZSHRC"
+            rm -f "${ZSHRC}.tmp"
         fi
 
         echo "Adding TR-200 Machine Report configuration to $ZSHRC..."
