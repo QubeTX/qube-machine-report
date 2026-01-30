@@ -92,7 +92,7 @@ function cleanProfileFile(filePath) {
     return false;
 }
 
-// Shell profile paths
+// Shell profile paths for INSTALLATION (minimal set to avoid duplicates)
 function getProfilePaths() {
     if (isWindows) {
         return [
@@ -110,6 +110,25 @@ function getProfilePaths() {
         // .profile sources .bashrc on most distros, so adding to both causes duplicates
         return [
             path.join(homeDir, '.bashrc')
+        ];
+    }
+}
+
+// ALL profile paths for CLEANUP (removes duplicates from old installs)
+function getAllProfilePaths() {
+    if (isWindows) {
+        return [
+            path.join(homeDir, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1'),
+            path.join(homeDir, 'Documents', 'WindowsPowerShell', 'Microsoft.PowerShell_profile.ps1')
+        ];
+    } else {
+        // Clean ALL Unix profile files regardless of OS
+        return [
+            path.join(homeDir, '.bashrc'),
+            path.join(homeDir, '.zshrc'),
+            path.join(homeDir, '.profile'),
+            path.join(homeDir, '.bash_profile'),
+            path.join(homeDir, '.zprofile')
         ];
     }
 }
@@ -160,10 +179,12 @@ async function installAutoRun() {
         process.exit(0);
     }
 
-    // First, clean up any existing TR-100/TR-200 configurations
-    console.log('Cleaning previous installations...');
+    // First, clean up any existing TR-100/TR-200 configurations from ALL profiles
+    // This removes duplicates from old installs that used multiple profile files
+    console.log('Cleaning previous installations from all profiles...');
+    const allProfiles = getAllProfilePaths();
     let cleaned = 0;
-    for (const profilePath of profiles) {
+    for (const profilePath of allProfiles) {
         if (cleanProfileFile(profilePath)) {
             console.log(`  [cleaned] ${profilePath}`);
             cleaned++;
@@ -213,7 +234,8 @@ async function installAutoRun() {
 
 // Uninstall auto-run from shell profiles
 async function uninstallAutoRun() {
-    const profiles = getProfilePaths();
+    // Use ALL profiles for uninstall to ensure complete cleanup
+    const profiles = getAllProfilePaths();
 
     console.log('\nTR-200 Machine Report - Remove Auto-Run\n');
     console.log('This will remove ALL TR-100/TR-200 configurations from your shell profile(s).');
@@ -343,7 +365,7 @@ function runReport() {
 // Handle help flag
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log(`
-TR-200 Machine Report v2.0.6
+TR-200 Machine Report v2.0.7
 
 Usage: tr200 [options]
        report [options]
@@ -363,7 +385,7 @@ More info: https://github.com/RealEmmettS/usgc-machine-report
 
 // Handle version flag
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
-    console.log('2.0.6');
+    console.log('2.0.7');
     process.exit(0);
 }
 
