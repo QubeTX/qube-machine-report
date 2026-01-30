@@ -74,6 +74,8 @@ If your system is different, things might break. Look up the offending line and 
 
 ## 📦 npm Install (Recommended - All Platforms)
 
+[![npm version](https://img.shields.io/npm/v/tr200.svg)](https://www.npmjs.com/package/tr200)
+
 **The easiest way to install TR-200 on any platform:**
 
 ```bash
