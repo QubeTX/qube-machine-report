@@ -1,5 +1,5 @@
 # TR-200 Machine Report
-SKU: (TR-200)(https://tr200.emmetts.dev), filed under Technical Reports (TR).
+SKU: (TR-200)[https://tr200.emmetts.dev], filed under Technical Reports (TR).
 
 ## What is it?
 A machine information report by **SHAUGHNESSY V DEVELOPMENT INC.** (originally from [United States Graphics Company](https://x.com/usgraphics))
