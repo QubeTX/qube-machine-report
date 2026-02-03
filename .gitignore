@@ -1,2 +1,44 @@
+# Rust/Cargo
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
 .idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Debug
+*.pdb
+
+# Coverage
+*.gcno
+*.gcda
+coverage/
+*.profraw
+*.profdata
+
+# Documentation
+/doc/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Environment
+.env
+.env.local

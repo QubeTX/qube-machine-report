@@ -1,0 +1,64 @@
+[package]
+name = "tr-300"
+version = "3.0.1"
+edition = "2021"
+authors = ["Emmett S <hey@emmetts.dev>"]
+description = "Cross-platform system information report"
+readme = "README.md"
+license = "BSD-3-Clause"
+repository = "https://github.com/RealEmmettS/qube-machine-report"
+keywords = ["cli", "system", "sysinfo", "report", "cross-platform"]
+categories = ["command-line-utilities"]
+
+[package.metadata.wix]
+upgrade-guid = "5CD540A8-AD16-4B0F-8CE4-51FF641DE181"
+path-guid = "0F93D599-44AD-4377-96FE-25B5C9EA3078"
+license = false
+eula = false
+
+[[bin]]
+name = "tr300"
+path = "src/main.rs"
+
+[dependencies]
+sysinfo = "0.32"
+clap = { version = "4.5", features = ["derive", "env"] }
+crossterm = "0.28"
+thiserror = "2.0"
+dirs = "5.0"
+
+[target.'cfg(windows)'.dependencies]
+wmi = "0.14"
+winapi = { version = "0.3", features = ["consoleapi", "wincon"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+users = "0.11"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Config for 'dist'
+[workspace.metadata.dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.30.3"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell", "msi"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
+# Which actions to run on pull requests
+pr-run-mode = "plan"
+# Whether to install an updater program
+install-updater = false
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to publish prereleases to package managers
+publish-prereleases = false
