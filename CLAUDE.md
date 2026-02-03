@@ -100,6 +100,14 @@ Key elements:
 
 Uses **cargo-dist** for fully automated cross-platform releases. No manual NPM packages or Homebrew taps.
 
+**IMPORTANT:** Every release requires ALL of these steps - do not skip any:
+
+1. **Bump version** in `Cargo.toml`
+2. **Update CHANGELOG.md** with new version section and changes
+3. **Commit** with message `release: vX.Y.Z`
+4. **Create git tag** matching the version (e.g., `v3.0.1`)
+5. **Push commits AND tags** - the tag push triggers the release
+
 ### Quick Release Commands
 
 ```bash
