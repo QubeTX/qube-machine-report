@@ -1,6 +1,6 @@
 # TR-300
 
-[![Build Status](https://github.com/RealEmmettS/qube-machine-report/actions/workflows/release.yml/badge.svg)](https://github.com/RealEmmettS/qube-machine-report/actions)
+[![Build Status](https://github.com/QubeTX/qube-machine-report/actions/workflows/release.yml/badge.svg)](https://github.com/QubeTX/qube-machine-report/actions)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
 Cross-platform system information report with Unicode box-drawing tables.
@@ -24,18 +24,18 @@ TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground
 ### Shell (macOS/Linux)
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/RealEmmettS/qube-machine-report/releases/latest/download/tr-300-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh | sh
 ```
 
 ### PowerShell (Windows)
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/RealEmmettS/qube-machine-report/releases/latest/download/tr-300-installer.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1 | iex"
 ```
 
 ### Windows Installer (.msi)
 
-Download the latest MSI installer from the [Releases page](https://github.com/RealEmmettS/qube-machine-report/releases).
+Download the latest MSI installer from the [Releases page](https://github.com/QubeTX/qube-machine-report/releases).
 
 ### Cargo
 
@@ -46,7 +46,7 @@ cargo install tr-300
 ### From Source
 
 ```bash
-git clone https://github.com/RealEmmettS/qube-machine-report.git
+git clone https://github.com/QubeTX/qube-machine-report.git
 cd qube-machine-report
 cargo build --release
 ```

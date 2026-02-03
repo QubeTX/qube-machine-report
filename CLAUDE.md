@@ -139,8 +139,8 @@ GitHub Actions will automatically:
 
 | Platform | Installer | Command |
 |----------|-----------|---------|
-| macOS/Linux | Shell script | `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/RealEmmettS/qube-machine-report/releases/latest/download/tr-300-installer.sh \| sh` |
-| Windows | PowerShell script | `powershell -c "irm https://github.com/RealEmmettS/qube-machine-report/releases/latest/download/tr-300-installer.ps1 \| iex"` |
+| macOS/Linux | Shell script | `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh \| sh` |
+| Windows | PowerShell script | `powershell -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1 \| iex"` |
 | Windows | MSI installer | Download from GitHub Releases |
 
 ### cargo-dist Configuration
