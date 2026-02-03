@@ -26,7 +26,7 @@ fn test_default_report() {
     let mut cmd = Command::cargo_bin("tr300").unwrap();
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("SHAUGHNESSY V DEVELOPMENT"))
+        .stdout(predicate::str::contains("QUBETX DEVELOPER TOOLS"))
         .stdout(predicate::str::contains("TR-300 MACHINE REPORT"));
 }
 

@@ -7,7 +7,7 @@ use crate::error::{AppError, Result};
 use std::path::PathBuf;
 
 /// Default title for the report header
-pub const DEFAULT_TITLE: &str = "SHAUGHNESSY V DEVELOPMENT INC.";
+pub const DEFAULT_TITLE: &str = "QUBETX DEVELOPER TOOLS";
 
 /// Default subtitle for the report header
 pub const DEFAULT_SUBTITLE: &str = "TR-300 MACHINE REPORT";

@@ -78,7 +78,7 @@ The report matches TR-200 exactly:
 ```
 ┌┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┐
 ├┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┤
-│       SHAUGHNESSY V DEVELOPMENT INC.          │
+│          QUBETX DEVELOPER TOOLS               │
 │           TR-300 MACHINE REPORT               │
 ├──────────────┬────────────────────────────────┤
 │ OS           │ <OS name + version>            │
