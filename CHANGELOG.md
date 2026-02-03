@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-02-03
+
+### Changed
+- License changed from BSD 3-Clause to PolyForm Noncommercial 1.0.0
+  - Permits noncommercial use, personal use, research, and hobby projects
+  - Permits use by charitable organizations, educational institutions, public research organizations, and government agencies
+  - Commercial use requires a separate license agreement
+
 ## [3.1.0] - 2026-02-03
 
 ### Added

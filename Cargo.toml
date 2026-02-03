@@ -1,11 +1,11 @@
 [package]
 name = "tr-300"
-version = "3.1.0"
+version = "3.2.0"
 edition = "2021"
 authors = ["Emmett S <hey@emmetts.dev>"]
 description = "Cross-platform system information report"
 readme = "README.md"
-license = "BSD-3-Clause"
+license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/QubeTX/qube-machine-report"
 keywords = ["cli", "system", "sysinfo", "report", "cross-platform"]
 categories = ["command-line-utilities"]
