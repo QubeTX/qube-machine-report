@@ -173,7 +173,7 @@
         <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
         <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
 
-        <Property Id='ARPHELPLINK' Value='https://github.com/RealEmmettS/qube-machine-report'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/QubeTX/qube-machine-report'/>
         
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>

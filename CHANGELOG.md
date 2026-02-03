@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-02-03
+
+### Fixed
+- Fixed incorrect repository URL in Cargo.toml causing installer 404 errors
+- Fixed MSI help link pointing to wrong repository
+
 ## [3.0.1] - 2026-02-03
 
 ### Added
