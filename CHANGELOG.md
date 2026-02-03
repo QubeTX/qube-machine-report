@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-02-03
+
+### Added
+- GPU information display - shows GPU name(s) in CPU section
+  - Shows each GPU on separate row if ≤3 GPUs
+  - Shows compact comma-separated list if >3 GPUs
+- System architecture display (x86_64, aarch64, etc.) in OS section
+- Shell name and version in session section
+- Terminal emulator detection in session section
+- System locale display in session section
+- Battery status for laptops (percentage and charging state)
+
+### Fixed
+- DNS parsing bug on Windows - DNS servers now display on separate rows instead of being concatenated with literal `\n` string
+
+### Changed
+- Simplified table footer to single line (removed double-border)
+- JSON output now includes all new fields (architecture, gpus, shell, terminal, locale, battery)
+
 ## [3.0.3] - 2026-02-03
 
 ### Changed

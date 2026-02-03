@@ -211,7 +211,7 @@ fn get_dns_servers_windows() -> Vec<String> {
         .args([
             "-NoProfile",
             "-Command",
-            "(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -ExpandProperty ServerAddresses) -join '\\n'",
+            "(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -ExpandProperty ServerAddresses) -join \"`n\"",
         ])
         .output()
     {

@@ -27,6 +27,20 @@ pub struct PlatformInfo {
     pub boot_mode: Option<String>,
     /// Virtualization platform if running in VM
     pub virtualization: Option<String>,
+    /// GPU names
+    pub gpus: Vec<String>,
+    /// System architecture (x86_64, aarch64, etc.)
+    pub architecture: Option<String>,
+    /// Terminal emulator name
+    pub terminal: Option<String>,
+    /// Shell name and version
+    pub shell: Option<String>,
+    /// Display resolution
+    pub display_resolution: Option<String>,
+    /// Battery status (percentage and charging state)
+    pub battery: Option<String>,
+    /// System locale
+    pub locale: Option<String>,
 }
 
 /// Collect platform-specific information

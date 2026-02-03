@@ -20,6 +20,7 @@ pub struct SystemInfo {
     pub os_name: String,
     pub os_version: String,
     pub kernel: String,
+    pub architecture: String,
 
     // Network Section
     pub hostname: String,
@@ -37,6 +38,7 @@ pub struct SystemInfo {
     pub load_1m: f64,
     pub load_5m: f64,
     pub load_15m: f64,
+    pub gpus: Vec<String>,
 
     // Disk Section
     pub disk_used_bytes: u64,
@@ -53,6 +55,10 @@ pub struct SystemInfo {
     pub last_login: String,
     pub last_login_ip: Option<String>,
     pub uptime_seconds: u64,
+    pub shell: Option<String>,
+    pub terminal: Option<String>,
+    pub locale: Option<String>,
+    pub battery: Option<String>,
 }
 
 impl SystemInfo {
@@ -90,6 +96,7 @@ impl SystemInfo {
             os_name: os_info.name,
             os_version: os_info.version,
             kernel: os_info.kernel_version,
+            architecture: platform_info.architecture.unwrap_or_else(|| std::env::consts::ARCH.to_string()),
             hostname: os_info.hostname,
             machine_ip: net_info.machine_ip,
             client_ip: net_info.client_ip,
@@ -103,6 +110,7 @@ impl SystemInfo {
             load_1m: cpu_info.load_1m,
             load_5m: cpu_info.load_5m,
             load_15m: cpu_info.load_15m,
+            gpus: platform_info.gpus,
             disk_used_bytes: disk_used,
             disk_total_bytes: disk_total,
             disk_percent,
@@ -113,6 +121,10 @@ impl SystemInfo {
             last_login: session_info.last_login,
             last_login_ip: session_info.last_login_ip,
             uptime_seconds: os_info.uptime_seconds,
+            shell: platform_info.shell,
+            terminal: platform_info.terminal,
+            locale: platform_info.locale,
+            battery: platform_info.battery,
         })
     }
 

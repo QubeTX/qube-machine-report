@@ -40,6 +40,7 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     let os_display = format!("{} {}", info.os_name, info.os_version);
     output.push_str(&renderer.render_row("OS", &os_display));
     output.push_str(&renderer.render_row("KERNEL", &info.kernel));
+    output.push_str(&renderer.render_row("ARCH", &info.architecture));
     output.push_str(&renderer.render_middle_divider());
 
     // Network Section
@@ -62,6 +63,25 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     // CPU Section
     output.push_str(&renderer.render_row("PROCESSOR", &info.processor));
     output.push_str(&renderer.render_row("CORES", &info.cores_str()));
+
+    // GPU display: if ≤3 GPUs, show each on own row; if >3, show as compact list
+    if !info.gpus.is_empty() {
+        if info.gpus.len() <= 3 {
+            for (i, gpu) in info.gpus.iter().enumerate() {
+                let label = if info.gpus.len() == 1 {
+                    "GPU".to_string()
+                } else {
+                    format!("GPU {}", i + 1)
+                };
+                output.push_str(&renderer.render_row(&label, gpu));
+            }
+        } else {
+            // Compact comma-separated list for >3 GPUs
+            let gpu_list = info.gpus.join(", ");
+            output.push_str(&renderer.render_row("GPUs", &gpu_list));
+        }
+    }
+
     output.push_str(&renderer.render_row("HYPERVISOR", &info.hypervisor));
     output.push_str(&renderer.render_row("CPU FREQ", &info.freq_str()));
 
@@ -101,8 +121,22 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     }
     output.push_str(&renderer.render_row("UPTIME", &info.uptime_formatted()));
 
-    // Footer
-    output.push_str(&renderer.render_bottom_divider());
+    // Shell and Terminal (only show if available)
+    if let Some(ref shell) = info.shell {
+        output.push_str(&renderer.render_row("SHELL", shell));
+    }
+    if let Some(ref terminal) = info.terminal {
+        output.push_str(&renderer.render_row("TERMINAL", terminal));
+    }
+    if let Some(ref locale) = info.locale {
+        output.push_str(&renderer.render_row("LOCALE", locale));
+    }
+    // Battery only shown if present (laptops)
+    if let Some(ref battery) = info.battery {
+        output.push_str(&renderer.render_row("BATTERY", battery));
+    }
+
+    // Simplified footer (single line, no bottom_divider)
     output.push_str(&renderer.render_footer());
 
     output
@@ -116,7 +150,8 @@ fn generate_json(info: &SystemInfo) -> String {
   "os": {{
     "name": "{}",
     "version": "{}",
-    "kernel": "{}"
+    "kernel": "{}",
+    "architecture": "{}"
   }},
   "network": {{
     "hostname": "{}",
@@ -132,7 +167,8 @@ fn generate_json(info: &SystemInfo) -> String {
     "frequency_ghz": {:.2},
     "load_1m": {:.2},
     "load_5m": {:.2},
-    "load_15m": {:.2}
+    "load_15m": {:.2},
+    "gpus": [{}]
   }},
   "disk": {{
     "used_bytes": {},
@@ -147,12 +183,17 @@ fn generate_json(info: &SystemInfo) -> String {
   "session": {{
     "username": "{}",
     "last_login": "{}",
-    "uptime_seconds": {}
+    "uptime_seconds": {},
+    "shell": {},
+    "terminal": {},
+    "locale": {},
+    "battery": {}
   }}
 }}"#,
         escape_json(&info.os_name),
         escape_json(&info.os_version),
         escape_json(&info.kernel),
+        escape_json(&info.architecture),
         escape_json(&info.hostname),
         escape_json(&info.machine_ip),
         info.client_ip
@@ -172,6 +213,11 @@ fn generate_json(info: &SystemInfo) -> String {
         info.load_1m,
         info.load_5m,
         info.load_15m,
+        info.gpus
+            .iter()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .collect::<Vec<_>>()
+            .join(", "),
         info.disk_used_bytes,
         info.disk_total_bytes,
         info.disk_percent,
@@ -180,7 +226,23 @@ fn generate_json(info: &SystemInfo) -> String {
         info.mem_percent,
         escape_json(&info.username),
         escape_json(&info.last_login),
-        info.uptime_seconds
+        info.uptime_seconds,
+        info.shell
+            .as_ref()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .unwrap_or_else(|| "null".to_string()),
+        info.terminal
+            .as_ref()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .unwrap_or_else(|| "null".to_string()),
+        info.locale
+            .as_ref()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .unwrap_or_else(|| "null".to_string()),
+        info.battery
+            .as_ref()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .unwrap_or_else(|| "null".to_string()),
     )
 }
 
