@@ -6,6 +6,7 @@
 use crate::error::{AppError, Result};
 use std::fs;
 use std::path::PathBuf;
+use std::env;
 
 /// Marker comments for shell profile modifications
 const MARKER_START: &str = "# TR-300 Machine Report";
@@ -306,4 +307,48 @@ fn remove_from_profile(path: &PathBuf) -> Result<bool> {
         .map_err(|e| AppError::platform(format!("Failed to write {}: {}", path.display(), e)))?;
 
     Ok(true)
+}
+
+/// Find the location of the currently running binary
+pub fn find_binary_location() -> Option<PathBuf> {
+    // First try to get the current executable path
+    if let Ok(exe_path) = env::current_exe() {
+        if exe_path.exists() {
+            return Some(exe_path);
+        }
+    }
+
+    // Fallback to the standard install path
+    let path = install_path();
+    if path.exists() {
+        return Some(path);
+    }
+
+    None
+}
+
+/// Remove the binary file
+pub fn remove_binary(binary_path: &PathBuf) -> Result<()> {
+    if !binary_path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_file(binary_path)
+        .map_err(|e| AppError::platform(format!("Failed to remove binary {}: {}", binary_path.display(), e)))?;
+
+    println!("Removed binary: {}", binary_path.display());
+    Ok(())
+}
+
+/// Perform complete uninstall (profile + binary)
+pub fn uninstall_complete() -> Result<()> {
+    // First, uninstall from shell profiles
+    uninstall()?;
+
+    // Then remove the binary
+    if let Some(binary_path) = find_binary_location() {
+        remove_binary(&binary_path)?;
+    }
+
+    Ok(())
 }

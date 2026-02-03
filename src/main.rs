@@ -100,15 +100,51 @@ fn run_install() -> Result<()> {
     Ok(())
 }
 
-/// Uninstall tr300 from shell profile
+/// Uninstall tr300 from shell profile (interactive)
 fn run_uninstall() -> Result<()> {
-    println!("Uninstalling TR-300...");
-    install::uninstall()?;
-    println!("Uninstallation complete!");
-    println!();
-    println!("TR-300 configuration has been removed from your shell profile.");
-    println!("The binary itself was not removed. To fully remove, delete the tr300 executable.");
-    Ok(())
+    use install::{
+        confirm_complete_uninstall, find_binary_location, get_binary_parent_dir,
+        prompt_uninstall_option, UninstallOption,
+    };
+
+    let option = prompt_uninstall_option();
+
+    match option {
+        UninstallOption::Cancel => {
+            println!();
+            println!("Uninstall cancelled.");
+            Ok(())
+        }
+        UninstallOption::ProfileOnly => {
+            println!();
+            println!("Removing shell profile modifications...");
+            install::uninstall()?;
+            println!();
+            println!("TR-300 auto-run has been removed from your shell profile.");
+            println!("The tr300 binary remains installed and can be run manually.");
+            Ok(())
+        }
+        UninstallOption::Complete => {
+            // Get binary location for confirmation prompt
+            let binary_path = find_binary_location();
+            let parent_dir = binary_path.as_ref().and_then(|p| get_binary_parent_dir(p.as_path()));
+
+            if let Some(ref path) = binary_path {
+                if !confirm_complete_uninstall(path, parent_dir.as_deref()) {
+                    println!();
+                    println!("Uninstall cancelled.");
+                    return Ok(());
+                }
+            }
+
+            println!();
+            println!("Performing complete uninstall...");
+            install::uninstall_complete()?;
+            println!();
+            println!("TR-300 has been completely removed from your system.");
+            Ok(())
+        }
+    }
 }
 
 /// Enable UTF-8 console output on Windows

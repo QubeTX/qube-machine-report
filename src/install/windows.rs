@@ -4,6 +4,7 @@
 //! Removes legacy TR-100 and TR-200 configurations before installing.
 
 use crate::error::{AppError, Result};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -293,4 +294,83 @@ fn remove_if_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
     }
 
     result
+}
+
+/// Find the location of the currently running binary
+pub fn find_binary_location() -> Option<PathBuf> {
+    // First try to get the current executable path
+    if let Ok(exe_path) = env::current_exe() {
+        if exe_path.exists() {
+            return Some(exe_path);
+        }
+    }
+
+    // Fallback to the standard install path
+    let path = install_path();
+    if path.exists() {
+        return Some(path);
+    }
+
+    None
+}
+
+/// Get the parent directory of the binary (for cleanup)
+pub fn get_binary_parent_dir(binary_path: &std::path::Path) -> Option<PathBuf> {
+    binary_path.parent().map(|p| p.to_path_buf())
+}
+
+/// Remove the binary file
+pub fn remove_binary(binary_path: &PathBuf) -> Result<()> {
+    if !binary_path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_file(binary_path)
+        .map_err(|e| AppError::platform(format!("Failed to remove binary {}: {}", binary_path.display(), e)))?;
+
+    println!("Removed binary: {}", binary_path.display());
+    Ok(())
+}
+
+/// Remove the parent directory if empty
+pub fn remove_empty_parent_dir(dir: &PathBuf) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    // Check if directory is empty
+    let is_empty = match fs::read_dir(dir) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(_) => false,
+    };
+
+    if is_empty {
+        fs::remove_dir(dir)
+            .map_err(|e| AppError::platform(format!("Failed to remove directory {}: {}", dir.display(), e)))?;
+        println!("Removed empty directory: {}", dir.display());
+    }
+
+    Ok(())
+}
+
+/// Perform complete uninstall (profile + binary + directory)
+pub fn uninstall_complete() -> Result<()> {
+    // First, uninstall from shell profiles
+    uninstall()?;
+
+    // Then remove the binary and cleanup directory
+    if let Some(binary_path) = find_binary_location() {
+        let parent_dir = get_binary_parent_dir(&binary_path);
+        remove_binary(&binary_path)?;
+
+        // Try to remove the parent directory if empty
+        if let Some(dir) = parent_dir {
+            // Only attempt to remove if it's our install directory (contains "tr300")
+            if dir.to_string_lossy().to_lowercase().contains("tr300") {
+                let _ = remove_empty_parent_dir(&dir);
+            }
+        }
+    }
+
+    Ok(())
 }

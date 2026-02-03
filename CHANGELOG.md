@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-02-03
+
+### Added
+- Interactive uninstall prompt with three options:
+  1. Remove auto-run only - Removes shell profile modifications but keeps binary
+  2. Uninstall TR300 entirely - Removes shell profile modifications AND the binary
+  0. Cancel - Abort uninstall operation
+- Complete uninstall feature removes:
+  - Shell profile modifications (alias and auto-run)
+  - The tr300 binary itself
+  - Empty installation directory on Windows
+
+### Changed
+- `--uninstall` flag now shows interactive menu instead of immediately uninstalling
+- Confirmation prompt required before complete uninstall to prevent accidental removal
+
 ## [3.2.0] - 2026-02-03
 
 ### Changed
