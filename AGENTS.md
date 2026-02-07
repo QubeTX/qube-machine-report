@@ -1,35 +1,304 @@
-# Repository Guidelines
+﻿# AGENTS.md
 
-## Project Status
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This repository is currently a staging area for a modern successor. The only implementation present today is the legacy reference in `TR200-OLD/`. Expect this guide to evolve once the new codebase is added.
+## Project Overview
 
-## Project Structure & Module Organization
+TR-300 is a cross-platform system information report tool written in Rust. It displays system information in the exact TR-200 format using Unicode box-drawing tables with bar graphs for resource usage.
 
-- `TR200-OLD/` contains the original program (shell/PowerShell scripts, npm packaging, and docs).
-- `.github/` is reserved for automation; it is empty at the moment.
-- `.gitignore` is the only root-level configuration file.
+**Binary name:** `tr300`
+**Convenience alias:** `report` (created by `--install`)
 
-## Build, Test, and Development Commands
+## Architecture
 
-- There are no repo-wide build or test commands yet.
-- Legacy build/packaging commands are documented under `TR200-OLD/README.md` and `TR200-OLD/tools/`; use them only if you are working on the legacy copy.
+```
+src/
+â”œâ”€â”€ main.rs              # CLI entry point with clap argument parsing
+â”œâ”€â”€ lib.rs               # Library exports and convenience functions
+â”œâ”€â”€ config.rs            # Configuration constants (TR-200 widths, chars)
+â”œâ”€â”€ error.rs             # Custom error types using thiserror
+â”œâ”€â”€ report.rs            # Report generation matching TR-200 format
+â”œâ”€â”€ render/
+â”‚   â”œâ”€â”€ mod.rs           # Render module exports
+â”‚   â”œâ”€â”€ table.rs         # TR-200-style Unicode box-drawing table
+â”‚   â””â”€â”€ bar.rs           # Bar graph rendering (â–ˆâ–‘)
+â”œâ”€â”€ collectors/
+â”‚   â”œâ”€â”€ mod.rs           # SystemInfo struct with all TR-200 fields
+â”‚   â”œâ”€â”€ os.rs            # OS name, version, kernel, uptime
+â”‚   â”œâ”€â”€ cpu.rs           # CPU model, cores, sockets, freq, load avg
+â”‚   â”œâ”€â”€ memory.rs        # Memory total/used/percent
+â”‚   â”œâ”€â”€ disk.rs          # Disk usage, ZFS support
+â”‚   â”œâ”€â”€ network.rs       # Hostname, IP, DNS servers
+â”‚   â”œâ”€â”€ session.rs       # Username, last login, uptime
+â”‚   â””â”€â”€ platform/
+â”‚       â”œâ”€â”€ mod.rs       # Platform-specific exports
+â”‚       â”œâ”€â”€ linux.rs     # /proc, lscpu, ZFS
+â”‚       â”œâ”€â”€ macos.rs     # sysctl, scutil
+â”‚       â””â”€â”€ windows.rs   # WMI queries
+â””â”€â”€ install/
+    â”œâ”€â”€ mod.rs           # Self-installation exports
+    â”œâ”€â”€ unix.rs          # .bashrc/.zshrc modifications
+    â””â”€â”€ windows.rs       # PowerShell profile modifications
+```
 
-## Coding Style & Naming Conventions
+## Development Commands
 
-- No formatting or linting tooling is configured at the root yet.
-- If editing legacy files, follow the existing style and keep line endings consistent with the file.
+```bash
+# Build
+cargo build              # Debug build
+cargo build --release    # Release build
 
-## Testing Guidelines
+# Test
+cargo test               # Run all tests
+cargo test --lib         # Run library tests only
+cargo test --doc         # Run documentation tests
+cargo clippy             # Run linter
+cargo clippy -- -D warnings  # Treat warnings as errors
+cargo fmt                # Format code
+cargo fmt -- --check     # Check formatting without modifying
 
-- No test framework is configured in the root.
-- The legacy folder does not include automated tests; verify changes manually if you touch it.
+# Run
+cargo run                # Run with default options
+cargo run -- --ascii     # ASCII mode
+cargo run -- --json      # JSON output
+cargo run -- --help      # Show help
+cargo run -- --install   # Test installation (modifies shell profiles)
+```
 
-## Commit & Pull Request Guidelines
+## CLI Flags
 
-- Recent commit history uses short, imperative messages (for example �Update README ��). Keep that style.
-- PRs should include a brief summary and note whether changes affect legacy only or future work.
+| Flag | Description |
+|------|-------------|
+| `--ascii` | Use ASCII instead of Unicode |
+| `--json` | Output in JSON format |
+| `-t, --title <TITLE>` | Custom title |
+| `--no-color` | Disable colors |
+| `--install` | Add to shell profile (removes TR-100/TR-200 legacy configs first) |
+| `--uninstall` | Interactive uninstall with three options (see Installation System below) |
+
+## Installation System
+
+The `--install` and `--uninstall` flags modify shell profiles to add a `report` alias and auto-run TR-300 on new shell sessions.
+
+### Installation Process (`--install`)
+1. **Cleanup** - Removes legacy TR-100/TR-200 configurations
+2. **Remove existing** - Cleans up any previous TR-300 installation blocks
+3. **Add alias** - Creates `alias report='tr300'`
+4. **Add auto-run** - Executes `tr300` on new interactive shells
+
+**Platform-specific modifications:**
+- **Unix/macOS** - Modifies `~/.bashrc` and/or `~/.zshrc` (see `src/install/unix.rs`)
+- **Windows** - Modifies PowerShell profile at `$PROFILE` (see `src/install/windows.rs`)
+
+Installation blocks are wrapped in markers:
+```bash
+# BEGIN TR-300 AUTO-CONFIGURATION
+...
+# END TR-300 AUTO-CONFIGURATION
+```
+
+### Uninstallation Process (`--uninstall`)
+Interactive prompt with three options:
+1. **Remove auto-run only** - Removes shell profile modifications, keeps binary
+2. **Uninstall TR-300 entirely** - Removes shell profile AND deletes the binary
+3. **Cancel** - Abort operation
+
+Complete uninstall (option 2) requires confirmation and shows:
+- Binary location that will be deleted
+- Parent directory that will be removed (Windows only, if empty)
+
+## TR-200 Output Format
+
+The report matches TR-200 exactly:
+
+```
+â”Œâ”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”
+â”œâ”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”¤
+â”‚          QUBETX DEVELOPER TOOLS               â”‚
+â”‚           TR-300 MACHINE REPORT               â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚ OS           â”‚ <OS name + version>            â”‚
+â”‚ KERNEL       â”‚ <kernel>                       â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+...
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+Key elements:
+- Header with `â”Œâ”¬â”¬â”¬...â”¬â”` then `â”œâ”´â”´â”´...â”´â”¤`
+- Centered title and subtitle
+- Two-column layout with 12-char labels, 32-char data
+- Section dividers with `â”œâ”€â”€â”€â”¼â”€â”€â”€â”¤`
+- Bar graphs using `â–ˆ` (filled) and `â–‘` (empty)
+- Footer with `â”œâ”€â”€â”€â”´â”€â”€â”€â”¤` then `â””â”€â”€â”€â”´â”€â”€â”€â”˜`
+
+## Release Process
+
+Uses **cargo-dist** for fully automated cross-platform releases. No manual NPM packages or Homebrew taps.
+
+**IMPORTANT:** Every release requires ALL of these steps - do not skip any:
+
+1. **Bump version** in `Cargo.toml`
+2. **Update CHANGELOG.md** with new version section and changes
+3. **Commit** with message `release: vX.Y.Z`
+4. **Create git tag** matching the version (e.g., `v3.0.1`)
+5. **Push commits AND tags** - the tag push triggers the release
+
+### Quick Release Commands
+
+```bash
+# 1. Update version in Cargo.toml (e.g., 3.0.1)
+# 2. Update CHANGELOG.md with changes
+# 3. Commit, tag, and push:
+git add -A && git commit -m "release: v3.0.1"
+git tag v3.0.1
+git push && git push --tags
+```
+
+GitHub Actions will automatically:
+1. Build binaries for all target platforms
+2. Generate installers (shell, PowerShell, MSI)
+3. Create a GitHub Release with all artifacts
+4. Generate release notes from CHANGELOG.md
+
+### Target Platforms
+| Platform | Target Triple |
+|----------|---------------|
+| Windows x64 | `x86_64-pc-windows-msvc` |
+| macOS Intel | `x86_64-apple-darwin` |
+| macOS Apple Silicon | `aarch64-apple-darwin` |
+| Linux x64 (glibc) | `x86_64-unknown-linux-gnu` |
+| Linux x64 (musl) | `x86_64-unknown-linux-musl` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` |
+
+### Installers Generated
+
+| Platform | Installer | Command |
+|----------|-----------|---------|
+| macOS/Linux | Shell script | `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh \| sh` |
+| Windows | PowerShell script | `powershell -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1 \| iex"` |
+| Windows | MSI installer | Download from GitHub Releases |
+
+### cargo-dist Configuration
+
+Configuration is in `Cargo.toml` under `[workspace.metadata.dist]`:
+
+```toml
+[workspace.metadata.dist]
+cargo-dist-version = "0.30.3"
+ci = "github"
+installers = ["shell", "powershell", "msi"]
+targets = [...]
+pr-run-mode = "plan"
+install-path = "CARGO_HOME"
+```
+
+### Regenerating CI Workflow
+
+If you need to update the GitHub Actions workflow after changing dist config:
+
+```bash
+cargo dist init  # Regenerates .github/workflows/release.yml
+```
+
+### Pre-release Checklist
+
+1. Run tests: `cargo test`
+2. Run linter: `cargo clippy`
+3. Update version in `Cargo.toml`
+4. Update `CHANGELOG.md` with all changes
+5. Commit with message: `release: vX.Y.Z`
+6. Create and push tag: `git tag vX.Y.Z && git push --tags`
+
+## Code Patterns
+
+### Adding a New Collector Field
+1. Add field to `SystemInfo` in `src/collectors/mod.rs`
+2. Collect the value in `SystemInfo::collect()`
+3. Add row in `generate_table()` in `src/report.rs`
+4. Add field to JSON output in `generate_json()` in `src/report.rs`
+
+### Platform-Specific Code
+Use conditional compilation:
+```rust
+#[cfg(target_os = "windows")]
+fn get_something_windows() -> String { ... }
+
+#[cfg(target_os = "linux")]
+fn get_something_linux() -> String { ... }
+
+#[cfg(target_os = "macos")]
+fn get_something_macos() -> String { ... }
+```
+
+Platform-specific collectors are in `src/collectors/platform/`:
+- **linux.rs** - Uses `/proc`, `lscpu`, ZFS commands
+- **macos.rs** - Uses `sysctl`, `scutil` for system queries
+- **windows.rs** - Uses WMI queries via the `wmi` crate
+
+### Error Handling
+Custom error types defined in `src/error.rs` using `thiserror`:
+```rust
+use crate::error::{AppError, Result};
+
+// Return Result<T> from functions that can fail
+fn collect_info() -> Result<String> {
+    // Use ? operator for error propagation
+    let data = some_fallible_operation()?;
+    Ok(data)
+}
+```
+
+Error variants:
+- `AppError::Io` - File/IO errors
+- `AppError::Platform` - Platform-specific failures
+- `AppError::Config` - Configuration errors
+- `AppError::Collection` - System info collection failures
+
+## Dependencies
+
+Core:
+- `sysinfo 0.32` - Cross-platform system information
+- `clap 4.5` - Command-line argument parsing with derive macros
+- `crossterm 0.28` - Terminal width detection
+- `thiserror 2.0` - Error type derivation
+- `dirs 5.0` - Standard directory paths
+
+Platform-specific:
+- `wmi 0.14`, `winapi 0.3` (Windows) - Windows Management Instrumentation queries
+- `libc 0.2`, `users 0.11` (Unix) - Low-level system calls and user info
+
+Dev dependencies:
+- `assert_cmd 2` - CLI testing
+- `predicates 3` - Assertion helpers for tests
+
+## Architecture Decisions
+
+### Why Rust?
+TR-300 rewrites TR-200 from bash/PowerShell to Rust for:
+- **Performance** - No subprocess spawning for basic info
+- **Cross-platform** - Single codebase for all platforms
+- **Type safety** - Compile-time guarantees vs runtime errors
+- **Maintainability** - Easier to extend than shell scripts
+
+### Data Flow
+1. **Collection** (`collectors/mod.rs`) - `SystemInfo::collect()` gathers all data
+2. **Aggregation** - Individual collectors return platform-agnostic structs
+3. **Rendering** (`report.rs`) - Converts `SystemInfo` to table or JSON
+4. **Output** (`render/table.rs`) - Draws Unicode/ASCII tables with exact TR-200 layout
+
+### Table Rendering
+Fixed-width columns match TR-200:
+- Label column: 12 characters (padded)
+- Data column: 32 characters (truncated if needed)
+- Total width: 52 characters (including borders)
+
+Bar graphs normalize values to percentage (0-100%) and fill proportionally across the 32-char data width.
 
 ## Legacy Reference
 
-`TR200-OLD/` is the source of truth for current behavior and output formatting. Treat it as reference material unless the change request explicitly targets legacy.
+The `TR200-OLD/` directory contains the original TR-200 implementation in bash/PowerShell. Key files for reference:
+- `machine_report.sh` - Output format, bar graph logic
+- `WINDOWS/TR-200-MachineReport.ps1` - WMI queries
+- `install.sh` - Shell profile modification patterns
+

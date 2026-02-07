@@ -50,14 +50,19 @@ cargo build --release    # Release build
 
 # Test
 cargo test               # Run all tests
+cargo test --lib         # Run library tests only
+cargo test --doc         # Run documentation tests
 cargo clippy             # Run linter
+cargo clippy -- -D warnings  # Treat warnings as errors
 cargo fmt                # Format code
+cargo fmt -- --check     # Check formatting without modifying
 
 # Run
 cargo run                # Run with default options
 cargo run -- --ascii     # ASCII mode
 cargo run -- --json      # JSON output
 cargo run -- --help      # Show help
+cargo run -- --install   # Test installation (modifies shell profiles)
 ```
 
 ## CLI Flags
@@ -69,7 +74,38 @@ cargo run -- --help      # Show help
 | `-t, --title <TITLE>` | Custom title |
 | `--no-color` | Disable colors |
 | `--install` | Add to shell profile (removes TR-100/TR-200 legacy configs first) |
-| `--uninstall` | Remove from shell profile |
+| `--uninstall` | Interactive uninstall with three options (see Installation System below) |
+
+## Installation System
+
+The `--install` and `--uninstall` flags modify shell profiles to add a `report` alias and auto-run TR-300 on new shell sessions.
+
+### Installation Process (`--install`)
+1. **Cleanup** - Removes legacy TR-100/TR-200 configurations
+2. **Remove existing** - Cleans up any previous TR-300 installation blocks
+3. **Add alias** - Creates `alias report='tr300'`
+4. **Add auto-run** - Executes `tr300` on new interactive shells
+
+**Platform-specific modifications:**
+- **Unix/macOS** - Modifies `~/.bashrc` and/or `~/.zshrc` (see `src/install/unix.rs`)
+- **Windows** - Modifies PowerShell profile at `$PROFILE` (see `src/install/windows.rs`)
+
+Installation blocks are wrapped in markers:
+```bash
+# BEGIN TR-300 AUTO-CONFIGURATION
+...
+# END TR-300 AUTO-CONFIGURATION
+```
+
+### Uninstallation Process (`--uninstall`)
+Interactive prompt with three options:
+1. **Remove auto-run only** - Removes shell profile modifications, keeps binary
+2. **Uninstall TR-300 entirely** - Removes shell profile AND deletes the binary
+3. **Cancel** - Abort operation
+
+Complete uninstall (option 2) requires confirmation and shows:
+- Binary location that will be deleted
+- Parent directory that will be removed (Windows only, if empty)
 
 ## TR-200 Output Format
 
@@ -180,6 +216,7 @@ cargo dist init  # Regenerates .github/workflows/release.yml
 1. Add field to `SystemInfo` in `src/collectors/mod.rs`
 2. Collect the value in `SystemInfo::collect()`
 3. Add row in `generate_table()` in `src/report.rs`
+4. Add field to JSON output in `generate_json()` in `src/report.rs`
 
 ### Platform-Specific Code
 Use conditional compilation:
@@ -194,18 +231,69 @@ fn get_something_linux() -> String { ... }
 fn get_something_macos() -> String { ... }
 ```
 
+Platform-specific collectors are in `src/collectors/platform/`:
+- **linux.rs** - Uses `/proc`, `lscpu`, ZFS commands
+- **macos.rs** - Uses `sysctl`, `scutil` for system queries
+- **windows.rs** - Uses WMI queries via the `wmi` crate
+
+### Error Handling
+Custom error types defined in `src/error.rs` using `thiserror`:
+```rust
+use crate::error::{AppError, Result};
+
+// Return Result<T> from functions that can fail
+fn collect_info() -> Result<String> {
+    // Use ? operator for error propagation
+    let data = some_fallible_operation()?;
+    Ok(data)
+}
+```
+
+Error variants:
+- `AppError::Io` - File/IO errors
+- `AppError::Platform` - Platform-specific failures
+- `AppError::Config` - Configuration errors
+- `AppError::Collection` - System info collection failures
+
 ## Dependencies
 
 Core:
 - `sysinfo 0.32` - Cross-platform system information
-- `clap 4.5` - Command-line argument parsing
+- `clap 4.5` - Command-line argument parsing with derive macros
 - `crossterm 0.28` - Terminal width detection
 - `thiserror 2.0` - Error type derivation
 - `dirs 5.0` - Standard directory paths
 
 Platform-specific:
-- `wmi 0.14`, `winapi 0.3` (Windows)
-- `libc 0.2`, `users 0.11` (Unix)
+- `wmi 0.14`, `winapi 0.3` (Windows) - Windows Management Instrumentation queries
+- `libc 0.2`, `users 0.11` (Unix) - Low-level system calls and user info
+
+Dev dependencies:
+- `assert_cmd 2` - CLI testing
+- `predicates 3` - Assertion helpers for tests
+
+## Architecture Decisions
+
+### Why Rust?
+TR-300 rewrites TR-200 from bash/PowerShell to Rust for:
+- **Performance** - No subprocess spawning for basic info
+- **Cross-platform** - Single codebase for all platforms
+- **Type safety** - Compile-time guarantees vs runtime errors
+- **Maintainability** - Easier to extend than shell scripts
+
+### Data Flow
+1. **Collection** (`collectors/mod.rs`) - `SystemInfo::collect()` gathers all data
+2. **Aggregation** - Individual collectors return platform-agnostic structs
+3. **Rendering** (`report.rs`) - Converts `SystemInfo` to table or JSON
+4. **Output** (`render/table.rs`) - Draws Unicode/ASCII tables with exact TR-200 layout
+
+### Table Rendering
+Fixed-width columns match TR-200:
+- Label column: 12 characters (padded)
+- Data column: 32 characters (truncated if needed)
+- Total width: 52 characters (including borders)
+
+Bar graphs normalize values to percentage (0-100%) and fill proportionally across the 32-char data width.
 
 ## Legacy Reference
 
