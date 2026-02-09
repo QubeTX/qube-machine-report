@@ -136,6 +136,12 @@ jobs:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+      - name: Remove broken Microsoft repos (Ubuntu runners)
+        if: ${{ runner.os == 'Linux' && matrix.packages_install }}
+        run: |
+          for f in /etc/apt/sources.list.d/*microsoft*; do
+            [ -e "$f" ] && sudo rm -f "$f"
+          done
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
