@@ -71,7 +71,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             boot_mode: None,
             virtualization: None,
             macos_codename: None,
-            gpus: Vec::new(),
+            gpus: get_gpus_fast(),
             terminal: get_terminal_fast(),
             shell: None,
             display_resolution: None,
@@ -134,6 +134,35 @@ fn get_terminal_fast() -> Option<String> {
         return Some("VS Code".to_string());
     }
     Some("Console".to_string())
+}
+
+/// Get GPU names from registry (fast, no WMI/PowerShell needed, ~5-10ms)
+fn get_gpus_fast() -> Vec<String> {
+    let mut gpus = Vec::new();
+    if let Ok(output) = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
+            "/s",
+            "/v",
+            "DriverDesc",
+        ])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.contains("DriverDesc") {
+                // Format: "    DriverDesc    REG_SZ    NVIDIA GeForce RTX 4090"
+                if let Some(value) = line.split("REG_SZ").nth(1) {
+                    let gpu = value.trim();
+                    if !gpu.is_empty() && !gpus.contains(&gpu.to_string()) {
+                        gpus.push(gpu.to_string());
+                    }
+                }
+            }
+        }
+    }
+    gpus
 }
 
 // --- WMI-based collectors (fast, no PowerShell) ---

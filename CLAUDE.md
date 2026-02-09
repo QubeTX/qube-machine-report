@@ -76,6 +76,7 @@ cargo run -- --install   # Test installation (modifies shell profiles)
 | `--json` | Output in JSON format |
 | `-t, --title <TITLE>` | Custom title |
 | `--no-color` | Disable colors |
+| `--fast` | Fast mode: skip slow collectors for quick auto-run |
 | `--install` | Add to shell profile (removes TR-100/TR-200 legacy configs first) |
 | `--uninstall` | Interactive uninstall with three options (see Installation System below) |
 
@@ -87,7 +88,7 @@ The `--install` and `--uninstall` flags modify shell profiles to add a `report` 
 1. **Cleanup** - Removes legacy TR-100/TR-200 configurations
 2. **Remove existing** - Cleans up any previous TR-300 installation blocks
 3. **Add alias** - Creates `alias report='tr300'`
-4. **Add auto-run** - Executes `tr300` on new interactive shells
+4. **Add auto-run** - Executes `tr300 --fast` on new interactive shells
 
 **Platform-specific modifications:**
 - **Unix/macOS** - Modifies `~/.bashrc` and/or `~/.zshrc` (see `src/install/unix.rs`)
@@ -109,6 +110,22 @@ Interactive prompt with three options:
 Complete uninstall (option 2) requires confirmation and shows:
 - Binary location that will be deleted
 - Parent directory that will be removed (Windows only, if empty)
+
+## Fast Mode (`CollectMode::Fast`)
+
+The `--fast` flag activates `CollectMode::Fast`, which skips slow platform-specific collectors for sub-second startup. Auto-run (`--install`) uses `tr300 --fast`; the manual `report` alias runs full mode.
+
+**What fast mode skips vs includes per platform:**
+
+| Collector | Linux | macOS | Windows |
+|-----------|-------|-------|---------|
+| GPU | Included (lspci ~10-20ms) | Included (ioreg ~20-40ms) | Included (registry ~5-10ms) |
+| Boot mode | Skipped | Skipped | Skipped |
+| Virtualization | Included (/proc) | Skipped (system_profiler) | Skipped (WMI) |
+| Display resolution | Skipped (xrandr) | Skipped (system_profiler) | Skipped |
+| Windows edition | N/A | N/A | Skipped (WMI) |
+| Shell/Terminal | Included | Included | Terminal only (env vars) |
+| Battery/Locale | Included | Included | Skipped |
 
 ## TR-200 Output Format
 

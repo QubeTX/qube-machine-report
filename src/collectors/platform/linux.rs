@@ -20,11 +20,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         virtualization: detect_virtualization(), // Fast: reads /proc
         windows_edition: None,
         macos_codename: None,
-        gpus: if mode == CollectMode::Fast {
-            Vec::new()
-        } else {
-            get_gpus()
-        }, // lspci is a subprocess
+        gpus: get_gpus(), // lspci is fast (~10-20ms), /sys/class/drm fallback is instant
         architecture: get_architecture(),
         terminal: get_terminal(),
         shell: get_shell(),

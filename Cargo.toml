@@ -1,6 +1,6 @@
 [package]
 name = "tr-300"
-version = "3.4.0"
+version = "3.5.0"
 edition = "2021"
 authors = ["Emmett S <hey@emmetts.dev>"]
 description = "Cross-platform system information report"

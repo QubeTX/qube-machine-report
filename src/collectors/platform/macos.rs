@@ -16,7 +16,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             desktop_environment: Some("Aqua".to_string()),
             display_server: Some("Quartz".to_string()),
             windows_edition: None,
-            gpus: Vec::new(), // Skip system_profiler SPDisplaysDataType
+            gpus: get_gpus_fast(), // ioreg is fast (~20-40ms) vs system_profiler (~1-2s)
             architecture: get_architecture(),
             terminal: get_terminal(), // Fast: reads env vars
             shell: get_shell(),       // Fast: reads env var + quick subprocess
@@ -164,6 +164,47 @@ fn get_display_info() -> (Vec<String>, Option<String>) {
     }
 
     (gpus, resolution)
+}
+
+/// Get GPU names quickly using ioreg (fast, ~20-40ms vs system_profiler ~1-2s)
+fn get_gpus_fast() -> Vec<String> {
+    let mut gpus = Vec::new();
+
+    // Try ioreg for discrete/integrated GPUs
+    if let Ok(output) = Command::new("ioreg").args(["-rc", "IOGPUDevice"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.contains("\"model\"") {
+                // Format: "model" = <"AMD Radeon Pro 5500M">
+                if let Some(start) = trimmed.find("<\"") {
+                    if let Some(end) = trimmed.rfind("\">") {
+                        let gpu = &trimmed[start + 2..end];
+                        if !gpu.is_empty() {
+                            gpus.push(gpu.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback for Apple Silicon: use sysctl to detect the chip
+    if gpus.is_empty() {
+        if let Ok(output) = Command::new("sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+        {
+            let brand = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if brand.contains("Apple") {
+                // Apple Silicon has integrated GPU in the SoC
+                let chip = brand.replace("Apple ", "");
+                gpus.push(format!("Apple {} GPU", chip));
+            }
+        }
+    }
+
+    gpus
 }
 
 fn get_gpus() -> Vec<String> {

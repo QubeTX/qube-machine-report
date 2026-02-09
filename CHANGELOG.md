@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-02-09
+
+### Added
+- GPU information now displays in `--fast` mode (previously skipped)
+  - **Linux**: Uses existing `lspci` (~10-20ms) with `/sys/class/drm` fallback
+  - **Windows**: New registry-based GPU detection via `DriverDesc` (~5-10ms, no WMI/PowerShell)
+  - **macOS**: New `ioreg -rc IOGPUDevice` GPU detection (~20-40ms) with `sysctl` fallback for Apple Silicon
+
+### Changed
+- Auto-run reports (`tr300 --fast`) now include GPU rows
+
 ## [3.4.0] - 2026-02-09
 
 ### Added
