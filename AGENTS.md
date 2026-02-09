@@ -1,304 +1,499 @@
-﻿# AGENTS.md
+﻿# Agent Guide (AGENTS.md)
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the working guide for AI coding agents in this repository.
+Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
-## Project Overview
+Last verified against source: 2026-02-09
 
-TR-300 is a cross-platform system information report tool written in Rust. It displays system information in the exact TR-200 format using Unicode box-drawing tables with bar graphs for resource usage.
+## Project Snapshot
 
-**Binary name:** `tr300`
-**Convenience alias:** `report` (created by `--install`)
+- Project: TR-300 (Rust rewrite of TR-200)
+- Cargo package name: `tr-300`
+- Current version: `3.3.0` (`Cargo.toml`)
+- Binary name: `tr300`
+- Convenience alias installed by `--install`: `report`
+- License: PolyForm-Noncommercial-1.0.0
+- Repo: `https://github.com/QubeTX/qube-machine-report`
 
-## Architecture
+## Repository Map
 
-```
+```text
 src/
-â”œâ”€â”€ main.rs              # CLI entry point with clap argument parsing
-â”œâ”€â”€ lib.rs               # Library exports and convenience functions
-â”œâ”€â”€ config.rs            # Configuration constants (TR-200 widths, chars)
-â”œâ”€â”€ error.rs             # Custom error types using thiserror
-â”œâ”€â”€ report.rs            # Report generation matching TR-200 format
-â”œâ”€â”€ render/
-â”‚   â”œâ”€â”€ mod.rs           # Render module exports
-â”‚   â”œâ”€â”€ table.rs         # TR-200-style Unicode box-drawing table
-â”‚   â””â”€â”€ bar.rs           # Bar graph rendering (â–ˆâ–‘)
-â”œâ”€â”€ collectors/
-â”‚   â”œâ”€â”€ mod.rs           # SystemInfo struct with all TR-200 fields
-â”‚   â”œâ”€â”€ os.rs            # OS name, version, kernel, uptime
-â”‚   â”œâ”€â”€ cpu.rs           # CPU model, cores, sockets, freq, load avg
-â”‚   â”œâ”€â”€ memory.rs        # Memory total/used/percent
-â”‚   â”œâ”€â”€ disk.rs          # Disk usage, ZFS support
-â”‚   â”œâ”€â”€ network.rs       # Hostname, IP, DNS servers
-â”‚   â”œâ”€â”€ session.rs       # Username, last login, uptime
-â”‚   â””â”€â”€ platform/
-â”‚       â”œâ”€â”€ mod.rs       # Platform-specific exports
-â”‚       â”œâ”€â”€ linux.rs     # /proc, lscpu, ZFS
-â”‚       â”œâ”€â”€ macos.rs     # sysctl, scutil
-â”‚       â””â”€â”€ windows.rs   # WMI queries
-â””â”€â”€ install/
-    â”œâ”€â”€ mod.rs           # Self-installation exports
-    â”œâ”€â”€ unix.rs          # .bashrc/.zshrc modifications
-    â””â”€â”€ windows.rs       # PowerShell profile modifications
+  main.rs                    # CLI entrypoint
+  lib.rs                     # Public library exports
+  config.rs                  # Config flags, widths, box char sets
+  error.rs                   # AppError + Result alias
+  report.rs                  # Table/JSON generation
+  render/
+    mod.rs
+    table.rs                 # Table renderer + ReportBuilder
+    bar.rs                   # Percent bar renderer
+  collectors/
+    mod.rs                   # SystemInfo aggregate + collection pipeline
+    os.rs
+    cpu.rs
+    memory.rs
+    disk.rs
+    network.rs
+    session.rs
+    platform/
+      mod.rs
+      linux.rs
+      macos.rs
+      windows.rs
+  install/
+    mod.rs
+    prompt.rs                # Interactive uninstall menu/confirm
+    unix.rs                  # bash/zsh profile edits
+    windows.rs               # PowerShell profile edits
+
+tests/
+  integration.rs
+
+.github/workflows/
+  release.yml                # cargo-dist generated release workflow
+
+wix/
+  main.wxs                   # MSI packaging template
+
+TR200-OLD/                   # Legacy bash/PowerShell implementation
 ```
+
+## How The Program Works
+
+### Runtime flow (`src/main.rs`)
+
+1. Parse CLI args with `clap`.
+2. If `--install`, run install path and exit.
+3. Else if `--uninstall`, run interactive uninstall path and exit.
+4. Build `Config` from flags (`--ascii`, `--json`, `--no-color`, `--title`).
+5. On Windows terminals, set console output code page to UTF-8.
+6. Collect system data via `SystemInfo::collect()`.
+7. Render output with `report::generate(...)` as table or JSON.
+8. Print to stdout.
+
+### Data pipeline (`src/collectors/mod.rs`)
+
+`SystemInfo::collect()` orchestrates:
+- `os::collect()`
+- `cpu::collect()`
+- `memory::collect()`
+- `disk::collect()`
+- `network::collect_network_info()`
+- `session::collect()`
+- `platform::collect()` (OS-specific enrichments)
+
+Then it:
+- Aggregates disk usage (prefer root `/` or `C:` volume, else non-removable sum, else first disk fallback).
+- Computes percentages for disk and memory.
+- Derives hypervisor string (`platform virtualization` or `Bare Metal`).
+- Builds final `SystemInfo` struct.
+
+### Rendering flow (`src/report.rs`)
+
+- `Config::format == Table`: render TR-200-style table.
+- `Config::format == Json`: render JSON string manually (without `serde`).
+
+Table rendering is fixed width:
+- Label column: 12 chars
+- Data column: 32 chars
+- Total row width with borders/spaces: 51 chars
+
+## CLI Reference
+
+Current supported flags:
+
+- `--ascii` -> ASCII table + `#`/`.` bars
+- `--json` -> JSON output
+- `--install` -> install alias + auto-run profile block
+- `--uninstall` -> interactive uninstall menu
+- `-t, --title <TITLE>` -> custom title
+- `--no-color` -> currently sets config only (no color styling currently applied)
+
+Notes:
+- If both `--install` and `--uninstall` are passed, `--install` wins because it is checked first.
+- There are no subcommands; all behavior is flag-based.
+
+## Output Format Details
+
+### Table sections and row behavior
+
+Rendered order:
+
+1. Header block (top border, subtitle lines)
+2. OS section
+   - `OS`
+   - `KERNEL`
+   - `ARCH`
+3. Network section
+   - `HOSTNAME`
+   - `MACHINE IP`
+   - `CLIENT  IP` (`Not connected` if none)
+   - `DNS  IP 1..5` (up to 5 rows)
+   - `USER`
+4. CPU section
+   - `PROCESSOR`
+   - `CORES`
+   - GPU rows:
+     - 1 GPU: `GPU`
+     - 2-3 GPUs: `GPU 1`, `GPU 2`, `GPU 3`
+     - 4+ GPUs: single `GPUs` row (comma-separated)
+   - `HYPERVISOR`
+   - `CPU FREQ`
+   - `LOAD  1m`, `LOAD  5m`, `LOAD 15m` bars
+5. Disk section
+   - `VOLUME`
+   - `DISK USAGE` bar
+   - `ZFS HEALTH` only when available (currently not set)
+6. Memory section
+   - `MEMORY`
+   - `USAGE` bar
+7. Session section
+   - `LAST LOGIN`
+   - optional extra row with blank label for `last_login_ip`
+   - `UPTIME`
+   - optional rows: `SHELL`, `TERMINAL`, `LOCALE`, `BATTERY`
+8. Footer
+
+Renderer behavior:
+- Strings are padded/truncated to fixed width with `...` ellipsis.
+- Header text is centered and truncated when needed.
+- Footer is single-line in current output (`render_footer()` directly, no extra bottom divider call).
+
+Bar behavior (`src/render/bar.rs`):
+- Percent clamped to `0..100`.
+- Filled cells computed with rounded value of `(percent / 100) * width`.
+- Table bars use width 32 (data width).
+
+### JSON output shape
+
+Top-level keys:
+- `os`
+- `network`
+- `cpu`
+- `disk`
+- `memory`
+- `session`
+
+Important implementation detail:
+- JSON is manually formatted with `format!` + `escape_json(...)`, not `serde`.
+- Optional values are emitted as either string literals or `null`.
+
+## Collector Behavior By Module
+
+### `os.rs`
+
+Uses `sysinfo::System` static getters for:
+- OS name/version
+- Kernel version
+- Hostname
+- Uptime seconds
+
+Architecture defaults to `std::env::consts::ARCH`.
+
+### `cpu.rs`
+
+- Refreshes CPU info twice with a 200ms sleep for stable usage values.
+- Brand/frequency from first CPU entry.
+- Logical cores from `sys.cpus().len()`.
+- Physical cores from `physical_core_count` (fallback logical).
+- Sockets:
+  - Linux: parse `lscpu`
+  - Windows: PowerShell CIM query
+  - macOS: `sysctl -n hw.packages`
+  - fallback: `1`
+- Load averages:
+  - Unix: `/proc/loadavg` parse first, then `libc::getloadavg`, converted to percent of cores
+  - Windows: uses current CPU usage for 1m/5m/15m
+
+### `memory.rs`
+
+Uses `sysinfo` memory/swap counters. Primary report uses RAM total/used/percent.
+
+### `disk.rs`
+
+Uses `sysinfo::Disks`:
+- collects mount point, filesystem, total/available/used, removable flag, name
+- skips disks with `total == 0`
+
+Aggregation into report uses logic in `collectors/mod.rs`.
+
+### `network.rs`
+
+Machine IP:
+- Windows: PowerShell `Get-NetIPAddress` fallback to `ipconfig`
+- Linux: `hostname -I` fallback to `ip route get 1`
+- macOS: `ipconfig getifaddr` on common interfaces + route fallback
+
+Client IP:
+- from `SSH_CLIENT` or `SSH_CONNECTION`
+
+DNS servers:
+- Windows: PowerShell `Get-DnsClientServerAddress`, fallback `ipconfig /all`
+- Linux: `/etc/resolv.conf`, fallback `resolvectl status`
+- macOS: `scutil --dns`
+- de-duplicated, max 5
+
+Also contains legacy interface collector (`collect()`) using `sysinfo::Networks`.
+
+### `session.rs`
+
+Collects:
+- username
+- home dir
+- shell
+- cwd
+- terminal
+- last login (+ optional login IP)
+
+Last-login strategy:
+- Linux: `lastlog2`, fallback `lastlog`, fallback `last`
+- macOS: `last`
+- Windows: PowerShell `Get-LocalUser`, fallback `net user`
+
+### `collectors/platform/*`
+
+Adds OS-specific enrichments (some not currently rendered in table):
+- virtualization/hypervisor signals
+- GPU names
+- architecture
+- shell + terminal details
+- locale
+- battery
+- display resolution
+- desktop/display server/edition/codename/boot mode metadata
+
+## Install/Uninstall System
+
+Entry points in `src/install/mod.rs`:
+- `install()`
+- `uninstall()`
+- `uninstall_complete()`
+- prompt helpers re-exported from `prompt.rs`
+
+### Interactive uninstall (`--uninstall`)
+
+Prompt options:
+- `1`: profile-only cleanup
+- `2`: complete uninstall (profile + binary)
+- `0`: cancel
+
+Complete uninstall requires explicit y/n confirmation and shows binary path (and Windows parent dir when applicable).
+
+### Unix install (`src/install/unix.rs`)
+
+Profiles touched:
+- `~/.bashrc` (if exists)
+- `~/.zshrc` (if exists)
+- if neither modified and `.bashrc` missing, creates `.bashrc`
+
+Injected block:
+
+```bash
+# TR-300 Machine Report
+alias report='tr300'
+
+# Auto-run on interactive shell
+if [[ $- == *i* ]]; then
+    tr300
+fi
+# End TR-300
+```
+
+Behavior:
+- removes existing TR-300 block first
+- removes known TR-100/TR-200 legacy blocks
+- idempotent re-install behavior
+
+### Windows install (`src/install/windows.rs`)
+
+Profile target:
+- PowerShell `$PROFILE` path (queried via `powershell -NoProfile -Command $PROFILE`)
+- creates profile directory if needed
+
+Injected block:
+
+```powershell
+# TR-300 Machine Report
+Set-Alias -Name report -Value tr300
+
+# Auto-run on interactive shell
+if ($Host.Name -eq 'ConsoleHost') {
+    tr300
+}
+# End TR-300
+```
+
+Behavior:
+- removes existing TR-300 block first
+- removes known TR-100/TR-200 legacy blocks (including delimited TR-200 config markers)
+
+Complete uninstall on Windows additionally:
+- deletes binary
+- attempts to remove empty parent dir when path contains `tr300`
+
+## Distribution And Release Methods
+
+### Packaging model
+
+Release automation uses `cargo-dist` + GitHub Actions.
+
+`Cargo.toml` (`[workspace.metadata.dist]`):
+- `cargo-dist-version = "0.30.3"`
+- `ci = "github"`
+- `installers = ["shell", "powershell", "msi"]`
+- targets:
+  - `aarch64-apple-darwin`
+  - `aarch64-unknown-linux-gnu`
+  - `x86_64-apple-darwin`
+  - `x86_64-unknown-linux-gnu`
+  - `x86_64-unknown-linux-musl`
+  - `x86_64-pc-windows-msvc`
+- `pr-run-mode = "plan"`
+- `install-updater = false`
+- `install-path = "CARGO_HOME"`
+- `publish-prereleases = false`
+
+### CI workflow (`.github/workflows/release.yml`)
+
+High-level job flow:
+1. `plan` (dist plan/host manifest)
+2. `build-local-artifacts` (matrix builds)
+3. `build-global-artifacts`
+4. `host` (upload + release)
+5. `announce`
+
+Trigger:
+- push tags matching semver-like pattern (`**[0-9]+.[0-9]+.[0-9]+*`)
+
+### Installer outputs
+
+- Shell installer (`tr-300-installer.sh`) for macOS/Linux
+- PowerShell installer (`tr-300-installer.ps1`) for Windows
+- MSI installer for Windows
+
+### MSI specifics (`wix/main.wxs`)
+
+- Product name: `tr-300`
+- Install scope: `perMachine`
+- Default folder under Program Files (`tr-300` with `bin/tr300.exe`)
+- Optional PATH feature included in MSI feature tree
+- Upgrade code/path GUID are defined in `Cargo.toml` metadata
+
+### Release checklist (current process)
+
+1. Update version in `Cargo.toml`
+2. Update `CHANGELOG.md`
+3. Run checks (`cargo test`, `cargo clippy -- -D warnings`, `cargo fmt -- --check`)
+4. Commit (`release: vX.Y.Z`)
+5. Tag (`vX.Y.Z`)
+6. Push commits and tags
 
 ## Development Commands
 
 ```bash
 # Build
-cargo build              # Debug build
-cargo build --release    # Release build
+cargo build
+cargo build --release
 
 # Test
-cargo test               # Run all tests
-cargo test --lib         # Run library tests only
-cargo test --doc         # Run documentation tests
-cargo clippy             # Run linter
-cargo clippy -- -D warnings  # Treat warnings as errors
-cargo fmt                # Format code
-cargo fmt -- --check     # Check formatting without modifying
+cargo test
+cargo test --lib
+cargo test --doc
+cargo test <test_name>
+
+# Lint/format
+cargo clippy
+cargo clippy -- -D warnings
+cargo fmt
+cargo fmt -- --check
 
 # Run
-cargo run                # Run with default options
-cargo run -- --ascii     # ASCII mode
-cargo run -- --json      # JSON output
-cargo run -- --help      # Show help
-cargo run -- --install   # Test installation (modifies shell profiles)
+cargo run
+cargo run -- --ascii
+cargo run -- --json
+cargo run -- --title "MY TITLE"
+cargo run -- --install
+cargo run -- --uninstall
 ```
 
-## CLI Flags
+## Error Model
 
-| Flag | Description |
-|------|-------------|
-| `--ascii` | Use ASCII instead of Unicode |
-| `--json` | Output in JSON format |
-| `-t, --title <TITLE>` | Custom title |
-| `--no-color` | Disable colors |
-| `--install` | Add to shell profile (removes TR-100/TR-200 legacy configs first) |
-| `--uninstall` | Interactive uninstall with three options (see Installation System below) |
+`src/error.rs` defines `AppError` variants:
+- `SystemInfo { message }`
+- `Platform { message }`
+- `Io(std::io::Error)`
+- `Config { message }`
+- `Display { message }`
+- Windows only: `Wmi(wmi::WMIError)`
 
-## Installation System
-
-The `--install` and `--uninstall` flags modify shell profiles to add a `report` alias and auto-run TR-300 on new shell sessions.
-
-### Installation Process (`--install`)
-1. **Cleanup** - Removes legacy TR-100/TR-200 configurations
-2. **Remove existing** - Cleans up any previous TR-300 installation blocks
-3. **Add alias** - Creates `alias report='tr300'`
-4. **Add auto-run** - Executes `tr300` on new interactive shells
-
-**Platform-specific modifications:**
-- **Unix/macOS** - Modifies `~/.bashrc` and/or `~/.zshrc` (see `src/install/unix.rs`)
-- **Windows** - Modifies PowerShell profile at `$PROFILE` (see `src/install/windows.rs`)
-
-Installation blocks are wrapped in markers:
-```bash
-# BEGIN TR-300 AUTO-CONFIGURATION
-...
-# END TR-300 AUTO-CONFIGURATION
-```
-
-### Uninstallation Process (`--uninstall`)
-Interactive prompt with three options:
-1. **Remove auto-run only** - Removes shell profile modifications, keeps binary
-2. **Uninstall TR-300 entirely** - Removes shell profile AND deletes the binary
-3. **Cancel** - Abort operation
-
-Complete uninstall (option 2) requires confirmation and shows:
-- Binary location that will be deleted
-- Parent directory that will be removed (Windows only, if empty)
-
-## TR-200 Output Format
-
-The report matches TR-200 exactly:
-
-```
-â”Œâ”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”¬â”
-â”œâ”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”´â”¤
-â”‚          QUBETX DEVELOPER TOOLS               â”‚
-â”‚           TR-300 MACHINE REPORT               â”‚
-â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
-â”‚ OS           â”‚ <OS name + version>            â”‚
-â”‚ KERNEL       â”‚ <kernel>                       â”‚
-â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
-...
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-Key elements:
-- Header with `â”Œâ”¬â”¬â”¬...â”¬â”` then `â”œâ”´â”´â”´...â”´â”¤`
-- Centered title and subtitle
-- Two-column layout with 12-char labels, 32-char data
-- Section dividers with `â”œâ”€â”€â”€â”¼â”€â”€â”€â”¤`
-- Bar graphs using `â–ˆ` (filled) and `â–‘` (empty)
-- Footer with `â”œâ”€â”€â”€â”´â”€â”€â”€â”¤` then `â””â”€â”€â”€â”´â”€â”€â”€â”˜`
-
-## Release Process
-
-Uses **cargo-dist** for fully automated cross-platform releases. No manual NPM packages or Homebrew taps.
-
-**IMPORTANT:** Every release requires ALL of these steps - do not skip any:
-
-1. **Bump version** in `Cargo.toml`
-2. **Update CHANGELOG.md** with new version section and changes
-3. **Commit** with message `release: vX.Y.Z`
-4. **Create git tag** matching the version (e.g., `v3.0.1`)
-5. **Push commits AND tags** - the tag push triggers the release
-
-### Quick Release Commands
-
-```bash
-# 1. Update version in Cargo.toml (e.g., 3.0.1)
-# 2. Update CHANGELOG.md with changes
-# 3. Commit, tag, and push:
-git add -A && git commit -m "release: v3.0.1"
-git tag v3.0.1
-git push && git push --tags
-```
-
-GitHub Actions will automatically:
-1. Build binaries for all target platforms
-2. Generate installers (shell, PowerShell, MSI)
-3. Create a GitHub Release with all artifacts
-4. Generate release notes from CHANGELOG.md
-
-### Target Platforms
-| Platform | Target Triple |
-|----------|---------------|
-| Windows x64 | `x86_64-pc-windows-msvc` |
-| macOS Intel | `x86_64-apple-darwin` |
-| macOS Apple Silicon | `aarch64-apple-darwin` |
-| Linux x64 (glibc) | `x86_64-unknown-linux-gnu` |
-| Linux x64 (musl) | `x86_64-unknown-linux-musl` |
-| Linux ARM64 | `aarch64-unknown-linux-gnu` |
-
-### Installers Generated
-
-| Platform | Installer | Command |
-|----------|-----------|---------|
-| macOS/Linux | Shell script | `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh \| sh` |
-| Windows | PowerShell script | `powershell -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1 \| iex"` |
-| Windows | MSI installer | Download from GitHub Releases |
-
-### cargo-dist Configuration
-
-Configuration is in `Cargo.toml` under `[workspace.metadata.dist]`:
-
-```toml
-[workspace.metadata.dist]
-cargo-dist-version = "0.30.3"
-ci = "github"
-installers = ["shell", "powershell", "msi"]
-targets = [...]
-pr-run-mode = "plan"
-install-path = "CARGO_HOME"
-```
-
-### Regenerating CI Workflow
-
-If you need to update the GitHub Actions workflow after changing dist config:
-
-```bash
-cargo dist init  # Regenerates .github/workflows/release.yml
-```
-
-### Pre-release Checklist
-
-1. Run tests: `cargo test`
-2. Run linter: `cargo clippy`
-3. Update version in `Cargo.toml`
-4. Update `CHANGELOG.md` with all changes
-5. Commit with message: `release: vX.Y.Z`
-6. Create and push tag: `git tag vX.Y.Z && git push --tags`
-
-## Code Patterns
-
-### Adding a New Collector Field
-1. Add field to `SystemInfo` in `src/collectors/mod.rs`
-2. Collect the value in `SystemInfo::collect()`
-3. Add row in `generate_table()` in `src/report.rs`
-4. Add field to JSON output in `generate_json()` in `src/report.rs`
-
-### Platform-Specific Code
-Use conditional compilation:
-```rust
-#[cfg(target_os = "windows")]
-fn get_something_windows() -> String { ... }
-
-#[cfg(target_os = "linux")]
-fn get_something_linux() -> String { ... }
-
-#[cfg(target_os = "macos")]
-fn get_something_macos() -> String { ... }
-```
-
-Platform-specific collectors are in `src/collectors/platform/`:
-- **linux.rs** - Uses `/proc`, `lscpu`, ZFS commands
-- **macos.rs** - Uses `sysctl`, `scutil` for system queries
-- **windows.rs** - Uses WMI queries via the `wmi` crate
-
-### Error Handling
-Custom error types defined in `src/error.rs` using `thiserror`:
-```rust
-use crate::error::{AppError, Result};
-
-// Return Result<T> from functions that can fail
-fn collect_info() -> Result<String> {
-    // Use ? operator for error propagation
-    let data = some_fallible_operation()?;
-    Ok(data)
-}
-```
-
-Error variants:
-- `AppError::Io` - File/IO errors
-- `AppError::Platform` - Platform-specific failures
-- `AppError::Config` - Configuration errors
-- `AppError::Collection` - System info collection failures
+Type alias:
+- `Result<T> = std::result::Result<T, AppError>`
 
 ## Dependencies
 
 Core:
-- `sysinfo 0.32` - Cross-platform system information
-- `clap 4.5` - Command-line argument parsing with derive macros
-- `crossterm 0.28` - Terminal width detection
-- `thiserror 2.0` - Error type derivation
-- `dirs 5.0` - Standard directory paths
+- `sysinfo = "0.32"`
+- `clap = "4.5"` (derive, env)
+- `crossterm = "0.28"`
+- `thiserror = "2.0"`
+- `dirs = "5.0"`
 
 Platform-specific:
-- `wmi 0.14`, `winapi 0.3` (Windows) - Windows Management Instrumentation queries
-- `libc 0.2`, `users 0.11` (Unix) - Low-level system calls and user info
+- Windows: `wmi = "0.14"`, `winapi = "0.3"`
+- Unix: `libc = "0.2"`, `users = "0.11"`
 
-Dev dependencies:
-- `assert_cmd 2` - CLI testing
-- `predicates 3` - Assertion helpers for tests
+Dev:
+- `assert_cmd = "2"`
+- `predicates = "3"`
 
-## Architecture Decisions
+## Tests
 
-### Why Rust?
-TR-300 rewrites TR-200 from bash/PowerShell to Rust for:
-- **Performance** - No subprocess spawning for basic info
-- **Cross-platform** - Single codebase for all platforms
-- **Type safety** - Compile-time guarantees vs runtime errors
-- **Maintainability** - Easier to extend than shell scripts
+`tests/integration.rs` currently validates:
+- help/version flags
+- default output contains main title
+- ascii mode output
+- json mode output structure keys
+- custom title injection
+- expected key report fields
 
-### Data Flow
-1. **Collection** (`collectors/mod.rs`) - `SystemInfo::collect()` gathers all data
-2. **Aggregation** - Individual collectors return platform-agnostic structs
-3. **Rendering** (`report.rs`) - Converts `SystemInfo` to table or JSON
-4. **Output** (`render/table.rs`) - Draws Unicode/ASCII tables with exact TR-200 layout
+## Known Caveats / Drift Risks
 
-### Table Rendering
-Fixed-width columns match TR-200:
-- Label column: 12 characters (padded)
-- Data column: 32 characters (truncated if needed)
-- Total width: 52 characters (including borders)
+- `Config` fields `use_colors`, `show_network`, `show_disks`, `width`, and `compact` exist but are not fully wired into report rendering/section toggling yet.
+- `zfs_health` is currently always `None` in `SystemInfo::collect()` (explicit TODO).
+- Some historical docs/examples still mention older behaviors/markers; source code is authoritative.
+- Core data collection still relies on OS commands for several fields (network/session/platform), not purely `sysinfo`.
 
-Bar graphs normalize values to percentage (0-100%) and fill proportionally across the 32-char data width.
+## Extension Patterns
+
+### Add a new report field
+
+1. Add field to `SystemInfo` (`src/collectors/mod.rs`).
+2. Collect/derive value in `SystemInfo::collect()`.
+3. Add table row in `generate_table()` (`src/report.rs`).
+4. Add JSON field in `generate_json()` (`src/report.rs`).
+5. Add/adjust integration tests in `tests/integration.rs`.
+
+### Add or change CLI behavior
+
+1. Update `Cli` struct in `src/main.rs`.
+2. Update config wiring in `main()`.
+3. Implement behavior in `run_report` or install/uninstall handlers.
+4. Add tests for flag behavior.
+
+### Add platform-specific detail
+
+1. Extend `PlatformInfo` in `src/collectors/platform/mod.rs`.
+2. Implement value for each supported OS file (`linux.rs`, `macos.rs`, `windows.rs`) with graceful fallback.
+3. Surface it in table/json if user-visible.
 
 ## Legacy Reference
 
-The `TR200-OLD/` directory contains the original TR-200 implementation in bash/PowerShell. Key files for reference:
-- `machine_report.sh` - Output format, bar graph logic
-- `WINDOWS/TR-200-MachineReport.ps1` - WMI queries
-- `install.sh` - Shell profile modification patterns
+`TR200-OLD/` keeps the previous shell/PowerShell implementation for behavior comparison and migration context.
+
+## Maintenance Rule
+
+When editing this guide:
+- update `AGENTS.md` and `CLAUDE.md` in the same change
+- keep statements tied to current source code, not older README wording
 

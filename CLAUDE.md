@@ -52,8 +52,11 @@ cargo build --release    # Release build
 cargo test               # Run all tests
 cargo test --lib         # Run library tests only
 cargo test --doc         # Run documentation tests
+cargo test <test_name>   # Run a single test by name
+
+# Lint & Format
 cargo clippy             # Run linter
-cargo clippy -- -D warnings  # Treat warnings as errors
+cargo clippy -- -D warnings  # Treat warnings as errors (CI mode)
 cargo fmt                # Format code
 cargo fmt -- --check     # Check formatting without modifying
 
@@ -200,15 +203,6 @@ If you need to update the GitHub Actions workflow after changing dist config:
 ```bash
 cargo dist init  # Regenerates .github/workflows/release.yml
 ```
-
-### Pre-release Checklist
-
-1. Run tests: `cargo test`
-2. Run linter: `cargo clippy`
-3. Update version in `Cargo.toml`
-4. Update `CHANGELOG.md` with all changes
-5. Commit with message: `release: vX.Y.Z`
-6. Create and push tag: `git tag vX.Y.Z && git push --tags`
 
 ## Code Patterns
 
