@@ -63,3 +63,5 @@ install-updater = false
 install-path = "CARGO_HOME"
 # Whether to publish prereleases to package managers
 publish-prereleases = false
+# Allow custom CI modifications (e.g. removing broken Microsoft repos on Ubuntu runners)
+allow-dirty = ["ci"]
