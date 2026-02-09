@@ -1,5 +1,6 @@
 //! Network information collector
 
+use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
 use std::process::Command;
@@ -7,8 +8,8 @@ use std::process::Command;
 /// Network information for TR-300
 #[derive(Debug, Clone)]
 pub struct NetworkInfo {
-    /// Machine's primary IP address
-    pub machine_ip: String,
+    /// Machine's primary IP address (None if skipped in fast mode)
+    pub machine_ip: Option<String>,
     /// Client IP (SSH_CLIENT if in SSH session)
     pub client_ip: Option<String>,
     /// DNS server addresses
@@ -16,16 +17,52 @@ pub struct NetworkInfo {
 }
 
 /// Collect network information
-pub fn collect_network_info() -> Result<NetworkInfo> {
-    let machine_ip = get_machine_ip();
+pub fn collect_network_info(mode: CollectMode) -> Result<NetworkInfo> {
+    let should_skip_slow = mode == CollectMode::Fast && should_skip_network_on_platform();
+
+    let machine_ip = if should_skip_slow {
+        None
+    } else {
+        Some(get_machine_ip())
+    };
+
     let client_ip = get_client_ip();
-    let dns_servers = get_dns_servers();
+
+    let dns_servers = if should_skip_slow {
+        Vec::new()
+    } else {
+        get_dns_servers()
+    };
 
     Ok(NetworkInfo {
         machine_ip,
         client_ip,
         dns_servers,
     })
+}
+
+/// Whether to skip network collection in fast mode on this platform.
+/// Windows and macOS use subprocess calls (slow). Linux reads /proc (fast).
+fn should_skip_network_on_platform() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        false
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        true
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        true
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        true
+    }
 }
 
 /// Get the machine's primary IP address
@@ -53,19 +90,10 @@ fn get_machine_ip() -> String {
 
 #[cfg(target_os = "windows")]
 fn get_machine_ip_windows() -> String {
-    // Try PowerShell command
-    if let Ok(output) = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress",
-        ])
-        .output()
-    {
-        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !ip.is_empty() && ip != "127.0.0.1" {
-            return ip;
-        }
+    // Use WMI for IP (no PowerShell subprocess)
+    let (ip, _dns) = crate::collectors::platform::windows::get_network_info_wmi();
+    if let Some(ip) = ip {
+        return ip;
     }
 
     // Fallback: try ipconfig
@@ -120,10 +148,7 @@ fn get_machine_ip_linux() -> String {
 fn get_machine_ip_macos() -> String {
     // Try ipconfig getifaddr en0 (WiFi) or en1 (Ethernet)
     for iface in &["en0", "en1", "en2"] {
-        if let Ok(output) = Command::new("ipconfig")
-            .args(["getifaddr", iface])
-            .output()
-        {
+        if let Ok(output) = Command::new("ipconfig").args(["getifaddr", iface]).output() {
             let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !ip.is_empty() && ip != "127.0.0.1" {
                 return ip;
@@ -132,18 +157,13 @@ fn get_machine_ip_macos() -> String {
     }
 
     // Fallback: try route
-    if let Ok(output) = Command::new("route")
-        .args(["get", "default"])
-        .output()
-    {
+    if let Ok(output) = Command::new("route").args(["get", "default"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.trim().starts_with("interface:") {
                 if let Some(iface) = line.split(':').last() {
                     let iface = iface.trim();
-                    if let Ok(output) = Command::new("ipconfig")
-                        .args(["getifaddr", iface])
-                        .output()
+                    if let Ok(output) = Command::new("ipconfig").args(["getifaddr", iface]).output()
                     {
                         let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
                         if !ip.is_empty() && ip != "127.0.0.1" {
@@ -204,56 +224,38 @@ fn get_dns_servers() -> Vec<String> {
 
 #[cfg(target_os = "windows")]
 fn get_dns_servers_windows() -> Vec<String> {
-    let mut servers = Vec::new();
-
-    // Try PowerShell
-    if let Ok(output) = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -ExpandProperty ServerAddresses) -join \"`n\"",
-        ])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let ip = line.trim();
-            if !ip.is_empty() && !servers.contains(&ip.to_string()) {
-                servers.push(ip.to_string());
-                if servers.len() >= 5 {
-                    break;
-                }
-            }
-        }
+    // Use WMI for DNS servers (no PowerShell subprocess)
+    let (_ip, servers) = crate::collectors::platform::windows::get_network_info_wmi();
+    if !servers.is_empty() {
+        return servers;
     }
 
-    if servers.is_empty() {
-        // Fallback: parse ipconfig /all
-        if let Ok(output) = Command::new("ipconfig").args(["/all"]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut in_dns_section = false;
-            for line in stdout.lines() {
-                if line.contains("DNS Servers") {
-                    in_dns_section = true;
-                    if let Some(ip) = line.split(':').next_back() {
-                        let ip = ip.trim();
-                        if !ip.is_empty() && !servers.contains(&ip.to_string()) {
-                            servers.push(ip.to_string());
-                        }
-                    }
-                } else if in_dns_section {
-                    let trimmed = line.trim();
-                    if trimmed.contains('.') && !trimmed.contains(':') {
-                        if !servers.contains(&trimmed.to_string()) {
-                            servers.push(trimmed.to_string());
-                        }
-                    } else if !trimmed.is_empty() {
-                        in_dns_section = false;
+    // Fallback: parse ipconfig /all
+    let mut servers = Vec::new();
+    if let Ok(output) = Command::new("ipconfig").args(["/all"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut in_dns_section = false;
+        for line in stdout.lines() {
+            if line.contains("DNS Servers") {
+                in_dns_section = true;
+                if let Some(ip) = line.split(':').next_back() {
+                    let ip = ip.trim();
+                    if !ip.is_empty() && !servers.contains(&ip.to_string()) {
+                        servers.push(ip.to_string());
                     }
                 }
-                if servers.len() >= 5 {
-                    break;
+            } else if in_dns_section {
+                let trimmed = line.trim();
+                if trimmed.contains('.') && !trimmed.contains(':') {
+                    if !servers.contains(&trimmed.to_string()) {
+                        servers.push(trimmed.to_string());
+                    }
+                } else if !trimmed.is_empty() {
+                    in_dns_section = false;
                 }
+            }
+            if servers.len() >= 5 {
+                break;
             }
         }
     }

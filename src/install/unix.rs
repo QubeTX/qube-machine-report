@@ -4,18 +4,16 @@
 //! Removes legacy TR-100 and TR-200 configurations before installing.
 
 use crate::error::{AppError, Result};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::env;
 
 /// Marker comments for shell profile modifications
 const MARKER_START: &str = "# TR-300 Machine Report";
 const MARKER_END: &str = "# End TR-300";
 
 /// TR-100 legacy markers (bash scripts)
-const TR100_MARKERS: &[&str] = &[
-    "# Run Machine Report only when in interactive mode",
-];
+const TR100_MARKERS: &[&str] = &["# Run Machine Report only when in interactive mode"];
 
 /// TR-200 legacy markers (various installation styles)
 const TR200_MARKERS: &[&str] = &[
@@ -31,7 +29,7 @@ alias report='tr300'
 
 # Auto-run on interactive shell
 if [[ $- == *i* ]]; then
-    tr300
+    tr300 --fast
 fi
 # End TR-300"#;
 
@@ -50,8 +48,8 @@ pub fn install_path() -> PathBuf {
 
 /// Install tr300 to shell profiles
 pub fn install() -> Result<()> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::platform("Could not determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| AppError::platform("Could not determine home directory"))?;
 
     let mut modified_files = Vec::new();
 
@@ -74,8 +72,9 @@ pub fn install() -> Result<()> {
     // If neither exists, try to create .bashrc (common default)
     if modified_files.is_empty() {
         if !bashrc.exists() {
-            fs::write(&bashrc, SHELL_ADDITIONS)
-                .map_err(|e| AppError::platform(format!("Failed to create {}: {}", bashrc.display(), e)))?;
+            fs::write(&bashrc, SHELL_ADDITIONS).map_err(|e| {
+                AppError::platform(format!("Failed to create {}: {}", bashrc.display(), e))
+            })?;
             modified_files.push(bashrc.display().to_string());
         }
     }
@@ -94,8 +93,8 @@ pub fn install() -> Result<()> {
 
 /// Uninstall tr300 from shell profiles
 pub fn uninstall() -> Result<()> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::platform("Could not determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| AppError::platform("Could not determine home directory"))?;
 
     let mut modified_files = Vec::new();
 
@@ -333,8 +332,13 @@ pub fn remove_binary(binary_path: &PathBuf) -> Result<()> {
         return Ok(());
     }
 
-    fs::remove_file(binary_path)
-        .map_err(|e| AppError::platform(format!("Failed to remove binary {}: {}", binary_path.display(), e)))?;
+    fs::remove_file(binary_path).map_err(|e| {
+        AppError::platform(format!(
+            "Failed to remove binary {}: {}",
+            binary_path.display(),
+            e
+        ))
+    })?;
 
     println!("Removed binary: {}", binary_path.display());
     Ok(())

@@ -1,9 +1,10 @@
 //! CPU information collector
 
+use crate::collectors::CollectMode;
 use crate::error::Result;
-use sysinfo::System;
 use std::thread;
 use std::time::Duration;
+use sysinfo::System;
 
 /// CPU information
 #[derive(Debug, Clone)]
@@ -14,28 +15,30 @@ pub struct CpuInfo {
     pub physical_cores: usize,
     /// Number of logical cores (threads)
     pub logical_cores: usize,
-    /// Number of CPU sockets
-    pub sockets: usize,
+    /// Number of CPU sockets (None if skipped in fast mode)
+    pub sockets: Option<usize>,
     /// CPU frequency in MHz
     pub frequency_mhz: u64,
     /// Current CPU usage percentage (0-100)
     pub usage_percent: f32,
-    /// 1-minute load average (as percentage of total cores)
-    pub load_1m: f64,
-    /// 5-minute load average (as percentage of total cores)
-    pub load_5m: f64,
-    /// 15-minute load average (as percentage of total cores)
-    pub load_15m: f64,
+    /// 1-minute load average (None if skipped in fast mode on Windows)
+    pub load_1m: Option<f64>,
+    /// 5-minute load average (None if skipped in fast mode on Windows)
+    pub load_5m: Option<f64>,
+    /// 15-minute load average (None if skipped in fast mode on Windows)
+    pub load_15m: Option<f64>,
 }
 
 /// Collect CPU information
-pub fn collect() -> Result<CpuInfo> {
+pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     let mut sys = System::new();
     sys.refresh_cpu_all();
 
-    // Wait a moment for accurate CPU usage
-    thread::sleep(Duration::from_millis(200));
-    sys.refresh_cpu_all();
+    // In fast mode, skip the 200ms sleep for accurate CPU usage measurement
+    if mode == CollectMode::Full {
+        thread::sleep(Duration::from_millis(200));
+        sys.refresh_cpu_all();
+    }
 
     let cpus = sys.cpus();
     let physical_cores = sys.physical_core_count().unwrap_or(cpus.len());
@@ -46,10 +49,7 @@ pub fn collect() -> Result<CpuInfo> {
         .map(|c| c.brand().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
 
-    let frequency_mhz = cpus
-        .first()
-        .map(|c| c.frequency())
-        .unwrap_or(0);
+    let frequency_mhz = cpus.first().map(|c| c.frequency()).unwrap_or(0);
 
     let usage_percent: f32 = if cpus.is_empty() {
         0.0
@@ -58,8 +58,12 @@ pub fn collect() -> Result<CpuInfo> {
     };
 
     // Get load averages and socket count (platform-specific)
-    let (load_1m, load_5m, load_15m) = get_load_averages(logical_cores, usage_percent);
-    let sockets = get_socket_count();
+    let (load_1m, load_5m, load_15m) = get_load_averages(mode, logical_cores, usage_percent);
+    let sockets = if mode == CollectMode::Fast {
+        None // Skip subprocess call in fast mode
+    } else {
+        Some(get_socket_count())
+    };
 
     Ok(CpuInfo {
         brand,
@@ -75,8 +79,14 @@ pub fn collect() -> Result<CpuInfo> {
 }
 
 /// Get load averages as percentages
+/// On Unix, these are fast (read from /proc or libc) so always collected.
+/// On Windows, these depend on the 200ms sleep, so skip in fast mode.
 #[cfg(unix)]
-fn get_load_averages(core_count: usize, _current_usage: f32) -> (f64, f64, f64) {
+fn get_load_averages(
+    _mode: CollectMode,
+    core_count: usize,
+    _current_usage: f32,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
     use std::fs;
 
     // Try to read from /proc/loadavg on Linux
@@ -90,9 +100,9 @@ fn get_load_averages(core_count: usize, _current_usage: f32) -> (f64, f64, f64) 
             // Convert to percentage of cores
             let max_load = core_count as f64;
             return (
-                (load1 / max_load * 100.0).min(100.0),
-                (load5 / max_load * 100.0).min(100.0),
-                (load15 / max_load * 100.0).min(100.0),
+                Some((load1 / max_load * 100.0).min(100.0)),
+                Some((load5 / max_load * 100.0).min(100.0)),
+                Some((load15 / max_load * 100.0).min(100.0)),
             );
         }
     }
@@ -103,28 +113,43 @@ fn get_load_averages(core_count: usize, _current_usage: f32) -> (f64, f64, f64) 
         if libc::getloadavg(loadavg.as_mut_ptr(), 3) == 3 {
             let max_load = core_count as f64;
             return (
-                (loadavg[0] / max_load * 100.0).min(100.0),
-                (loadavg[1] / max_load * 100.0).min(100.0),
-                (loadavg[2] / max_load * 100.0).min(100.0),
+                Some((loadavg[0] / max_load * 100.0).min(100.0)),
+                Some((loadavg[1] / max_load * 100.0).min(100.0)),
+                Some((loadavg[2] / max_load * 100.0).min(100.0)),
             );
         }
     }
 
-    (0.0, 0.0, 0.0)
+    (Some(0.0), Some(0.0), Some(0.0))
 }
 
 /// Get load averages on Windows (uses current CPU usage for all)
+/// In fast mode, skip since the 200ms sleep was skipped (no accurate data)
 #[cfg(windows)]
-fn get_load_averages(_core_count: usize, current_usage: f32) -> (f64, f64, f64) {
+fn get_load_averages(
+    mode: CollectMode,
+    _core_count: usize,
+    current_usage: f32,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    if mode == CollectMode::Fast {
+        return (None, None, None);
+    }
     // Windows doesn't have load averages, so we use current CPU usage
     let usage = current_usage as f64;
-    (usage, usage, usage)
+    (Some(usage), Some(usage), Some(usage))
 }
 
 #[cfg(not(any(unix, windows)))]
-fn get_load_averages(_core_count: usize, current_usage: f32) -> (f64, f64, f64) {
+fn get_load_averages(
+    mode: CollectMode,
+    _core_count: usize,
+    current_usage: f32,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    if mode == CollectMode::Fast {
+        return (None, None, None);
+    }
     let usage = current_usage as f64;
-    (usage, usage, usage)
+    (Some(usage), Some(usage), Some(usage))
 }
 
 /// Get number of CPU sockets
@@ -152,24 +177,8 @@ fn get_socket_count() -> usize {
 
 #[cfg(target_os = "windows")]
 fn get_socket_count() -> usize {
-    use std::process::Command;
-
-    // Use PowerShell to get socket count
-    if let Ok(output) = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "(Get-CimInstance Win32_Processor).Count",
-        ])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Ok(count) = stdout.trim().parse::<usize>() {
-            return count.max(1);
-        }
-    }
-
-    1
+    // Use WMI directly instead of PowerShell subprocess
+    crate::collectors::platform::windows::get_socket_count_wmi()
 }
 
 #[cfg(target_os = "macos")]
@@ -177,10 +186,7 @@ fn get_socket_count() -> usize {
     use std::process::Command;
 
     // Use sysctl to get package count
-    if let Ok(output) = Command::new("sysctl")
-        .args(["-n", "hw.packages"])
-        .output()
-    {
+    if let Ok(output) = Command::new("sysctl").args(["-n", "hw.packages"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Ok(count) = stdout.trim().parse::<usize>() {
             return count.max(1);
@@ -206,7 +212,10 @@ impl CpuInfo {
         if self.physical_cores == self.logical_cores {
             format!("{} cores", self.physical_cores)
         } else {
-            format!("{} cores / {} threads", self.physical_cores, self.logical_cores)
+            format!(
+                "{} cores / {} threads",
+                self.physical_cores, self.logical_cores
+            )
         }
     }
 }

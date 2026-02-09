@@ -63,9 +63,7 @@ fn test_custom_title() {
 #[test]
 fn test_no_color_flag() {
     let mut cmd = Command::cargo_bin("tr300").unwrap();
-    cmd.arg("--no-color")
-        .assert()
-        .success();
+    cmd.arg("--no-color").assert().success();
 }
 
 #[test]

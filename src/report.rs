@@ -45,7 +45,9 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
 
     // Network Section
     output.push_str(&renderer.render_row("HOSTNAME", &info.hostname));
-    output.push_str(&renderer.render_row("MACHINE IP", &info.machine_ip));
+    if let Some(ref ip) = info.machine_ip {
+        output.push_str(&renderer.render_row("MACHINE IP", ip));
+    }
     output.push_str(&renderer.render_row(
         "CLIENT  IP",
         info.client_ip.as_deref().unwrap_or("Not connected"),
@@ -82,18 +84,22 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
         }
     }
 
-    output.push_str(&renderer.render_row("HYPERVISOR", &info.hypervisor));
+    if let Some(ref hypervisor) = info.hypervisor {
+        output.push_str(&renderer.render_row("HYPERVISOR", hypervisor));
+    }
     output.push_str(&renderer.render_row("CPU FREQ", &info.freq_str()));
 
-    // Load averages as bar graphs
+    // Load averages as bar graphs (only shown when available)
     let bar_width = data_width;
-    let load_1m_bar = render_bar(info.load_1m, bar_width, bar_filled, bar_empty);
-    let load_5m_bar = render_bar(info.load_5m, bar_width, bar_filled, bar_empty);
-    let load_15m_bar = render_bar(info.load_15m, bar_width, bar_filled, bar_empty);
+    if let (Some(l1), Some(l5), Some(l15)) = (info.load_1m, info.load_5m, info.load_15m) {
+        let load_1m_bar = render_bar(l1, bar_width, bar_filled, bar_empty);
+        let load_5m_bar = render_bar(l5, bar_width, bar_filled, bar_empty);
+        let load_15m_bar = render_bar(l15, bar_width, bar_filled, bar_empty);
 
-    output.push_str(&renderer.render_row("LOAD  1m", &load_1m_bar));
-    output.push_str(&renderer.render_row("LOAD  5m", &load_5m_bar));
-    output.push_str(&renderer.render_row("LOAD 15m", &load_15m_bar));
+        output.push_str(&renderer.render_row("LOAD  1m", &load_1m_bar));
+        output.push_str(&renderer.render_row("LOAD  5m", &load_5m_bar));
+        output.push_str(&renderer.render_row("LOAD 15m", &load_15m_bar));
+    }
     output.push_str(&renderer.render_middle_divider());
 
     // Disk Section
@@ -115,9 +121,11 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     output.push_str(&renderer.render_middle_divider());
 
     // Session Section
-    output.push_str(&renderer.render_row("LAST LOGIN", &info.last_login));
-    if let Some(ref ip) = info.last_login_ip {
-        output.push_str(&renderer.render_row("", ip));
+    if let Some(ref last_login) = info.last_login {
+        output.push_str(&renderer.render_row("LAST LOGIN", last_login));
+        if let Some(ref ip) = info.last_login_ip {
+            output.push_str(&renderer.render_row("", ip));
+        }
     }
     output.push_str(&renderer.render_row("UPTIME", &info.uptime_formatted()));
 
@@ -144,6 +152,20 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
 
 /// Generate JSON format output
 fn generate_json(info: &SystemInfo) -> String {
+    let opt_str = |o: &Option<String>| -> String {
+        o.as_ref()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .unwrap_or_else(|| "null".to_string())
+    };
+    let opt_f64 = |o: Option<f64>| -> String {
+        o.map(|v| format!("{:.2}", v))
+            .unwrap_or_else(|| "null".to_string())
+    };
+    let opt_usize = |o: Option<usize>| -> String {
+        o.map(|v| format!("{}", v))
+            .unwrap_or_else(|| "null".to_string())
+    };
+
     // Simple JSON serialization without serde
     format!(
         r#"{{
@@ -155,7 +177,7 @@ fn generate_json(info: &SystemInfo) -> String {
   }},
   "network": {{
     "hostname": "{}",
-    "machine_ip": "{}",
+    "machine_ip": {},
     "client_ip": {},
     "dns_servers": [{}]
   }},
@@ -163,11 +185,11 @@ fn generate_json(info: &SystemInfo) -> String {
     "processor": "{}",
     "cores": {},
     "sockets": {},
-    "hypervisor": "{}",
+    "hypervisor": {},
     "frequency_ghz": {:.2},
-    "load_1m": {:.2},
-    "load_5m": {:.2},
-    "load_15m": {:.2},
+    "load_1m": {},
+    "load_5m": {},
+    "load_15m": {},
     "gpus": [{}]
   }},
   "disk": {{
@@ -182,7 +204,7 @@ fn generate_json(info: &SystemInfo) -> String {
   }},
   "session": {{
     "username": "{}",
-    "last_login": "{}",
+    "last_login": {},
     "uptime_seconds": {},
     "shell": {},
     "terminal": {},
@@ -195,11 +217,8 @@ fn generate_json(info: &SystemInfo) -> String {
         escape_json(&info.kernel),
         escape_json(&info.architecture),
         escape_json(&info.hostname),
-        escape_json(&info.machine_ip),
-        info.client_ip
-            .as_ref()
-            .map(|s| format!("\"{}\"", escape_json(s)))
-            .unwrap_or_else(|| "null".to_string()),
+        opt_str(&info.machine_ip),
+        opt_str(&info.client_ip),
         info.dns_servers
             .iter()
             .map(|s| format!("\"{}\"", escape_json(s)))
@@ -207,12 +226,12 @@ fn generate_json(info: &SystemInfo) -> String {
             .join(", "),
         escape_json(&info.processor),
         info.cores,
-        info.sockets,
-        escape_json(&info.hypervisor),
+        opt_usize(info.sockets),
+        opt_str(&info.hypervisor),
         info.cpu_freq_ghz,
-        info.load_1m,
-        info.load_5m,
-        info.load_15m,
+        opt_f64(info.load_1m),
+        opt_f64(info.load_5m),
+        opt_f64(info.load_15m),
         info.gpus
             .iter()
             .map(|s| format!("\"{}\"", escape_json(s)))
@@ -225,24 +244,12 @@ fn generate_json(info: &SystemInfo) -> String {
         info.mem_total_bytes,
         info.mem_percent,
         escape_json(&info.username),
-        escape_json(&info.last_login),
+        opt_str(&info.last_login),
         info.uptime_seconds,
-        info.shell
-            .as_ref()
-            .map(|s| format!("\"{}\"", escape_json(s)))
-            .unwrap_or_else(|| "null".to_string()),
-        info.terminal
-            .as_ref()
-            .map(|s| format!("\"{}\"", escape_json(s)))
-            .unwrap_or_else(|| "null".to_string()),
-        info.locale
-            .as_ref()
-            .map(|s| format!("\"{}\"", escape_json(s)))
-            .unwrap_or_else(|| "null".to_string()),
-        info.battery
-            .as_ref()
-            .map(|s| format!("\"{}\"", escape_json(s)))
-            .unwrap_or_else(|| "null".to_string()),
+        opt_str(&info.shell),
+        opt_str(&info.terminal),
+        opt_str(&info.locale),
+        opt_str(&info.battery),
     )
 }
 

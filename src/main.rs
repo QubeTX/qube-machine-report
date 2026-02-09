@@ -4,12 +4,21 @@
 //! in a visually appealing Unicode box-drawing table format.
 
 use clap::Parser;
-use tr_300::{collectors::SystemInfo, config::Config, error::Result, install, report};
+use tr_300::{
+    collectors::{CollectMode, SystemInfo},
+    config::Config,
+    error::Result,
+    install, report,
+};
 
 /// TR-300: Cross-platform system information report
 #[derive(Parser)]
 #[command(name = "tr300")]
-#[command(author, version, about = "TR-300 Machine Report - Cross-platform system information")]
+#[command(
+    author,
+    version,
+    about = "TR-300 Machine Report - Cross-platform system information"
+)]
 #[command(long_about = "TR-300 is the successor to TR-200 Machine Report.\n\n\
     It displays comprehensive system information including OS, network, CPU, \n\
     memory, disk usage, and session details in a formatted table.\n\n\
@@ -38,6 +47,10 @@ struct Cli {
     /// Disable colored output
     #[arg(long)]
     no_color: bool,
+
+    /// Fast mode: skip slow platform-specific collectors for quick auto-run
+    #[arg(long)]
+    fast: bool,
 }
 
 fn main() -> Result<()> {
@@ -73,13 +86,20 @@ fn main() -> Result<()> {
         enable_utf8_console();
     }
 
+    // Determine collection mode
+    let mode = if cli.fast {
+        CollectMode::Fast
+    } else {
+        CollectMode::Full
+    };
+
     // Run the report
-    run_report(&config)
+    run_report(&config, mode)
 }
 
 /// Run the main system report
-fn run_report(config: &Config) -> Result<()> {
-    let info = SystemInfo::collect()?;
+fn run_report(config: &Config, mode: CollectMode) -> Result<()> {
+    let info = SystemInfo::collect_with_mode(mode)?;
     let output = report::generate(&info, config);
     print!("{}", output);
     Ok(())
@@ -127,7 +147,9 @@ fn run_uninstall() -> Result<()> {
         UninstallOption::Complete => {
             // Get binary location for confirmation prompt
             let binary_path = find_binary_location();
-            let parent_dir = binary_path.as_ref().and_then(|p| get_binary_parent_dir(p.as_path()));
+            let parent_dir = binary_path
+                .as_ref()
+                .and_then(|p| get_binary_parent_dir(p.as_path()));
 
             if let Some(ref path) = binary_path {
                 if !confirm_complete_uninstall(path, parent_dir.as_deref()) {

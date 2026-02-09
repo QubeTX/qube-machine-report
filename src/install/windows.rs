@@ -32,7 +32,7 @@ Set-Alias -Name report -Value tr300
 
 # Auto-run on interactive shell
 if ($Host.Name -eq 'ConsoleHost') {
-    tr300
+    tr300 --fast
 }
 # End TR-300"#;
 
@@ -40,7 +40,10 @@ if ($Host.Name -eq 'ConsoleHost') {
 pub fn install_path() -> PathBuf {
     // Use %LOCALAPPDATA%\Programs\tr300
     if let Some(local_app_data) = dirs::data_local_dir() {
-        return local_app_data.join("Programs").join("tr300").join("tr300.exe");
+        return local_app_data
+            .join("Programs")
+            .join("tr300")
+            .join("tr300.exe");
     }
 
     // Fallback to user profile
@@ -71,9 +74,10 @@ fn get_powershell_profile() -> Option<PathBuf> {
 
     // Fallback to default location
     if let Some(docs) = dirs::document_dir() {
-        return Some(docs
-            .join("WindowsPowerShell")
-            .join("Microsoft.PowerShell_profile.ps1"));
+        return Some(
+            docs.join("WindowsPowerShell")
+                .join("Microsoft.PowerShell_profile.ps1"),
+        );
     }
 
     None
@@ -87,8 +91,9 @@ pub fn install() -> Result<()> {
     // Create profile directory if needed
     if let Some(parent) = profile_path.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent)
-                .map_err(|e| AppError::platform(format!("Failed to create profile directory: {}", e)))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                AppError::platform(format!("Failed to create profile directory: {}", e))
+            })?;
         }
     }
 
@@ -107,7 +112,11 @@ pub fn install() -> Result<()> {
     let new_content = if cleaned_content.trim().is_empty() {
         POWERSHELL_ADDITIONS.to_string()
     } else {
-        format!("{}\r\n\r\n{}", cleaned_content.trim_end(), POWERSHELL_ADDITIONS)
+        format!(
+            "{}\r\n\r\n{}",
+            cleaned_content.trim_end(),
+            POWERSHELL_ADDITIONS
+        )
     };
 
     fs::write(&profile_path, new_content)
@@ -325,8 +334,13 @@ pub fn remove_binary(binary_path: &PathBuf) -> Result<()> {
         return Ok(());
     }
 
-    fs::remove_file(binary_path)
-        .map_err(|e| AppError::platform(format!("Failed to remove binary {}: {}", binary_path.display(), e)))?;
+    fs::remove_file(binary_path).map_err(|e| {
+        AppError::platform(format!(
+            "Failed to remove binary {}: {}",
+            binary_path.display(),
+            e
+        ))
+    })?;
 
     println!("Removed binary: {}", binary_path.display());
     Ok(())
@@ -345,8 +359,13 @@ pub fn remove_empty_parent_dir(dir: &PathBuf) -> Result<()> {
     };
 
     if is_empty {
-        fs::remove_dir(dir)
-            .map_err(|e| AppError::platform(format!("Failed to remove directory {}: {}", dir.display(), e)))?;
+        fs::remove_dir(dir).map_err(|e| {
+            AppError::platform(format!(
+                "Failed to remove directory {}: {}",
+                dir.display(),
+                e
+            ))
+        })?;
         println!("Removed empty directory: {}", dir.display());
     }
 

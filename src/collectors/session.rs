@@ -1,5 +1,6 @@
 //! User session information collector
 
+use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
 use std::process::Command;
@@ -17,14 +18,14 @@ pub struct SessionInfo {
     pub current_dir: String,
     /// Terminal type
     pub terminal: String,
-    /// Last login time
-    pub last_login: String,
+    /// Last login time (None if skipped in fast mode)
+    pub last_login: Option<String>,
     /// Last login IP (if available)
     pub last_login_ip: Option<String>,
 }
 
 /// Collect session information
-pub fn collect() -> Result<SessionInfo> {
+pub fn collect(mode: CollectMode) -> Result<SessionInfo> {
     let username = get_username();
     let home_dir = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -36,7 +37,14 @@ pub fn collect() -> Result<SessionInfo> {
         .unwrap_or_else(|_| "Unknown".to_string());
 
     let terminal = get_terminal();
-    let (last_login, last_login_ip) = get_last_login(&username);
+
+    let should_skip_last_login = mode == CollectMode::Fast && should_skip_last_login_on_platform();
+    let (last_login, last_login_ip) = if should_skip_last_login {
+        (None, None)
+    } else {
+        let (login, ip) = get_last_login(&username);
+        (Some(login), ip)
+    };
 
     Ok(SessionInfo {
         username,
@@ -47,6 +55,20 @@ pub fn collect() -> Result<SessionInfo> {
         last_login,
         last_login_ip,
     })
+}
+
+/// Whether to skip last_login in fast mode on this platform.
+/// Windows uses PowerShell (slow). Linux/macOS use fast commands.
+fn should_skip_last_login_on_platform() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        true
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 /// Get current username
@@ -149,10 +171,7 @@ fn get_last_login(username: &str) -> (String, Option<String>) {
 #[cfg(target_os = "linux")]
 fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     // Try lastlog2 first (newer systems)
-    if let Ok(output) = Command::new("lastlog2")
-        .args(["--user", username])
-        .output()
-    {
+    if let Ok(output) = Command::new("lastlog2").args(["--user", username]).output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
@@ -168,10 +187,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     }
 
     // Try lastlog (older systems)
-    if let Ok(output) = Command::new("lastlog")
-        .args(["-u", username])
-        .output()
-    {
+    if let Ok(output) = Command::new("lastlog").args(["-u", username]).output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
@@ -191,10 +207,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     }
 
     // Try last command
-    if let Ok(output) = Command::new("last")
-        .args(["-1", username])
-        .output()
-    {
+    if let Ok(output) = Command::new("last").args(["-1", username]).output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().next() {
@@ -223,10 +236,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
 #[cfg(target_os = "macos")]
 fn get_last_login_macos(username: &str) -> (String, Option<String>) {
     // Use last command on macOS
-    if let Ok(output) = Command::new("last")
-        .args(["-1", username])
-        .output()
-    {
+    if let Ok(output) = Command::new("last").args(["-1", username]).output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().next() {
@@ -234,7 +244,10 @@ fn get_last_login_macos(username: &str) -> (String, Option<String>) {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.len() >= 5 {
                         let from = parts.get(2).and_then(|s| {
-                            if s.starts_with(':') || s.starts_with("console") || s.starts_with("tty") {
+                            if s.starts_with(':')
+                                || s.starts_with("console")
+                                || s.starts_with("tty")
+                            {
                                 None
                             } else {
                                 Some(s.to_string())
@@ -253,22 +266,7 @@ fn get_last_login_macos(username: &str) -> (String, Option<String>) {
 
 #[cfg(target_os = "windows")]
 fn get_last_login_windows(_username: &str) -> (String, Option<String>) {
-    // Try PowerShell to get last logon
-    if let Ok(output) = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "(Get-LocalUser -Name $env:USERNAME).LastLogon",
-        ])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !stdout.is_empty() && !stdout.contains("Error") {
-            return (stdout, None);
-        }
-    }
-
-    // Try net user command
+    // Try net user command first (faster than PowerShell)
     if let Ok(output) = Command::new("net")
         .args(["user", &env::var("USERNAME").unwrap_or_default()])
         .output()
@@ -277,7 +275,11 @@ fn get_last_login_windows(_username: &str) -> (String, Option<String>) {
         for line in stdout.lines() {
             if line.contains("Last logon") {
                 if let Some(date) = line.split_whitespace().nth(2) {
-                    let time = line.split_whitespace().skip(3).collect::<Vec<_>>().join(" ");
+                    let time = line
+                        .split_whitespace()
+                        .skip(3)
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     return (format!("{} {}", date, time), None);
                 }
             }

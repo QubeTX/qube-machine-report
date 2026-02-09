@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-02-09
+
+### Added
+- `--fast` CLI flag for sub-second startup in auto-run mode
+  - Platform-aware skipping: Windows skips all WMI/PowerShell calls, macOS skips system_profiler, Linux skips almost nothing (already fast)
+  - Auto-run installer now uses `tr300 --fast` for instant terminal startup
+  - Manual `report` alias still runs full report
+- WMI-based system information collection on Windows (replaces PowerShell subprocesses)
+  - GPU, battery, Windows edition, virtualization, network info via direct WMI queries
+  - CPU socket count via WMI Win32_Processor
+  - PowerShell fallbacks for all WMI queries in case of WMI service issues
+- Win32 API calls for display resolution (`GetSystemMetrics`) and locale (`GetUserDefaultLocaleName`)
+- Registry-based PowerShell version detection (replaces spawning PowerShell subprocess)
+- Parallel system information collection using `std::thread::scope`
+  - All 7 collectors (OS, CPU, memory, disk, network, session, platform) run concurrently
+  - CPU 200ms measurement sleep now overlaps with other collectors
+
+### Changed
+- Full report on Windows improved from ~5-7s to ~500ms (10x faster)
+- Fast mode report on Windows completes in ~250ms (22x faster than original)
+- macOS `system_profiler SPDisplaysDataType` called once instead of twice (GPU + resolution parsed from single call)
+- Multiple `SystemInfo` fields changed to `Option<T>` for graceful fast-mode omission
+- Report renderer conditionally omits rows when data was skipped in fast mode
+
+### Dependencies
+- Added `serde` (Windows only) for WMI query deserialization
+- Extended `winapi` features: `sysinfoapi`, `winuser`, `winnls`
+
 ## [3.3.0] - 2026-02-03
 
 ### Added

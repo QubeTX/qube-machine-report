@@ -1,6 +1,6 @@
 [package]
 name = "tr-300"
-version = "3.3.0"
+version = "3.4.0"
 edition = "2021"
 authors = ["Emmett S <hey@emmetts.dev>"]
 description = "Cross-platform system information report"
@@ -29,7 +29,8 @@ dirs = "5.0"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "0.14"
-winapi = { version = "0.3", features = ["consoleapi", "wincon"] }
+serde = { version = "1", features = ["derive"] }
+winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "winuser", "winnls"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

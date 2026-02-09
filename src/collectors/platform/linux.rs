@@ -1,27 +1,40 @@
 //! Linux-specific information collectors
 
-use super::PlatformInfo;
+use super::{CollectMode, PlatformInfo};
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 /// Collect Linux-specific information
-pub fn collect() -> PlatformInfo {
+/// Linux is already fast (reads /proc, env vars) — minimal skips in fast mode.
+pub fn collect(mode: CollectMode) -> PlatformInfo {
     PlatformInfo {
         desktop_environment: detect_desktop_environment(),
         display_server: detect_display_server(),
-        boot_mode: detect_boot_mode(),
-        virtualization: detect_virtualization(),
+        boot_mode: if mode == CollectMode::Fast {
+            None
+        } else {
+            detect_boot_mode()
+        },
+        virtualization: detect_virtualization(), // Fast: reads /proc
         windows_edition: None,
         macos_codename: None,
-        gpus: get_gpus(),
+        gpus: if mode == CollectMode::Fast {
+            Vec::new()
+        } else {
+            get_gpus()
+        }, // lspci is a subprocess
         architecture: get_architecture(),
         terminal: get_terminal(),
         shell: get_shell(),
-        display_resolution: get_display_resolution(),
-        battery: get_battery(),
-        locale: get_locale(),
+        display_resolution: if mode == CollectMode::Fast {
+            None
+        } else {
+            get_display_resolution()
+        }, // xrandr subprocess
+        battery: get_battery(), // Fast: reads /sys
+        locale: get_locale(),   // Fast: reads env var
     }
 }
 
@@ -113,7 +126,8 @@ fn get_gpus() -> Vec<String> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             let lower = line.to_lowercase();
-            if lower.contains("vga") || lower.contains("3d controller") || lower.contains("display") {
+            if lower.contains("vga") || lower.contains("3d controller") || lower.contains("display")
+            {
                 // Format: "00:02.0 VGA compatible controller: Intel Corporation ..."
                 if let Some(pos) = line.find(": ") {
                     let gpu_name = line[pos + 2..].trim();
@@ -170,14 +184,20 @@ fn get_terminal() -> Option<String> {
             .args(["-o", "ppid=", "-p", &format!("{}", std::process::id())])
             .output()
         {
-            let ppid = String::from_utf8_lossy(&ppid_output.stdout).trim().to_string();
+            let ppid = String::from_utf8_lossy(&ppid_output.stdout)
+                .trim()
+                .to_string();
             if let Ok(parent_output) = Command::new("ps")
                 .args(["-o", "comm=", "-p", &ppid])
                 .output()
             {
-                let parent = String::from_utf8_lossy(&parent_output.stdout).trim().to_string();
+                let parent = String::from_utf8_lossy(&parent_output.stdout)
+                    .trim()
+                    .to_string();
                 match parent.as_str() {
-                    "gnome-terminal" | "gnome-terminal-" => return Some("GNOME Terminal".to_string()),
+                    "gnome-terminal" | "gnome-terminal-" => {
+                        return Some("GNOME Terminal".to_string())
+                    }
                     "konsole" => return Some("Konsole".to_string()),
                     "xterm" => return Some("xterm".to_string()),
                     "alacritty" => return Some("Alacritty".to_string()),
@@ -201,7 +221,10 @@ fn get_terminal() -> Option<String> {
 /// Get shell name and version
 fn get_shell() -> Option<String> {
     let shell_path = env::var("SHELL").ok()?;
-    let shell_name = Path::new(&shell_path).file_name()?.to_string_lossy().to_string();
+    let shell_name = Path::new(&shell_path)
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
 
     // Try to get version
     let version_output = match shell_name.as_str() {
@@ -216,9 +239,15 @@ fn get_shell() -> Option<String> {
         if let Some(line) = version_str.lines().next() {
             // Extract version number
             for word in line.split_whitespace() {
-                if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                if word
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+                {
                     // Take just the version number part
-                    let version: String = word.chars()
+                    let version: String = word
+                        .chars()
                         .take_while(|c| c.is_ascii_digit() || *c == '.')
                         .collect();
                     if !version.is_empty() {
@@ -241,9 +270,16 @@ fn get_display_resolution() -> Option<String> {
             if line.contains(" connected") && line.contains('x') {
                 // Find resolution pattern like "1920x1080+0+0"
                 for word in line.split_whitespace() {
-                    if word.contains('x') && word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    if word.contains('x')
+                        && word
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_digit())
+                            .unwrap_or(false)
+                    {
                         // Extract just the resolution part
-                        let res: String = word.chars()
+                        let res: String = word
+                            .chars()
                             .take_while(|c| c.is_ascii_digit() || *c == 'x')
                             .collect();
                         if res.contains('x') {
@@ -262,7 +298,13 @@ fn get_display_resolution() -> Option<String> {
             if line.contains("current") {
                 // Find resolution pattern
                 for word in line.split_whitespace() {
-                    if word.contains('x') && word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    if word.contains('x')
+                        && word
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_digit())
+                            .unwrap_or(false)
+                    {
                         return Some(word.to_string());
                     }
                 }

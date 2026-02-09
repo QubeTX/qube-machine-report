@@ -1,12 +1,34 @@
 //! macOS-specific information collectors
 
-use super::PlatformInfo;
+use super::{CollectMode, PlatformInfo};
 use std::env;
 use std::path::Path;
 use std::process::Command;
 
 /// Collect macOS-specific information
-pub fn collect() -> PlatformInfo {
+/// In fast mode, skip system_profiler calls (slow ~1-2s each)
+pub fn collect(mode: CollectMode) -> PlatformInfo {
+    if mode == CollectMode::Fast {
+        return PlatformInfo {
+            macos_codename: get_macos_codename(), // Fast: sw_vers is quick
+            boot_mode: None,                      // Skip uname subprocess
+            virtualization: None,                 // Skip system_profiler SPHardwareDataType
+            desktop_environment: Some("Aqua".to_string()),
+            display_server: Some("Quartz".to_string()),
+            windows_edition: None,
+            gpus: Vec::new(), // Skip system_profiler SPDisplaysDataType
+            architecture: get_architecture(),
+            terminal: get_terminal(), // Fast: reads env vars
+            shell: get_shell(),       // Fast: reads env var + quick subprocess
+            display_resolution: None, // Skip system_profiler SPDisplaysDataType
+            battery: get_battery(),   // Fast: pmset is quick
+            locale: get_locale(),     // Fast: reads env var
+        };
+    }
+
+    // Call system_profiler once for both GPUs and resolution
+    let (gpus, display_resolution) = get_display_info();
+
     PlatformInfo {
         macos_codename: get_macos_codename(),
         boot_mode: detect_boot_mode(),
@@ -14,11 +36,11 @@ pub fn collect() -> PlatformInfo {
         desktop_environment: Some("Aqua".to_string()),
         display_server: Some("Quartz".to_string()),
         windows_edition: None,
-        gpus: get_gpus(),
+        gpus,
         architecture: get_architecture(),
         terminal: get_terminal(),
         shell: get_shell(),
-        display_resolution: get_display_resolution(),
+        display_resolution,
         battery: get_battery(),
         locale: get_locale(),
     }
@@ -52,10 +74,7 @@ fn get_macos_codename() -> Option<String> {
 /// Detect boot mode (always UEFI on Intel Macs, native on Apple Silicon)
 fn detect_boot_mode() -> Option<String> {
     // Check if running on Apple Silicon
-    let output = Command::new("uname")
-        .arg("-m")
-        .output()
-        .ok()?;
+    let output = Command::new("uname").arg("-m").output().ok()?;
 
     let arch = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
@@ -104,9 +123,11 @@ fn detect_virtualization() -> Option<String> {
     None
 }
 
-/// Get GPU names
-fn get_gpus() -> Vec<String> {
+/// Get GPU names and display resolution from a single system_profiler call.
+/// Saves ~1-2 seconds by avoiding duplicate SPDisplaysDataType invocations.
+fn get_display_info() -> (Vec<String>, Option<String>) {
     let mut gpus = Vec::new();
+    let mut resolution = None;
 
     if let Ok(output) = Command::new("system_profiler")
         .args(["SPDisplaysDataType"])
@@ -115,7 +136,7 @@ fn get_gpus() -> Vec<String> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             let trimmed = line.trim();
-            // Look for "Chipset Model:" lines
+            // GPU: "Chipset Model:" lines
             if trimmed.starts_with("Chipset Model:") {
                 if let Some(gpu) = trimmed.strip_prefix("Chipset Model:") {
                     let gpu = gpu.trim();
@@ -124,10 +145,29 @@ fn get_gpus() -> Vec<String> {
                     }
                 }
             }
+            // Resolution: "Resolution:" lines
+            if resolution.is_none() && trimmed.starts_with("Resolution:") {
+                if let Some(res) = trimmed.strip_prefix("Resolution:") {
+                    let res = res.trim();
+                    let clean: String = res
+                        .chars()
+                        .filter(|c| c.is_ascii_digit() || *c == 'x')
+                        .collect();
+                    if clean.contains('x') {
+                        resolution = Some(clean);
+                    } else if !res.is_empty() {
+                        resolution = Some(res.to_string());
+                    }
+                }
+            }
         }
     }
 
-    gpus
+    (gpus, resolution)
+}
+
+fn get_gpus() -> Vec<String> {
+    get_display_info().0
 }
 
 /// Get system architecture
@@ -154,7 +194,10 @@ fn get_terminal() -> Option<String> {
 /// Get shell name and version
 fn get_shell() -> Option<String> {
     let shell_path = env::var("SHELL").ok()?;
-    let shell_name = Path::new(&shell_path).file_name()?.to_string_lossy().to_string();
+    let shell_name = Path::new(&shell_path)
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
 
     // Try to get version
     let version_output = match shell_name.as_str() {
@@ -169,8 +212,14 @@ fn get_shell() -> Option<String> {
         if let Some(line) = version_str.lines().next() {
             // Extract version number
             for word in line.split_whitespace() {
-                if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-                    let version: String = word.chars()
+                if word
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+                {
+                    let version: String = word
+                        .chars()
                         .take_while(|c| c.is_ascii_digit() || *c == '.')
                         .collect();
                     if !version.is_empty() {
@@ -186,42 +235,12 @@ fn get_shell() -> Option<String> {
 
 /// Get display resolution
 fn get_display_resolution() -> Option<String> {
-    if let Ok(output) = Command::new("system_profiler")
-        .args(["SPDisplaysDataType"])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let trimmed = line.trim();
-            // Look for "Resolution:" lines
-            if trimmed.starts_with("Resolution:") {
-                if let Some(res) = trimmed.strip_prefix("Resolution:") {
-                    let res = res.trim();
-                    // Parse "3024 x 1964" to "3024x1964"
-                    let clean: String = res.chars()
-                        .filter(|c| c.is_ascii_digit() || *c == 'x')
-                        .collect();
-                    if clean.contains('x') {
-                        return Some(clean);
-                    }
-                    // Or return as-is if format is different
-                    if !res.is_empty() {
-                        return Some(res.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    None
+    get_display_info().1
 }
 
 /// Get battery status
 fn get_battery() -> Option<String> {
-    if let Ok(output) = Command::new("pmset")
-        .args(["-g", "batt"])
-        .output()
-    {
+    if let Ok(output) = Command::new("pmset").args(["-g", "batt"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         // Parse output like:
         // Now drawing from 'Battery Power'
@@ -236,8 +255,10 @@ fn get_battery() -> Option<String> {
                     let part = part.trim();
                     if part.ends_with('%') {
                         percentage = part.to_string();
-                    } else if part.contains("charging") || part.contains("discharging")
-                        || part.contains("charged") || part.contains("AC")
+                    } else if part.contains("charging")
+                        || part.contains("discharging")
+                        || part.contains("charged")
+                        || part.contains("AC")
                     {
                         status = part.to_string();
                     }
@@ -256,7 +277,9 @@ fn get_battery() -> Option<String> {
                 if !percentage.is_empty() {
                     if !status.is_empty() {
                         // Capitalize first letter
-                        let status = status.chars().next()
+                        let status = status
+                            .chars()
+                            .next()
                             .map(|c| c.to_uppercase().to_string())
                             .unwrap_or_default()
                             + &status[1..];

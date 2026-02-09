@@ -13,6 +13,15 @@ pub mod session;
 
 use crate::error::Result;
 
+/// Controls how much data to collect
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectMode {
+    /// Full collection — all fields, all subprocess calls
+    Full,
+    /// Fast collection — skip slow platform-specific collectors for quick auto-run
+    Fast,
+}
+
 /// Collected system information matching TR-200 fields
 #[derive(Debug, Clone)]
 pub struct SystemInfo {
@@ -24,7 +33,7 @@ pub struct SystemInfo {
 
     // Network Section
     pub hostname: String,
-    pub machine_ip: String,
+    pub machine_ip: Option<String>,
     pub client_ip: Option<String>,
     pub dns_servers: Vec<String>,
     pub username: String,
@@ -32,12 +41,12 @@ pub struct SystemInfo {
     // CPU Section
     pub processor: String,
     pub cores: usize,
-    pub sockets: usize,
-    pub hypervisor: String,
+    pub sockets: Option<usize>,
+    pub hypervisor: Option<String>,
     pub cpu_freq_ghz: f64,
-    pub load_1m: f64,
-    pub load_5m: f64,
-    pub load_15m: f64,
+    pub load_1m: Option<f64>,
+    pub load_5m: Option<f64>,
+    pub load_15m: Option<f64>,
     pub gpus: Vec<String>,
 
     // Disk Section
@@ -52,25 +61,50 @@ pub struct SystemInfo {
     pub mem_percent: f64,
 
     // Session Section
-    pub last_login: String,
+    pub last_login: Option<String>,
     pub last_login_ip: Option<String>,
     pub uptime_seconds: u64,
     pub shell: Option<String>,
     pub terminal: Option<String>,
     pub locale: Option<String>,
     pub battery: Option<String>,
+
+    /// The collection mode used
+    pub mode: CollectMode,
 }
 
 impl SystemInfo {
-    /// Collect all system information
-    pub fn collect() -> Result<Self> {
-        let os_info = os::collect()?;
-        let cpu_info = cpu::collect()?;
-        let mem_info = memory::collect()?;
-        let disks = disk::collect()?;
-        let net_info = network::collect_network_info()?;
-        let session_info = session::collect()?;
-        let platform_info = platform::collect();
+    /// Collect all system information with the given mode.
+    /// Uses `std::thread::scope` to run collectors in parallel —
+    /// the 200ms CPU sleep (full mode) overlaps with disk/network/session/platform.
+    pub fn collect_with_mode(mode: CollectMode) -> Result<Self> {
+        let (os_info, cpu_info, mem_info, disks, net_info, session_info, platform_info) =
+            std::thread::scope(|s| {
+                let os_h = s.spawn(os::collect);
+                let cpu_h = s.spawn(|| cpu::collect(mode));
+                let mem_h = s.spawn(memory::collect);
+                let disk_h = s.spawn(disk::collect);
+                let net_h = s.spawn(|| network::collect_network_info(mode));
+                let session_h = s.spawn(|| session::collect(mode));
+                let platform_h = s.spawn(|| platform::collect(mode));
+
+                (
+                    os_h.join().unwrap(),
+                    cpu_h.join().unwrap(),
+                    mem_h.join().unwrap(),
+                    disk_h.join().unwrap(),
+                    net_h.join().unwrap(),
+                    session_h.join().unwrap(),
+                    platform_h.join().unwrap(),
+                )
+            });
+
+        let os_info = os_info?;
+        let cpu_info = cpu_info?;
+        let mem_info = mem_info?;
+        let disks = disks?;
+        let net_info = net_info?;
+        let session_info = session_info?;
 
         // Aggregate disk info (use root/C: or sum all)
         let (disk_used, disk_total) = aggregate_disk_usage(&disks);
@@ -88,15 +122,21 @@ impl SystemInfo {
         };
 
         // Hypervisor detection
-        let hypervisor = platform_info
-            .virtualization
-            .unwrap_or_else(|| "Bare Metal".to_string());
+        let hypervisor = platform_info.virtualization.or_else(|| {
+            if mode == CollectMode::Full {
+                Some("Bare Metal".to_string())
+            } else {
+                None
+            }
+        });
 
         Ok(Self {
             os_name: os_info.name,
             os_version: os_info.version,
             kernel: os_info.kernel_version,
-            architecture: platform_info.architecture.unwrap_or_else(|| std::env::consts::ARCH.to_string()),
+            architecture: platform_info
+                .architecture
+                .unwrap_or_else(|| std::env::consts::ARCH.to_string()),
             hostname: os_info.hostname,
             machine_ip: net_info.machine_ip,
             client_ip: net_info.client_ip,
@@ -125,7 +165,13 @@ impl SystemInfo {
             terminal: platform_info.terminal,
             locale: platform_info.locale,
             battery: platform_info.battery,
+            mode,
         })
+    }
+
+    /// Collect all system information (full mode, backward compatible)
+    pub fn collect() -> Result<Self> {
+        Self::collect_with_mode(CollectMode::Full)
     }
 
     /// Format uptime as human-readable string
@@ -177,7 +223,11 @@ impl SystemInfo {
 
     /// Get cores string in TR-200 format
     pub fn cores_str(&self) -> String {
-        format!("{} vCPU(s) / {} Socket(s)", self.cores, self.sockets)
+        if let Some(sockets) = self.sockets {
+            format!("{} vCPU(s) / {} Socket(s)", self.cores, sockets)
+        } else {
+            format!("{} vCPU(s)", self.cores)
+        }
     }
 
     /// Get CPU frequency string

@@ -3,6 +3,8 @@
 //! These modules provide platform-specific system information
 //! that cannot be obtained through cross-platform libraries.
 
+use super::CollectMode;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
@@ -44,24 +46,25 @@ pub struct PlatformInfo {
 }
 
 /// Collect platform-specific information
-pub fn collect() -> PlatformInfo {
+pub fn collect(mode: CollectMode) -> PlatformInfo {
     #[cfg(target_os = "linux")]
     {
-        linux::collect()
+        linux::collect(mode)
     }
 
     #[cfg(target_os = "macos")]
     {
-        macos::collect()
+        macos::collect(mode)
     }
 
     #[cfg(target_os = "windows")]
     {
-        windows::collect()
+        windows::collect(mode)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
+        let _ = mode;
         PlatformInfo::default()
     }
 }

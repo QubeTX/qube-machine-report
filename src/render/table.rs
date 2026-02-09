@@ -241,14 +241,16 @@ impl ReportBuilder {
         self.output.push_str(&self.renderer.render_top_header());
         self.output.push_str(&self.renderer.render_header_bottom());
         self.output.push_str(&self.renderer.render_centered(title));
-        self.output.push_str(&self.renderer.render_centered(subtitle));
+        self.output
+            .push_str(&self.renderer.render_centered(subtitle));
         self.output.push_str(&self.renderer.render_top_divider());
         self
     }
 
     /// Add a data row
     pub fn row(mut self, label: &str, value: &str) -> Self {
-        self.output.push_str(&self.renderer.render_row(label, value));
+        self.output
+            .push_str(&self.renderer.render_row(label, value));
         self.has_rows = true;
         self
     }
