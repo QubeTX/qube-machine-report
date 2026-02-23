@@ -17,6 +17,8 @@ TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground
 - Hypervisor/virtualization detection
 - Session info with last login tracking
 - JSON output for scripting
+- Auto-save markdown report to Downloads folder on manual runs
+- Fast mode (`--fast`) for sub-second auto-run startup
 - Self-installation with shell alias and auto-run
 
 ## Installation
@@ -124,6 +126,7 @@ tr300 --help
 | `--json` | Output in JSON format |
 | `-t, --title <TITLE>` | Custom title for the report header |
 | `--no-color` | Disable colored output |
+| `--fast` | Fast mode: skip slow collectors for quick auto-run |
 | `--install` | Add to shell profile with alias and auto-run |
 | `--uninstall` | Remove from shell profile |
 | `-h, --help` | Print help information |

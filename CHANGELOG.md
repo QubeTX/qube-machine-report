@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-02-22
+
+### Added
+- Auto-save markdown report to Downloads folder on manual full-mode runs
+  - Generates a comprehensive `.md` file with all system info in table format
+  - Only triggers on `tr300` / `report` (full mode, table output) — never on `--fast` or `--json`
+  - Non-fatal: warnings go to stderr, terminal report always displays
+
+### Dependencies
+- Added `chrono` for timestamp formatting in markdown reports
+
 ## [3.5.0] - 2026-02-09
 
 ### Added

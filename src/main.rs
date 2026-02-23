@@ -6,7 +6,7 @@
 use clap::Parser;
 use tr_300::{
     collectors::{CollectMode, SystemInfo},
-    config::Config,
+    config::{Config, OutputFormat},
     error::Result,
     install, report,
 };
@@ -102,6 +102,15 @@ fn run_report(config: &Config, mode: CollectMode) -> Result<()> {
     let info = SystemInfo::collect_with_mode(mode)?;
     let output = report::generate(&info, config);
     print!("{}", output);
+
+    // Auto-save markdown report in full table mode (not --fast, not --json)
+    if mode == CollectMode::Full && config.format == OutputFormat::Table {
+        match report::save_markdown_report(&info) {
+            Some(path) => eprintln!("Report saved: {}", path.display()),
+            None => eprintln!("Warning: Could not save markdown report"),
+        }
+    }
+
     Ok(())
 }
 

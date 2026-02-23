@@ -3,6 +3,8 @@
 //! Generates the complete system report using the exact
 //! layout and styling of TR-200 Machine Report.
 
+use std::path::PathBuf;
+
 use crate::collectors::SystemInfo;
 use crate::config::{Config, OutputFormat, MAX_DATA_WIDTH};
 use crate::render::bar::render_bar;
@@ -260,4 +262,152 @@ fn escape_json(s: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t")
+}
+
+/// Get the user's Downloads directory (cross-platform)
+fn downloads_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let dir = PathBuf::from(profile).join("Downloads");
+            if dir.is_dir() {
+                return dir;
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let dir = PathBuf::from(home).join("Downloads");
+            if dir.is_dir() {
+                return dir;
+            }
+        }
+    }
+
+    // Fallback: current working directory
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Generate a comprehensive markdown report from system info
+fn generate_markdown(info: &SystemInfo) -> String {
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let version = env!("CARGO_PKG_VERSION");
+
+    let mut md = String::new();
+
+    md.push_str("# TR-300 Machine Report\n\n");
+    md.push_str(&format!("**Date:** {}\n", timestamp));
+    md.push_str(&format!("**Hostname:** {}\n", info.hostname));
+    md.push_str("\n---\n\n");
+
+    // System section
+    md.push_str("## System\n\n");
+    md.push_str("| Field | Value |\n|-------|-------|\n");
+    md.push_str(&format!("| OS | {} {} |\n", info.os_name, info.os_version));
+    md.push_str(&format!("| Kernel | {} |\n", info.kernel));
+    md.push_str(&format!("| Architecture | {} |\n", info.architecture));
+    md.push('\n');
+
+    // Network section
+    md.push_str("## Network\n\n");
+    md.push_str("| Field | Value |\n|-------|-------|\n");
+    md.push_str(&format!("| Hostname | {} |\n", info.hostname));
+    if let Some(ref ip) = info.machine_ip {
+        md.push_str(&format!("| Machine IP | {} |\n", ip));
+    }
+    md.push_str(&format!(
+        "| Client IP | {} |\n",
+        info.client_ip.as_deref().unwrap_or("Not connected")
+    ));
+    for (i, dns) in info.dns_servers.iter().take(5).enumerate() {
+        md.push_str(&format!("| DNS Server {} | {} |\n", i + 1, dns));
+    }
+    md.push_str(&format!("| User | {} |\n", info.username));
+    md.push('\n');
+
+    // CPU section
+    md.push_str("## CPU\n\n");
+    md.push_str("| Field | Value |\n|-------|-------|\n");
+    md.push_str(&format!("| Processor | {} |\n", info.processor));
+    md.push_str(&format!("| Cores | {} |\n", info.cores_str()));
+    for (i, gpu) in info.gpus.iter().enumerate() {
+        let label = if info.gpus.len() == 1 {
+            "GPU".to_string()
+        } else {
+            format!("GPU {}", i + 1)
+        };
+        md.push_str(&format!("| {} | {} |\n", label, gpu));
+    }
+    if let Some(ref hypervisor) = info.hypervisor {
+        md.push_str(&format!("| Hypervisor | {} |\n", hypervisor));
+    }
+    md.push_str(&format!("| Frequency | {} |\n", info.freq_str()));
+    if let (Some(l1), Some(l5), Some(l15)) = (info.load_1m, info.load_5m, info.load_15m) {
+        md.push_str(&format!("| Load 1m | {:.2}% |\n", l1));
+        md.push_str(&format!("| Load 5m | {:.2}% |\n", l5));
+        md.push_str(&format!("| Load 15m | {:.2}% |\n", l15));
+    }
+    md.push('\n');
+
+    // Storage section
+    md.push_str("## Storage\n\n");
+    md.push_str("| Field | Value |\n|-------|-------|\n");
+    md.push_str(&format!("| Volume | {} |\n", info.disk_usage_str()));
+    md.push_str(&format!("| Disk Usage | {:.2}% |\n", info.disk_percent));
+    if let Some(ref zfs_health) = info.zfs_health {
+        md.push_str(&format!("| ZFS Health | {} |\n", zfs_health));
+    }
+    md.push('\n');
+
+    // Memory section
+    md.push_str("## Memory\n\n");
+    md.push_str("| Field | Value |\n|-------|-------|\n");
+    md.push_str(&format!("| Memory | {} |\n", info.memory_usage_str()));
+    md.push_str(&format!("| Usage | {:.1}% |\n", info.mem_percent));
+    md.push('\n');
+
+    // Session section
+    md.push_str("## Session\n\n");
+    md.push_str("| Field | Value |\n|-------|-------|\n");
+    if let Some(ref last_login) = info.last_login {
+        md.push_str(&format!("| Last Login | {} |\n", last_login));
+    }
+    md.push_str(&format!("| Uptime | {} |\n", info.uptime_formatted()));
+    if let Some(ref shell) = info.shell {
+        md.push_str(&format!("| Shell | {} |\n", shell));
+    }
+    if let Some(ref terminal) = info.terminal {
+        md.push_str(&format!("| Terminal | {} |\n", terminal));
+    }
+    if let Some(ref locale) = info.locale {
+        md.push_str(&format!("| Locale | {} |\n", locale));
+    }
+    if let Some(ref battery) = info.battery {
+        md.push_str(&format!("| Battery | {} |\n", battery));
+    }
+
+    md.push_str("\n---\n\n");
+    md.push_str(&format!("*Generated by TR-300 v{}*\n", version));
+
+    md
+}
+
+/// Save a markdown report to the Downloads folder.
+/// Returns the file path on success, or None on failure.
+pub fn save_markdown_report(info: &SystemInfo) -> Option<PathBuf> {
+    let dir = downloads_dir();
+    let _ = std::fs::create_dir_all(&dir);
+
+    let filename_ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let filename = format!("tr300-report-{}.md", filename_ts);
+    let path = dir.join(filename);
+
+    let markdown = generate_markdown(info);
+
+    match std::fs::write(&path, markdown) {
+        Ok(()) => Some(path),
+        Err(_) => None,
+    }
 }

@@ -274,6 +274,7 @@ Core:
 - `crossterm 0.28` - Terminal width detection
 - `thiserror 2.0` - Error type derivation
 - `dirs 5.0` - Standard directory paths
+- `chrono 0.4` - Date/time formatting for markdown reports
 
 Platform-specific:
 - `wmi 0.14`, `winapi 0.3` (Windows) - Windows Management Instrumentation queries
