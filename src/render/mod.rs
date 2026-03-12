@@ -6,4 +6,4 @@ pub mod bar;
 pub mod table;
 
 pub use bar::{render_bar, render_bar_ascii, render_bar_unicode};
-pub use table::{ReportBuilder, TableRenderer};
+pub use table::TableRenderer;

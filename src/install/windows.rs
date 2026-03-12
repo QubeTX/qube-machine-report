@@ -282,19 +282,22 @@ fn remove_if_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
             continue;
         }
         if skip_if_block {
-            // Count braces to handle nested blocks
-            for ch in line.chars() {
-                match ch {
-                    '{' => brace_depth += 1,
-                    '}' => {
-                        if brace_depth > 0 {
-                            brace_depth -= 1;
-                            if brace_depth == 0 {
-                                skip_if_block = false;
+            // Skip brace counting in comment lines to avoid miscounting
+            let trimmed = line.trim();
+            if !trimmed.starts_with('#') {
+                for ch in line.chars() {
+                    match ch {
+                        '{' => brace_depth += 1,
+                        '}' => {
+                            if brace_depth > 0 {
+                                brace_depth -= 1;
+                                if brace_depth == 0 {
+                                    skip_if_block = false;
+                                }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             continue;

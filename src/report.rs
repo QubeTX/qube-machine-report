@@ -257,11 +257,23 @@ fn generate_json(info: &SystemInfo) -> String {
 
 /// Escape special characters for JSON
 fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\")
+    let result = s
+        .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
-        .replace('\t', "\\t")
+        .replace('\t', "\\t");
+    // Escape remaining control characters (0x00-0x1F)
+    result
+        .chars()
+        .map(|c| {
+            if c.is_control() {
+                format!("\\u{:04x}", c as u32)
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
 /// Get the user's Downloads directory (cross-platform)

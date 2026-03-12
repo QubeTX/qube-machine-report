@@ -1,6 +1,6 @@
 [package]
 name = "tr-300"
-version = "3.6.0"
+version = "3.7.0"
 edition = "2021"
 authors = ["Emmett S <hey@emmetts.dev>"]
 description = "Cross-platform system information report"
@@ -27,6 +27,11 @@ crossterm = "0.28"
 thiserror = "2.0"
 dirs = "5.0"
 chrono = "0.4"
+unicode-width = "0.2"
+
+[build-dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+clap_mangen = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "0.14"
@@ -49,7 +54,7 @@ lto = "thin"
 # Config for 'dist'
 [workspace.metadata.dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.30.3"
+cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app

@@ -78,6 +78,8 @@ impl SystemInfo {
     /// Uses `std::thread::scope` to run collectors in parallel —
     /// the 200ms CPU sleep (full mode) overlaps with disk/network/session/platform.
     pub fn collect_with_mode(mode: CollectMode) -> Result<Self> {
+        use crate::error::AppError;
+
         let (os_info, cpu_info, mem_info, disks, net_info, session_info, platform_info) =
             std::thread::scope(|s| {
                 let os_h = s.spawn(os::collect);
@@ -89,13 +91,27 @@ impl SystemInfo {
                 let platform_h = s.spawn(|| platform::collect(mode));
 
                 (
-                    os_h.join().unwrap(),
-                    cpu_h.join().unwrap(),
-                    mem_h.join().unwrap(),
-                    disk_h.join().unwrap(),
-                    net_h.join().unwrap(),
-                    session_h.join().unwrap(),
-                    platform_h.join().unwrap(),
+                    os_h.join().unwrap_or_else(|_| {
+                        Err(AppError::system_info("OS collector thread panicked"))
+                    }),
+                    cpu_h.join().unwrap_or_else(|_| {
+                        Err(AppError::system_info("CPU collector thread panicked"))
+                    }),
+                    mem_h.join().unwrap_or_else(|_| {
+                        Err(AppError::system_info("memory collector thread panicked"))
+                    }),
+                    disk_h.join().unwrap_or_else(|_| {
+                        Err(AppError::system_info("disk collector thread panicked"))
+                    }),
+                    net_h.join().unwrap_or_else(|_| {
+                        Err(AppError::system_info("network collector thread panicked"))
+                    }),
+                    session_h.join().unwrap_or_else(|_| {
+                        Err(AppError::system_info("session collector thread panicked"))
+                    }),
+                    platform_h
+                        .join()
+                        .unwrap_or_else(|_| platform::PlatformInfo::default()),
                 )
             });
 

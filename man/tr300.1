@@ -1,0 +1,46 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH tr300 1  "tr300 3.7.0" 
+.SH NAME
+tr300 \- TR\-300 Machine Report \- Cross\-platform system information
+.SH SYNOPSIS
+\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] 
+.SH DESCRIPTION
+TR\-300 is the successor to TR\-200 Machine Report.
+.PP
+It displays comprehensive system information including OS, network, CPU, 
+memory, disk usage, and session details in a formatted table.
+.PP
+After installation with \-\-install, you can also use the \*(Aqreport\*(Aq alias.
+.SH OPTIONS
+.TP
+\fB\-\-ascii\fR
+Use ASCII characters instead of Unicode box\-drawing
+.TP
+\fB\-\-json\fR
+Output in JSON format instead of table
+.TP
+\fB\-\-install\fR
+Install tr300 to shell profile (adds \*(Aqreport\*(Aq alias and auto\-run)
+.TP
+\fB\-\-uninstall\fR
+Remove tr300 from shell profile
+.TP
+\fB\-t\fR, \fB\-\-title\fR \fI<TITLE>\fR
+Custom title for the report header
+.TP
+\fB\-\-no\-color\fR
+Disable colored output
+.TP
+\fB\-\-fast\fR
+Fast mode: skip slow platform\-specific collectors for quick auto\-run
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH VERSION
+v3.7.0
+.SH AUTHORS
+Emmett S <hey@emmetts.dev>

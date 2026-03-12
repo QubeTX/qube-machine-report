@@ -172,6 +172,15 @@ cargo clippy
 cargo run -- --ascii
 ```
 
+### Man Page (Linux/macOS)
+
+A man page is auto-generated during build via `clap_mangen`. After building from source:
+
+```bash
+sudo cp man/tr300.1 /usr/local/share/man/man1/
+man tr300
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

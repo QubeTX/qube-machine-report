@@ -4,6 +4,7 @@
 //! with proper dividers and centered headers.
 
 use crate::config::BoxChars;
+use unicode_width::UnicodeWidthStr;
 
 /// Table renderer matching TR-200 format
 pub struct TableRenderer {
@@ -57,18 +58,18 @@ impl TableRenderer {
 
     /// Render a centered text line (for title/subtitle)
     pub fn render_centered(&self, text: &str) -> String {
-        let text_len = text.chars().count();
+        let text_width = text.width();
         let inner_width = self.total_width - 2; // Subtract the two │ borders
 
-        let padding = if text_len >= inner_width {
+        let padding = if text_width >= inner_width {
             0
         } else {
-            (inner_width - text_len) / 2
+            (inner_width - text_width) / 2
         };
-        let extra = if text_len >= inner_width {
+        let extra = if text_width >= inner_width {
             0
         } else {
-            (inner_width - text_len) % 2
+            (inner_width - text_width) % 2
         };
 
         let mut line = String::new();
@@ -76,8 +77,17 @@ impl TableRenderer {
         line.push_str(&" ".repeat(padding));
 
         // Truncate if needed
-        if text_len > inner_width {
-            let truncated: String = text.chars().take(inner_width.saturating_sub(3)).collect();
+        if text_width > inner_width {
+            let mut truncated = String::new();
+            let mut w = 0;
+            for c in text.chars() {
+                let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                if w + cw > inner_width.saturating_sub(3) {
+                    break;
+                }
+                truncated.push(c);
+                w += cw;
+            }
             line.push_str(&truncated);
             line.push_str("...");
         } else {
@@ -201,75 +211,50 @@ impl TableRenderer {
         line
     }
 
-    /// Fit a string to exact width, padding or truncating as needed
+    /// Fit a string to exact width (display columns), padding or truncating as needed
     fn fit_string(&self, s: &str, width: usize) -> String {
-        let char_count = s.chars().count();
-        if char_count > width {
+        let display_width = s.width();
+        if display_width > width {
             // Truncate with ellipsis
             if width <= 3 {
-                s.chars().take(width).collect()
+                let mut result = String::new();
+                let mut w = 0;
+                for c in s.chars() {
+                    let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                    if w + cw > width {
+                        break;
+                    }
+                    result.push(c);
+                    w += cw;
+                }
+                while w < width {
+                    result.push(' ');
+                    w += 1;
+                }
+                result
             } else {
-                let truncated: String = s.chars().take(width - 3).collect();
-                format!("{}...", truncated)
+                let mut result = String::new();
+                let mut w = 0;
+                for c in s.chars() {
+                    let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                    if w + cw > width - 3 {
+                        break;
+                    }
+                    result.push(c);
+                    w += cw;
+                }
+                result.push_str("...");
+                w += 3;
+                while w < width {
+                    result.push(' ');
+                    w += 1;
+                }
+                result
             }
         } else {
             // Pad with spaces
-            format!("{:width$}", s, width = width)
+            let padding = width - display_width;
+            format!("{}{}", s, " ".repeat(padding))
         }
-    }
-}
-
-/// Convenience function to create a full report table
-pub struct ReportBuilder {
-    renderer: TableRenderer,
-    output: String,
-    has_rows: bool,
-}
-
-impl ReportBuilder {
-    /// Create a new report builder
-    pub fn new(label_width: usize, data_width: usize, chars: BoxChars) -> Self {
-        Self {
-            renderer: TableRenderer::new(label_width, data_width, chars),
-            output: String::new(),
-            has_rows: false,
-        }
-    }
-
-    /// Add the header section with title and subtitle
-    pub fn header(mut self, title: &str, subtitle: &str) -> Self {
-        self.output.push_str(&self.renderer.render_top_header());
-        self.output.push_str(&self.renderer.render_header_bottom());
-        self.output.push_str(&self.renderer.render_centered(title));
-        self.output
-            .push_str(&self.renderer.render_centered(subtitle));
-        self.output.push_str(&self.renderer.render_top_divider());
-        self
-    }
-
-    /// Add a data row
-    pub fn row(mut self, label: &str, value: &str) -> Self {
-        self.output
-            .push_str(&self.renderer.render_row(label, value));
-        self.has_rows = true;
-        self
-    }
-
-    /// Add a section divider
-    pub fn divider(mut self) -> Self {
-        self.output.push_str(&self.renderer.render_middle_divider());
-        self
-    }
-
-    /// Finish and return the complete output
-    pub fn finish(mut self) -> String {
-        self.output.push_str(&self.renderer.render_bottom_divider());
-        self.output.push_str(&self.renderer.render_footer());
-        self.output
-    }
-
-    /// Get the current output without footer (for adding more sections)
-    pub fn build(self) -> String {
-        self.output
     }
 }

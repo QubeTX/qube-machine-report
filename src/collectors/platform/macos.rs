@@ -317,13 +317,14 @@ fn get_battery() -> Option<String> {
 
                 if !percentage.is_empty() {
                     if !status.is_empty() {
-                        // Capitalize first letter
-                        let status = status
-                            .chars()
-                            .next()
-                            .map(|c| c.to_uppercase().to_string())
-                            .unwrap_or_default()
-                            + &status[1..];
+                        // Capitalize first letter (safe for multi-byte chars)
+                        let status = {
+                            let mut chars = status.chars();
+                            match chars.next() {
+                                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                                None => String::new(),
+                            }
+                        };
                         return Some(format!("{} ({})", percentage, status));
                     }
                     return Some(percentage);

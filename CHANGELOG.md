@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-03-12
+
+### Changed
+- Upgraded cargo-dist from v0.30.3 to v0.31.0 (CI installer bug fixes, GitHub Actions updates)
+- Table rendering now uses Unicode display width for correct alignment with CJK/emoji characters
+
+### Fixed
+- Fixed potential panic in macOS battery status when status string is empty
+- Fixed thread join panics — collector failures now handled gracefully instead of crashing
+- Fixed JSON output producing invalid JSON when system info contains control characters
+- Fixed PowerShell legacy cleanup incorrectly counting braces inside comments
+
+### Removed
+- Removed dead code: unused `print_version()` function and `ReportBuilder` struct
+- Consolidated duplicate `format_bytes()` into shared utility
+
+### Added
+- Man page generation via `clap_mangen` — build produces `man/tr300.1` automatically
+
+### Dependencies
+- Added `unicode-width` for correct Unicode display width calculation
+- Added `clap_mangen` (build dependency) for man page generation
+
 ## [3.6.0] - 2026-02-22
 
 ### Added
