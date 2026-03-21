@@ -27,7 +27,7 @@ fn main() -> Result<()> {
     // Build configuration from CLI args
     let mut config = Config::new().with_colors(!cli.no_color);
 
-    if cli.ascii {
+    if cli.ascii || !is_utf8_locale() {
         config = config.with_ascii();
     }
 
@@ -134,6 +134,28 @@ fn run_uninstall() -> Result<()> {
             println!("TR-300 has been completely removed from your system.");
             Ok(())
         }
+    }
+}
+
+/// Check if the current locale supports UTF-8
+fn is_utf8_locale() -> bool {
+    // On Windows, we handle UTF-8 via SetConsoleOutputCP
+    #[cfg(windows)]
+    {
+        true
+    }
+
+    #[cfg(not(windows))]
+    {
+        for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
+            if let Ok(val) = std::env::var(var) {
+                if !val.is_empty() && val != "C" && val != "POSIX" {
+                    let upper = val.to_uppercase();
+                    return upper.contains("UTF-8") || upper.contains("UTF8");
+                }
+            }
+        }
+        false
     }
 }
 

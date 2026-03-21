@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-03-21
+
+### Added
+- **Automatic UTF-8 locale detection with ASCII fallback** — TR-300 now checks the
+  terminal's locale environment variables (`LC_ALL`, `LC_CTYPE`, `LANG`) at startup
+  to determine whether the terminal supports UTF-8 encoding. If none of these variables
+  indicate UTF-8 support (e.g., the locale is `C`, `POSIX`, or a non-UTF-8 encoding
+  like `ISO-8859-1`), the tool automatically falls back to ASCII box-drawing characters
+  (`+`, `-`, `|`, `#`, `.`) instead of Unicode (`┌`, `─`, `│`, `█`, `░`).
+  - **Problem solved**: On systems like Raspberry Pi OS (Debian), the default locale is
+    often `C` or `POSIX` rather than `en_US.UTF-8`. When TR-300 outputs 3-byte UTF-8
+    box-drawing characters to a terminal expecting single-byte Latin-1/ISO-8859-1
+    encoding, each character gets split into individual bytes and rendered as mojibake
+    (garbled `â` sequences with broken table borders). This made the report completely
+    unreadable on RPi, many headless Linux servers, Docker containers, minimal Debian
+    installs, and SSH sessions where locale forwarding fails.
+  - **How it works**: The detection checks environment variables in priority order:
+    `LC_ALL` (highest override) → `LC_CTYPE` (character encoding specific) → `LANG`
+    (general fallback). If the first non-empty, non-`C`/`POSIX` value contains "UTF-8"
+    or "UTF8" (case-insensitive), Unicode mode is used. Otherwise, ASCII mode activates
+    automatically. On Windows, UTF-8 is always assumed since the tool already calls
+    `SetConsoleOutputCP(65001)` to enable UTF-8 console output.
+  - **No behavior change for existing users**: Users with properly configured UTF-8
+    locales (the vast majority of modern desktop Linux, macOS, and Windows systems)
+    will continue to see the same Unicode table output as before.
+  - **Manual override still works**: The `--ascii` flag continues to force ASCII mode
+    regardless of locale detection, and users can also fix their locale with
+    `export LANG=en_US.UTF-8` in their shell profile to get Unicode output.
+
 ## [3.7.0] - 2026-03-12
 
 ### Changed
