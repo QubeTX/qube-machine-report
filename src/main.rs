@@ -9,22 +9,13 @@ use tr_300::{
     collectors::{CollectMode, SystemInfo},
     config::{Config, OutputFormat},
     error::Result,
-    install, report,
+    install, report, update,
 };
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Handle install/uninstall commands
-    if cli.install {
-        return run_install();
-    }
-
-    if cli.uninstall {
-        return run_uninstall();
-    }
-
-    // Build configuration from CLI args
+    // Build configuration from CLI args (needed by --update)
     let mut config = Config::new().with_colors(!cli.no_color);
 
     if cli.ascii || !is_utf8_locale() {
@@ -43,6 +34,20 @@ fn main() -> Result<()> {
     #[cfg(windows)]
     {
         enable_utf8_console();
+    }
+
+    // Handle action commands (early exit)
+    if cli.update {
+        let exit_code = update::run(&config);
+        std::process::exit(exit_code);
+    }
+
+    if cli.install {
+        return run_install();
+    }
+
+    if cli.uninstall {
+        return run_uninstall();
     }
 
     // Determine collection mode

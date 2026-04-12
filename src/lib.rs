@@ -27,6 +27,7 @@ pub mod error;
 pub mod install;
 pub mod render;
 pub mod report;
+pub mod update;
 
 pub use collectors::{CollectMode, SystemInfo};
 pub use config::Config;

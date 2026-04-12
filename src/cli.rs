@@ -34,6 +34,10 @@ pub struct Cli {
     #[arg(long)]
     pub uninstall: bool,
 
+    /// Check for updates and install the latest version
+    #[arg(long)]
+    pub update: bool,
+
     /// Custom title for the report header
     #[arg(short = 't', long)]
     pub title: Option<String>,

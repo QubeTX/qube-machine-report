@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-04-12
+
+### Added
+- **Self-update command (`--update`)** — Check for and install the latest version
+  directly from the command line. Automatically detects whether TR-300 was
+  installed via `cargo install` or the shell/PowerShell installer and uses the
+  appropriate update method. Supports `--json` output for scripted update checks.
+
+### Fixed
+- Shell installation now uses POSIX-compatible `case "$-"` syntax instead of
+  bash-specific `[[ $- == *i* ]]`, fixing "command not found" errors on
+  Raspberry Pi OS and other systems using dash/sh as the default shell
+
+### Dependencies
+- Added `ureq` for blocking HTTPS requests to GitHub releases API
+- Added `serde_json` for parsing GitHub API responses
+
 ## [3.8.0] - 2026-03-21
 
 ### Added

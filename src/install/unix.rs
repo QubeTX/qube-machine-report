@@ -28,9 +28,9 @@ const SHELL_ADDITIONS: &str = r#"# TR-300 Machine Report
 alias report='tr300'
 
 # Auto-run on interactive shell
-if [[ $- == *i* ]]; then
+case "$-" in *i*)
     tr300 --fast
-fi
+    ;; esac
 # End TR-300"#;
 
 /// Get the installation path for Unix systems
