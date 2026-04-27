@@ -59,17 +59,10 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     //   3. Finally fall back to sysinfo's static value (base clock from registry
     //      on Windows; current frequency on Linux).
     let sysinfo_mhz = cpus.first().map(|c| c.frequency()).unwrap_or(0);
-    let frequency_mhz = cpuid_16h_max_mhz()
-        .or_else(|| {
-            #[cfg(target_os = "windows")]
-            {
-                cpu_max_mhz_windows(logical_cores)
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                None
-            }
-        })
+    let frequency_mhz_raw = cpuid_16h_max_mhz();
+    #[cfg(target_os = "windows")]
+    let frequency_mhz_raw = frequency_mhz_raw.or_else(|| cpu_max_mhz_windows(logical_cores));
+    let frequency_mhz = frequency_mhz_raw
         .map(|v| v.max(sysinfo_mhz))
         .unwrap_or(sysinfo_mhz);
 
@@ -233,13 +226,14 @@ fn cpuid_16h_max_mhz() -> Option<u64> {
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::__cpuid;
 
-    // SAFETY: __cpuid is supported on every x86/x86_64 chip we target. Leaf 0
-    // returns the maximum supported leaf in EAX; we only query 0x16 if EAX >= 0x16.
-    let max_leaf = unsafe { __cpuid(0) }.eax;
+    // CPUID is callable without an unsafe block on Rust ≥ 1.95 (no safety
+    // preconditions on x86/x86_64). Leaf 0 returns the maximum supported leaf
+    // in EAX; we only query 0x16 if EAX >= 0x16.
+    let max_leaf = __cpuid(0).eax;
     if max_leaf < 0x16 {
         return None;
     }
-    let info = unsafe { __cpuid(0x16) };
+    let info = __cpuid(0x16);
     // EBX = silicon-rated max frequency in MHz. Returns 0 on AMD and on Intel
     // hybrid chips (Meteor Lake / Lunar Lake / Arrow Lake) where Intel zeroed
     // out leaf 16h in microcode.

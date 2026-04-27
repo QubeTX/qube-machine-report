@@ -136,6 +136,107 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 `--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
 
+**Auto-rustup on the cargo path (v3.11.1+).** When `execute_update()` takes the
+`InstallMethod::Cargo` branch it first calls `rustup_update_stable_best_effort()`,
+which probes for `rustup` on PATH (via `rustup --version`, redirecting both
+stdout and stderr to `Stdio::null()` so the probe is silent) and, if found,
+runs `rustup update stable` and prints `Updating Rust toolchain (rustup
+update stable)…` so the user sees what's happening. Any failure — rustup
+absent, network timeout, locked toolchain, permission error — is *non-fatal*:
+we discard the result with `let _ =` and proceed straight to the
+`cargo install tr-300 --force` call. The Installer (cargo-dist shell/PS)
+branch never touches Rust because it downloads a prebuilt binary.
+
+*Why this exists — the failure mode it prevents:* TR-300's MSRV tracks the
+GitHub Actions `stable` toolchain and moves whenever Rust ships a stable
+release that promotes a lint we trigger or changes safety classifications
+on stdlib intrinsics we use (cf. the 1.95 `__cpuid` reclassification that
+prompted this change). Without auto-rustup, a user who installed via
+`cargo install tr-300` on Rust 1.94 and then later runs `tr300 --update`
+against a release built with `rust-version = "1.95"` would see cargo print
+`error: rustc 1.94.0 is not supported by the following package: tr-300@…
+requires rustc 1.95`, our `execute_update` would propagate that as a
+non-zero exit, and the user would be silently stuck on the stale binary
+forever — they'd assume `--update` "doesn't work" and either give up or
+manually research the toolchain pin themselves. The 5–30 seconds spent on
+a redundant `rustup update stable` (effectively a no-op when already
+current — rustup just prints `info: cleaning up downloads & tmp directories`
+and exits) is dramatically cheaper than that user-experience failure, and
+this pattern means MSRV bumps in future releases stop being a coordination
+problem with users.
+
+*Why best-effort instead of "fail loudly if rustup isn't there":* not every
+user manages Rust through rustup. Distro packages (Debian's `rustc`/`cargo`,
+Homebrew's `rust`, NixOS's nixpkgs Rust), CI environments where rustup is
+intentionally absent, and corporate-managed toolchains all install Rust
+without putting `rustup` on PATH. Hard-failing in those cases would be
+worse than the status quo (we'd block working updates on a tool we don't
+need). Probing first and silently skipping when it's missing means we help
+the rustup majority while not surprising the minority — they just see the
+plain `cargo install` path and any MSRV mismatch surfaces normally, with
+the standard cargo error pointing at `rust-version` so they can update
+their distro/Homebrew Rust on their own terms.
+
+*Why we don't probe rustc version and conditionally call rustup:* the
+naive alternative — parse `rustc --version`, compare against an MSRV
+constant, only run rustup when older — adds two new failure modes (parse
+errors, drift between the constant and `Cargo.toml`'s `rust-version`) and
+saves at most a few seconds. Always running `rustup update stable` is
+simpler, idempotent, and self-correcting; rustup itself decides whether
+work is needed.
+
+### MSRV policy (v3.11.1+)
+
+`rust-version` is pinned in `Cargo.toml` and tracks the GitHub Actions
+`stable` toolchain. As of 3.11.1 it's `1.95` because `std::arch::x86::__cpuid`
+and `std::arch::x86_64::__cpuid` were reclassified as safe-to-call in
+Rust 1.95 (no safety preconditions on x86/x86_64 — CPUID is universally
+available), which made our `unsafe { __cpuid(_) }` wrappers in
+`src/collectors/cpu.rs` and `src/collectors/platform/windows.rs` trip the
+`unused_unsafe` lint. Under our `-D warnings` policy that's a hard build
+error. Bump `rust-version` whenever a new stable lint or stdlib change
+forces source edits — and at the same release pin so that users running
+older toolchains hit cargo's MSRV check, not E0133s deep in collector
+modules.
+
+*Why pin MSRV instead of supporting older Rust via shims:* there are three
+realistic alternatives, and we considered each.
+
+1. **`#[allow(unused_unsafe)]` on every `unsafe { __cpuid(_) }` block.**
+   Compiles on both old and new toolchains. *Rejected* because the `allow`
+   is permanent — once added, even Rust toolchains where the lint is
+   correct (i.e. the unsafe block really is necessary because someone
+   added a genuinely-unsafe call inside it later) will silently swallow
+   the warning and we'd miss real safety regressions. It also bloats every
+   CPUID callsite with attribute noise that has to be re-justified at
+   review time, and it propagates: every future stable lint we want to
+   straddle adds another permanent `allow`. Tech debt that compounds.
+
+2. **`#[cfg(rustc_version)]` ladders to gate per Rust version.** Requires
+   pulling in `rustversion` or `rustc_version` build-script crates, adds a
+   build-time fingerprint to every release, and means our source has two
+   parallel implementations of the same logic — one with `unsafe`, one
+   without — that have to be kept in lockstep. *Rejected* as
+   over-engineering for a tool whose CI deliberately uses
+   `dtolnay/rust-toolchain@stable` and ships from a single toolchain.
+
+3. **Pin MSRV to the CI toolchain (this approach).** Cargo's existing
+   `rust-version` field already enforces this without any source-level
+   shims. Older toolchains get `error: package tr-300@3.11.1 cannot be
+   built because it requires rustc 1.95.0 or newer, while the currently
+   active rustc version is 1.94.0` — clear, actionable, and points at
+   exactly the right knob to fix. Combined with auto-rustup in
+   `--update`, users on rustup-managed toolchains never see the error at
+   all because `tr300 --update` brings their stable forward in lockstep
+   with the MSRV pin. Users on distro-managed toolchains see the clear
+   error and can update on their own schedule.
+
+The combination — pin in `Cargo.toml`, auto-rustup in `--update`, README
+mentions `rustup update stable` ahead of `cargo install tr-300` — gives us
+a coherent toolchain story across all three install paths (binary
+installer, fresh `cargo install`, self-update) without source-level
+compatibility shims.
+
 ### Elevation Tier (v3.10.0+)
 
 TR-300 detects whether the current process is elevated (Unix `geteuid() == 0` / Windows `IsUserAnAdmin()` from shell32 — declared as a manual `extern` since `winapi-rs` doesn't bind it) and surfaces this via `SystemInfo.is_elevated`, plus a dim footer hint below the table on platforms where elevation unlocks more data.

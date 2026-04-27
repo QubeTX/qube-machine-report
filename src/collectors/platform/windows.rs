@@ -327,13 +327,14 @@ fn cpuid_hypervisor_brand() -> Option<String> {
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        // SAFETY: CPUID is supported on every x86/x86_64 CPU we target.
-        let leaf1 = unsafe { __cpuid(1) };
+        // CPUID is callable without an unsafe block on Rust ≥ 1.95 (no safety
+        // preconditions on x86/x86_64).
+        let leaf1 = __cpuid(1);
         // Bit 31 of ECX = hypervisor present
         if (leaf1.ecx & (1u32 << 31)) == 0 {
             return None;
         }
-        let leaf = unsafe { __cpuid(0x4000_0000) };
+        let leaf = __cpuid(0x4000_0000);
         let mut bytes = [0u8; 12];
         bytes[0..4].copy_from_slice(&leaf.ebx.to_le_bytes());
         bytes[4..8].copy_from_slice(&leaf.ecx.to_le_bytes());

@@ -55,28 +55,22 @@ pub fn install() -> Result<()> {
 
     // Try to update .bashrc
     let bashrc = home.join(".bashrc");
-    if bashrc.exists() {
-        if update_shell_profile(&bashrc)? {
-            modified_files.push(bashrc.display().to_string());
-        }
+    if bashrc.exists() && update_shell_profile(&bashrc)? {
+        modified_files.push(bashrc.display().to_string());
     }
 
     // Try to update .zshrc
     let zshrc = home.join(".zshrc");
-    if zshrc.exists() {
-        if update_shell_profile(&zshrc)? {
-            modified_files.push(zshrc.display().to_string());
-        }
+    if zshrc.exists() && update_shell_profile(&zshrc)? {
+        modified_files.push(zshrc.display().to_string());
     }
 
     // If neither exists, try to create .bashrc (common default)
-    if modified_files.is_empty() {
-        if !bashrc.exists() {
-            fs::write(&bashrc, SHELL_ADDITIONS).map_err(|e| {
-                AppError::platform(format!("Failed to create {}: {}", bashrc.display(), e))
-            })?;
-            modified_files.push(bashrc.display().to_string());
-        }
+    if modified_files.is_empty() && !bashrc.exists() {
+        fs::write(&bashrc, SHELL_ADDITIONS).map_err(|e| {
+            AppError::platform(format!("Failed to create {}: {}", bashrc.display(), e))
+        })?;
+        modified_files.push(bashrc.display().to_string());
     }
 
     if modified_files.is_empty() {
@@ -100,18 +94,14 @@ pub fn uninstall() -> Result<()> {
 
     // Try to clean .bashrc
     let bashrc = home.join(".bashrc");
-    if bashrc.exists() {
-        if remove_from_profile(&bashrc)? {
-            modified_files.push(bashrc.display().to_string());
-        }
+    if bashrc.exists() && remove_from_profile(&bashrc)? {
+        modified_files.push(bashrc.display().to_string());
     }
 
     // Try to clean .zshrc
     let zshrc = home.join(".zshrc");
-    if zshrc.exists() {
-        if remove_from_profile(&zshrc)? {
-            modified_files.push(zshrc.display().to_string());
-        }
+    if zshrc.exists() && remove_from_profile(&zshrc)? {
+        modified_files.push(zshrc.display().to_string());
     }
 
     if modified_files.is_empty() {
@@ -251,12 +241,12 @@ fn remove_if_fi_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
             // Track nested if statements
             if trimmed.starts_with("if ") || trimmed.starts_with("if[") {
                 if_depth += 1;
-            } else if trimmed == "fi" || trimmed.starts_with("fi ") || trimmed.starts_with("fi;") {
-                if if_depth > 0 {
-                    if_depth -= 1;
-                    if if_depth == 0 {
-                        skip_if_block = false;
-                    }
+            } else if (trimmed == "fi" || trimmed.starts_with("fi ") || trimmed.starts_with("fi;"))
+                && if_depth > 0
+            {
+                if_depth -= 1;
+                if if_depth == 0 {
+                    skip_if_block = false;
                 }
             }
             continue;

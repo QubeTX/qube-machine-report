@@ -172,9 +172,10 @@ fn get_terminal() -> Option<String> {
     }
 
     // Try to detect from parent process
-    if let Ok(output) = Command::new("ps")
+    if Command::new("ps")
         .args(["-o", "comm=", "-p", &format!("{}", std::process::id())])
         .output()
+        .is_ok()
     {
         // Get grandparent (terminal emulator)
         if let Ok(ppid_output) = Command::new("ps")

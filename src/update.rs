@@ -16,6 +16,7 @@ const SHELL_INSTALLER: &str =
     "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh";
 
 /// PowerShell installer URL (Windows).
+#[cfg(windows)]
 const PS_INSTALLER: &str =
     "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1";
 
@@ -293,13 +294,40 @@ fn detect_install_method() -> InstallMethod {
 
 // ── Platform-specific update execution ─────────────────────────────
 
+/// Run `rustup update stable` if rustup is on PATH. Best-effort: any failure is
+/// non-fatal (we let the subsequent `cargo install` surface the real error).
+/// This keeps the user's toolchain in lock-step with whatever Rust version
+/// tr-300's MSRV (Cargo.toml `rust-version`) currently requires.
+fn rustup_update_stable_best_effort() {
+    let rustup_present = std::process::Command::new("rustup")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !rustup_present {
+        return;
+    }
+    println!("Updating Rust toolchain (rustup update stable)…");
+    let _ = std::process::Command::new("rustup")
+        .args(["update", "stable"])
+        .status();
+}
+
 /// Execute the platform-specific update command.
 fn execute_update(method: &InstallMethod) -> Result<(), String> {
     let status = match method {
-        InstallMethod::Cargo => std::process::Command::new("cargo")
-            .args(["install", CRATE_NAME, "--force"])
-            .status()
-            .map_err(|e| format!("Failed to run cargo install: {}", e))?,
+        InstallMethod::Cargo => {
+            // Self-update via `cargo install` requires Rust ≥ tr-300's MSRV
+            // (currently 1.95). If rustup is available, refresh stable first
+            // so the install never fails on an out-of-date toolchain.
+            rustup_update_stable_best_effort();
+            std::process::Command::new("cargo")
+                .args(["install", CRATE_NAME, "--force"])
+                .status()
+                .map_err(|e| format!("Failed to run cargo install: {}", e))?
+        }
         InstallMethod::Installer => {
             #[cfg(windows)]
             {

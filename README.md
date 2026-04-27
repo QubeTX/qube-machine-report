@@ -43,7 +43,11 @@ Download the latest MSI installer from the [Releases page](https://github.com/Qu
 
 ### Cargo
 
+Requires Rust **1.95.0 or later** (run `rustup update stable` if needed —
+older toolchains will fail with `rustc … is not supported by … tr-300`):
+
 ```bash
+rustup update stable
 cargo install tr-300
 ```
 
@@ -176,7 +180,7 @@ To remove these additions, run `tr300 --uninstall`.
 ## Building from Source
 
 Requirements:
-- Rust 1.70 or later
+- Rust 1.95.0 or later (`rustup update stable`)
 - Cargo
 
 ```bash

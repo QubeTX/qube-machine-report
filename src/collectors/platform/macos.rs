@@ -209,6 +209,7 @@ fn get_gpus_fast() -> Vec<String> {
     gpus
 }
 
+#[allow(dead_code)]
 fn get_gpus() -> Vec<String> {
     get_display_info().0
 }
@@ -277,6 +278,7 @@ fn get_shell() -> Option<String> {
 }
 
 /// Get display resolution
+#[allow(dead_code)]
 fn get_display_resolution() -> Option<String> {
     get_display_info().1
 }

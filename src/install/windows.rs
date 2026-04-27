@@ -288,12 +288,10 @@ fn remove_if_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
                 for ch in line.chars() {
                     match ch {
                         '{' => brace_depth += 1,
-                        '}' => {
-                            if brace_depth > 0 {
-                                brace_depth -= 1;
-                                if brace_depth == 0 {
-                                    skip_if_block = false;
-                                }
+                        '}' if brace_depth > 0 => {
+                            brace_depth -= 1;
+                            if brace_depth == 0 {
+                                skip_if_block = false;
                             }
                         }
                         _ => {}

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.1] - 2026-04-27
+
+### Changed
+- **MSRV bumped to Rust 1.95.0.** The GitHub Actions stable toolchain rolled to
+  1.95.0 on 2026-04-14, which reclassified `std::arch::x86::__cpuid` /
+  `std::arch::x86_64::__cpuid` as safe-to-call. We drop the `unsafe { … }`
+  wrappers in `src/collectors/cpu.rs` and `src/collectors/platform/windows.rs`
+  and pin `rust-version = "1.95"` in `Cargo.toml` so older toolchains get a
+  clear error instead of a confusing E0133 build failure. Run
+  `rustup update stable` before `cargo install tr-300`.
+- **Self-update auto-refreshes Rust** when invoked via the cargo path
+  (`tr300 --update` against a `cargo install`-placed binary). If `rustup` is
+  on PATH we run `rustup update stable` first so the subsequent
+  `cargo install tr-300 --force` always meets the current MSRV. Best-effort:
+  no rustup → no-op, error → non-fatal. (`src/update.rs`)
+
+### Fixed
+- **CI green again on Rust 1.95.** The 1.95 toolchain promoted several lints
+  to warnings that fail under our `RUSTFLAGS="-D warnings"` policy. Cleaned up
+  15 sites: `clippy::collapsible_if` (×6 in `src/install/unix.rs`),
+  `clippy::collapsible_match` (×1 in `src/install/windows.rs`),
+  `unused_unsafe` (×4, `__cpuid` callsites), `unused_mut` (×3 in
+  `src/collectors/os.rs` — refactored to `#[cfg(target_os = "windows")]`
+  shadow), `clippy::unnecessary_lazy_evaluations` (×1 in
+  `src/collectors/cpu.rs` — Windows-only `or_else` is now cfg-gated),
+  `clippy::double_ended_iterator_last` (×1 in `src/collectors/network.rs`),
+  `unused_variables` (×1 in `src/collectors/platform/linux.rs`), and
+  `dead_code` (×3, gated `PS_INSTALLER` and `#[allow(dead_code)]` on two
+  unused thin wrappers in `src/collectors/platform/macos.rs`). No behavior
+  change.
+
 ## [3.11.0] - 2026-04-27
 
 ### Added

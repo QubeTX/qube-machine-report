@@ -292,7 +292,7 @@ fn get_dns_servers_linux() -> Vec<String> {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("DNS Servers:") {
-                    if let Some(ips) = line.split(':').last() {
+                    if let Some(ips) = line.split(':').next_back() {
                         for ip in ips.split_whitespace() {
                             if !servers.contains(&ip.to_string()) {
                                 servers.push(ip.to_string());

@@ -22,9 +22,9 @@ pub struct OsInfo {
 
 /// Collect OS information
 pub fn collect() -> Result<OsInfo> {
-    let mut name = System::name().unwrap_or_else(|| "Unknown".to_string());
-    let mut version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
-    let mut kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
+    let name = System::name().unwrap_or_else(|| "Unknown".to_string());
+    let version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
+    let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
     let hostname = System::host_name().unwrap_or_else(|| "Unknown".to_string());
     let architecture = std::env::consts::ARCH.to_string();
     let uptime_seconds = System::uptime();
@@ -35,13 +35,11 @@ pub fn collect() -> Result<OsInfo> {
     // Reference: Microsoft Q&A: "Windows 11 ProductName in registry"
     // https://learn.microsoft.com/en-us/answers/questions/555857/windows-11-product-name-in-registry
     #[cfg(target_os = "windows")]
-    if let Some((win_name, win_version, win_kernel)) =
-        crate::collectors::platform::windows::get_os_info_from_registry()
-    {
-        name = win_name;
-        version = win_version;
-        kernel_version = win_kernel;
-    }
+    let (name, version, kernel_version) =
+        match crate::collectors::platform::windows::get_os_info_from_registry() {
+            Some((win_name, win_version, win_kernel)) => (win_name, win_version, win_kernel),
+            None => (name, version, kernel_version),
+        };
 
     Ok(OsInfo {
         name,
