@@ -1,35 +1,54 @@
-﻿# Agent Guide (AGENTS.md)
+# Agent Guide (AGENTS.md)
 
 This file is the working guide for AI coding agents in this repository.
 Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
-Last verified against source: 2026-02-09
+Last verified against source: 2026-04-27
 
 ## Project Snapshot
 
-- Project: TR-300 (Rust rewrite of TR-200)
+- Project: TR-300, the Rust successor to TR-200 Machine Report
 - Cargo package name: `tr-300`
-- Current version: `3.3.0` (`Cargo.toml`)
+- Library import path: `tr_300`
+- Current version: `3.9.0` (`Cargo.toml`)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
 - License: PolyForm-Noncommercial-1.0.0
 - Repo: `https://github.com/QubeTX/qube-machine-report`
+- Release tooling: cargo-dist `0.31.0`
+
+The crate exposes both:
+- a binary in `src/main.rs`
+- a library in `src/lib.rs`, including `generate_report()`, `generate_report_with_config()`, `format_bytes()`, `CollectMode`, `SystemInfo`, `Config`, `AppError`, and `Result`
+
+Keep both surfaces working when refactoring.
 
 ## Repository Map
 
 ```text
+.claude/
+  settings.local.json         # Claude Code local output style setting
+
+.github/workflows/
+  release.yml                 # cargo-dist generated release workflow
+
+man/
+  tr300.1                     # generated man page
+
 src/
-  main.rs                    # CLI entrypoint
-  lib.rs                     # Public library exports
-  config.rs                  # Config flags, widths, box char sets
-  error.rs                   # AppError + Result alias
-  report.rs                  # Table/JSON generation
+  cli.rs                      # clap CLI definition shared by main.rs and build.rs
+  main.rs                     # binary entrypoint and action dispatch
+  lib.rs                      # public library exports and helpers
+  config.rs                   # config flags, widths, box char sets
+  error.rs                    # AppError + Result alias
+  report.rs                   # table/JSON/markdown report generation
+  update.rs                   # self-update flow
   render/
     mod.rs
-    table.rs                 # Table renderer + ReportBuilder
-    bar.rs                   # Percent bar renderer
+    table.rs                  # fixed-width table renderer
+    bar.rs                    # percent bar renderer
   collectors/
-    mod.rs                   # SystemInfo aggregate + collection pipeline
+    mod.rs                    # SystemInfo aggregate + parallel collection pipeline
     os.rs
     cpu.rs
     memory.rs
@@ -43,76 +62,110 @@ src/
       windows.rs
   install/
     mod.rs
-    prompt.rs                # Interactive uninstall menu/confirm
-    unix.rs                  # bash/zsh profile edits
-    windows.rs               # PowerShell profile edits
+    prompt.rs                 # interactive uninstall menu/confirm
+    unix.rs                   # bash/zsh profile edits
+    windows.rs                # PowerShell profile edits
 
 tests/
   integration.rs
 
-.github/workflows/
-  release.yml                # cargo-dist generated release workflow
-
 wix/
-  main.wxs                   # MSI packaging template
+  main.wxs                    # MSI packaging template
 
-TR200-OLD/                   # Legacy bash/PowerShell implementation
+build.rs                      # generates man/tr300.1 via clap_mangen
+Cargo.toml                    # package metadata, dependencies, cargo-dist config
+CHANGELOG.md                  # release history
+README.md                     # user-facing docs
+TR200-OLD/                    # legacy bash/PowerShell implementation
 ```
 
 ## How The Program Works
 
 ### Runtime flow (`src/main.rs`)
 
-1. Parse CLI args with `clap`.
-2. If `--install`, run install path and exit.
-3. Else if `--uninstall`, run interactive uninstall path and exit.
-4. Build `Config` from flags (`--ascii`, `--json`, `--no-color`, `--title`).
+1. Parse CLI args from `src/cli.rs` with `clap`.
+2. Build `Config` up front so action commands can honor output/color settings.
+3. Apply `--ascii` or automatic ASCII fallback when Unix locale is not UTF-8.
+4. Apply `--json`, `--no-color`, and custom `--title`.
 5. On Windows terminals, set console output code page to UTF-8.
-6. Collect system data via `SystemInfo::collect()`.
-7. Render output with `report::generate(...)` as table or JSON.
-8. Print to stdout.
+6. Handle action flags with early exit:
+   - `--update`
+   - `--install`
+   - `--uninstall`
+7. Choose collection mode:
+   - `CollectMode::Fast` when `--fast` is set
+   - `CollectMode::Full` otherwise
+8. Collect system data with `SystemInfo::collect_with_mode(mode)`.
+9. Render output with `report::generate(...)`.
+10. Print to stdout.
+11. In full table mode only, auto-save a markdown report to Downloads and print the path or warning to stderr.
+
+Important ordering rule:
+- Do not print Unicode box-drawing characters before `is_utf8_locale()` and Windows UTF-8 setup have run.
+
+### CLI definition (`src/cli.rs`)
+
+`src/cli.rs` is included by both:
+- `src/main.rs`
+- `build.rs`
+
+Because `build.rs` uses `include!("src/cli.rs")`, `src/cli.rs` must use normal `//` comments rather than inner doc comments like `//!`.
+
+Current supported flags:
+- `--ascii` -> ASCII table + `#`/`.` bars
+- `--json` -> JSON output
+- `--install` -> install alias + shell auto-run block
+- `--uninstall` -> interactive uninstall path
+- `--update` -> self-update from GitHub releases
+- `-t, --title <TITLE>` -> custom title
+- `--no-color` -> disables update-flow ANSI styling
+- `--fast` -> skip slow collectors for quick auto-run startup
+
+There are no subcommands; behavior is flag-based.
 
 ### Data pipeline (`src/collectors/mod.rs`)
 
-`SystemInfo::collect()` orchestrates:
+`SystemInfo::collect_with_mode(mode)` runs collectors in parallel with `std::thread::scope`.
+
+The scoped collector threads are:
 - `os::collect()`
-- `cpu::collect()`
+- `cpu::collect(mode)`
 - `memory::collect()`
 - `disk::collect()`
-- `network::collect_network_info()`
-- `session::collect()`
-- `platform::collect()` (OS-specific enrichments)
+- `network::collect_network_info(mode)`
+- `session::collect(mode)`
+- `platform::collect(mode)`
 
-Then it:
-- Aggregates disk usage (prefer root `/` or `C:` volume, else non-removable sum, else first disk fallback).
-- Computes percentages for disk and memory.
-- Derives hypervisor string (`platform virtualization` or `Bare Metal`).
-- Builds final `SystemInfo` struct.
+Thread panic behavior:
+- Core collector thread panics are converted to `AppError::SystemInfo`.
+- Platform collector panics fall back to `PlatformInfo::default()`.
+
+After collection it:
+- Aggregates disk usage by preferring root `/` or `C:` volume, then non-removable disk sum, then first-disk fallback.
+- Computes disk and memory percentages.
+- Derives hypervisor string from platform virtualization.
+- Uses `Bare Metal` as the full-mode fallback when no virtualization signal exists.
+- Leaves hypervisor as `None` in fast mode when not cheaply known.
+- Builds final `SystemInfo` with the collection mode stored in `mode`.
+
+### Fast mode (`CollectMode::Fast`)
+
+`--fast` is intended for shell startup auto-run and avoids slow subprocess-heavy checks where possible.
+
+Install profile auto-run uses `tr300 --fast`; the `report` alias still runs full mode. Exact skipped work varies by platform collector, so check `src/collectors/platform/{linux,macos,windows}.rs` before changing fast-mode behavior.
 
 ### Rendering flow (`src/report.rs`)
 
-- `Config::format == Table`: render TR-200-style table.
-- `Config::format == Json`: render JSON string manually (without `serde`).
+- `Config::format == OutputFormat::Table`: render TR-200-style table.
+- `Config::format == OutputFormat::Json`: render manually formatted JSON.
+- Full table mode auto-save calls `save_markdown_report(info)`.
 
 Table rendering is fixed width:
 - Label column: 12 chars
 - Data column: 32 chars
 - Total row width with borders/spaces: 51 chars
 
-## CLI Reference
-
-Current supported flags:
-
-- `--ascii` -> ASCII table + `#`/`.` bars
-- `--json` -> JSON output
-- `--install` -> install alias + auto-run profile block
-- `--uninstall` -> interactive uninstall menu
-- `-t, --title <TITLE>` -> custom title
-- `--no-color` -> currently sets config only (no color styling currently applied)
-
-Notes:
-- If both `--install` and `--uninstall` are passed, `--install` wins because it is checked first.
-- There are no subcommands; all behavior is flag-based.
+`src/render/table.rs` uses `unicode-width` for display width. Use `UnicodeWidthStr::width()` or `UnicodeWidthChar::width()` instead of `.chars().count()` for visible terminal alignment.
 
 ## Output Format Details
 
@@ -120,16 +173,20 @@ Notes:
 
 Rendered order:
 
-1. Header block (top border, subtitle lines)
+1. Header block
+   - top border
+   - title
+   - subtitle
+   - top divider
 2. OS section
    - `OS`
    - `KERNEL`
    - `ARCH`
 3. Network section
    - `HOSTNAME`
-   - `MACHINE IP`
+   - optional `MACHINE IP`
    - `CLIENT  IP` (`Not connected` if none)
-   - `DNS  IP 1..5` (up to 5 rows)
+   - `DNS  IP 1..5` rows
    - `USER`
 4. CPU section
    - `PROCESSOR`
@@ -137,33 +194,33 @@ Rendered order:
    - GPU rows:
      - 1 GPU: `GPU`
      - 2-3 GPUs: `GPU 1`, `GPU 2`, `GPU 3`
-     - 4+ GPUs: single `GPUs` row (comma-separated)
-   - `HYPERVISOR`
+     - 4+ GPUs: single `GPUs` row
+   - optional `HYPERVISOR`
    - `CPU FREQ`
-   - `LOAD  1m`, `LOAD  5m`, `LOAD 15m` bars
+   - `LOAD  1m`, `LOAD  5m`, `LOAD 15m` bars when available
 5. Disk section
    - `VOLUME`
    - `DISK USAGE` bar
-   - `ZFS HEALTH` only when available (currently not set)
+   - `ZFS HEALTH` only when available
 6. Memory section
    - `MEMORY`
    - `USAGE` bar
 7. Session section
-   - `LAST LOGIN`
+   - optional `LAST LOGIN`
    - optional extra row with blank label for `last_login_ip`
    - `UPTIME`
    - optional rows: `SHELL`, `TERMINAL`, `LOCALE`, `BATTERY`
 8. Footer
 
 Renderer behavior:
-- Strings are padded/truncated to fixed width with `...` ellipsis.
+- Strings are padded/truncated to fixed display width with `...` ellipsis.
 - Header text is centered and truncated when needed.
-- Footer is single-line in current output (`render_footer()` directly, no extra bottom divider call).
+- Footer is single-line in current output via `render_footer()`.
 
 Bar behavior (`src/render/bar.rs`):
-- Percent clamped to `0..100`.
-- Filled cells computed with rounded value of `(percent / 100) * width`.
-- Table bars use width 32 (data width).
+- Percent is clamped to `0..100`.
+- Filled cells are rounded from `(percent / 100) * width`.
+- Table bars use width 32.
 
 ### JSON output shape
 
@@ -175,9 +232,11 @@ Top-level keys:
 - `memory`
 - `session`
 
-Important implementation detail:
-- JSON is manually formatted with `format!` + `escape_json(...)`, not `serde`.
-- Optional values are emitted as either string literals or `null`.
+Important implementation details:
+- JSON is manually formatted with `format!`, not serde serialization.
+- `escape_json(...)` must escape control characters `0x00..0x1F` as `\u00xx`.
+- Optional values are emitted as string literals or `null`.
+- `--update --json` is a separate JSON shape implemented in `src/update.rs`.
 
 ## Collector Behavior By Module
 
@@ -185,45 +244,48 @@ Important implementation detail:
 
 Uses `sysinfo::System` static getters for:
 - OS name/version
-- Kernel version
-- Hostname
-- Uptime seconds
+- kernel version
+- hostname
+- uptime seconds
 
-Architecture defaults to `std::env::consts::ARCH`.
+Architecture defaults to `std::env::consts::ARCH` unless platform collection provides a richer value.
 
 ### `cpu.rs`
 
-- Refreshes CPU info twice with a 200ms sleep for stable usage values.
-- Brand/frequency from first CPU entry.
-- Logical cores from `sys.cpus().len()`.
-- Physical cores from `physical_core_count` (fallback logical).
+- Full mode refreshes CPU info with a short delay for stable usage values.
+- Brand/frequency come from the first CPU entry.
+- Logical cores come from `sys.cpus().len()`.
+- Physical cores come from `physical_core_count`, with logical cores as fallback.
 - Sockets:
   - Linux: parse `lscpu`
   - Windows: PowerShell CIM query
   - macOS: `sysctl -n hw.packages`
   - fallback: `1`
 - Load averages:
-  - Unix: `/proc/loadavg` parse first, then `libc::getloadavg`, converted to percent of cores
-  - Windows: uses current CPU usage for 1m/5m/15m
+  - Unix: `/proc/loadavg` first, then `libc::getloadavg`, converted to percent of cores
+  - Windows: current CPU usage for 1m/5m/15m style fields
 
 ### `memory.rs`
 
-Uses `sysinfo` memory/swap counters. Primary report uses RAM total/used/percent.
+Uses `sysinfo` memory/swap counters. The main report surfaces RAM total/used/percent.
 
 ### `disk.rs`
 
 Uses `sysinfo::Disks`:
-- collects mount point, filesystem, total/available/used, removable flag, name
-- skips disks with `total == 0`
+- mount point
+- filesystem
+- total/available/used
+- removable flag
+- name
 
-Aggregation into report uses logic in `collectors/mod.rs`.
+Skips disks with `total == 0`.
 
 ### `network.rs`
 
 Machine IP:
-- Windows: PowerShell `Get-NetIPAddress` fallback to `ipconfig`
-- Linux: `hostname -I` fallback to `ip route get 1`
-- macOS: `ipconfig getifaddr` on common interfaces + route fallback
+- Windows: PowerShell `Get-NetIPAddress`, fallback to `ipconfig`
+- Linux: `hostname -I`, fallback to `ip route get 1`
+- macOS: `ipconfig getifaddr` on common interfaces, then route fallback
 
 Client IP:
 - from `SSH_CLIENT` or `SSH_CONNECTION`
@@ -234,7 +296,7 @@ DNS servers:
 - macOS: `scutil --dns`
 - de-duplicated, max 5
 
-Also contains legacy interface collector (`collect()`) using `sysinfo::Networks`.
+The module also contains legacy network interface collection using `sysinfo::Networks`.
 
 ### `session.rs`
 
@@ -244,7 +306,8 @@ Collects:
 - shell
 - cwd
 - terminal
-- last login (+ optional login IP)
+- last login
+- optional login IP
 
 Last-login strategy:
 - Linux: `lastlog2`, fallback `lastlog`, fallback `last`
@@ -253,15 +316,20 @@ Last-login strategy:
 
 ### `collectors/platform/*`
 
-Adds OS-specific enrichments (some not currently rendered in table):
+Adds OS-specific enrichments, some not currently rendered:
 - virtualization/hypervisor signals
 - GPU names
 - architecture
-- shell + terminal details
+- shell and terminal details
 - locale
 - battery
 - display resolution
 - desktop/display server/edition/codename/boot mode metadata
+
+Platform implementations:
+- `linux.rs`: `/proc`, `lscpu`, `lspci`, `/sys`, ZFS commands where available
+- `macos.rs`: `sysctl`, `scutil`, `pmset`, `ioreg`
+- `windows.rs`: WMI via `wmi`, Win32 APIs, registry, PowerShell fallbacks
 
 ## Install/Uninstall System
 
@@ -274,18 +342,18 @@ Entry points in `src/install/mod.rs`:
 ### Interactive uninstall (`--uninstall`)
 
 Prompt options:
-- `1`: profile-only cleanup
-- `2`: complete uninstall (profile + binary)
-- `0`: cancel
+- profile-only cleanup
+- complete uninstall (profile + binary)
+- cancel
 
-Complete uninstall requires explicit y/n confirmation and shows binary path (and Windows parent dir when applicable).
+Complete uninstall requires explicit confirmation and shows the binary path before deletion. Do not bypass the prompt unless implementing a clearly requested non-interactive variant.
 
 ### Unix install (`src/install/unix.rs`)
 
 Profiles touched:
-- `~/.bashrc` (if exists)
-- `~/.zshrc` (if exists)
-- if neither modified and `.bashrc` missing, creates `.bashrc`
+- `~/.bashrc` when present
+- `~/.zshrc` when present
+- creates `.bashrc` if neither shell profile exists
 
 Injected block:
 
@@ -294,21 +362,22 @@ Injected block:
 alias report='tr300'
 
 # Auto-run on interactive shell
-if [[ $- == *i* ]]; then
-    tr300
-fi
+case "$-" in *i*)
+    tr300 --fast
+    ;; esac
 # End TR-300
 ```
 
 Behavior:
 - removes existing TR-300 block first
 - removes known TR-100/TR-200 legacy blocks
+- uses POSIX-compatible `case "$-"` rather than bash-only `[[ ... ]]`
 - idempotent re-install behavior
 
 ### Windows install (`src/install/windows.rs`)
 
 Profile target:
-- PowerShell `$PROFILE` path (queried via `powershell -NoProfile -Command $PROFILE`)
+- PowerShell `$PROFILE` path queried via PowerShell
 - creates profile directory if needed
 
 Injected block:
@@ -319,27 +388,46 @@ Set-Alias -Name report -Value tr300
 
 # Auto-run on interactive shell
 if ($Host.Name -eq 'ConsoleHost') {
-    tr300
+    tr300 --fast
 }
 # End TR-300
 ```
 
 Behavior:
 - removes existing TR-300 block first
-- removes known TR-100/TR-200 legacy blocks (including delimited TR-200 config markers)
+- removes known TR-100/TR-200 legacy blocks
+- complete uninstall deletes the binary and attempts to remove an empty parent directory when path contains `tr300`
 
-Complete uninstall on Windows additionally:
-- deletes binary
-- attempts to remove empty parent dir when path contains `tr300`
+## Self-Update System
+
+`--update` is implemented in `src/update.rs`.
+
+Behavior:
+- fetches latest release from `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest`
+- uses `ureq` with a 15 second timeout
+- sends `User-Agent: tr300/<current version>`
+- strips leading `v` from release tags
+- compares semver-like numeric components
+- detects install method from current executable path:
+  - `.cargo/.../bin/...` -> `cargo install tr-300 --force`
+  - otherwise -> shell or PowerShell installer from the latest GitHub release
+
+JSON mode:
+- `tr300 --update --json` prints a single JSON object
+- fields include `action`, `success`, `message`, `current_version`, `latest_version`, and `update_available` when available
+
+Exit codes:
+- `0`: success or already current
+- `2`: failure
 
 ## Distribution And Release Methods
 
 ### Packaging model
 
-Release automation uses `cargo-dist` + GitHub Actions.
+Release automation uses cargo-dist and GitHub Actions.
 
 `Cargo.toml` (`[workspace.metadata.dist]`):
-- `cargo-dist-version = "0.30.3"`
+- `cargo-dist-version = "0.31.0"`
 - `ci = "github"`
 - `installers = ["shell", "powershell", "msi"]`
 - targets:
@@ -357,14 +445,15 @@ Release automation uses `cargo-dist` + GitHub Actions.
 ### CI workflow (`.github/workflows/release.yml`)
 
 High-level job flow:
-1. `plan` (dist plan/host manifest)
-2. `build-local-artifacts` (matrix builds)
+1. `plan`
+2. `build-local-artifacts`
 3. `build-global-artifacts`
-4. `host` (upload + release)
+4. `host`
 5. `announce`
 
-Trigger:
-- push tags matching semver-like pattern (`**[0-9]+.[0-9]+.[0-9]+*`)
+Triggers:
+- pull requests run cargo-dist planning
+- pushes of semver-like tags matching `**[0-9]+.[0-9]+.[0-9]+*` publish releases
 
 ### Installer outputs
 
@@ -375,19 +464,33 @@ Trigger:
 ### MSI specifics (`wix/main.wxs`)
 
 - Product name: `tr-300`
+- Manufacturer: `Emmett S`
 - Install scope: `perMachine`
 - Default folder under Program Files (`tr-300` with `bin/tr300.exe`)
 - Optional PATH feature included in MSI feature tree
-- Upgrade code/path GUID are defined in `Cargo.toml` metadata
+- Upgrade/path GUIDs are defined in `Cargo.toml` metadata
 
-### Release checklist (current process)
+### Release checklist
 
-1. Update version in `Cargo.toml`
-2. Update `CHANGELOG.md`
-3. Run checks (`cargo test`, `cargo clippy -- -D warnings`, `cargo fmt -- --check`)
-4. Commit (`release: vX.Y.Z`)
-5. Tag (`vX.Y.Z`)
-6. Push commits and tags
+1. Update version in `Cargo.toml`.
+2. Update `CHANGELOG.md`.
+3. Run checks:
+   - `cargo test`
+   - `cargo clippy -- -D warnings`
+   - `cargo fmt -- --check`
+4. Commit with message `release: vX.Y.Z - <summary>`.
+5. Tag with `git tag vX.Y.Z`.
+6. Push commit and tag:
+   - `git push`
+   - `git push --tags`
+
+After changing `[workspace.metadata.dist]`, regenerate the workflow with:
+
+```bash
+dist init
+```
+
+The binary is `dist`, not `cargo dist`.
 
 ## Development Commands
 
@@ -399,7 +502,7 @@ cargo build --release
 # Test
 cargo test
 cargo test --lib
-cargo test --doc
+cargo test --test integration
 cargo test <test_name>
 
 # Lint/format
@@ -410,9 +513,13 @@ cargo fmt -- --check
 
 # Run
 cargo run
+cargo run -- --fast
 cargo run -- --ascii
 cargo run -- --json
 cargo run -- --title "MY TITLE"
+cargo run -- --no-color
+cargo run -- --update
+cargo run -- --update --json
 cargo run -- --install
 cargo run -- --uninstall
 ```
@@ -438,9 +545,17 @@ Core:
 - `crossterm = "0.28"`
 - `thiserror = "2.0"`
 - `dirs = "5.0"`
+- `chrono = "0.4"`
+- `unicode-width = "0.2"`
+- `ureq = "2"` (tls, json)
+- `serde_json = "1"`
+
+Build:
+- `clap = "4.5"` (derive, env)
+- `clap_mangen = "0.2"`
 
 Platform-specific:
-- Windows: `wmi = "0.14"`, `winapi = "0.3"`
+- Windows: `wmi = "0.14"`, `serde = "1"`, `winapi = "0.3"`
 - Unix: `libc = "0.2"`, `users = "0.11"`
 
 Dev:
@@ -450,42 +565,61 @@ Dev:
 ## Tests
 
 `tests/integration.rs` currently validates:
-- help/version flags
-- default output contains main title
-- ascii mode output
-- json mode output structure keys
+- `--help`
+- `--version`
+- default output contains main title/subtitle
+- ASCII mode output
+- JSON mode output structure keys
 - custom title injection
+- `--no-color`
 - expected key report fields
+
+For markdown-only guide edits, Rust tests are not required. For source changes, run at least the affected test scope, and prefer `cargo test` before release work.
 
 ## Known Caveats / Drift Risks
 
-- `Config` fields `use_colors`, `show_network`, `show_disks`, `width`, and `compact` exist but are not fully wired into report rendering/section toggling yet.
-- `zfs_health` is currently always `None` in `SystemInfo::collect()` (explicit TODO).
-- Some historical docs/examples still mention older behaviors/markers; source code is authoritative.
-- Core data collection still relies on OS commands for several fields (network/session/platform), not purely `sysinfo`.
+- `Config` fields `show_network`, `show_disks`, `width`, and `compact` exist but are not fully wired into report rendering/section toggling.
+- `use_colors` currently affects update-flow styling, not the normal table renderer.
+- `zfs_health` is currently always `None` in `SystemInfo::collect()` despite platform collectors containing ZFS-related helpers.
+- JSON report output is manual; schema changes require careful escaping and integration test updates.
+- `--install`, `--uninstall`, and `--update` have real user-environment side effects. Treat them carefully in tests and automation.
+- Some historical docs/examples may mention older behaviors; source code is authoritative.
+- PowerShell can be unavailable or restricted on some Windows environments; Windows collectors and installers should retain graceful fallbacks.
 
 ## Extension Patterns
 
 ### Add a new report field
 
-1. Add field to `SystemInfo` (`src/collectors/mod.rs`).
-2. Collect/derive value in `SystemInfo::collect()`.
-3. Add table row in `generate_table()` (`src/report.rs`).
-4. Add JSON field in `generate_json()` (`src/report.rs`).
-5. Add/adjust integration tests in `tests/integration.rs`.
+1. Add field to `SystemInfo` in `src/collectors/mod.rs`.
+2. Collect or derive the value in `SystemInfo::collect_with_mode()`.
+3. Preserve `CollectMode::Fast` expectations and avoid slow commands in auto-run paths.
+4. Add table row in `generate_table()` (`src/report.rs`) if user-visible.
+5. Add JSON field in `generate_json()` (`src/report.rs`) if machine-readable output should expose it.
+6. Add or adjust integration tests in `tests/integration.rs`.
 
 ### Add or change CLI behavior
 
-1. Update `Cli` struct in `src/main.rs`.
-2. Update config wiring in `main()`.
-3. Implement behavior in `run_report` or install/uninstall handlers.
-4. Add tests for flag behavior.
+1. Update `Cli` in `src/cli.rs`.
+2. Keep comments in `src/cli.rs` compatible with `include!` from `build.rs`.
+3. Update config/action dispatch in `src/main.rs`.
+4. Update man page generation expectations if needed.
+5. Add integration coverage for flag behavior.
+6. Update README, CLAUDE.md, and AGENTS.md when user-visible behavior changes.
 
 ### Add platform-specific detail
 
 1. Extend `PlatformInfo` in `src/collectors/platform/mod.rs`.
-2. Implement value for each supported OS file (`linux.rs`, `macos.rs`, `windows.rs`) with graceful fallback.
-3. Surface it in table/json if user-visible.
+2. Implement graceful collection for Linux, macOS, and Windows.
+3. Make fast-mode behavior explicit.
+4. Surface in table/JSON only when the value is useful and reliable.
+5. Prefer fallbacks over hard failures for optional enrichments.
+
+### Change table rendering
+
+1. Preserve fixed TR-200 layout unless the user explicitly requests a format change.
+2. Use display-width-aware truncation/padding from `unicode-width`.
+3. Keep ASCII mode equivalent to Unicode mode.
+4. Test with long strings and non-ASCII text when alignment changes.
 
 ## Legacy Reference
 
@@ -494,6 +628,7 @@ Dev:
 ## Maintenance Rule
 
 When editing this guide:
-- update `AGENTS.md` and `CLAUDE.md` in the same change
+- update `AGENTS.md` and `CLAUDE.md` in the same change when both contain the affected fact
 - keep statements tied to current source code, not older README wording
-
+- update the "Last verified against source" date after source verification
+- keep `.claude/settings.local.json` unchanged unless intentionally changing Claude Code local behavior

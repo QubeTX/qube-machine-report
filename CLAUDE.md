@@ -42,7 +42,7 @@ cargo run -- --update            # Self-update from GitHub releases
 
 - **`src/cli.rs` must use `//` comments, not `//!`** — `build.rs` uses `include!("src/cli.rs")` to generate man pages via `clap_mangen`, and inner doc comments fail in that context.
 - **Table rendering uses `unicode-width`** for display column calculation. Use `UnicodeWidthStr::width()` instead of `.chars().count()` in `render/table.rs`.
-- **Fixed-width columns** match TR-200: 12-char labels, 32-char data, 52 total width including borders.
+- **Fixed-width columns** match TR-200: 12-char labels, 32-char data, 51 total width including borders.
 - **Thread panics are caught** — collector threads use `.unwrap_or_else()` instead of `.unwrap()` on join handles, returning errors gracefully.
 - **Shared utility** — `format_bytes()` lives in `src/lib.rs`; the per-module methods in `disk.rs`, `memory.rs`, `network.rs` delegate to it.
 - **JSON escaping** handles control characters (0x00-0x1F) via `\u00xx` encoding in `escape_json()` in `report.rs`.
