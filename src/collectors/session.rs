@@ -76,7 +76,7 @@ fn should_skip_last_login_on_platform() -> bool {
 fn get_username() -> String {
     #[cfg(unix)]
     {
-        users::get_current_username()
+        uzers::get_current_username()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| env::var("USER").unwrap_or_else(|_| "Unknown".to_string()))
     }

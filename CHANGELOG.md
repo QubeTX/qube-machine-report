@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.11.1] - 2026-04-27
 
+### Security
+- **Migrated off the unmaintained `users` crate** to its maintained fork
+  `uzers`. Clears three RustSec advisories that were flagged by `cargo audit`:
+  RUSTSEC-2025-0040 (`root` appended to group listings — vulnerability with
+  no upgrade available on the original crate), RUSTSEC-2023-0040
+  (unmaintained), and RUSTSEC-2023-0059 (unaligned read of
+  `*const *const c_char`). Drop-in API-compatible swap; the only callsite is
+  `users::get_current_username()` → `uzers::get_current_username()` in
+  `src/collectors/session.rs`. Unix-only dependency, so Windows is
+  unaffected.
+
 ### Changed
 - **MSRV bumped to Rust 1.95.0.** The GitHub Actions stable toolchain rolled to
   1.95.0 on 2026-04-14, which reclassified `std::arch::x86::__cpuid` /
