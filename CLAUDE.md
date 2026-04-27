@@ -6,8 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in the exact TR-200 format using Unicode box-drawing tables with bar graphs for resource usage.
 
-**Binary name:** `tr300`
+**Crate name:** `tr-300` (hyphenated — used by `cargo install tr-300` and as the library import path `tr_300`)
+**Binary name:** `tr300` (no hyphen — set via `[[bin]] name = "tr300"`)
 **Convenience alias:** `report` (created by `--install`)
+
+The crate exposes both a binary (`src/main.rs`) and a library (`src/lib.rs` with public `generate_report()`, `format_bytes()`, etc.) — keep both surfaces working when refactoring.
 
 ## Development Commands
 
@@ -16,12 +19,14 @@ cargo build                      # Debug build
 cargo build --release            # Release build
 cargo test                       # Run all tests (unit + integration + doc)
 cargo test --lib                 # Library tests only
+cargo test --test integration    # Integration tests (assert_cmd-based, in tests/integration.rs)
 cargo test <test_name>           # Single test by name
 cargo clippy -- -D warnings      # Lint (CI mode, warnings = errors)
 cargo fmt -- --check             # Check formatting
 cargo run -- --fast              # Quick run (skips slow collectors)
 cargo run -- --json              # JSON output
 cargo run -- --ascii             # ASCII fallback mode
+cargo run -- --update            # Self-update from GitHub releases
 ```
 
 ## Architecture
@@ -41,6 +46,8 @@ cargo run -- --ascii             # ASCII fallback mode
 - **Thread panics are caught** — collector threads use `.unwrap_or_else()` instead of `.unwrap()` on join handles, returning errors gracefully.
 - **Shared utility** — `format_bytes()` lives in `src/lib.rs`; the per-module methods in `disk.rs`, `memory.rs`, `network.rs` delegate to it.
 - **JSON escaping** handles control characters (0x00-0x1F) via `\u00xx` encoding in `escape_json()` in `report.rs`.
+- **UTF-8 / ASCII auto-fallback** — `main.rs::is_utf8_locale()` checks `LC_ALL`/`LC_CTYPE`/`LANG` on Unix and force-applies `--ascii` if none indicate UTF-8. Windows is treated as UTF-8 because `enable_utf8_console()` calls `SetConsoleOutputCP(65001)` when stdout is a terminal. Don't add code that prints box-drawing chars before this auto-detection runs.
+- **Markdown auto-save** — Manual full-mode runs (no `--fast`, no `--json`) call `report::save_markdown_report()` which writes to the user's Downloads folder and prints the path to stderr. `--fast` (auto-run) deliberately skips this to keep startup quiet and fast.
 
 ### Platform-Specific Code
 
@@ -79,6 +86,16 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 - **Unix/macOS** — `src/install/unix.rs` modifies `~/.bashrc` and/or `~/.zshrc`
 - **Windows** — `src/install/windows.rs` modifies PowerShell `$PROFILE`
+
+`--uninstall` is interactive (`src/install/prompt.rs`): the user picks `ProfileOnly`, `Complete` (also deletes the binary), or `Cancel`. The `Complete` path uses `find_binary_location()` + `confirm_complete_uninstall()` to show the path before deleting. Don't bypass the prompt unless the user has explicitly opted into a non-interactive variant.
+
+### Self-Update (`--update`)
+
+`src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and re-runs the install method that placed the binary:
+- `~/.cargo/bin/...` → `cargo install tr-300 --force`
+- Otherwise → re-pipes the shell or PowerShell installer URL
+
+`--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
 
 ## Release Process
 
