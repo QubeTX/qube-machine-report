@@ -68,6 +68,7 @@ pub struct SystemInfo {
     pub terminal: Option<String>,
     pub locale: Option<String>,
     pub battery: Option<String>,
+    pub encryption: Option<String>,
 
     /// The collection mode used
     pub mode: CollectMode,
@@ -186,6 +187,7 @@ impl SystemInfo {
             terminal: platform_info.terminal,
             locale: platform_info.locale,
             battery: platform_info.battery,
+            encryption: platform_info.encryption,
             mode,
             is_elevated: crate::is_elevated(),
         })

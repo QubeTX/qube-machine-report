@@ -49,7 +49,29 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
         .map(|c| c.brand().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
 
-    let frequency_mhz = cpus.first().map(|c| c.frequency()).unwrap_or(0);
+    // Frequency strategy:
+    //   1. Prefer CPUID leaf 16h (Intel "Processor Frequency Information") — EBX
+    //      returns the architectural max frequency. Reflects silicon-rated boost
+    //      and is unaffected by the OS power plan. 0 on AMD / older CPUs.
+    //   2. On Windows, fall back to CallNtPowerInformation(ProcessorInformation)
+    //      MaxMhz, which reflects the active power-plan ceiling (lower than
+    //      silicon boost when the user is on battery saver / balanced).
+    //   3. Finally fall back to sysinfo's static value (base clock from registry
+    //      on Windows; current frequency on Linux).
+    let sysinfo_mhz = cpus.first().map(|c| c.frequency()).unwrap_or(0);
+    let frequency_mhz = cpuid_16h_max_mhz()
+        .or_else(|| {
+            #[cfg(target_os = "windows")]
+            {
+                cpu_max_mhz_windows(logical_cores)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        })
+        .map(|v| v.max(sysinfo_mhz))
+        .unwrap_or(sysinfo_mhz);
 
     let usage_percent: f32 = if cpus.is_empty() {
         0.0
@@ -199,6 +221,100 @@ fn get_socket_count() -> usize {
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn get_socket_count() -> usize {
     1
+}
+
+// CPUID leaf 16h ("Processor Frequency Information") returns the silicon-rated
+// max frequency in EBX (MHz). Intel-only; AMD / older CPUs return 0 in EBX.
+// Reference: Intel SDM Vol. 2A, CPUID, Leaf 16H.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn cpuid_16h_max_mhz() -> Option<u64> {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::__cpuid;
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::__cpuid;
+
+    // SAFETY: __cpuid is supported on every x86/x86_64 chip we target. Leaf 0
+    // returns the maximum supported leaf in EAX; we only query 0x16 if EAX >= 0x16.
+    let max_leaf = unsafe { __cpuid(0) }.eax;
+    if max_leaf < 0x16 {
+        return None;
+    }
+    let info = unsafe { __cpuid(0x16) };
+    // EBX = silicon-rated max frequency in MHz. Returns 0 on AMD and on Intel
+    // hybrid chips (Meteor Lake / Lunar Lake / Arrow Lake) where Intel zeroed
+    // out leaf 16h in microcode.
+    if info.ebx > 0 {
+        Some(info.ebx as u64)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+fn cpuid_16h_max_mhz() -> Option<u64> {
+    None
+}
+
+// Windows: query CallNtPowerInformation for accurate per-core max frequency.
+// Returns MaxMhz across all logical processors (power-plan ceiling). Declared
+// as a manual `extern` because winapi-rs's `powrprof` bindings are not stable.
+#[cfg(target_os = "windows")]
+#[link(name = "powrprof")]
+extern "system" {
+    fn CallNtPowerInformation(
+        InformationLevel: u32,
+        InputBuffer: *mut std::ffi::c_void,
+        InputBufferLength: u32,
+        OutputBuffer: *mut std::ffi::c_void,
+        OutputBufferLength: u32,
+    ) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Default, Copy, Clone)]
+struct ProcessorPowerInformation {
+    number: u32,
+    max_mhz: u32,
+    current_mhz: u32,
+    mhz_limit: u32,
+    max_idle_state: u32,
+    current_idle_state: u32,
+}
+
+#[cfg(target_os = "windows")]
+fn cpu_max_mhz_windows(logical_cores: usize) -> Option<u64> {
+    if logical_cores == 0 {
+        return None;
+    }
+    const PROCESSOR_INFORMATION: u32 = 11;
+
+    let mut buf: Vec<ProcessorPowerInformation> =
+        vec![ProcessorPowerInformation::default(); logical_cores];
+    let buf_size = (logical_cores * std::mem::size_of::<ProcessorPowerInformation>()) as u32;
+
+    // SAFETY: CallNtPowerInformation(ProcessorInformation) takes no input buffer
+    // and writes one PROCESSOR_POWER_INFORMATION per logical processor into the
+    // output buffer. We size `buf` to `logical_cores` exactly.
+    let status = unsafe {
+        CallNtPowerInformation(
+            PROCESSOR_INFORMATION,
+            std::ptr::null_mut(),
+            0,
+            buf.as_mut_ptr() as *mut _,
+            buf_size,
+        )
+    };
+
+    if status != 0 {
+        return None;
+    }
+
+    // Use the maximum MaxMhz across all cores (power-plan ceiling).
+    buf.iter()
+        .map(|p| p.max_mhz as u64)
+        .max()
+        .filter(|&v| v > 0)
 }
 
 impl CpuInfo {

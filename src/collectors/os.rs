@@ -22,12 +22,26 @@ pub struct OsInfo {
 
 /// Collect OS information
 pub fn collect() -> Result<OsInfo> {
-    let name = System::name().unwrap_or_else(|| "Unknown".to_string());
-    let version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
-    let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
+    let mut name = System::name().unwrap_or_else(|| "Unknown".to_string());
+    let mut version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
+    let mut kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
     let hostname = System::host_name().unwrap_or_else(|| "Unknown".to_string());
     let architecture = std::env::consts::ARCH.to_string();
     let uptime_seconds = System::uptime();
+
+    // On Windows, the registry's ProductName is frozen at "Windows 10" even on
+    // Windows 11 — we detect Win11 by CurrentBuild >= 22000 and enrich the
+    // version with DisplayVersion ("24H2") and UBR for a more accurate display.
+    // Reference: Microsoft Q&A: "Windows 11 ProductName in registry"
+    // https://learn.microsoft.com/en-us/answers/questions/555857/windows-11-product-name-in-registry
+    #[cfg(target_os = "windows")]
+    if let Some((win_name, win_version, win_kernel)) =
+        crate::collectors::platform::windows::get_os_info_from_registry()
+    {
+        name = win_name;
+        version = win_version;
+        kernel_version = win_kernel;
+    }
 
     Ok(OsInfo {
         name,

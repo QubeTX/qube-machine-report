@@ -134,3 +134,16 @@ fn test_fast_mode_no_elevation_footer() {
         .stdout(predicate::str::contains("Run with sudo").not())
         .stdout(predicate::str::contains("Run as Administrator").not());
 }
+
+// --- v3.11.0 additions ---
+
+#[test]
+fn test_json_includes_encryption_key() {
+    // The `encryption` key is always present in JSON (nullable). On Windows
+    // hosts where BitLocker is readable it'll be a string; otherwise null.
+    tr300()
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"encryption\":"));
+}

@@ -78,3 +78,24 @@ Foundation scaffolding only — no collector changes. Verified:
 - Library tests: 15 passed (8 pre-existing + 7 new for elevation footer logic and schema version).
 
 Pending hardware verification (no collector changes that would affect them, but matrix entries should be stamped on next per-platform PR): macOS Intel/AS, all Linux distros, WSL2.
+
+### v3.11.0 — 2026-04-27
+
+Windows accuracy + BitLocker (PR #4). Verified on Windows 11 25H2 (build 26200.8246), unelevated user session:
+
+- **OS row** — was `Windows 11 (26200)`, now `Windows 11 25H2`. Registry-based detection working.
+- **Kernel row** — was `26200`, now `26200.8246` (full build with UBR).
+- **Last-login row** — was `Login tracking unavailable`, now real timestamp `Tue Apr 21 22:12` (matches uptime). WTSLogonTime returned 0 (console session quirk); fell back to GetTickCount64-derived boot time as designed.
+- **CPU freq row** — still `1.4 GHz` on this host (machine is power-plan throttled at 1400 MHz; CPUID leaf 16h returns 0 on Meteor Lake; CallNtPowerInformation correctly reports 1400 MaxMhz). Implementation correct; will show higher values on machines with full performance power plan or older Intel chips where leaf 16h works.
+- **Hypervisor row** — was `Hypervisor Present`, now `Bare Metal (Hyper-V/VBS)`. CPUID returned `Microsoft Hv` correctly; SMBIOS manufacturer disambiguated to "physical host with VBS active".
+- **Encryption row** — absent on this user's unelevated session (Win32_EncryptableVolume returned access-denied as expected). Footer hint covers the gap. Will surface on Win11 Device Encryption laptops and admin sessions.
+- **Architecture row** — `x86_64` (unchanged on x64 host running x64 binary; IsWow64Process2 implementation will activate on ARM64 hosts).
+- **Footer hint** — still renders correctly with the BitLocker mention; on hosts where the encryption row appears non-admin, the hint is harmless extra info about RDP login history (also admin-gated per E.6, deferred to PR #5).
+- Integration tests: 13 passed (1 new for JSON `encryption` key); library tests: 15 passed.
+
+Pending verification (deferred or platform-locked):
+- Windows 11 ARM64 host (C.2 IsWow64Process2 emulation annotation)
+- Windows 11 with admin shell (BitLocker full method visible; E.6 RDP history would land in PR #5)
+- Windows 11 with Device Encryption ON, unelevated (BitLocker row should appear)
+- Windows 11 in a real Hyper-V VM (CPUID `Microsoft Hv` + Microsoft Corp manufacturer → `Hyper-V`, not `Bare Metal (Hyper-V/VBS)`)
+- Windows running inside KVM / VMware / VirtualBox (CPUID-based hypervisor brand detection)

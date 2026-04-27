@@ -43,6 +43,10 @@ pub struct PlatformInfo {
     pub battery: Option<String>,
     /// System locale
     pub locale: Option<String>,
+    /// Disk encryption status — BitLocker on Windows, FileVault on macOS, LUKS on Linux.
+    /// Only populated when the data is readable in the current security context;
+    /// otherwise `None` (unelevated users may see this gap on certain configurations).
+    pub encryption: Option<String>,
 }
 
 /// Collect platform-specific information

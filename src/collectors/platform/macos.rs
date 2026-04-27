@@ -23,6 +23,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             display_resolution: None, // Skip system_profiler SPDisplaysDataType
             battery: get_battery(),   // Fast: pmset is quick
             locale: get_locale(),     // Fast: reads env var
+            encryption: None,         // FileVault detection deferred to PR #2
         };
     }
 
@@ -43,6 +44,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         display_resolution,
         battery: get_battery(),
         locale: get_locale(),
+        encryption: None, // FileVault detection deferred to PR #2
     }
 }
 

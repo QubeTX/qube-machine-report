@@ -149,6 +149,12 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     if let Some(ref battery) = info.battery {
         output.push_str(&renderer.render_row("BATTERY", battery));
     }
+    // Encryption status (BitLocker / FileVault / LUKS) only shown when we
+    // can actually read it; absence of the row is intentional on systems
+    // where elevation would be required (footer hint covers that case).
+    if let Some(ref enc) = info.encryption {
+        output.push_str(&renderer.render_row("ENCRYPTION", enc));
+    }
 
     // Simplified footer (single line, no bottom_divider)
     output.push_str(&renderer.render_footer());
@@ -256,7 +262,8 @@ fn generate_json(info: &SystemInfo) -> String {
     "shell": {},
     "terminal": {},
     "locale": {},
-    "battery": {}
+    "battery": {},
+    "encryption": {}
   }}
 }}"#,
         SCHEMA_VERSION,
@@ -300,6 +307,7 @@ fn generate_json(info: &SystemInfo) -> String {
         opt_str(&info.terminal),
         opt_str(&info.locale),
         opt_str(&info.battery),
+        opt_str(&info.encryption),
     )
 }
 

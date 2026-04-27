@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-04-27
+
+### Added
+- **Windows BitLocker status** — new `ENCRYPTION` row in the report when readable
+  on Win11 Device Encryption laptops. Renders as `BitLocker On (XTS-AES-256)` /
+  `BitLocker Off`. Queries `Win32_EncryptableVolume` in the
+  `ROOT\CIMV2\Security\MicrosoftVolumeEncryption` namespace. Try-and-degrade:
+  works non-admin on most Win11 hosts, gracefully absent on older Win10 / domain
+  configurations where the elevation footer hint covers the gap. JSON exposes
+  this under `session.encryption`. (E.5 — user priority)
+- **Windows last-login** now shows the actual session start instead of "Login
+  tracking unavailable". Uses `WTSQuerySessionInformation(WTSLogonTime /
+  WTSConnectTime)` for RDP / network logons, falling back to the boot time
+  (derived from `GetTickCount64`) for local console sessions where Windows
+  leaves the session timestamps at 0. (C.3)
+
+### Changed
+- **Windows OS detection** now reads `HKLM\SOFTWARE\Microsoft\Windows NT\
+  CurrentVersion` directly. Detects Windows 11 by `CurrentBuild >= 22000` (the
+  registry `ProductName` is frozen at "Windows 10" even on Win11) and enriches
+  the version with `DisplayVersion` (e.g. `25H2`) and `UBR` (Update Build
+  Revision) for kernel display like `26200.8246`. (C.1)
+- **Windows architecture detection** via `IsWow64Process2`. Returns the host
+  machine's architecture regardless of the running process's own architecture,
+  so an x64-built binary running on a Surface Pro X correctly reports
+  `aarch64 (x86_64 emulation)`. (C.2)
+- **CPU frequency** on Windows now combines three sources: CPUID leaf 16h
+  (silicon-rated boost on supported Intel CPUs), `CallNtPowerInformation`
+  (active power-plan ceiling, including any per-core MaxMhz reflecting current
+  performance state), and sysinfo's static base — using whichever is highest.
+  CPUID leaf 16h is empty on Intel hybrid chips (Meteor Lake / Lunar Lake / Arrow
+  Lake) where Intel zeroed it; CallNtPowerInformation reflects the user's active
+  power plan, which is honest about throttling (Battery Saver users see the real
+  ceiling, not the silicon max). (C.6)
+- **Hypervisor detection** now reads CPUID leaf `0x40000000` (12-byte vendor
+  string) for fast and reliable identification of KVM, Hyper-V, VMware,
+  VirtualBox, Xen, QEMU, Parallels, ACRN, and bhyve. On Win11 with VBS
+  (Virtualization-Based Security) enabled, where the kernel runs atop a thin
+  Hyper-V layer on real hardware, this is disambiguated against SMBIOS
+  manufacturer/model and reported as `Bare Metal (Hyper-V/VBS)` rather than
+  the misleading `Hyper-V`. (C.7)
+
+### Deferred to a follow-up PR
+- C.4 (DNS+IP via `GetBestInterfaceEx` + `GetAdaptersAddresses` for VPN-aware
+  default-route detection) and C.5 (Fast Startup uptime annotation via
+  `HiberbootEnabled` registry + `GetTickCount64`) are split into PR #4b. The
+  existing WMI-based network path and sysinfo uptime continue to work; these
+  are accuracy refinements, not bug fixes.
+
+### Internal
+- New `encryption: Option<String>` field on `PlatformInfo` and `SystemInfo` —
+  populated by Windows BitLocker query, reserved for future macOS FileVault
+  (PR #2 A-block) and Linux LUKS (PR #3 B-block). All existing platforms
+  initialize it to `None` so the cross-platform compile stays green.
+- Added integration test `test_json_includes_encryption_key` (13 integration
+  tests now passing).
+- New manual-test matrix entries in `TESTING.md` under the v3.11.0
+  verification log: live results from Windows 11 25H2 build 26200.8246
+  (unelevated user session) for every changed row, plus the pending-verification
+  list (Win11 ARM64, Win11 admin shell, Win11 with Device Encryption ON, real
+  Hyper-V VM, KVM / VMware / VirtualBox guests).
+- Per-PR documentation block (`F.1`–`F.5` from the development workflow) ran
+  in full: CHANGELOG (this entry), README features list, CLAUDE.md "Windows
+  accuracy patterns" arch notes with Microsoft Learn citations, Cargo.toml
+  bumped 3.10.0 → 3.11.0 (minor — additive `encryption` JSON key), auto memory
+  `project_tr300_overview.md` refreshed with the v3.11.0 deltas.
+
 ## [3.10.0] - 2026-04-27
 
 ### Added

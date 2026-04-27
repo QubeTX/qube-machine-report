@@ -89,6 +89,45 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 `--uninstall` is interactive (`src/install/prompt.rs`): the user picks `ProfileOnly`, `Complete` (also deletes the binary), or `Cancel`. The `Complete` path uses `find_binary_location()` + `confirm_complete_uninstall()` to show the path before deleting. Don't bypass the prompt unless the user has explicitly opted into a non-interactive variant.
 
+### Windows accuracy patterns (v3.11.0+)
+
+- **OS detection** reads `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
+  directly (`get_os_info_from_registry`) and overrides sysinfo. Detects Win11
+  by `CurrentBuild >= 22000` because the registry `ProductName` is frozen at
+  "Windows 10". Adds `DisplayVersion` (release ID like `25H2`) and `UBR` to the
+  kernel string for richer output.
+- **Architecture detection** (`get_architecture`) calls `IsWow64Process2` via a
+  manual `extern "system"` linked against `kernel32`. Returns the host's
+  native machine even when the binary itself runs under emulation. Handles
+  `IMAGE_FILE_MACHINE_AMD64`, `_ARM64`, `_I386`, `_ARM`. Annotates emulation
+  in the form `aarch64 (x86_64 emulation)` when process arch ≠ host arch.
+- **CPU frequency** (`cpu.rs::collect`) combines CPUID leaf 16h + Windows
+  `CallNtPowerInformation(ProcessorInformation)` + sysinfo, using
+  `Iterator::max`. Leaf 16h returns 0 on Intel hybrid (Meteor/Lunar/Arrow Lake)
+  — that's a documented Intel microcode change, not a bug. Falls through to
+  the next source.
+- **Hypervisor detection** (`detect_virtualization_wmi`) calls
+  `cpuid_hypervisor_brand()` first (CPUID leaf 0x40000000, 12-byte vendor
+  string) and disambiguates the Win11 VBS edge case: if CPUID returns
+  `Microsoft Hv` but the SMBIOS manufacturer is a normal OEM (not Microsoft
+  Corp), the result is `Bare Metal (Hyper-V/VBS)` instead of `Hyper-V`. Real
+  Hyper-V VMs always have Microsoft Corp as manufacturer.
+- **Last-login** (`get_last_login_windows`) calls `WTSQuerySessionInformation`
+  via a manual `extern "system"` linked against `wtsapi32` (the constants
+  `WTS_CURRENT_SESSION = 0xFFFFFFFF`, `WTSLogonTime = 17`,
+  `WTSConnectTime = 14` are declared inline). Falls back to a boot-time
+  derivation from `GetTickCount64` because Windows leaves the WTS time fields
+  at 0 for local console sessions on most modern installs (auto-login + Fast
+  Startup mask the actual logon timestamp). The previous `net user`-based
+  parsing returned localized strings and "Never" — gone.
+- **BitLocker** (`get_bitlocker_status`) queries `Win32_EncryptableVolume` in
+  the `ROOT\CIMV2\Security\MicrosoftVolumeEncryption` namespace via the `wmi`
+  crate's `WMIConnection::with_namespace_path`. Try-and-degrade pattern: on
+  modern Win11 Device Encryption hosts this is readable non-admin and the
+  `ENCRYPTION` row renders; on older Win10 / domain configurations the WMI
+  call returns access-denied → `None` and the row is gracefully omitted; the
+  elevation footer hint covers the unelevated case.
+
 ### Self-Update (`--update`)
 
 `src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and re-runs the install method that placed the binary:

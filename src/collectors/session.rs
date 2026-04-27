@@ -3,6 +3,7 @@
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 
 /// Session/user information
@@ -266,25 +267,109 @@ fn get_last_login_macos(username: &str) -> (String, Option<String>) {
 
 #[cfg(target_os = "windows")]
 fn get_last_login_windows(_username: &str) -> (String, Option<String>) {
-    // Try net user command first (faster than PowerShell)
-    if let Ok(output) = Command::new("net")
-        .args(["user", &env::var("USERNAME").unwrap_or_default()])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if line.contains("Last logon") {
-                if let Some(date) = line.split_whitespace().nth(2) {
-                    let time = line
-                        .split_whitespace()
-                        .skip(3)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    return (format!("{} {}", date, time), None);
-                }
-            }
-        }
+    // Preferred: WTSQuerySessionInformation(WTSLogonTime / WTSConnectTime) for
+    // the current session — works without admin and is accurate for RDP /
+    // network logons. Reference:
+    // https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
+    if let Some(when) = wts_query_session_connect_time() {
+        return (when, None);
+    }
+
+    // Fallback: derive from boot time. For local console sessions Windows
+    // leaves WTSLogonTime/WTSConnectTime at 0 — but the user has effectively
+    // been "logged in" since boot, so the boot time is the meaningful answer.
+    // GetTickCount64 returns ms since boot and continues across hibernation
+    // resume on Windows 10/11, so it survives Fast Startup correctly.
+    if let Some(boot_time_str) = boot_time_local_string() {
+        return (boot_time_str, None);
     }
 
     ("Login tracking unavailable".to_string(), None)
+}
+
+#[cfg(target_os = "windows")]
+fn boot_time_local_string() -> Option<String> {
+    // SAFETY: GetTickCount64 takes no args, returns u64 (ms since boot).
+    let uptime_ms: u64 = unsafe { winapi::um::sysinfoapi::GetTickCount64() };
+    let now = chrono::Local::now();
+    let boot = now - chrono::Duration::milliseconds(uptime_ms as i64);
+    Some(boot.format("%a %b %-d %H:%M").to_string())
+}
+
+// `WTSQuerySessionInformationW` and friends are declared manually because
+// `winapi-rs`'s `wtsapi32` feature does not expose them on stable. See:
+// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
+#[cfg(target_os = "windows")]
+const WTS_CURRENT_SESSION: u32 = 0xFFFF_FFFF;
+#[cfg(target_os = "windows")]
+const WTS_CONNECT_TIME: u32 = 14; // WTS_INFO_CLASS::WTSConnectTime
+#[cfg(target_os = "windows")]
+const WTS_LOGON_TIME: u32 = 17; // WTS_INFO_CLASS::WTSLogonTime
+
+#[cfg(target_os = "windows")]
+#[link(name = "wtsapi32")]
+extern "system" {
+    fn WTSQuerySessionInformationW(
+        hServer: *mut std::ffi::c_void,
+        SessionId: u32,
+        WTSInfoClass: u32,
+        ppBuffer: *mut *mut u16,
+        pBytesReturned: *mut u32,
+    ) -> i32;
+    fn WTSFreeMemory(pMemory: *mut std::ffi::c_void);
+}
+
+#[cfg(target_os = "windows")]
+fn wts_query_session_connect_time() -> Option<String> {
+    // Try WTSLogonTime first (authentication time — populated for console + RDP).
+    // Fall back to WTSConnectTime (RDP/network only — 0 for console sessions).
+    let filetime = wts_query_filetime(WTS_LOGON_TIME)
+        .filter(|&ft| ft > 0)
+        .or_else(|| wts_query_filetime(WTS_CONNECT_TIME).filter(|&ft| ft > 0))?;
+    filetime_to_local_string(filetime)
+}
+
+#[cfg(target_os = "windows")]
+fn wts_query_filetime(info_class: u32) -> Option<i64> {
+    let mut buffer_ptr: *mut u16 = std::ptr::null_mut();
+    let mut bytes_returned: u32 = 0;
+
+    // SAFETY: WTSQuerySessionInformationW returns a pointer to a LARGE_INTEGER
+    // (FILETIME, 8 bytes) for the time-typed info classes. We must call
+    // WTSFreeMemory after reading. `hServer = NULL` is `WTS_CURRENT_SERVER_HANDLE`.
+    let ok = unsafe {
+        WTSQuerySessionInformationW(
+            std::ptr::null_mut(),
+            WTS_CURRENT_SESSION,
+            info_class,
+            &mut buffer_ptr,
+            &mut bytes_returned,
+        )
+    };
+
+    if ok == 0 || buffer_ptr.is_null() || (bytes_returned as usize) < std::mem::size_of::<i64>() {
+        if !buffer_ptr.is_null() {
+            unsafe { WTSFreeMemory(buffer_ptr as *mut _) };
+        }
+        return None;
+    }
+
+    // Read the LARGE_INTEGER (FILETIME) — 100-ns intervals since 1601-01-01 UTC.
+    let filetime: i64 = unsafe { *(buffer_ptr as *const i64) };
+    unsafe { WTSFreeMemory(buffer_ptr as *mut _) };
+    Some(filetime)
+}
+
+#[cfg(target_os = "windows")]
+fn filetime_to_local_string(filetime: i64) -> Option<String> {
+    // Convert FILETIME → Unix timestamp:
+    //   100-ns intervals → seconds, then subtract the 1601→1970 offset
+    //   (11_644_473_600 seconds).
+    const FILETIME_UNIX_EPOCH_DIFF_SECS: i64 = 11_644_473_600;
+    let unix_secs = filetime / 10_000_000 - FILETIME_UNIX_EPOCH_DIFF_SECS;
+    let unix_nsecs = ((filetime % 10_000_000) * 100) as u32;
+
+    let dt_utc = chrono::DateTime::<chrono::Utc>::from_timestamp(unix_secs, unix_nsecs)?;
+    let dt_local = dt_utc.with_timezone(&chrono::Local);
+    Some(dt_local.format("%a %b %-d %H:%M").to_string())
 }

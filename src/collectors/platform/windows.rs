@@ -77,6 +77,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             display_resolution: None,
             battery: None,
             locale: None,
+            encryption: None,
         };
     }
 
@@ -122,6 +123,87 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         display_resolution: get_display_resolution(),
         battery,
         locale: get_locale(),
+        encryption: get_bitlocker_status(),
+    }
+}
+
+/// Query BitLocker status for the system drive (`C:`) via the
+/// `root\CIMV2\Security\MicrosoftVolumeEncryption` namespace.
+///
+/// This namespace is readable by non-admin users on most Win11 Device
+/// Encryption laptops; older Win10 / domain-joined configurations may require
+/// admin and will return `None` (the elevation footer hint covers that case).
+fn get_bitlocker_status() -> Option<String> {
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename = "Win32_EncryptableVolume")]
+    #[serde(rename_all = "PascalCase")]
+    struct EncryptableVolume {
+        drive_letter: Option<String>,
+        protection_status: Option<u32>,
+        // Note: queried as a separate property because not all driver versions
+        // expose ConversionStatus, and some return it as i32 vs u32.
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename = "Win32_EncryptableVolume")]
+    #[serde(rename_all = "PascalCase")]
+    struct EncryptableVolumeMethod {
+        drive_letter: Option<String>,
+        encryption_method: Option<u32>,
+    }
+
+    let com = COMLibrary::new().ok()?;
+    let wmi =
+        WMIConnection::with_namespace_path(r"ROOT\CIMV2\Security\MicrosoftVolumeEncryption", com)
+            .ok()?;
+
+    let volumes: Vec<EncryptableVolume> = wmi.query().ok()?;
+    let methods: Vec<EncryptableVolumeMethod> = wmi.query().ok().unwrap_or_default();
+
+    // Find the system drive — typically C:.
+    let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+    let target = volumes
+        .iter()
+        .find(|v| v.drive_letter.as_deref() == Some(system_drive.as_str()))?;
+
+    let protection = target.protection_status?;
+    let method_for_drive = methods
+        .iter()
+        .find(|m| m.drive_letter.as_deref() == Some(system_drive.as_str()))
+        .and_then(|m| m.encryption_method);
+
+    Some(format_bitlocker_status(protection, method_for_drive))
+}
+
+/// Format BitLocker status. ProtectionStatus: 0=Off, 1=On, 2=Unknown.
+/// EncryptionMethod values per Microsoft Learn:
+/// https://learn.microsoft.com/en-us/windows/win32/secprov/getencryptionmethod-win32-encryptablevolume
+fn format_bitlocker_status(protection_status: u32, method: Option<u32>) -> String {
+    match protection_status {
+        0 => "BitLocker Off".to_string(),
+        1 => {
+            let method_name = method
+                .map(bitlocker_method_name)
+                .unwrap_or_else(|| "Unknown".to_string());
+            format!("BitLocker On ({})", method_name)
+        }
+        _ => "BitLocker (status unknown)".to_string(),
+    }
+}
+
+fn bitlocker_method_name(method: u32) -> String {
+    match method {
+        0 => "None".to_string(),
+        1 => "AES-128 + Diffuser".to_string(),
+        2 => "AES-256 + Diffuser".to_string(),
+        3 => "AES-128".to_string(),
+        4 => "AES-256".to_string(),
+        5 => "Hardware".to_string(),
+        6 => "XTS-AES-128".to_string(),
+        7 => "XTS-AES-256".to_string(),
+        _ => format!("Method #{}", method),
     }
 }
 
@@ -173,37 +255,112 @@ fn get_windows_edition_wmi(wmi: &WMIConnection) -> Option<String> {
 }
 
 fn detect_virtualization_wmi(wmi: &WMIConnection) -> Option<String> {
+    // Pull CPUID brand AND DMI manufacturer/model. CPUID is precise but
+    // ambiguous on Win11 with VBS: a physical Win11 host running on top of the
+    // VBS Hyper-V layer reports "Microsoft Hv" via CPUID even though the user
+    // is on bare metal. We disambiguate by checking the SMBIOS manufacturer.
+    let cpuid_brand = cpuid_hypervisor_brand();
+
     let results: Vec<Win32ComputerSystem> = wmi.query().ok()?;
     let cs = results.into_iter().next()?;
-
     let manufacturer = cs.manufacturer.unwrap_or_default().to_lowercase();
     let model = cs.model.unwrap_or_default().to_lowercase();
-    let info = format!("{}|{}", manufacturer, model);
+    let dmi = format!("{}|{}", manufacturer, model);
 
-    if info.contains("vmware") {
+    // Definite VM signals from DMI (regardless of CPUID).
+    if dmi.contains("vmware") {
         return Some("VMware".to_string());
     }
-    if info.contains("virtualbox") || info.contains("vbox") {
+    if dmi.contains("virtualbox") || dmi.contains("vbox") {
         return Some("VirtualBox".to_string());
     }
-    if info.contains("microsoft") && info.contains("virtual") {
-        return Some("Hyper-V".to_string());
-    }
-    if info.contains("qemu") {
+    if dmi.contains("qemu") {
         return Some("QEMU".to_string());
     }
-    if info.contains("xen") {
+    if dmi.contains("xen") {
         return Some("Xen".to_string());
     }
-    if info.contains("parallels") {
+    if dmi.contains("parallels") {
         return Some("Parallels".to_string());
     }
+    // "Microsoft Corporation" + "Virtual Machine" = a real Hyper-V VM.
+    if dmi.contains("microsoft") && dmi.contains("virtual") {
+        return Some("Hyper-V".to_string());
+    }
 
+    // CPUID brand is set but DMI looks physical → host is running with
+    // VBS/HVCI on a real laptop/desktop. Surface that nuance.
+    match cpuid_brand.as_deref() {
+        Some("Hyper-V") => {
+            // Heuristic: real Hyper-V VMs always have Microsoft Corporation as
+            // manufacturer. If we got here and manufacturer is something else
+            // (Dell, HP, Lenovo, ASUS, MSI, Razer, Apple, Framework, etc.),
+            // the hypervisor is the VBS layer — user is on bare metal.
+            return Some("Bare Metal (Hyper-V/VBS)".to_string());
+        }
+        Some(other) => return Some(other.to_string()),
+        None => {}
+    }
+
+    // Last-resort: WMI hypervisor_present flag.
     if cs.hypervisor_present == Some(true) {
         return Some("Hypervisor Present".to_string());
     }
 
     None
+}
+
+/// Detect hypervisor brand via CPUID leaf 0x40000000.
+///
+/// Bit 31 of ECX from leaf 1 indicates "hypervisor present". When set, leaf
+/// 0x40000000 returns:
+///   - EAX: maximum hypervisor leaf supported (>= 0x40000000)
+///   - EBX, ECX, EDX: 12 bytes of ASCII forming the hypervisor vendor string
+///     (e.g. "Microsoft Hv", "VMwareVMware", "KVMKVMKVM\0\0\0", "VBoxVBoxVBox")
+fn cpuid_hypervisor_brand() -> Option<String> {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::__cpuid;
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::__cpuid;
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    return None;
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        // SAFETY: CPUID is supported on every x86/x86_64 CPU we target.
+        let leaf1 = unsafe { __cpuid(1) };
+        // Bit 31 of ECX = hypervisor present
+        if (leaf1.ecx & (1u32 << 31)) == 0 {
+            return None;
+        }
+        let leaf = unsafe { __cpuid(0x4000_0000) };
+        let mut bytes = [0u8; 12];
+        bytes[0..4].copy_from_slice(&leaf.ebx.to_le_bytes());
+        bytes[4..8].copy_from_slice(&leaf.ecx.to_le_bytes());
+        bytes[8..12].copy_from_slice(&leaf.edx.to_le_bytes());
+        let raw = std::str::from_utf8(&bytes).ok()?.trim_end_matches('\0');
+        if raw.is_empty() {
+            return None;
+        }
+        Some(map_hypervisor_vendor(raw))
+    }
+}
+
+/// Map CPUID hypervisor vendor string to a friendly name.
+fn map_hypervisor_vendor(raw: &str) -> String {
+    match raw {
+        "KVMKVMKVM" | "KVMKVMKVM\0\0\0" => "KVM".to_string(),
+        "Microsoft Hv" => "Hyper-V".to_string(),
+        "VMwareVMware" => "VMware".to_string(),
+        "VBoxVBoxVBox" => "VirtualBox".to_string(),
+        "XenVMMXenVMM" => "Xen".to_string(),
+        "TCGTCGTCGTCG" => "QEMU".to_string(),
+        "prl hyperv  " | "prl hyperv" => "Parallels".to_string(),
+        "ACRNACRNACRN" => "ACRN".to_string(),
+        "bhyve bhyve " | "bhyve bhyve" => "bhyve".to_string(),
+        "QNXQVMBSQG" => "QNX".to_string(),
+        other => other.trim().to_string(),
+    }
 }
 
 fn get_gpus_wmi(wmi: &WMIConnection) -> Vec<String> {
@@ -232,6 +389,87 @@ fn get_battery_wmi(wmi: &WMIConnection) -> Option<String> {
         _ => "Unknown",
     };
     Some(format!("{}% ({})", charge, status))
+}
+
+/// Read OS info from `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` so we
+/// can detect Windows 11 by build number (the registry's `ProductName` is
+/// frozen at "Windows 10" even on Win11) and enrich the version with the
+/// release ID (DisplayVersion, e.g. "24H2") and UBR (Update Build Revision).
+///
+/// Returns `(name, version, kernel)` on success.
+pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
+    let mut display_version: Option<String> = None;
+    let mut current_build: Option<String> = None;
+    let mut ubr: Option<u32> = None;
+    let mut product_name: Option<String> = None;
+
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        ])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    for line in stdout.lines() {
+        // Format: "    <Name>    <Type>    <Value>" — split on whitespace and
+        // pattern-match on the first three tokens (name, type, value...).
+        let mut parts = line.split_whitespace();
+        let name = match parts.next() {
+            Some(n) => n,
+            None => continue,
+        };
+        let _type_tok = match parts.next() {
+            Some(t) => t,
+            None => continue,
+        };
+        let value = parts.collect::<Vec<_>>().join(" ");
+        match name {
+            "DisplayVersion" => display_version = Some(value),
+            "CurrentBuild" => current_build = Some(value),
+            "UBR" => {
+                ubr = u32::from_str_radix(value.trim_start_matches("0x"), 16).ok();
+            }
+            "ProductName" => product_name = Some(value),
+            _ => {}
+        }
+    }
+
+    let build_num: u32 = current_build.as_deref()?.parse().ok()?;
+
+    // Detect Windows 11 by build number (>= 22000), per Microsoft's own gate.
+    let name = "Windows".to_string();
+    let release = if build_num >= 22000 {
+        "11"
+    } else if build_num >= 10240 {
+        "10"
+    } else {
+        // Older Windows — fall back to ProductName which is accurate for those.
+        return Some((
+            product_name
+                .clone()
+                .unwrap_or_else(|| "Windows".to_string()),
+            format!("(Build {})", build_num),
+            current_build.unwrap_or_default(),
+        ));
+    };
+
+    let mut version = release.to_string();
+    if let Some(dv) = &display_version {
+        if !dv.is_empty() {
+            version.push(' ');
+            version.push_str(dv);
+        }
+    }
+
+    // Kernel string: full build with UBR (e.g. "26200.0" or "26100.4317").
+    let kernel = match ubr {
+        Some(u) => format!("{}.{}", build_num, u),
+        None => build_num.to_string(),
+    };
+
+    Some((name, version, kernel))
 }
 
 /// Get socket count via WMI, with PowerShell fallback (used from cpu.rs)
@@ -349,8 +587,64 @@ pub fn get_network_info_wmi() -> (Option<String>, Vec<String>) {
 
 // --- Non-WMI collectors ---
 
+// IsWow64Process2 manually-declared because winapi-rs's bindings are stale.
+// Returns the host machine's architecture regardless of the running process's
+// own architecture (so an x64 binary running on a Surface Pro X correctly
+// identifies the host as ARM64). Reference:
+// https://learn.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-iswow64process2
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetCurrentProcess() -> *mut std::ffi::c_void;
+    fn IsWow64Process2(
+        hProcess: *mut std::ffi::c_void,
+        pProcessMachine: *mut u16,
+        pNativeMachine: *mut u16,
+    ) -> i32;
+}
+
+// IMAGE_FILE_MACHINE_* constants from <winnt.h>.
+const IMAGE_FILE_MACHINE_UNKNOWN: u16 = 0;
+const IMAGE_FILE_MACHINE_I386: u16 = 0x014C;
+const IMAGE_FILE_MACHINE_AMD64: u16 = 0x8664;
+const IMAGE_FILE_MACHINE_ARM: u16 = 0x01C0;
+const IMAGE_FILE_MACHINE_ARM64: u16 = 0xAA64;
+
 fn get_architecture() -> Option<String> {
-    Some(std::env::consts::ARCH.to_string())
+    let mut process_machine: u16 = 0;
+    let mut native_machine: u16 = 0;
+    // SAFETY: IsWow64Process2 takes a HANDLE and two *mut u16 outputs; we pass
+    // valid pointers and the pseudo-handle from GetCurrentProcess.
+    let ok = unsafe {
+        IsWow64Process2(
+            GetCurrentProcess(),
+            &mut process_machine,
+            &mut native_machine,
+        )
+    };
+    if ok == 0 {
+        return Some(std::env::consts::ARCH.to_string());
+    }
+    let host = match native_machine {
+        IMAGE_FILE_MACHINE_AMD64 => "x86_64",
+        IMAGE_FILE_MACHINE_ARM64 => "aarch64",
+        IMAGE_FILE_MACHINE_I386 => "x86",
+        IMAGE_FILE_MACHINE_ARM => "arm",
+        IMAGE_FILE_MACHINE_UNKNOWN => return Some(std::env::consts::ARCH.to_string()),
+        _ => return Some(format!("unknown (0x{:x})", native_machine)),
+    };
+    // If the running process arch differs from the host, annotate (e.g. an
+    // x64-built TR-300 running on Win11 ARM64 reports "aarch64 (x86_64 emulation)").
+    if process_machine != IMAGE_FILE_MACHINE_UNKNOWN && process_machine != native_machine {
+        let proc_name = match process_machine {
+            IMAGE_FILE_MACHINE_AMD64 => "x86_64",
+            IMAGE_FILE_MACHINE_I386 => "x86",
+            IMAGE_FILE_MACHINE_ARM => "arm",
+            IMAGE_FILE_MACHINE_ARM64 => "aarch64",
+            _ => "unknown",
+        };
+        return Some(format!("{} ({} emulation)", host, proc_name));
+    }
+    Some(host.to_string())
 }
 
 /// Detect boot mode via environment variable (no PowerShell needed)

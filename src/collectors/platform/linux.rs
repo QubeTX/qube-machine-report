@@ -31,6 +31,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         }, // xrandr subprocess
         battery: get_battery(), // Fast: reads /sys
         locale: get_locale(),   // Fast: reads env var
+        encryption: None,       // LUKS detection deferred to a future PR
     }
 }
 
