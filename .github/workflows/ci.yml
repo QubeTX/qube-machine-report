@@ -1,0 +1,206 @@
+name: CI
+
+# Quality gate for every commit and PR. Complements the cargo-dist
+# release.yml workflow (which only runs on tag push to ship binaries).
+#
+# Jobs:
+#   fmt        — cargo fmt --check (Linux only; rustfmt is platform-agnostic)
+#   clippy     — cargo clippy --all-targets -- -D warnings (Linux only)
+#   test       — cargo test --workspace (Linux glibc + Linux musl + macOS ARM + macOS Intel + Windows)
+#   build      — cargo build --release smoke test on every supported target
+#   speed      — measure tr300 --fast median wall-clock; fail above 1500 ms
+#   audit      — cargo-audit (advisory; continue-on-error so it never blocks)
+#   dist-plan  — verify cargo-dist plan parses (catches dist config errors before tagging)
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Treat warnings during compilation as errors (clippy enforces its own).
+  RUSTFLAGS: "-D warnings"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --workspace -- -D warnings
+
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: "Linux x86_64 glibc"
+          - os: macos-latest
+            name: "macOS ARM (Apple Silicon)"
+          - os: macos-13
+            name: "macOS x86_64 (Intel)"
+          - os: windows-latest
+            name: "Windows x86_64"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets
+
+  build:
+    name: Release Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: "Linux x86_64 glibc"
+          - os: macos-latest
+            name: "macOS ARM (Apple Silicon)"
+          - os: macos-13
+            name: "macOS x86_64 (Intel)"
+          - os: windows-latest
+            name: "Windows x86_64"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --workspace
+      - name: Smoke test (--version)
+        shell: bash
+        run: |
+          BIN="./target/release/tr300"
+          [ "${{ runner.os }}" = "Windows" ] && BIN="./target/release/tr300.exe"
+          "$BIN" --version
+          "$BIN" --fast --json | head -5
+
+  speed:
+    name: Auto-run speed (${{ matrix.name }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: "Linux"
+            budget_ms: 1500
+          - os: macos-latest
+            name: "macOS ARM"
+            budget_ms: 1500
+          - os: windows-latest
+            name: "Windows"
+            budget_ms: 1500
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --bin tr300
+
+      - name: Time tr300 --fast (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN="./target/release/tr300"
+          # Warm-up
+          "$BIN" --fast >/dev/null
+          # 5 timed runs
+          times=()
+          for i in 1 2 3 4 5; do
+            start=$(date +%s%N)
+            "$BIN" --fast >/dev/null
+            end=$(date +%s%N)
+            elapsed=$(( (end - start) / 1000000 ))
+            times+=($elapsed)
+            echo "Run $i: ${elapsed}ms"
+          done
+          sorted=($(printf '%s\n' "${times[@]}" | sort -n))
+          median=${sorted[2]}
+          echo "Median: ${median}ms"
+          {
+            echo "## tr300 --fast on ${{ matrix.name }}"
+            echo ""
+            echo "Runs: ${times[*]} (ms)"
+            echo "Median: **${median}ms** (budget: ${{ matrix.budget_ms }}ms)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$median" -gt "${{ matrix.budget_ms }}" ]; then
+            echo "::error::--fast median ${median}ms exceeds ${{ matrix.budget_ms }}ms budget"
+            exit 1
+          fi
+
+      - name: Time tr300 --fast (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = ".\target\release\tr300.exe"
+          # Warm-up
+          & $bin --fast | Out-Null
+          # 5 timed runs
+          $times = @()
+          for ($i = 1; $i -le 5; $i++) {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            & $bin --fast | Out-Null
+            $sw.Stop()
+            $elapsed = [int]$sw.Elapsed.TotalMilliseconds
+            $times += $elapsed
+            Write-Host "Run $i`: ${elapsed}ms"
+          }
+          $sorted = $times | Sort-Object
+          $median = $sorted[2]
+          Write-Host "Median: ${median}ms"
+          $summary = @"
+          ## tr300 --fast on ${{ matrix.name }}
+
+          Runs: $($times -join ', ') (ms)
+          Median: **${median}ms** (budget: ${{ matrix.budget_ms }}ms)
+          "@
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+          if ($median -gt ${{ matrix.budget_ms }}) {
+            Write-Error "--fast median ${median}ms exceeds ${{ matrix.budget_ms }}ms budget"
+            exit 1
+          }
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - run: cargo audit
+
+  dist-plan:
+    name: cargo-dist plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-dist v0.31.0
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh
+      - name: Verify dist plan parses
+        run: ~/.cargo/bin/dist plan

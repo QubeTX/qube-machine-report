@@ -43,3 +43,6 @@ coverage/
 .env
 .env.local
 2026-02-03-stage1.txt
+
+# Claude Code per-machine settings (the project-scope settings.json IS committed)
+.claude/settings.local.json

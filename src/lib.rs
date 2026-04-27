@@ -36,6 +36,42 @@ pub use error::{AppError, Result};
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// `IsUserAnAdmin` from shell32 is not bound by `winapi-rs`, so it is declared
+// manually here with a `#[link]` against `shell32`. Wraps the Win32 API of the
+// same name; checks Administrators-group membership of the calling thread's
+// primary token (under UAC, this means the process is elevated).
+#[cfg(windows)]
+#[link(name = "shell32")]
+extern "system" {
+    fn IsUserAnAdmin() -> i32;
+}
+
+/// Detect whether the current process is running with elevated privileges.
+///
+/// Unix: returns `true` when the effective UID is 0 (root).
+/// Windows: returns `true` when running with an admin token under UAC.
+pub fn is_elevated() -> bool {
+    #[cfg(unix)]
+    unsafe {
+        libc::geteuid() == 0
+    }
+
+    #[cfg(windows)]
+    unsafe {
+        IsUserAnAdmin() != 0
+    }
+}
+
+/// Whether the current platform has elevation-gated data points worth
+/// surfacing in a footer hint when running unelevated.
+///
+/// Linux: yes — dmidecode unlocks motherboard, BIOS, and RAM slot details.
+/// Windows: yes — BitLocker on older domain configs and full RDP login history.
+/// macOS: no — sudo doesn't unlock anything aesthetically meaningful for the report.
+pub fn platform_has_elevated_data() -> bool {
+    cfg!(target_os = "linux") || cfg!(target_os = "windows")
+}
+
 /// Format bytes as a human-readable string (B, KB, MB, GB, TB)
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;

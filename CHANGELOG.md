@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-04-27
+
+### Added
+- **Elevation tier scaffolding** — TR-300 now detects whether the current process is
+  running with elevated privileges (Unix `euid == 0` / Windows admin token under UAC)
+  and surfaces this in the JSON output and as a single-line hint at the bottom of the
+  table on platforms where running with sudo/Administrator would unlock additional data
+  points. The hint is shown only in full mode (never during `--fast` auto-run), on
+  Linux (`Run with sudo for motherboard, BIOS, and RAM slot details`) and Windows
+  (`Run as Administrator for BitLocker status and full login history`). macOS shows no
+  hint — there is no equivalent unlock on Apple platforms. (E.1, E.7)
+- `--no-elevation-hint` flag to suppress the footer hint for users who find it noisy. (E.2)
+- JSON `schema_version` field (initial value `1`) for forward-compatibility of
+  programmatic consumers. Bumps only on breaking renames or removals; additive new keys
+  do not require a bump. (D.1)
+- JSON `elevated` and `elevation_unlocks_more` boolean keys. (E.8)
+
+### Changed
+- Library now exposes `tr_300::is_elevated()` and `tr_300::platform_has_elevated_data()`
+  helpers for callers that want to drive their own elevation-aware UI on top of the
+  collected `SystemInfo`.
+
+### Internal
+- Foundation for upcoming per-platform accuracy work (PRs #2–#5): macOS Apple Silicon
+  CPU brand/frequency, Linux systemd-resolved DNS priority, Windows registry-based OS
+  detection and BitLocker status, etc. No collector changes land in this release.
+- **Comprehensive CI** — new `.github/workflows/ci.yml` runs on every push and PR with
+  jobs for `fmt`, `clippy --all-targets --workspace -- -D warnings`, cross-platform
+  `test` (Linux + macOS ARM + macOS Intel + Windows), release build smoke tests, an
+  auto-run speed-budget gate (fails if `tr300 --fast` median > 1500 ms), `cargo audit`
+  for dependency advisories, and a `dist plan` verification so cargo-dist regressions
+  surface on PRs instead of at tag time. (CI.1, CI.3–CI.6)
+- Migrated `tests/integration.rs` off the deprecated `assert_cmd::Command::cargo_bin`
+  to the canonical `Command::new(env!("CARGO_BIN_EXE_tr300"))` pattern, plus added
+  integration tests for the new `schema_version`, `elevated`, and
+  `elevation_unlocks_more` JSON keys and the `--no-elevation-hint` / `--fast` footer
+  gating. (CI.2)
+- **Codified the development workflow** in `CLAUDE.md` (new "Development Workflow"
+  section) and saved it as a project memory at
+  `~/.claude/projects/.../memory/feedback_tr300_workflow.md`. Seven phases: plan in
+  plan mode (parallel Explore + research) → upfront task tracking → sequential
+  implementation → per-PR `F.1–F.6` documentation block → local gate + Codex review
+  → `ci-tester` + `git-master` for push → close out. Apply for every non-trivial
+  change.
+- **Codex plugin enabled at project scope** via `.claude/settings.json`
+  (`extraKnownMarketplaces.openai-codex` + `enabledPlugins.codex@openai-codex`) so
+  cloners get the same Codex review subagent without manual setup. Added
+  `.claude/settings.local.json` to `.gitignore` since it's per-machine state.
+
 ## [3.9.0] - 2026-04-12
 
 ### Added

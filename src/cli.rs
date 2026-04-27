@@ -49,4 +49,8 @@ pub struct Cli {
     /// Fast mode: skip slow platform-specific collectors for quick auto-run
     #[arg(long)]
     pub fast: bool,
+
+    /// Suppress the "Run with sudo / Administrator for more details" footer hint
+    #[arg(long)]
+    pub no_elevation_hint: bool,
 }

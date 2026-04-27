@@ -5,10 +5,14 @@
 
 use std::path::PathBuf;
 
-use crate::collectors::SystemInfo;
+use crate::collectors::{CollectMode, SystemInfo};
 use crate::config::{Config, OutputFormat, MAX_DATA_WIDTH};
 use crate::render::bar::render_bar;
 use crate::render::table::TableRenderer;
+
+/// JSON output schema version. Bump on breaking renames or removals
+/// (additive changes — new keys — do not require a bump).
+pub const SCHEMA_VERSION: u32 = 1;
 
 /// Generate the complete system report
 pub fn generate(info: &SystemInfo, config: &Config) -> String {
@@ -149,7 +153,45 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     // Simplified footer (single line, no bottom_divider)
     output.push_str(&renderer.render_footer());
 
+    // Elevation-tier footer hint: only shown when running unelevated on a platform
+    // where sudo/admin would unlock additional data, in full mode, and not opted-out.
+    // Never shown in --fast mode (auto-run) — would clutter the prompt-ready output.
+    if should_render_elevation_footer(info.is_elevated, info.mode, config.no_elevation_hint) {
+        output.push_str(&render_elevation_footer(config.use_colors));
+    }
+
     output
+}
+
+/// Decide whether the elevation-tier footer hint should appear under the table.
+/// Extracted so the gate is unit-testable independently from rendering.
+pub(crate) fn should_render_elevation_footer(
+    is_elevated: bool,
+    mode: CollectMode,
+    no_elevation_hint: bool,
+) -> bool {
+    !is_elevated
+        && crate::platform_has_elevated_data()
+        && mode != CollectMode::Fast
+        && !no_elevation_hint
+}
+
+/// Render the dim elevation-tier hint as a single line.
+/// ANSI-dim when colors are enabled; plain text otherwise.
+/// Returns an empty string on platforms without elevated-only data (macOS).
+pub(crate) fn render_elevation_footer(use_colors: bool) -> String {
+    let hint: &str = if cfg!(target_os = "linux") {
+        "Run with sudo for motherboard, BIOS, and RAM slot details"
+    } else if cfg!(target_os = "windows") {
+        "Run as Administrator for BitLocker status and full login history"
+    } else {
+        return String::new();
+    };
+    if use_colors {
+        format!("\x1b[2m{}\x1b[0m\n", hint)
+    } else {
+        format!("{}\n", hint)
+    }
 }
 
 /// Generate JSON format output
@@ -171,6 +213,9 @@ fn generate_json(info: &SystemInfo) -> String {
     // Simple JSON serialization without serde
     format!(
         r#"{{
+  "schema_version": {},
+  "elevated": {},
+  "elevation_unlocks_more": {},
   "os": {{
     "name": "{}",
     "version": "{}",
@@ -214,6 +259,9 @@ fn generate_json(info: &SystemInfo) -> String {
     "battery": {}
   }}
 }}"#,
+        SCHEMA_VERSION,
+        info.is_elevated,
+        crate::platform_has_elevated_data() && !info.is_elevated,
         escape_json(&info.os_name),
         escape_json(&info.os_version),
         escape_json(&info.kernel),
@@ -421,5 +469,78 @@ pub fn save_markdown_report(info: &SystemInfo) -> Option<PathBuf> {
     match std::fs::write(&path, markdown) {
         Ok(()) => Some(path),
         Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elevation_footer_skipped_when_elevated() {
+        // Already running as root/admin — nothing more to unlock; no hint.
+        assert!(!should_render_elevation_footer(
+            true,
+            CollectMode::Full,
+            false
+        ));
+    }
+
+    #[test]
+    fn elevation_footer_skipped_in_fast_mode() {
+        // Auto-run uses --fast; the prompt must be free immediately, no footer noise.
+        assert!(!should_render_elevation_footer(
+            false,
+            CollectMode::Fast,
+            false
+        ));
+    }
+
+    #[test]
+    fn elevation_footer_skipped_when_user_opted_out() {
+        // --no-elevation-hint suppresses the line for users who find it noisy.
+        assert!(!should_render_elevation_footer(
+            false,
+            CollectMode::Full,
+            true
+        ));
+    }
+
+    #[test]
+    fn elevation_footer_present_when_unelevated_full_no_optout() {
+        // Per platform: Linux+Windows have elevated-only data; macOS does not.
+        let expected = cfg!(target_os = "linux") || cfg!(target_os = "windows");
+        assert_eq!(
+            should_render_elevation_footer(false, CollectMode::Full, false),
+            expected
+        );
+    }
+
+    #[test]
+    fn elevation_footer_string_is_empty_on_macos() {
+        // platform_has_elevated_data() == false on macOS, so the renderer
+        // returns an empty string even if the gate was somehow bypassed.
+        if cfg!(target_os = "macos") {
+            assert_eq!(render_elevation_footer(false), "");
+            assert_eq!(render_elevation_footer(true), "");
+        }
+    }
+
+    #[test]
+    fn elevation_footer_uses_ansi_dim_when_colors_enabled() {
+        if cfg!(target_os = "linux") || cfg!(target_os = "windows") {
+            let with_color = render_elevation_footer(true);
+            let no_color = render_elevation_footer(false);
+            assert!(with_color.starts_with("\x1b[2m"));
+            assert!(with_color.ends_with("\x1b[0m\n"));
+            assert!(!no_color.contains("\x1b["));
+            assert!(no_color.ends_with('\n'));
+        }
+    }
+
+    #[test]
+    fn schema_version_is_one() {
+        // Bump only on breaking changes (renames/removals); additive new keys do not bump.
+        assert_eq!(SCHEMA_VERSION, 1);
     }
 }

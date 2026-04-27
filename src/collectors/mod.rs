@@ -71,6 +71,11 @@ pub struct SystemInfo {
 
     /// The collection mode used
     pub mode: CollectMode,
+
+    /// Whether the current process is running with elevated privileges
+    /// (Unix euid == 0 / Windows admin token under UAC). Drives the
+    /// elevation-tier footer hint and gates admin-only collectors.
+    pub is_elevated: bool,
 }
 
 impl SystemInfo {
@@ -182,6 +187,7 @@ impl SystemInfo {
             locale: platform_info.locale,
             battery: platform_info.battery,
             mode,
+            is_elevated: crate::is_elevated(),
         })
     }
 

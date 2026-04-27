@@ -1,6 +1,7 @@
 # TR-300
 
-[![Build Status](https://github.com/QubeTX/qube-machine-report/actions/workflows/release.yml/badge.svg)](https://github.com/QubeTX/qube-machine-report/actions)
+[![CI](https://github.com/QubeTX/qube-machine-report/actions/workflows/ci.yml/badge.svg)](https://github.com/QubeTX/qube-machine-report/actions/workflows/ci.yml)
+[![Release](https://github.com/QubeTX/qube-machine-report/actions/workflows/release.yml/badge.svg)](https://github.com/QubeTX/qube-machine-report/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 
 Cross-platform system information report with Unicode box-drawing tables.
@@ -127,10 +128,32 @@ tr300 --help
 | `-t, --title <TITLE>` | Custom title for the report header |
 | `--no-color` | Disable colored output |
 | `--fast` | Fast mode: skip slow collectors for quick auto-run |
+| `--no-elevation-hint` | Suppress the "Run with sudo / Administrator" footer hint |
 | `--install` | Add to shell profile with alias and auto-run |
 | `--uninstall` | Remove from shell profile |
 | `-h, --help` | Print help information |
 | `-V, --version` | Print version information |
+
+## Elevation Tier
+
+TR-300 detects whether it is running with elevated privileges (root on Unix /
+Administrator on Windows) and surfaces additional data when it is.
+
+- **Default (unelevated)** — the report renders exactly as it always has, with one
+  small addition on Linux and Windows: a single dim line below the table noting that
+  running with sudo / Administrator would unlock more details (motherboard / BIOS /
+  RAM slots on Linux; BitLocker / full RDP login history on Windows). This hint is
+  **never** shown during `--fast` auto-run, so the prompt-ready experience is
+  unchanged.
+- **Elevated** — extra rows render inline (motherboard, BIOS, RAM slot summary on
+  Linux when `dmidecode` is available; BitLocker status when readable on Windows).
+- **macOS** — no elevation tier; everything TR-300 needs is accessible without sudo.
+
+To opt out of the hint, run `tr300 --no-elevation-hint` (or wire the flag into your
+shell alias). The hint is rendered with ANSI dim, so respects `--no-color` as well.
+
+The JSON output exposes this state under top-level keys `elevated` and
+`elevation_unlocks_more` for scripted consumers.
 
 ## Installation to Shell Profile
 

@@ -86,6 +86,9 @@ pub struct Config {
     pub compact: bool,
     /// Output format: "table" (default) or "json"
     pub format: OutputFormat,
+    /// Suppress the elevation-tier footer hint shown to non-elevated users
+    /// on platforms where running with sudo / Administrator unlocks more data
+    pub no_elevation_hint: bool,
 }
 
 /// Output format options
@@ -107,6 +110,7 @@ impl Default for Config {
             width: 0,
             compact: false,
             format: OutputFormat::Table,
+            no_elevation_hint: false,
         }
     }
 }
@@ -226,6 +230,12 @@ impl Config {
     /// Set JSON output format
     pub fn with_json(mut self) -> Self {
         self.format = OutputFormat::Json;
+        self
+    }
+
+    /// Suppress the elevation-tier footer hint
+    pub fn with_no_elevation_hint(mut self, no_hint: bool) -> Self {
+        self.no_elevation_hint = no_hint;
         self
     }
 }

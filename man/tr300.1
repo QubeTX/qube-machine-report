@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH tr300 1  "tr300 3.9.0" 
+.TH tr300 1  "tr300 3.10.0" 
 .SH NAME
 tr300 \- TR\-300 Machine Report \- Cross\-platform system information
 .SH SYNOPSIS
-\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] 
+\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] 
 .SH DESCRIPTION
 TR\-300 is the successor to TR\-200 Machine Report.
 .PP
@@ -38,12 +38,15 @@ Disable colored output
 \fB\-\-fast\fR
 Fast mode: skip slow platform\-specific collectors for quick auto\-run
 .TP
+\fB\-\-no\-elevation\-hint\fR
+Suppress the "Run with sudo / Administrator for more details" footer hint
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)
 .TP
 \fB\-V\fR, \fB\-\-version\fR
 Print version
 .SH VERSION
-v3.9.0
+v3.10.0
 .SH AUTHORS
 Emmett S <hey@emmetts.dev>

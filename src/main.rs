@@ -26,6 +26,10 @@ fn main() -> Result<()> {
         config = config.with_json();
     }
 
+    if cli.no_elevation_hint {
+        config = config.with_no_elevation_hint(true);
+    }
+
     if let Some(title) = cli.title {
         config = config.with_title(title);
     }

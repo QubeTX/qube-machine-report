@@ -97,6 +97,122 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 `--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
 
+### Elevation Tier (v3.10.0+)
+
+TR-300 detects whether the current process is elevated (Unix `geteuid() == 0` / Windows `IsUserAnAdmin()` from shell32 — declared as a manual `extern` since `winapi-rs` doesn't bind it) and surfaces this via `SystemInfo.is_elevated`, plus a dim footer hint below the table on platforms where elevation unlocks more data.
+
+- `tr_300::is_elevated()` (in `src/lib.rs`) — runtime detection.
+- `tr_300::platform_has_elevated_data()` — compile-time per-target constant: `true` on Linux + Windows, `false` on macOS. macOS gets no footer because sudo doesn't aesthetically unlock anything (`powermetrics` for live CPU freq is the main candidate, and the chip-name → frequency lookup table on Apple Silicon already gives a reasonable answer non-elevated).
+- `report::should_render_elevation_footer(is_elevated, mode, no_elevation_hint)` — the gate. Returns `true` only when the user is unelevated, on a platform with elevated data, in `Full` mode (never in `Fast` — the auto-run prompt must stay free), and hasn't passed `--no-elevation-hint`.
+- `report::render_elevation_footer(use_colors)` — emits the line with ANSI dim (`\x1b[2m...\x1b[0m`) when colors are enabled, plain text otherwise. Returns an empty string on macOS even if the gate is bypassed.
+- The hint strings are hardcoded per platform in `render_elevation_footer`. Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`. Windows: `Run as Administrator for BitLocker status and full login history`.
+
+When adding a new elevated-only collector (e.g. `dmidecode` on Linux), gate it on `info.is_elevated` and let the footer hint cover the unelevated case rather than rendering a stub or warning row inside the table.
+
+### JSON Schema Versioning (v3.10.0+)
+
+Top-level `schema_version` (currently `1`) on every JSON output. Defined as `report::SCHEMA_VERSION`. Bump only on **breaking** schema changes — renames, type changes, or removals. Additive new keys do **not** require a bump (so adding `cpu.p_cores`/`cpu.e_cores` in a later PR is fine without a schema bump). Document every nullable key in CLAUDE.md as it lands so contributors know which absences are intentional.
+
+Top-level `elevated: bool` and `elevation_unlocks_more: bool` are also emitted on every JSON output. The latter is `true` only when the platform has elevated-only data AND the user isn't currently elevated — i.e. `true` indicates "re-running with sudo/Administrator would give you more". On macOS this is always `false`.
+
+### Disk volume semantics — do not "fix"
+
+sysinfo's reporting on BTRFS subvolumes (reports the pool, not the subvolume) and APFS containers (reports container free space, not per-volume) is **correct**, even though the numbers can look surprising. Don't change `aggregate_disk_usage()` to subtract overlapping space — you'll regress against what the OS itself reports in Disk Utility / `df`. ZFS pool sizes are similar.
+
+## Development Workflow (canonical — follow for every change)
+
+This is the workflow that proved itself during the v3.10.0 cross-platform accuracy pass. Follow it for any non-trivial change. Lightweight one-line fixes (typos, version bumps) can skip phases 1–2 but never skip phase 5.
+
+### Phase 1 — Plan (read-only)
+
+1. Enter Claude Code plan mode. Plans live at `C:\Users\hey\.claude\plans\<descriptive-name>.md` (the runtime tells you the path).
+2. **Explore in parallel.** Spawn up to 3 `Explore` agents simultaneously (single message, multiple tool calls) for codebase context. Each agent gets a focused brief: where the field is collected, what the existing pattern is, what's already best-in-class.
+3. **Research authoritative sources before designing.** For platform-specific work, dispatch parallel `general-purpose` agents (model: `opus`) with WebFetch / WebSearch / Firecrawl / Perplexity access. Require citations from Apple Developer Forums, Microsoft Learn, kernel.org, systemd man pages, freedesktop specs, sysinfo crate issues. Verdicts: ✅ best-in-class / ⚠️ acceptable / ❌ inaccurate.
+4. **Build the plan incrementally.** Sections: Context · What's Already Best-in-Class (don't redo good work) · Per-Platform Fixes · Cross-Platform Reliability · Speed · New Data Points (with skip list) · Files to Modify · Implementation Task Checklist · Testing Strategy · Phasing & Sequencing · Verification.
+5. **Phase the work** into PR-sized chunks (typical: 4–6 PRs). PR #1 is always the foundation primitives that later PRs depend on. Each PR has a docs/version block (`F.1`–`F.6`) at the end.
+6. End with `ExitPlanMode` — do not text-prompt for plan approval.
+
+### Phase 2 — Task tracking (`TaskCreate` upfront, `TaskUpdate` as you go)
+
+After plan approval, create:
+
+- **Top-level PR tasks** (one per PR), with `addBlocks`/`addBlockedBy` for sequencing.
+- **Sub-task per plan ID** (`[PR1] D.1 …`, `[PR2] A.3 …`, etc.) with the spec verbatim from the plan plus LOC estimate. The user uses these to track progress, so be granular.
+- **Per-PR doc block tasks** (`F.1`–`F.6`) and **test tasks** (unit + integration + manual matrix).
+
+`TaskUpdate` to `in_progress` *before* starting any sub-task, and to `completed` *immediately* when done — never batch.
+
+### Phase 3 — Implement (one PR at a time, sequentially)
+
+1. **Read first.** Read every file you'll edit before the first `Edit` call. Don't guess at file structure.
+2. **Edit minimally.** No drive-by refactors, no comments that explain *what* the code does, no error handling for impossible cases.
+3. **`cargo check` after each meaningful change.** Catches issues while context is fresh.
+4. **Run the full local gate after each PR completes** *before* moving to the next PR:
+   ```bash
+   cargo fmt -- --check
+   cargo clippy --all-targets --workspace -- -D warnings
+   cargo test --workspace
+   cargo build --release
+   ./target/release/tr300 --version
+   ./target/release/tr300 --fast --json | head -5
+   ./target/release/tr300 --ascii          # visual smoke test
+   ```
+5. **Time `--fast`** on the local platform; record before/after numbers in the PR description.
+
+### Phase 4 — Per-PR documentation (the F-block — never skip)
+
+Every PR completes this block before commit:
+
+- `F.1` — `CHANGELOG.md` new `## [X.Y.Z] — YYYY-MM-DD` section at the top, Keep-a-Changelog voice, **reference task IDs in parens** for traceability.
+- `F.2` — `README.md` updates: flag table, sample output, new subsections.
+- `F.3` — `CLAUDE.md` architectural notes for any new pattern (cite man pages / Apple docs / Microsoft Learn URLs inline).
+- `F.4` — `Cargo.toml` `version =` bump (minor for new fields/flags; patch for pure accuracy fixes).
+- `F.5` — Auto memory writes at `C:\Users\hey\.claude\projects\C--Users-hey-Documents-GitHub-qube-machine-report\memory\`: keep `project_tr300_overview.md` (project) up-to-date, append to `feedback_tr300_constraints.md` (feedback) when the user adds a hard rule, update `MEMORY.md` index.
+- `F.6` — `TESTING.md` append a `### vX.Y.Z — YYYY-MM-DD` log noting which manual matrix rows were re-verified and on which hardware.
+
+### Phase 5 — Verification + independent review
+
+1. Re-run the full local gate (Phase 3 step 4). Must be green.
+2. **Codex review** (`Agent` tool, `subagent_type: "codex:codex-rescue"`) for non-trivial PRs. Use it to spot-check cross-platform safety / YAML / unsafe blocks where a second pair of eyes catches things stale eyes miss. Note: Codex's `gh pr diff` review path needs the PR to actually exist — open the PR first, then ask Codex to review it. Don't over-rely on its findings; double-check.
+3. Manual matrix run for the platforms touched (`TESTING.md`).
+
+### Phase 6 — Commit + push
+
+- **Local commit**: `git-master` agent. No `ci-tester` needed for local-only operations.
+- **Push to remote**: `ci-tester` agent FIRST. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`), never bypass signing. Once `ci-tester` is `[PASS]`, hand off to `git-master` for the push.
+- **Tag a release**: bump version (already done in `F.4`), commit + push commits, then `git tag vX.Y.Z && git push --tags`. The tag push triggers cargo-dist's `release.yml`. Push the tag *only after* `ci.yml` has gone green on the commit being tagged.
+
+### Phase 7 — Close out
+
+Mark the parent PR task `completed` in `TaskList`. Move on to the next PR's parent task and start phase 3 again. PR #6 (and other "deferred" tasks) only run if the user explicitly asks after the previous PR lands.
+
+## CI
+
+Two GitHub Actions workflows guard the project:
+
+- **`.github/workflows/ci.yml`** — runs on every push to master and every pull request. Jobs:
+  - `fmt` — `cargo fmt --check` (Linux only)
+  - `clippy` — `cargo clippy --all-targets --workspace -- -D warnings` (Linux only)
+  - `test` — `cargo test --workspace --all-targets` on Linux + macOS ARM + macOS Intel + Windows
+  - `build` — `cargo build --release` smoke test on every platform, plus `--version` and `--fast --json` invocation to verify the binary actually runs
+  - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
+  - `audit` — `cargo audit` against RustSec advisories (advisory-only via `continue-on-error: true`; flagged vulnerabilities should be triaged within one release cycle but don't gate PRs)
+  - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
+- **`.github/workflows/release.yml`** — auto-generated by cargo-dist v0.31.0. Triggered by tag push (`vX.Y.Z`). Builds 6 targets and produces shell + PowerShell + MSI installers. Do not hand-edit; regenerate via `dist init` after changing `[workspace.metadata.dist]` in `Cargo.toml`.
+
+To reproduce the CI gates locally:
+
+```bash
+cargo fmt -- --check
+cargo clippy --all-targets --workspace -- -D warnings
+cargo test --workspace --all-targets
+cargo build --release --workspace
+# Speed check (rough — CI uses 5-run median):
+time ./target/release/tr300 --fast > /dev/null
+```
+
+If a CI job fails, click into the job logs first — `clippy` and `test` failures are usually obvious from the diff. Speed regressions print the per-run times and median in the step summary; correlate against the recent change set.
+
 ## Release Process
 
 Uses **cargo-dist** (v0.31.0) for fully automated cross-platform releases.

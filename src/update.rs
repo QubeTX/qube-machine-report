@@ -252,11 +252,8 @@ fn fetch_latest_version() -> Result<String, String> {
 
 /// Compare semver versions. Returns true if `latest` is newer than `current`.
 fn is_newer(current: &str, latest: &str) -> bool {
-    let parse = |v: &str| -> Vec<u64> {
-        v.split('.')
-            .filter_map(|s| s.parse::<u64>().ok())
-            .collect()
-    };
+    let parse =
+        |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse::<u64>().ok()).collect() };
 
     let c = parse(current);
     let l = parse(latest);
