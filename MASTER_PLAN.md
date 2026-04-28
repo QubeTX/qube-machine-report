@@ -5,8 +5,8 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-04-27 (during PR #4 push)
-**Current version:** 3.11.0
+**Last updated:** 2026-04-28 (after v3.13.0 push)
+**Current version:** 3.13.0
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
 
@@ -34,49 +34,61 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 |---|---|---|---|
 | v3.10.0 | `58812cc` | 2026-04-27 | **Foundation** — elevation tier (`is_elevated`, `--no-elevation-hint`, footer hint, JSON `schema_version` + `elevated` + `elevation_unlocks_more`), comprehensive CI (`.github/workflows/ci.yml` with cross-platform fmt/clippy/test/build/speed/audit/dist-plan), Codex plugin config at project scope (`.claude/settings.json`), 7-phase development workflow codified in CLAUDE.md, new `TESTING.md` with manual matrix |
 | v3.11.0 | `3a252df` | 2026-04-27 | **Windows accuracy + BitLocker** — registry-based OS detection (Win11 by build ≥ 22000, DisplayVersion + UBR), `IsWow64Process2` arch, `WTSQuerySessionInformation` last-login with `GetTickCount64` boot-time fallback, CPUID leaf 16h + `CallNtPowerInformation` CPU frequency, CPUID leaf `0x40000000` hypervisor brand with VBS disambiguation, BitLocker via `Win32_EncryptableVolume` in `MicrosoftVolumeEncryption` namespace |
+| v3.11.1 | `22f2002` | 2026-04-27 | **Rust 1.95 MSRV + auto-rustup self-update + uzers migration** — pin `rust-version = "1.95"` after `__cpuid` reclassified as safe-to-call, drop `unsafe { … }` wrappers; `tr300 --update` runs `rustup update stable` first when the binary was placed via `cargo install` (best-effort, silent if rustup absent); migrate `users` → `uzers` to clear RUSTSEC-2025-0040 / 2023-0040 / 2023-0059 |
+| (untagged) | `24fdc60` | 2026-04-27 | RUSTSEC audit fix folded into v3.11.1 (no separate tag needed) |
+| (untagged) | `14e0d97` | 2026-04-28 | CI: dropped `macos-13` (Intel macOS) from test+build matrices; rolled into v3.12.0 changelog |
+| v3.12.0 | `28bda98` | 2026-04-28 | **Windows accuracy refinements (PR #4b)** — VPN-aware default-route detection via `GetBestInterfaceEx` (the WMI adapter list is reordered so the kernel's preferred-route adapter wins, correct on multi-homed/VPN configs), Fast Startup uptime annotation (`HiberbootEnabled` + WMI `LastBootUpTime` divergence > 1h → `UPTIME` row renders `9d 4h 12m (session: 7h 14m)`), nullable `os.session_uptime_seconds` JSON key, `os::collect()` takes `CollectMode` to gate the Fast Startup WMI cost, `wmi::WMIDateTime` for CIM datetime parsing |
+| v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history + C.13 batched-PowerShell fallback deferred to a future session |
 
-**Tag status**: neither tag has been pushed yet. The plan is to wait for `ci.yml` to go green on real Linux / macOS / Windows runners against `3a252df`, then tag both releases:
+**Tag status (as of 2026-04-28):**
+- `v3.10.0` (`58812cc`): tagged + pushed; cargo-dist `release.yml` ran, 4/6 binaries built (Linux glibc, macOS ARM, Windows, Linux ARM); **2/6 failed** with cargo-dist v0.31.0 installer regression on `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` (`dist: command not found` after the install step); no GitHub release artifact created (cargo-dist is all-or-nothing). See task #54.
+- `v3.11.0` (`3a252df`): NOT tagged. Same release.yml as v3.10.0; would hit the same regression.
+- `v3.11.1` (`22f2002`): NOT tagged. Same regression.
+- `v3.12.0` (`28bda98`): tagged + pushed; release.yml status pending observation in next session.
+- `v3.13.0` (`f34e981`): NOT tagged yet — waiting for CI green on the commit before tag push.
 
-```bash
-git tag v3.10.0 58812cc
-git tag v3.11.0 3a252df
-git push --tags
-```
+The session that tagged v3.10.0 deliberately stopped retroactively tagging v3.11.0 / v3.11.1 because (a) all three share the same broken release.yml at their respective commits, and (b) v3.12.0 supersedes them on master and ships the same code path forward. The historical tags are documentation-only; users should install v3.13.0 (or latest) which subsumes everything.
 
-The tag push triggers cargo-dist's `release.yml` and produces shell + PowerShell + MSI installers across the 6 target platforms.
+### Live behavior changes already on master (as of v3.13.0)
 
-### Live behavior changes already on master
-
-After a fresh `git pull` and `cargo build --release`, you'll see (verified on Windows 11 25H2 build 26200.8246, unelevated user session):
+After a fresh `git pull` and `cargo build --release`, you'll see (verified on Windows 11 25H2 build 26200.8246, unelevated user session, Alienware on AC):
 
 - `OS` row: `Windows 11 25H2` (was `Windows 11 (26200)`)
 - `KERNEL` row: `26200.8246` (was `26200`)
 - `LAST LOGIN` row: real timestamp (was `Login tracking unavailable`)
 - `HYPERVISOR` row: `Bare Metal (Hyper-V/VBS)` on Win11 with VBS active (was `Hypervisor Present`)
+- `MACHINE IP` / `DNS IP` rows now reflect the kernel's preferred-route adapter (correct on multi-homed/VPN configs — the old WMI-first-match behavior was a coin flip when a tunnel was active)
+- `UPTIME` row renders `9d 4h 12m (session: 7h 14m)` annotation when Fast Startup is on AND cold-boot diverges from kernel-session by > 1h (skipped in `--fast` mode)
+- `BATTERY` row: 5-state output — `AC Power` (≥95% on AC, no charging — clean, no percentage); `X% (Charging)` (on AC, charging); `X% (Plugged in)` (on AC, < 95%, not charging — gaming-laptop PSU-undersized OR firmware battery-longevity); `X% (Discharging)` (off AC, normal); `X% (Critical)` / `X% (Low)` overrides; `X% (Unknown)` fallback
+- `SHELL` row: detects PowerShell 7+ via `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\SemanticVersion` before falling through to legacy WinPS-5.x; semver-tuple comparison (not string sort) so `7.10` correctly outranks `7.9`
+- `TERMINAL` row: env-var pre-checks (`WT_SESSION`, `TERM_PROGRAM=vscode`, `CURSOR_TRACE_ID`/`CURSOR_AGENT`) THEN parent-process walk via Toolhelp32 (cap 10 levels, intermediate hosts skipped) — recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity
+- `GPU` rows: registry-prefer in full mode + `filter_software_gpus()` name filter (strips Microsoft Basic Render Driver, Hyper-V Video, etc.) — only hardware adapters appear
 - New footer line below the table on Linux + Windows when unelevated:
   - Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`
   - Windows: `Run as Administrator for BitLocker status and full login history`
   - macOS: no footer (no meaningful elevated unlocks)
 - `--no-elevation-hint` flag suppresses the footer
 - `--fast` mode never shows the footer (auto-run safety)
-- JSON output gains `schema_version: 1`, `elevated`, `elevation_unlocks_more`, `session.encryption`
+- JSON output gains `schema_version: 1`, `elevated`, `elevation_unlocks_more`, `session.encryption`, `os.session_uptime_seconds`
 
 ### Pending (not yet shipped)
 
-- **PR #2** — macOS accuracy (12 sub-tasks) — Apple Silicon CPU brand/freq, Rosetta detection, scutil hostname/IP, AppleLocale, P/E core split, Mac model marketing name, vm_stat memory, battery health
-- **PR #3** — Linux accuracy (15 sub-tasks) — systemd-resolved DNS priority, aarch64 CPU brand, in-process systemd-detect-virt port, POSIX locale precedence, power_supply iteration with type filter + battery health, `ip route get` for local IP, terminal env-var priority, last-login fallback chain, ZFS health, dmidecode-backed motherboard/BIOS/RAM (sudo only)
-- **PR #4b** — deferred Windows accuracy (2 sub-tasks) — `GetBestInterfaceEx` + `GetAdaptersAddresses` (VPN-aware DNS+IP), Fast Startup uptime annotation
-- **PR #5** — Windows polish (10 sub-tasks) — DXGI GPU enumeration, `GetLogicalProcessorInformationEx`, `GetSystemPowerStatus` battery + cycle count, PowerShell 7+ detection, terminal parent-process walk, batched-PowerShell fallback, drop COM/WMI from `--fast` hot path, admin-only RDP login history
-- **PR #6** *(optional, deferred unless explicitly requested)* — `--security` flag adding TPM 2.0 + Secure Boot + FileVault + SELinux/AppArmor rows
+- **PR #2** — macOS accuracy (12 sub-tasks) — Apple Silicon CPU brand/freq, Rosetta detection, scutil hostname/IP, AppleLocale, P/E core split, Mac model marketing name, vm_stat memory, battery health. Needs Apple Silicon hardware to validate per §7.5 #11.
+- **PR #3** — Linux accuracy (15 sub-tasks) — systemd-resolved DNS priority, aarch64 CPU brand, in-process systemd-detect-virt port, POSIX locale precedence, power_supply iteration with type filter + battery health, `ip route get` for local IP, terminal env-var priority, last-login fallback chain, ZFS health, dmidecode-backed motherboard/BIOS/RAM (sudo only). Needs Linux distros + RPi to validate.
+- **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing, C.13 batched-PowerShell fallback (single `pwsh ConvertTo-Json` call when WMI fails). Deferred from v3.13.0 because (a) E.6 needs elevated-shell validation, (b) C.13 needs WMI-failure simulation, (c) v3.13.0 already shipped substantial improvements without them.
+- **Cross-platform 3-state battery model** (task #56) — extend the v3.13.0 Windows 5-state model to Linux + macOS. Linux can land independently using `/sys/class/power_supply/AC*/online` + `BAT*/status`; macOS waits on PR #2 hardware.
+- **Cargo-dist installer regression** (task #54) — v0.31.0's `dist` install step fails for `x86_64-apple-darwin` and `x86_64-unknown-linux-musl` runners. Result: tag pushes produce partial builds (4/6 binaries) but no GitHub release artifact. Options: switch to the `astral-sh/cargo-dist` fork (currently at v0.28.7), drop those targets from `[workspace.metadata.dist].targets`, or hand-edit `release.yml`. v3.10.0's release.yml run from this session is the canonical evidence.
+- **PR #6** *(optional, deferred unless explicitly requested)* — `--security` flag adding TPM 2.0 + Secure Boot + FileVault + SELinux/AppArmor rows.
 
 ### Recommended next steps (in order)
 
-1. **Watch CI on `3a252df`**: https://github.com/QubeTX/qube-machine-report/actions — `ci.yml` is brand new, this is its second cross-platform run. If anything fails, fix-forward (don't amend; create a new commit).
-2. **Tag both releases** once CI is green (commands above).
+1. **Watch CI on `f34e981`** (the v3.13.0 commit): https://github.com/QubeTX/qube-machine-report/actions . If green, tag: `git tag v3.13.0 f34e981 && git push origin v3.13.0`.
+2. **Investigate cargo-dist regression** (task #54). Until this is fixed, every tag push produces partial binaries with no GitHub release. Likely fastest fix: switch to `astral-sh/cargo-dist` fork (newer install script).
 3. Pick the next PR. Recommendation:
-   - **If validating on Mac** → PR #2 (macOS accuracy). The user's primary platforms are Windows + Apple Silicon; PR #2 touches the most-impactful M-series accuracy bugs (CPU brand "Apple M1" stale on M3/M4, CPU frequency = 0 GHz on Apple Silicon).
-   - **If on Windows** → PR #4b (finish Windows network + Fast Startup) or PR #5 (Windows polish — speed wins by replacing remaining WMI calls with Win32 APIs).
-   - **If on Linux** → PR #3.
+   - **If validating on Mac** → PR #2 (macOS accuracy). The user's primary platforms are Windows + Apple Silicon; PR #2 touches the most-impactful M-series accuracy bugs.
+   - **If on Linux / RPi** → PR #3.
+   - **If on Windows with admin shell** → finish PR #5 leftovers (task #58: E.6 admin RDP history + C.13 batched-PowerShell fallback).
+   - **Cross-platform** → task #56 (battery 3-state for Linux/macOS).
 
 ---
 
@@ -277,33 +289,34 @@ Status legend: `[x]` done, `[ ]` pending, `[~]` deferred to a later PR than orig
 - [x] **C.1** Windows OS from registry (Win11 detect by build ≥ 22000, DisplayVersion + UBR)
 - [x] **C.2** Windows arch via `IsWow64Process2`
 - [x] **C.3** Last-login via `WTSQuerySessionInformation` + boot-time fallback
-- [~] **C.4** Windows DNS+IP via `GetBestInterfaceEx` + `GetAdaptersAddresses` — **deferred to PR #4b** (existing WMI path works; this is an accuracy refinement, not a fix)
-- [~] **C.5** Fast Startup uptime detection — **deferred to PR #4b** (sysinfo uptime is acceptable today)
+- [~] **C.4** Windows DNS+IP via `GetBestInterfaceEx` + `GetAdaptersAddresses` — **shipped in v3.12.0 (PR #4b)**, simpler design
+- [~] **C.5** Fast Startup uptime detection — **shipped in v3.12.0 (PR #4b)**
 - [x] **C.6** CPU freq via CPUID leaf 16h + `CallNtPowerInformation`
 - [x] **C.7** Hypervisor via CPUID `0x40000000` with VBS disambiguation
 - [x] **E.5** Windows BitLocker collector (try non-admin, escalate)
 - [x] **F.1–F.5** Windows accuracy PR documentation
 - [x] Tests: Windows unit + manual matrix (user-validatable)
 
-### PR #4b — Deferred Windows accuracy (⏳ pending; user can validate live on Windows)
+### PR #4b — Deferred Windows accuracy (✅ shipped as v3.12.0, commit `28bda98`)
 
-- [ ] **C.4** DNS+IP via `GetBestInterfaceEx` + `GetAdaptersAddresses`
-- [ ] **C.5** Fast Startup uptime annotation
-- [ ] **F.1–F.5** PR #4b documentation block
-- [ ] Tests: speed regression check (must show no regression vs PR #4 baseline)
+- [x] **C.4** VPN-aware default-route detection — `GetBestInterfaceEx` (manual extern, `iphlpapi`) + reorder existing WMI `Win32_NetworkAdapterConfiguration` rows by `interface_index` so the kernel-preferred adapter wins. *Plan deviation:* simpler than the originally-planned `GetBestInterfaceEx` + `GetAdaptersAddresses` linked-list walk; same VPN-aware outcome, ~50 LOC vs ~120 LOC, much smaller unsafe surface.
+- [x] **C.5** Fast Startup uptime annotation — `detect_fast_startup()` reads `HiberbootEnabled` registry DWORD; `last_cold_boot_seconds()` queries `Win32_OperatingSystem.LastBootUpTime` via `wmi::WMIDateTime` (the wmi crate's serde-aware CIM datetime wrapper — an early hand-written parser was discarded). When divergence > 1h, render `9d 4h 12m (session: 7h 14m)`; full-mode-only.
+- [x] **F.1–F.6** PR #4b documentation block — CHANGELOG, README, CLAUDE.md, Cargo.toml, auto-memory, TESTING.md.
+- [x] Endianness fix in `sin_addr` (caught during Codex GPT-5.5 review): original `from_be_bytes` would have routed to wrong IP on non-palindromic destinations; fixed to `from_le_bytes` with explanatory comment.
 
-### PR #5 — Windows polish (⏳ pending; user can validate live on Windows)
+### PR #5 — Windows polish (✅ shipped partially as v3.13.0, commit `f34e981`)
 
-- [ ] **C.8** GPU via DXGI EnumAdapters1
-- [ ] **C.9** Cores via `GetLogicalProcessorInformationEx`
-- [ ] **C.10** Battery via `GetSystemPowerStatus` + DeviceIoControl
-- [ ] **C.11** PowerShell 7+ detection
-- [ ] **C.12** Terminal parent-process walk via Toolhelp
-- [ ] **C.13** Batched-PowerShell fallback into single JSON call
-- [ ] **C.14** Drop COM/WMI init from `--fast` hot path
-- [ ] **E.6** Admin-only full RDP login history
-- [ ] **F.1–F.5** PR #5 documentation block
-- [ ] Tests: Windows polish unit + speed regression (target ~150ms+ improvement on `--fast` cold start)
+- [x] **C.8** GPU enumeration via DXGI `EnumAdapters1` — *plan deviation:* used the simpler registry-prefer + `filter_software_gpus()` name-based filter approach instead. ~25 LOC vs ~100 LOC of unsafe COM. Same user-visible outcome (no Microsoft Basic Render Driver). DXGI deferred unless a future bug demands vendor/device-ID filtering that name-based filtering can't do.
+- [x] **C.9** Cores via `GetLogicalProcessorInformationEx` — two-call buffer-sizing pattern, alignment-safe walk via `u32::from_le_bytes` (caught in Codex review — the original raw-cast approach happened to work in practice but was technically UB per Rust spec). WMI fallback retained.
+- [x] **C.10** Battery via `GetSystemPowerStatus` (deferred `DeviceIoControl` cycle-count enrichment).
+- [x] **C.10b** *(plan addition, user-requested)* Extended C.10 from 3-state to 5+ states: `AC Power` (≥95% on AC, no charging — clean, no percentage), `X% (Charging)`, `X% (Plugged in)` (gaming-laptop PSU-undersized OR firmware battery-longevity), `X% (Discharging)` / `Critical` / `Low` overrides off AC, `X% (Unknown)` fallback. AC-status-unknown edge case renders bare `X%`.
+- [x] **C.11** PowerShell 7+ detection via `PowerShellCore` registry. *Caught in Codex review:* original string-compare approach put `"7.9.0" > "7.10.0"`; fixed via `parse_semver_tuple` comparing `(u64, u64, u64)`.
+- [x] **C.12** Terminal parent-process walk via Toolhelp32 — `CreateToolhelp32Snapshot` + `Process32FirstW`/`Process32NextW`, build `HashMap<pid, (parent_pid, name)>`, climb cap 10 levels. Recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity. Intermediate hosts (`conhost.exe`, `powershell.exe`, `pwsh.exe`, `cmd.exe`, shells) skipped.
+- [ ] **C.13** Batched-PowerShell fallback into single JSON call — **deferred to task #58**; rare WMI-failure path, awkward to validate without breaking the test host.
+- [x] **C.14** Drop COM/WMI init from `--fast` hot path — verified by audit: fast mode early-returns at `platform/windows.rs:66` BEFORE any `COMLibrary::new()` call; structurally already done.
+- [ ] **E.6** Admin-only full RDP login history — **deferred to task #58**; needs elevated-shell validation. Implementation plan: `wevtutil qe Security /q:"*[System[EventID=4624]]" /c:50 /rd:true /f:xml`, hand-rolled XML parse, filter `LogonType ∈ {3,7,10,11}`, render 1-5 conditional rows under LAST LOGIN.
+- [x] **F.1–F.6** PR #5 documentation block — CHANGELOG, README, CLAUDE.md, Cargo.toml, auto-memory, TESTING.md.
+- [x] Tests: Windows polish unit (covered by existing test suite — additive changes don't need new tests; the deferred tests for `cpu.gpus` array regression and `session.login_history` are tied to the deferred E.6).
 
 ### PR #6 — Optional `--security` flag (⏸ deferred unless explicitly requested)
 
@@ -439,9 +452,13 @@ Land in this order. PR #1 unblocks every later PR. PR #4 already shipped, but C.
 | 2 | ⏳ pending | — | macOS accuracy (A.1–A.10) + macOS PR docs (F.1–F.5) |
 | 3 | ⏳ pending | — | Linux accuracy (B.1–B.11) + dmidecode tier (E.3–E.4) + Linux PR docs |
 | 4 | ✅ shipped | `3a252df` (v3.11.0) | Windows accuracy (C.1, C.2, C.3, C.6, C.7) + BitLocker (E.5) + Windows PR docs |
-| 4b | ⏳ pending | — | Deferred Windows accuracy (C.4 + C.5) |
-| 5 | ⏳ pending | — | Windows polish (C.8–C.14) + admin RDP login history (E.6) |
+| (4.5) | ✅ shipped | `22f2002` (v3.11.1) | Rust 1.95 MSRV + auto-rustup self-update + uzers RUSTSEC migration |
+| 4b | ✅ shipped | `28bda98` (v3.12.0) | Deferred Windows accuracy: VPN-aware default-route (C.4 simplified design) + Fast Startup uptime annotation (C.5) |
+| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14). E.6 admin RDP history + C.13 batched-PowerShell fallback deferred to task #58. |
+| 5b | ⏳ pending (task #58) | — | E.6 admin RDP login history + C.13 batched-PowerShell fallback (the deferred half of PR #5) |
 | 6 | ⏸ optional | — | `--security` flag with TPM + Secure Boot + FileVault + SELinux/AppArmor |
+| (cross-cutting) | ⏳ pending (task #56) | — | Battery 3-state model for Linux + macOS (mirror v3.13.0 Windows C.10b) |
+| (infra) | ⏳ pending (task #54) | — | cargo-dist v0.31.0 release.yml installer regression on `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` (consider switching to astral-sh/cargo-dist fork) |
 
 Within each PR, sub-tasks can be tackled in any order that compiles. Per-PR documentation block (F.1–F.6) runs at the end before commit. Verification runs before the push.
 

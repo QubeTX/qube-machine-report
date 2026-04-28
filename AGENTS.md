@@ -10,7 +10,7 @@ Last verified against source: 2026-04-27
 - Project: TR-300, the Rust successor to TR-200 Machine Report
 - Cargo package name: `tr-300`
 - Library import path: `tr_300`
-- Current version: `3.9.0` (`Cargo.toml`)
+- Current version: `3.13.0` (`Cargo.toml`)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
 - License: PolyForm-Noncommercial-1.0.0
