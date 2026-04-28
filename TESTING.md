@@ -8,8 +8,8 @@ This file tracks the manual verification matrix that must pass before each tagge
 
 - **`fmt`** — `cargo fmt --check` (Linux)
 - **`clippy`** — `cargo clippy --all-targets --workspace -- -D warnings` (Linux)
-- **`test`** — `cargo test --workspace --all-targets` on Linux + macOS ARM + macOS Intel + Windows
-- **`build`** — release build smoke test on all four platforms (with a `--version` + `--fast --json` invocation to verify the binary runs)
+- **`test`** — `cargo test --workspace --all-targets` on Linux + macOS ARM + Windows
+- **`build`** — release build smoke test on all three platforms (with a `--version` + `--fast --json` invocation to verify the binary runs)
 - **`speed`** — 5-run median of `tr300 --fast` on Linux + macOS ARM + Windows, fails if median > 1500 ms (auto-run safety gate). Reports times in the job summary.
 - **`audit`** — `cargo audit` against RustSec advisories (advisory-only; doesn't block)
 - **`dist-plan`** — verifies cargo-dist config parses, so dist regressions don't surprise us at tag time

@@ -6,7 +6,7 @@ name: CI
 # Jobs:
 #   fmt        — cargo fmt --check (Linux only; rustfmt is platform-agnostic)
 #   clippy     — cargo clippy --all-targets -- -D warnings (Linux only)
-#   test       — cargo test --workspace (Linux glibc + Linux musl + macOS ARM + macOS Intel + Windows)
+#   test       — cargo test --workspace (Linux glibc + macOS ARM + Windows)
 #   build      — cargo build --release smoke test on every supported target
 #   speed      — measure tr300 --fast median wall-clock; fail above 1500 ms
 #   audit      — cargo-audit (advisory; continue-on-error so it never blocks)
@@ -59,8 +59,6 @@ jobs:
             name: "Linux x86_64 glibc"
           - os: macos-latest
             name: "macOS ARM (Apple Silicon)"
-          - os: macos-13
-            name: "macOS x86_64 (Intel)"
           - os: windows-latest
             name: "Windows x86_64"
     steps:
@@ -80,8 +78,6 @@ jobs:
             name: "Linux x86_64 glibc"
           - os: macos-latest
             name: "macOS ARM (Apple Silicon)"
-          - os: macos-13
-            name: "macOS x86_64 (Intel)"
           - os: windows-latest
             name: "Windows x86_64"
     steps:

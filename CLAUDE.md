@@ -333,7 +333,7 @@ Two GitHub Actions workflows guard the project:
 - **`.github/workflows/ci.yml`** — runs on every push to master and every pull request. Jobs:
   - `fmt` — `cargo fmt --check` (Linux only)
   - `clippy` — `cargo clippy --all-targets --workspace -- -D warnings` (Linux only)
-  - `test` — `cargo test --workspace --all-targets` on Linux + macOS ARM + macOS Intel + Windows
+  - `test` — `cargo test --workspace --all-targets` on Linux + macOS ARM + Windows
   - `build` — `cargo build --release` smoke test on every platform, plus `--version` and `--fast --json` invocation to verify the binary actually runs
   - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
   - `audit` — `cargo audit` against RustSec advisories (advisory-only via `continue-on-error: true`; flagged vulnerabilities should be triaged within one release cycle but don't gate PRs)
@@ -352,6 +352,102 @@ time ./target/release/tr300 --fast > /dev/null
 ```
 
 If a CI job fails, click into the job logs first — `clippy` and `test` failures are usually obvious from the diff. Speed regressions print the per-run times and median in the step summary; correlate against the recent change set.
+
+### Intel macOS coverage policy (v3.11.2+)
+
+**What changed.** On 2026-04-28 the `macos-13` matrix entries were removed
+from both the `test` and `build` jobs in `.github/workflows/ci.yml`. CI no
+longer exercises Intel macOS x86_64. The Intel binary continues to ship
+from tag-push releases — `[workspace.metadata.dist].targets` in
+`Cargo.toml` still lists `x86_64-apple-darwin`, and cargo-dist's
+`release.yml` still builds it on a `macos-13` runner at every `vX.Y.Z`
+tag. CI on every commit no longer touches that runner.
+
+**The triggering symptom.** The five CI runs immediately preceding this
+change all stalled exclusively on the two Intel macOS jobs while every
+other matrix cell finished within minutes. Concrete examples (run IDs +
+queue times before manual cancellation): `#25023039347` ("fix(audit):
+migrate users → uzers") sat queued **3h 20m+** before being cancelled to
+unblock the next push, `#25022743655` (v3.11.1 release) cancelled at 7m
+59s, `#25021879374` (docs commit) cancelled at 22m 34s, `#25021109459`
+(v3.11.0 release) cancelled at 18m 41s, and `#24978816648` (v3.10.0
+release) sat for **15h 50m** before cancellation. The repeated workflow
+was: push → wait → realise Intel never picked up → `gh run cancel ...` →
+push next commit, which the `concurrency: cancel-in-progress: true`
+group then auto-cancelled anyway. Hours of latency per push, no Intel
+runtime ever exercised.
+
+**Why it's structural, not a glitch.** `macos-13` is GitHub's last public
+Intel x86_64 macOS hosted runner label. There is no `macos-14`,
+`macos-15`, or `macos-latest` Intel variant — Apple Silicon is the only
+forward path on hosted runners. GitHub has been progressively winding
+down the Intel hosted-fleet capacity through 2025 as Apple Silicon
+became default; on top of that thin baseline, transient incidents like
+the 2026-04-27 16:31 UTC "Actions experiencing degraded performance"
+event push queue depth from "slow" to "indefinite." This is not a
+problem we can wait out — capacity is not coming back.
+
+**Why dropping CI coverage is acceptable for this project.** Apple
+stopped selling Intel Macs in June 2023; the newest hardware Apple
+shipped with an Intel CPU (the 2019 Mac Pro / 2020 Intel iMac /
+MacBook Pro) is roughly three years old by 2026-04-28 and falling out
+of macOS support tiers release-over-release. Critically, dropping Intel
+*CI* does not mean dropping Intel *correctness coverage*: the
+`#[cfg(target_os = "macos")]` gates in `src/collectors/platform/macos.rs`
+are arch-agnostic, so Apple Silicon CI exercises every line of the
+macOS path. The only thing ARM CI doesn't catch is genuinely
+arch-specific behavior, of which TR-300's macOS path has effectively
+none — no inline asm, `format_bytes()` and the table renderer are
+arch-agnostic, sysinfo's `System` API hides arch internally, and the
+`sysctl`/`scutil`/`pmset`/`ioreg` subprocess calls produce identical
+output regardless of CPU. The accuracy delta from losing Intel CI
+coverage is close to zero in practice, and any drift would show up at
+tag-push time when cargo-dist builds the Intel target anyway.
+
+**Why not just `continue-on-error: true` on the Intel matrix entry.**
+Considered. Rejected because it leaves the queued-3-hours-and-then-
+cancel UX intact for every push: the workflow's overall conclusion
+would be `success`, but the dashboard would still show two perpetually
+pending cells, and the run wouldn't be considered "complete" until
+either the runner finally picked up (rare) or `cancel-in-progress`
+killed it on the next push. That's theatrical coverage — the user
+experience is identical to the current pain. Hard removal is the only
+fix that actually changes the dashboard state.
+
+**Why not also drop Intel from cargo-dist's release targets.**
+Considered. Rejected per maintainer direction. Release-time builds run
+on a tag push (cadence: minor/patch releases, ~weekly to monthly), and
+that cadence is willing to absorb a multi-hour Intel queue wait — we
+don't tag releases on a deadline. The cost of keeping
+`x86_64-apple-darwin` in `[workspace.metadata.dist].targets` is one
+extra `macos-13` job per *tag*, not per *commit*. Any user still on
+2019/2020-era Intel hardware deserves a working binary download
+without having to build from source. The contract is: **CI never
+blocks on Intel; releases still produce the artifact.**
+
+**What this implies for future contributors.**
+
+1. Don't re-add `macos-13` to `ci.yml` without a concrete reason and a
+   discussion of capacity risk. The default state is "Intel is not in
+   CI, period."
+2. If GitHub ever ships a hosted Intel macOS replacement label
+   (unlikely), prefer that label over `macos-13` and re-evaluate
+   whether re-adding to CI makes sense at that point.
+3. If `release.yml` starts taking longer than ~2 hours at tag time
+   because of `macos-13` queue depth, *that* is the signal to revisit
+   dropping `x86_64-apple-darwin` from cargo-dist's targets. Until
+   then, releases tolerate the wait.
+4. If a macOS-arch-specific bug is reported by an Intel user, reproduce
+   locally on Intel hardware (or via a one-shot self-hosted runner)
+   rather than re-introducing CI coverage. The bug-rate doesn't justify
+   the queue cost.
+
+**Why "Builds 6 targets" in `## Release Process` still says 6.** Six
+binary targets continue to ship from `release.yml`: Windows x64, macOS
+Intel (x86_64), macOS ARM (aarch64), Linux x64 glibc, Linux x64 musl,
+Linux ARM64. CI tests three of them (Linux x64 glibc, macOS ARM,
+Windows x64). The mismatch between *tested* and *shipped* platforms
+is intentional and is exactly what this section documents — see above.
 
 ## Release Process
 

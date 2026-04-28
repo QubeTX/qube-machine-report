@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **CI: dropped `macos-13` (Intel macOS x86_64) from the `test` and `build`
+  matrices.** The hosted runner pool is effectively retired — recent CI runs
+  sat queued for 3+ hours (and one for 15h 50m) waiting exclusively on
+  Intel macOS while every other matrix cell finished in minutes, forcing
+  hand-cancellations on every push. Apple Silicon CI continues to exercise
+  every line of `src/collectors/platform/macos.rs` because the platform
+  cfg-gates aren't arch-specific. `cargo-dist`'s `release.yml` continues
+  to ship `tr300-x86_64-apple-darwin.tar.xz` at every tag push, so any
+  user on 2019/2020-era Intel hardware still gets a working binary
+  download. CI never blocks on Intel; releases still produce the artifact.
+  See `CLAUDE.md` § _Intel macOS coverage policy_ for the full rationale.
+
 ## [3.11.1] - 2026-04-27
 
 ### Security

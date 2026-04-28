@@ -534,7 +534,7 @@ Plus on each platform:
 for i in 1 2 3 4 5; do time ./target/release/tr300 --fast > /dev/null; done
 ```
 
-CI runs the same checks across Linux, macOS ARM, macOS Intel, and Windows. Local fmt/clippy/test only validates the host platform; cross-platform issues surface on remote CI runs.
+CI runs the same checks across Linux, macOS ARM, and Windows. Intel macOS x86_64 was dropped from CI on 2026-04-28 because `macos-13` runner capacity has effectively retired (see `CLAUDE.md` § _Intel macOS coverage policy_); cargo-dist still builds the Intel binary at tag time. Local fmt/clippy/test only validates the host platform; cross-platform issues surface on remote CI runs.
 
 ---
 
@@ -558,7 +558,7 @@ A PR is done when ALL of these are true:
 5. `tr300 --version` reports the bumped version
 6. `tr300 --fast --json | jq .` parses
 7. `tr300 --ascii` visually correct
-8. CI on GitHub Actions is green across all 4 matrix legs (Linux glibc, macOS ARM, macOS Intel, Windows)
+8. CI on GitHub Actions is green across all 3 matrix legs (Linux glibc, macOS ARM, Windows). Intel macOS coverage moved to tag-time-only via cargo-dist (see `CLAUDE.md` § _Intel macOS coverage policy_).
 9. The `--fast` median wall-clock on the host platform did not regress > 100 ms vs the prior commit
 10. `report --ascii` line count did not grow (verified in `tests/integration.rs`)
 11. The user was able to confirm the changed field shows the right value on their actual machine for at least one of: macOS Apple Silicon, Win11, Linux
