@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-04-28
+
 ### Changed
+- **VPN-aware Windows IP + DNS detection.** The Windows network collector
+  now asks the kernel which interface index would carry traffic to the
+  public internet — via `GetBestInterfaceEx` for `1.1.1.1` — and reorders
+  the WMI `Win32_NetworkAdapterConfiguration` query results so the
+  best-route adapter is picked first. On hosts running Tailscale,
+  WireGuard, OpenVPN, Cisco AnyConnect, or any other tunnel that
+  steals the default route, `MACHINE IP` and `DNS IP` rows now reflect
+  the tunnel rather than a coin-flip pick from the available adapters.
+  Falls back transparently to the pre-v3.12.0 first-IP-enabled-adapter
+  behavior on hosts where the kernel route lookup fails (IP Helper
+  service disabled, no default route). Reference:
+  [GetBestInterfaceEx](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getbestinterfaceex)
+  (C.4)
+- **Windows Fast Startup uptime annotation.** When `HiberbootEnabled=1`
+  in the registry AND the WMI cold-boot time (`Win32_OperatingSystem.
+  LastBootUpTime`) diverges from the kernel session uptime by more than
+  one hour, the `UPTIME` row now renders as
+  `9d 4h 12m (session: 7h 14m)` — the long form is time since the last
+  *cold* boot (what users mean by "since I really restarted") and the
+  parenthetical is the current resumed-from-hibernation kernel session.
+  Both values are correct and meaningful; surfacing both eliminates the
+  "wait, I restarted three days ago, why does this say 47 days?"
+  confusion that Fast Startup creates on laptops. Skipped in `--fast`
+  mode (~80 ms WMI cost). Adds nullable `os.session_uptime_seconds`
+  to JSON output (additive, no schema bump). Reference:
+  [Microsoft Q&A: how to get OS start time when Fast Startup is enabled](https://learn.microsoft.com/en-us/answers/questions/1443763/how-to-get-oss-start-time-when-fast-startup-mode-i)
+  (C.5)
 - **CI: dropped `macos-13` (Intel macOS x86_64) from the `test` and `build`
   matrices.** The hosted runner pool is effectively retired — recent CI runs
   sat queued for 3+ hours (and one for 15h 50m) waiting exclusively on
@@ -19,6 +48,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user on 2019/2020-era Intel hardware still gets a working binary
   download. CI never blocks on Intel; releases still produce the artifact.
   See `CLAUDE.md` § _Intel macOS coverage policy_ for the full rationale.
+  (Originally `[Unreleased]`; rolled into v3.12.0.)
+
+### Fixed
+- **Endianness in `sin_addr` for `GetBestInterfaceEx` destination**
+  caught during Codex (GPT-5.5) pre-commit review. The original draft
+  used `u32::from_be_bytes([1,1,1,1])` for the IPv4 destination — which
+  works coincidentally for the palindromic 1.1.1.1 because all bytes
+  are equal, but on little-endian Windows the `sin_addr: u32` field
+  stores its bytes in native (LE) order, meaning a non-palindromic
+  destination (e.g. 8.4.4.8) would have routed to the wrong IP.
+  Switched to `u32::from_le_bytes` with an inline comment documenting
+  the network-byte-order requirement and why both byte-order choices
+  happen to produce the same result for 1.1.1.1. Verified against
+  [Microsoft `in_addr`](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/ns-winsock2-in_addr)
+  docs (s_b1 = highest IP octet at offset 0).
+
+### Internal
+- New nullable `OsInfo.session_uptime_seconds: Option<u64>` field
+  propagated through `SystemInfo`. Drives the parenthetical UPTIME
+  annotation; reserved for future expansion (e.g. macOS / Linux
+  session-vs-uptime nuance, should that prove worth surfacing).
+- `SystemInfo::uptime_formatted()` refactored to delegate to a new
+  module-private `format_duration_seconds(secs: u64) -> String`
+  helper so the same compact "Nd Nh Nm" rendering can be reused
+  for the parenthetical session-uptime suffix without duplicating
+  the day/hour/minute decomposition.
+- `os::collect()` now takes a `CollectMode` argument (was nullary)
+  so the Windows Fast Startup WMI cold-boot query can be skipped in
+  `--fast` mode without affecting cross-platform call sites. The
+  callsite in `SystemInfo::collect_with_mode()` was updated to pass
+  `mode` through to the spawned thread.
+- `winapi` feature set extended to include `iphlpapi`, `ws2def`,
+  `ws2ipdef`, `winerror`, `inaddr`, `in6addr`, `ifdef` for the
+  `GetBestInterfaceEx` extern + `SOCKADDR_IN` declaration. Inline
+  `#[repr(C)] struct SockaddrIn` matches the 16-byte Win32 layout
+  (u16 sin_family, u16 sin_port, u32 sin_addr, [u8;8] sin_zero) so
+  `GetBestInterfaceEx`'s `pDestAddr: sockaddr*` parameter receives a
+  layout-compatible pointer.
+- `Win32NetworkAdapterConfig` (the existing serde struct for
+  `Win32_NetworkAdapterConfiguration` rows) gained an
+  `interface_index: Option<u32>` field so the WMI query can be
+  reordered by best-route ifindex.
+- `last_cold_boot_seconds()` deserializes `LastBootUpTime` via
+  `wmi::WMIDateTime` (a serde-aware newtype around
+  `chrono::DateTime<FixedOffset>`). An earlier draft hand-parsed the
+  CIM datetime format (`yyyymmddHHMMSS.mmmmmmsUUU`) — discarded after
+  field-testing showed the wmi crate already converts the type at the
+  COM boundary, so a raw `Option<String>` field can never see the
+  format the parser expected.
+- New integration test `test_json_includes_session_uptime_seconds_key`
+  pins the JSON contract (key always present in `os` object, nullable
+  per design — `null` on Windows when Fast Startup hibernation isn't
+  active or hasn't diverged enough, and on every non-Windows platform).
 
 ## [3.11.1] - 2026-04-27
 

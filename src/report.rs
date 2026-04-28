@@ -215,6 +215,10 @@ fn generate_json(info: &SystemInfo) -> String {
         o.map(|v| format!("{}", v))
             .unwrap_or_else(|| "null".to_string())
     };
+    let opt_u64 = |o: Option<u64>| -> String {
+        o.map(|v| format!("{}", v))
+            .unwrap_or_else(|| "null".to_string())
+    };
 
     // Simple JSON serialization without serde
     format!(
@@ -226,7 +230,8 @@ fn generate_json(info: &SystemInfo) -> String {
     "name": "{}",
     "version": "{}",
     "kernel": "{}",
-    "architecture": "{}"
+    "architecture": "{}",
+    "session_uptime_seconds": {}
   }},
   "network": {{
     "hostname": "{}",
@@ -273,6 +278,7 @@ fn generate_json(info: &SystemInfo) -> String {
         escape_json(&info.os_version),
         escape_json(&info.kernel),
         escape_json(&info.architecture),
+        opt_u64(info.session_uptime_seconds),
         escape_json(&info.hostname),
         opt_str(&info.machine_ip),
         opt_str(&info.client_ip),

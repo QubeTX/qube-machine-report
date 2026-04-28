@@ -128,6 +128,47 @@ Custom error types in `src/error.rs` using `thiserror`:
   call returns access-denied → `None` and the row is gracefully omitted; the
   elevation footer hint covers the unelevated case.
 
+### Windows accuracy patterns (v3.12.0+)
+
+- **VPN-aware default-route detection** (`get_best_route_interface_index` +
+  `get_network_info_wmi`). The historical Windows network collector queried
+  `Win32_NetworkAdapterConfiguration WHERE IPEnabled = TRUE` and picked the
+  first IPv4 address it found — coin-flip behavior on multi-homed hosts and
+  on hosts with active VPN tunnels (Tailscale, WireGuard, OpenVPN, Cisco
+  AnyConnect). v3.12.0 calls `GetBestInterfaceEx` (manual `extern` linked
+  against `iphlpapi`) for `1.1.1.1`; the kernel returns the interface index
+  that *would* carry packets to the public internet right now. We then
+  reorder the WMI result list so that adapter is picked first, falling back
+  transparently to the original first-match logic when the kernel lookup
+  fails (IP Helper service disabled, no default route, etc.). The `winapi`
+  features `iphlpapi`/`ws2def`/`ws2ipdef`/`winerror`/`inaddr`/`in6addr`/
+  `ifdef` were added for this — `SOCKADDR_IN` is declared inline (3 fields,
+  layout-stable since Win95) to keep the surface area minimal. Reference:
+  [GetBestInterfaceEx](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getbestinterfaceex).
+- **Fast Startup uptime annotation** (`detect_fast_startup` +
+  `last_cold_boot_seconds` in `platform/windows.rs`, threaded through
+  `OsInfo.session_uptime_seconds` and `SystemInfo.uptime_formatted()`).
+  Windows 10/11 default to `HiberbootEnabled = 1` — at "shut down" the
+  kernel session is hibernated to `hiberfil.sys` and resumed at "boot",
+  so `GetTickCount64` (sysinfo's uptime) reports the resumed-session age,
+  while `Win32_OperatingSystem.LastBootUpTime` reports the actual cold-boot
+  time. They diverge by days on a daily-use laptop. The collector probes
+  the registry key `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\
+  Power\HiberbootEnabled` (DWORD), and when enabled AND the WMI cold-boot
+  time is >1h older than the kernel session age, swaps `uptime_seconds` to
+  the cold-boot value AND populates `session_uptime_seconds` with the
+  resumed-session value. The renderer surfaces both as
+  `9d 4h 12m (session: 7h 14m)`. Both values are right; surfacing both
+  avoids the "wait, I restarted three days ago, why does this say 47 days"
+  confusion. The WMI cold-boot query is full-mode-only (~80 ms cost);
+  `--fast` uses sysinfo's uptime exclusively. The CIM datetime field is
+  deserialized via `wmi::WMIDateTime` (the `wmi` crate's serde-aware
+  wrapper around `chrono::DateTime<FixedOffset>`) — manual hand-parsing of
+  the `yyyymmddHHMMSS.mmmmmmsUUU` format is unnecessary and was tried-
+  and-discarded in early v3.12.0 development. References:
+  [Microsoft Q&A: Fast Startup boot time](https://learn.microsoft.com/en-us/answers/questions/1443763/how-to-get-oss-start-time-when-fast-startup-mode-i),
+  [Win32_OperatingSystem](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem).
+
 ### Self-Update (`--update`)
 
 `src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and re-runs the install method that placed the binary:

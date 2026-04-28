@@ -49,6 +49,7 @@ struct Win32NetworkAdapterConfig {
     ip_address: Option<Vec<String>>,
     #[serde(rename = "DNSServerSearchOrder")]
     dns_server_search_order: Option<Vec<String>>,
+    interface_index: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -504,7 +505,15 @@ pub fn get_socket_count_wmi() -> usize {
     1
 }
 
-/// Get network info via WMI, with PowerShell fallback (used from network.rs)
+/// Get network info via WMI, with PowerShell fallback (used from network.rs).
+///
+/// Uses `GetBestInterfaceEx` (VPN-aware, kernel default-route lookup) to pick
+/// the IP-enabled adapter Windows would actually use to reach the public
+/// internet, then extracts that adapter's IPv4 address + DNS servers from the
+/// existing WMI query. Falls back to "first IP-enabled adapter" if either the
+/// kernel route lookup or the WMI filter returns nothing — preserves the
+/// pre-v3.12.0 behavior on hosts where IP Helper service is disabled or no
+/// default route exists.
 pub fn get_network_info_wmi() -> (Option<String>, Vec<String>) {
     // Try WMI first
     let result = COMLibrary::new()
@@ -512,16 +521,32 @@ pub fn get_network_info_wmi() -> (Option<String>, Vec<String>) {
         .and_then(|com| WMIConnection::new(com).ok())
         .and_then(|wmi| {
             let results: Vec<Win32NetworkAdapterConfig> = wmi
-                .raw_query("SELECT IPAddress, DNSServerSearchOrder FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = TRUE")
+                .raw_query("SELECT IPAddress, DNSServerSearchOrder, InterfaceIndex FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = TRUE")
                 .ok()?;
             Some(results)
         });
 
     if let Some(results) = result {
+        // Ask the kernel for the best-route interface to a public address; the
+        // adapter that wins this lookup is the one carrying actual internet
+        // traffic right now (correct on multi-homed/VPN configs).
+        let best_index = get_best_route_interface_index();
+
+        // Order adapters: best-route adapter first (if known), then the rest in
+        // their WMI-natural order. This makes the existing first-match loop
+        // produce VPN-correct output without changing its shape.
+        let mut ordered: Vec<&Win32NetworkAdapterConfig> = Vec::with_capacity(results.len());
+        if let Some(idx) = best_index {
+            ordered.extend(results.iter().filter(|a| a.interface_index == Some(idx)));
+            ordered.extend(results.iter().filter(|a| a.interface_index != Some(idx)));
+        } else {
+            ordered.extend(results.iter());
+        }
+
         let mut machine_ip: Option<String> = None;
         let mut dns_servers: Vec<String> = Vec::new();
 
-        for adapter in &results {
+        for adapter in &ordered {
             if machine_ip.is_none() {
                 if let Some(ref ips) = adapter.ip_address {
                     for ip in ips {
@@ -856,4 +881,140 @@ fn get_battery_ps() -> Option<String> {
         .replace("(8)", "(Charging Low)")
         .replace("(9)", "(Charging Critical)");
     Some(battery)
+}
+
+// --- C.4: VPN-aware default-route detection (v3.12.0+) ---
+//
+// `GetBestInterfaceEx` asks the kernel which interface index it would route
+// a packet to a given destination through. Pointing it at a public IPv4
+// (1.1.1.1) gives us the interface carrying real internet traffic — correct
+// on multi-homed hosts and on hosts with WireGuard / Tailscale / OpenVPN /
+// Cisco AnyConnect tunnels active. Reference:
+// https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getbestinterfaceex
+//
+// Declared as a manual `extern` because we want the broader `winapi` feature
+// set under `iphlpapi` to stay opt-in elsewhere; we only need this single
+// symbol here. `SOCKADDR_IN` is declared inline (3 fields, fixed layout, has
+// been stable since Win95) for the same reason.
+#[link(name = "iphlpapi")]
+extern "system" {
+    fn GetBestInterfaceEx(pDestAddr: *mut SockaddrIn, pdwBestIfIndex: *mut u32) -> u32;
+}
+
+#[repr(C)]
+struct SockaddrIn {
+    sin_family: u16, // AF_INET = 2
+    sin_port: u16,
+    sin_addr: u32, // network byte order (big-endian)
+    sin_zero: [u8; 8],
+}
+
+const AF_INET: u16 = 2;
+
+/// Look up the interface index Windows would use to reach 1.1.1.1.
+/// Returns `None` on any failure — caller must fall back to non-best-route logic.
+fn get_best_route_interface_index() -> Option<u32> {
+    // SOCKADDR_IN.sin_addr.s_addr is documented as "network byte order" — the
+    // first octet of the IP must occupy the lowest-addressed byte of the
+    // 4-byte field. On little-endian Windows (x86_64 + ARM64), constructing
+    // the u32 via `from_le_bytes` produces a value that, when stored as
+    // `sin_addr: u32` in our `repr(C)` struct, writes bytes `01 01 01 01`
+    // (= IP 1.1.1.1) into memory in the right order. Using `from_be_bytes`
+    // would happen to work for palindromic addresses like 1.1.1.1 but break
+    // on anything else (e.g. 8.4.4.8) — we use the right idiom so the code
+    // survives a future destination-address change.
+    let sin_addr: u32 = u32::from_le_bytes([1, 1, 1, 1]);
+
+    let mut sa = SockaddrIn {
+        sin_family: AF_INET,
+        sin_port: 0,
+        sin_addr,
+        sin_zero: [0u8; 8],
+    };
+    let mut best_index: u32 = 0;
+
+    // SAFETY: `GetBestInterfaceEx` reads `sa` (a valid SOCKADDR_IN we own on
+    // the stack) and writes a single `u32` to `best_index`. Both pointers are
+    // non-null and properly aligned. The function returns `NO_ERROR (0)` on
+    // success.
+    let status = unsafe { GetBestInterfaceEx(&mut sa, &mut best_index) };
+    if status == 0 {
+        Some(best_index)
+    } else {
+        None
+    }
+}
+
+// --- C.5: Fast Startup uptime annotation (v3.12.0+) ---
+//
+// Win10/Win11 default to "Fast Startup" (HiberbootEnabled=1), which
+// hibernates the kernel session at shutdown and resumes it at next boot.
+// `GetTickCount64` (and sysinfo's `System::uptime()`) report time-since the
+// CURRENT kernel session started — usually a few hours. `LastBootUpTime`
+// from WMI's Win32_OperatingSystem reports the LAST COLD BOOT time — often
+// weeks ago on laptops that get used daily. We surface both so the table is
+// honest about what's happening:
+//   "9d 4h 12m (session: 7h 14m)"
+// References:
+//   https://learn.microsoft.com/en-us/answers/questions/1443763/how-to-get-oss-start-time-when-fast-startup-mode-i
+//   https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem
+
+/// Read `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power` value
+/// `HiberbootEnabled` (DWORD). Returns `true` only when explicitly = 1.
+/// Default-safe: any read or parse error returns `false`.
+pub fn detect_fast_startup() -> bool {
+    let output = match Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power",
+            "/v",
+            "HiberbootEnabled",
+        ])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("HiberbootEnabled") {
+            // Format: "    HiberbootEnabled    REG_DWORD    0x1"
+            if let Some(value) = line.split_whitespace().last() {
+                let trimmed = value.trim_start_matches("0x");
+                if let Ok(v) = u32::from_str_radix(trimmed, 16) {
+                    return v == 1;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Query `Win32_OperatingSystem.LastBootUpTime` and convert to seconds elapsed
+/// since the last *cold* boot. Returns `None` on any WMI/parse failure.
+///
+/// Uses `wmi::WMIDateTime` which the `wmi` crate's serde deserializer parses
+/// from the CIM datetime format (`yyyymmddHHMMSS.mmmmmmsUUU`) into a
+/// `chrono::DateTime<chrono::FixedOffset>`.
+pub fn last_cold_boot_seconds() -> Option<u64> {
+    #[derive(Deserialize)]
+    #[serde(rename = "Win32_OperatingSystem")]
+    #[serde(rename_all = "PascalCase")]
+    struct OsBoot {
+        last_boot_up_time: Option<wmi::WMIDateTime>,
+    }
+
+    let com = COMLibrary::new().ok()?;
+    let wmi = WMIConnection::new(com).ok()?;
+    let results: Vec<OsBoot> = wmi.query().ok()?;
+    let boot = results.into_iter().next()?.last_boot_up_time?.0;
+
+    let elapsed = chrono::Utc::now()
+        .signed_duration_since(boot.with_timezone(&chrono::Utc))
+        .num_seconds();
+    if elapsed < 0 {
+        None
+    } else {
+        Some(elapsed as u64)
+    }
 }

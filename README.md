@@ -14,10 +14,11 @@ TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground
 - Beautiful Unicode box-drawing tables (TR-200 format)
 - ASCII fallback mode for legacy terminals
 - Bar graphs for CPU load, memory, and disk usage
-- Network information (hostname, IP, DNS servers)
+- VPN-aware network information on Windows — `MACHINE IP` and `DNS IP` rows reflect the active default route (`GetBestInterfaceEx`-driven) so Tailscale / WireGuard / OpenVPN / corporate VPN tunnels are reported correctly instead of a coin-flip pick
 - Hypervisor / virtualization detection (CPUID-based; disambiguates Win11 VBS from real VMs)
 - Session info with last-login tracking (RDP-aware on Windows via WTS APIs)
 - Disk encryption status (BitLocker on Win11 Device Encryption laptops)
+- Fast Startup-aware uptime on Windows — when the kernel session age and the WMI cold-boot time diverge by >1h (typical on Win10/Win11 laptops with `HiberbootEnabled`), the `UPTIME` row renders both as `9d 4h 12m (session: 7h 14m)`
 - JSON output for scripting
 - Auto-save markdown report to Downloads folder on manual runs
 - Fast mode (`--fast`) for sub-second auto-run startup

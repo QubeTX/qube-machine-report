@@ -147,3 +147,17 @@ fn test_json_includes_encryption_key() {
         .success()
         .stdout(predicate::str::contains("\"encryption\":"));
 }
+
+// --- v3.12.0 additions ---
+
+#[test]
+fn test_json_includes_session_uptime_seconds_key() {
+    // `os.session_uptime_seconds` is always present (nullable). On Windows
+    // hosts with Fast Startup enabled and a divergent session, it's a number.
+    // On all other configs it's null. The presence of the key is the contract.
+    tr300()
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"session_uptime_seconds\":"));
+}

@@ -64,6 +64,10 @@ pub struct SystemInfo {
     pub last_login: Option<String>,
     pub last_login_ip: Option<String>,
     pub uptime_seconds: u64,
+    /// Current kernel-session uptime when distinct from `uptime_seconds`
+    /// (Windows Fast Startup case). `None` otherwise — drives the
+    /// `UPTIME … (session: …)` annotation when `Some(_)`.
+    pub session_uptime_seconds: Option<u64>,
     pub shell: Option<String>,
     pub terminal: Option<String>,
     pub locale: Option<String>,
@@ -88,7 +92,7 @@ impl SystemInfo {
 
         let (os_info, cpu_info, mem_info, disks, net_info, session_info, platform_info) =
             std::thread::scope(|s| {
-                let os_h = s.spawn(os::collect);
+                let os_h = s.spawn(|| os::collect(mode));
                 let cpu_h = s.spawn(|| cpu::collect(mode));
                 let mem_h = s.spawn(memory::collect);
                 let disk_h = s.spawn(disk::collect);
@@ -183,6 +187,7 @@ impl SystemInfo {
             last_login: session_info.last_login,
             last_login_ip: session_info.last_login_ip,
             uptime_seconds: os_info.uptime_seconds,
+            session_uptime_seconds: os_info.session_uptime_seconds,
             shell: platform_info.shell,
             terminal: platform_info.terminal,
             locale: platform_info.locale,
@@ -198,18 +203,14 @@ impl SystemInfo {
         Self::collect_with_mode(CollectMode::Full)
     }
 
-    /// Format uptime as human-readable string
+    /// Format uptime as human-readable string. When `session_uptime_seconds`
+    /// is set (Windows Fast Startup case where the kernel session is shorter
+    /// than the cold-boot time), appends a `(session: …)` annotation.
     pub fn uptime_formatted(&self) -> String {
-        let days = self.uptime_seconds / 86400;
-        let hours = (self.uptime_seconds % 86400) / 3600;
-        let minutes = (self.uptime_seconds % 3600) / 60;
-
-        if days > 0 {
-            format!("{}d {}h {}m", days, hours, minutes)
-        } else if hours > 0 {
-            format!("{}h {}m", hours, minutes)
-        } else {
-            format!("{}m", minutes)
+        let primary = format_duration_seconds(self.uptime_seconds);
+        match self.session_uptime_seconds {
+            Some(s) => format!("{} (session: {})", primary, format_duration_seconds(s)),
+            None => primary,
         }
     }
 
@@ -257,6 +258,20 @@ impl SystemInfo {
     /// Get CPU frequency string
     pub fn freq_str(&self) -> String {
         format!("{:.1} GHz", self.cpu_freq_ghz)
+    }
+}
+
+/// Format a seconds count as a compact "Nd Nh Nm" / "Nh Nm" / "Nm" string.
+fn format_duration_seconds(secs: u64) -> String {
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let minutes = (secs % 3600) / 60;
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, minutes)
+    } else {
+        format!("{}m", minutes)
     }
 }
 
