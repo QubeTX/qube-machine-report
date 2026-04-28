@@ -128,6 +128,105 @@ Custom error types in `src/error.rs` using `thiserror`:
   call returns access-denied → `None` and the row is gracefully omitted; the
   elevation footer hint covers the unelevated case.
 
+### Windows accuracy patterns (v3.13.0+)
+
+- **5-state battery awareness via `GetSystemPowerStatus`** (`get_battery_native`
+  in `platform/windows.rs`). Replaces the WMI `Win32_Battery` query (~40 ms,
+  COM round-trip) with a single Win32 API call (~1 ms). The output state
+  machine layered on top is the v3.13.0 user-visible improvement and was
+  expanded mid-implementation (originally a 3-state plan; the user requested
+  better gaming-laptop awareness):
+    1. `BatteryFlag == 0x80` (no system battery — desktops) → `None`, BATTERY
+       row omitted entirely.
+    2. `BatteryLifePercent == 0xFF` (unknown charge) → `None`.
+    3. `BatteryFlag == 0xFF` (unknown state) → `X% (Unknown)` so the user
+       sees something rather than nothing.
+    4. `ACLineStatus == 0xFF` (AC status unknown — rare; some VMs,
+       hypervisor-passthrough batteries) → `X%` with no AC label, since
+       guessing would be misleading.
+    5. On AC + Charging bit set → `X% (Charging)`.
+    6. On AC + percent ≥ 95 + not charging → `AC Power` with NO percentage.
+       The percentage at full charge is uninformative; suppressing it
+       eliminates the v3.11.x output `100% (AC Power)` which was redundant.
+    7. On AC + percent < 95 + not charging → `X% (Plugged in)`. Covers two
+       distinct but indistinguishable scenarios from a single-snapshot API:
+       (a) gaming laptop where peak GPU draw exceeds the AC brick's
+       wattage (Alienware, ROG, Razer with discrete GPUs); (b) firmware-
+       limited charging (ThinkPad / ASUS / Lenovo battery-longevity modes
+       capping at 60-80%). Either way, the percentage matters and we can't
+       distinguish without time-series sampling — the label is honest about
+       the ambiguity.
+    8. Off AC + Critical bit → `X% (Critical)`; Low bit → `X% (Low)`;
+       otherwise → `X% (Discharging)`. Critical/Low take precedence so
+       the urgency is visible.
+  The `BATTERY_FLAG_HIGH` bit (0x01, > 66% charge) is intentionally NOT
+  surfaced as a label suffix — early v3.13.0 testing on a fully-charged
+  laptop on AC produced `100% (Discharging (High))` which was incoherent
+  (charging bit OFF + ACLineStatus=1 + High set is the "fully topped up
+  on AC" case, not "discharging"). The percentage already conveys charge
+  level. Reference:
+  [GetSystemPowerStatus](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getsystempowerstatus).
+- **Native socket count via `GetLogicalProcessorInformationEx`**
+  (`get_socket_count_native` in `platform/windows.rs`). Replaces the
+  `Win32_Processor` WMI count (~30 ms COM round-trip) with the standard
+  two-call buffer-sizing pattern: first call with `Buffer = null_mut`
+  returns FALSE + `ERROR_INSUFFICIENT_BUFFER` and writes
+  `returned_length`; allocate exactly that size and call again. Walks the
+  resulting variable-length `SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX`
+  records by reading the `Size` field at each entry's offset (the records
+  aren't fixed-size — different `Relationship` values pack different
+  payloads). Counts entries with `Relationship == RelationProcessorPackage`.
+  WMI fallback (`get_socket_count_wmi`) retained as a safety net during
+  the C.9 → C.14 transition. Reference:
+  [GetLogicalProcessorInformationEx](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformationex).
+- **GPU enumeration prefers the registry path** (`filter_software_gpus` +
+  the existing `get_gpus_fast` registry walk). The `--fast` mode already
+  used the `{4d36e968-e325-11ce-bfc1-08002be10318}` Display class registry
+  walk because it's COM-free and fast (~5 ms), and it has the additional
+  property that it only enumerates hardware adapters — Microsoft Basic
+  Render Driver, Microsoft Hyper-V Video, and similar software-only
+  adapters don't appear there. Full mode now also prefers it (with WMI /
+  PowerShell as fallbacks), and a `filter_software_gpus()` name-based
+  filter strips known-bad strings as belt-and-suspenders. This is a
+  deliberate simplification of the originally-planned C.8 (full DXGI
+  `IDXGIFactory1::EnumAdapters1` COM enumeration) — the simpler approach
+  achieves the same user-visible outcome (no software adapters in the GPU
+  row) at 25 LOC vs ~100 LOC of unsafe COM. DXGI remains an option if
+  vendor/device-ID filtering ever becomes necessary that name-based
+  filtering can't do.
+- **PowerShell 7+ ("PowerShell Core") detection** (`get_powershell_core_version`
+  in `platform/windows.rs`). The historical `get_shell()` only knew about
+  Windows PowerShell 5.x via `HKLM\SOFTWARE\Microsoft\PowerShell\3\
+  PowerShellEngine\PowerShellVersion`. PowerShell 7+ installs register
+  under a different hive: `HKLM\SOFTWARE\Microsoft\PowerShellCore\
+  InstalledVersions\<GUID>\SemanticVersion`. We do a recursive
+  `reg query /s` and pick the highest `SemanticVersion` value found by
+  string-compare (works for 3-tuple semver since each component fits in
+  2 digits — no zero-padding needed). Falls back to the legacy 5.x
+  detection when no PSCore subkey exists.
+- **Terminal parent-process walk via Toolhelp32**
+  (`detect_terminal_via_parent_walk` + `match_terminal_name` in
+  `platform/windows.rs`). When neither `WT_SESSION` nor `TERM_PROGRAM`
+  nor the new Cursor env vars are set (common when launched from a
+  desktop shortcut, a fresh subshell that lost the parent's environment,
+  or by an AI agent), `get_terminal()` walks the parent-process chain:
+  `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`, then iterate via
+  `Process32FirstW` / `Process32NextW`, build a
+  `HashMap<pid, (parent_pid, name)>`, then climb from `GetCurrentProcessId()`
+  upward (cap 10 levels — defensive against PID-table cycles, which
+  happen in practice on Windows when a parent dies and its PID gets
+  recycled). Recognizes Windows Terminal, WezTerm, Alacritty, VS Code,
+  Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code,
+  Antigravity. Intermediate hosts (`conhost.exe`, `powershell.exe`,
+  `pwsh.exe`, `cmd.exe`, `bash.exe`, `sh.exe`, `zsh.exe`, `fish.exe`,
+  `nu.exe`, `tr300.exe`, `node.exe`, `python.exe`) are skipped so the
+  walk continues through them; unrecognized exes break the walk silently
+  and the row falls back to `Console`. Verified on this dev host: when
+  TR-300 runs inside Claude Code's Bash tool, the chain
+  `tr300.exe → bash.exe → claude.exe → powershell.exe` correctly
+  resolves to `Claude Code`. Reference:
+  [CreateToolhelp32Snapshot](https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot).
+
 ### Windows accuracy patterns (v3.12.0+)
 
 - **VPN-aware default-route detection** (`get_best_route_interface_index` +

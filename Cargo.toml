@@ -1,6 +1,6 @@
 [package]
 name = "tr-300"
-version = "3.12.0"
+version = "3.13.0"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -42,7 +42,7 @@ clap_mangen = "0.2"
 [target.'cfg(windows)'.dependencies]
 wmi = "0.14"
 serde = { version = "1", features = ["derive"] }
-winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "winuser", "winnls", "iphlpapi", "ws2def", "ws2ipdef", "winerror", "inaddr", "in6addr", "ifdef"] }
+winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "winuser", "winnls", "iphlpapi", "ws2def", "ws2ipdef", "winerror", "inaddr", "in6addr", "ifdef", "winbase", "errhandlingapi", "winnt", "tlhelp32", "processthreadsapi", "handleapi"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

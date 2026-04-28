@@ -192,8 +192,11 @@ fn get_socket_count() -> usize {
 
 #[cfg(target_os = "windows")]
 fn get_socket_count() -> usize {
-    // Use WMI directly instead of PowerShell subprocess
-    crate::collectors::platform::windows::get_socket_count_wmi()
+    // C.9 (v3.13.0+): native GetLogicalProcessorInformationEx, ~10x faster
+    // than the WMI path it replaces. WMI fallback retained for systems where
+    // the native call returns nothing unexpected.
+    crate::collectors::platform::windows::get_socket_count_native()
+        .unwrap_or_else(crate::collectors::platform::windows::get_socket_count_wmi)
 }
 
 #[cfg(target_os = "macos")]

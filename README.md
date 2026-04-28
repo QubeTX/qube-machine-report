@@ -19,6 +19,9 @@ TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground
 - Session info with last-login tracking (RDP-aware on Windows via WTS APIs)
 - Disk encryption status (BitLocker on Win11 Device Encryption laptops)
 - Fast Startup-aware uptime on Windows — when the kernel session age and the WMI cold-boot time diverge by >1h (typical on Win10/Win11 laptops with `HiberbootEnabled`), the `UPTIME` row renders both as `9d 4h 12m (session: 7h 14m)`
+- 5-state battery awareness on Windows — distinguishes `AC Power` (plugged in, fully topped up), `X% (Charging)`, `X% (Plugged in)` (gaming-laptop case where peak GPU draw exceeds the brick wattage, OR firmware-limited charging modes like ThinkPad battery longevity), `X% (Discharging)`, plus `Critical` / `Low` overrides
+- Smart terminal detection on Windows — env-var pre-checks (`WT_SESSION`, `TERM_PROGRAM`, `CURSOR_TRACE_ID`) then a parent-process walk via Toolhelp32 that recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, and Antigravity even when env vars are absent
+- PowerShell 7+ ("PowerShell Core") detection on Windows — reads `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\SemanticVersion` so `pwsh` users see the actual installed version instead of falling back to Windows PowerShell 5.x
 - JSON output for scripting
 - Auto-save markdown report to Downloads folder on manual runs
 - Fast mode (`--fast`) for sub-second auto-run startup

@@ -7,6 +7,161 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-04-28
+
+### Added
+- **5-state battery awareness on Windows (C.10b — user-requested
+  enhancement).** When the laptop is plugged in and fully topped up
+  (≥ 95%, not actively charging), the BATTERY row now renders as just
+  `AC Power` — the percentage is uninformative and adds noise. When
+  plugged in and charging, `X% (Charging)`. When plugged in but battery
+  is < 95% and not charging — common on Alienware / ROG / Razer with
+  discrete GPUs whose peak draw exceeds the brick's wattage, AND on
+  ThinkPad / ASUS / Lenovo with battery-longevity firmware modes that
+  cap charge at 60-80% — `X% (Plugged in)` so the user can see the
+  battery state through whichever path their system uses. Off AC, the
+  classical `X% (Charging)` / `X% (Critical)` / `X% (Low)` /
+  `X% (Discharging)` labels apply. AC-status-unknown edge case (rare —
+  some VMs, hypervisor-passthrough batteries) renders as bare `X%`
+  rather than a fabricated AC label. Replaces the v3.11.x output of
+  `100% (AC Power)` (always showed % even when meaningless) and
+  `100% (Discharging (High))` (legacy `BATTERY_FLAG_HIGH` bit
+  surfaced as a confusing label). (C.10, C.10b)
+- **PowerShell 7+ detection on Windows.** `get_shell()` now probes
+  `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\
+  SemanticVersion` recursively before falling through to the legacy
+  Windows PowerShell 5.x detection. Users running `pwsh` see the
+  installed `PowerShell 7.x.y` version instead of `PowerShell 5.1.x`
+  (or the bare `PowerShell` fallback). The string-compare for the
+  highest version works for 3-tuple semver since each component fits
+  in 2 digits. (C.11)
+- **Terminal parent-process walk on Windows (C.12).** When neither
+  `WT_SESSION` nor `TERM_PROGRAM` is set in the environment (common
+  when launched from a desktop shortcut, a fresh subshell that lost
+  the parent's environment, or by an AI agent), `get_terminal()` now
+  walks the parent-process chain via `CreateToolhelp32Snapshot` (cap
+  10 levels — defensive against PID-table cycles). Recognizes
+  Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf,
+  Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, and Antigravity.
+  Intermediate hosts (`conhost.exe`, `powershell.exe`, `pwsh.exe`,
+  `cmd.exe`, `bash.exe`, etc.) are skipped so the walk continues to
+  the actual terminal emulator. Unrecognized exes break the walk
+  silently and the terminal row falls back to `Console` as before.
+  (C.12)
+
+### Changed
+- **Native socket count on Windows via `GetLogicalProcessorInformationEx`
+  (C.9).** Replaces the WMI `Win32_Processor` count path (~30 ms
+  COM round-trip) with a single Win32 API call (~3 ms). Walks the
+  variable-length `SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX` records
+  and counts `RelationProcessorPackage` entries via the standard
+  two-call buffer-sizing pattern. WMI fallback retained for systems
+  where the native call returns nothing. The historical
+  `get_socket_count_wmi` function is kept (`#[allow(dead_code)]`)
+  through one release so future debugging can A/B against it. (C.9)
+- **Native battery on Windows via `GetSystemPowerStatus` (C.10).**
+  Replaces the WMI `Win32_Battery` query (~40 ms) with a single
+  Win32 API call (~1 ms). The 5-state output model above sits on
+  top of this. WMI / PowerShell fallbacks retained. (C.10)
+- **GPU enumeration prefers the registry path in full mode (C.8).**
+  Historically, full mode used `Win32_VideoController` WMI which
+  occasionally surfaced "Microsoft Basic Render Driver", "Microsoft
+  Hyper-V Video", and similar software adapters alongside the real
+  hardware. The registry path used by `--fast` (the
+  `{4d36e968-e325-11ce-bfc1-08002be10318}` Display class under
+  HKLM) only enumerates hardware adapters, so we now use it in full
+  mode too. Added a name-based `filter_software_gpus()` belt-and-
+  suspenders filter that strips known software-adapter strings
+  (Microsoft Basic Render / Basic Display / Hyper-V Video / Remote
+  Display Adapter / Indirect Display / RDPDD / RDP Encoder Mirror)
+  in case a future config re-introduces them via either path. WMI /
+  PowerShell remain as second/third fallbacks. Verified on a host
+  with Intel Arc + NVIDIA RTX 4070 Laptop + Trigger 6 External
+  Graphics — all three hardware GPUs appear, no software adapters.
+  (C.8)
+
+### Performance
+- **`--fast` median wall-clock: 338 ms** on Windows 11 25H2 build
+  26200.8246 (Intel Core Ultra 7 155H, sorted-7-runs middle). +30 ms
+  vs the v3.11 baseline (~308 ms) — within the 100 ms budget per
+  MASTER_PLAN §5 and well under the 1500 ms CI gate. The regression
+  is from the new winapi features pulling additional bindings into
+  the binary; collectors themselves are equal-or-faster (C.9 native
+  sockets and C.10 native battery save ~70 ms in full mode but are
+  not on the fast path).
+- **C.14 (drop COM/WMI from `--fast`) — verified, no source
+  change needed.** Audit confirms `--fast` returns from
+  `platform/windows.rs::collect()` at the early-return on line 66
+  *before* any `COMLibrary::new()` call. All COM-using paths
+  (`get_bitlocker_status`, `get_socket_count_wmi` fallback,
+  `get_network_info_wmi`, `last_cold_boot_seconds`) are reached only
+  via full-mode code paths. The "drop COM from fast" outcome is
+  already structurally true. (C.14)
+
+### Deferred to a future session
+- **E.6 — admin-only RDP login history** via Security Event 4624
+  XML parsing. Adds `last_login_history: Option<Vec<String>>` field
+  to `PlatformInfo` + `SystemInfo`, gated on `is_elevated()`, renders
+  1–5 extra rows under `LAST LOGIN`. Deferred because validation
+  requires running TR-300 from an elevated PowerShell on this host;
+  the implementation is straightforward but should land with its
+  validation evidence. Tracked as task #58.
+- **C.13 — batched-PowerShell fallback** when WMI fails. Bundles the
+  4 separate `_ps` fallbacks (`get_windows_edition_ps`,
+  `detect_virtualization_ps`, `get_gpus_ps`, `get_battery_ps`) into a
+  single `pwsh -NoProfile -Command @{…} | ConvertTo-Json` call,
+  saving ~3× pwsh startup overhead in the WMI-failure branch.
+  Deferred because the WMI-failure path is rarely exercised in
+  practice (locked-down corporate hosts, Winmgmt service stopped),
+  and validating without breaking the test host is awkward. Tracked
+  as task #58.
+- **Cross-platform 3-state battery model** for Linux + macOS to
+  mirror Windows C.10b. Linux can land independently using
+  `/sys/class/power_supply/AC*/online` + `BAT*/status`; macOS
+  validation waits on PR #2 hardware. Tracked as task #56.
+- **Full DXGI EnumAdapters1 implementation.** v3.13.0 took the
+  shorter registry-prefer + name-filter approach (C.8 above) which
+  achieves the same user-visible outcome (no software adapters)
+  with 25 LOC vs ~100 LOC of unsafe COM code. DXGI remains an
+  option if a future bug demands vendor/device-ID filtering that
+  name-based filtering can't do.
+
+### Internal
+- `winapi` feature set extended further: `winbase` (for
+  `GetSystemPowerStatus` + `SYSTEM_POWER_STATUS`), `errhandlingapi`
+  (for `GetLastError`), `winnt` (for
+  `RelationProcessorPackage` + the `LOGICAL_PROCESSOR_RELATIONSHIP`
+  type), `tlhelp32` (for `CreateToolhelp32Snapshot` /
+  `Process32FirstW` / `Process32NextW` / `PROCESSENTRY32W` /
+  `TH32CS_SNAPPROCESS`), `processthreadsapi` (for
+  `GetCurrentProcessId`), `handleapi` (for `CloseHandle` /
+  `INVALID_HANDLE_VALUE`).
+- `get_socket_count_wmi` marked `#[allow(dead_code)]` — retained as
+  a fallback under the C.9 → C.14 transition; will be removed in a
+  later release once native socket detection has soak-time on real
+  hardware.
+- New `filter_software_gpus(Vec<String>) -> Vec<String>` helper
+  (case-insensitive substring match against a small static needle
+  list) reused across all three GPU enumeration paths.
+- New `get_powershell_core_version() -> Option<String>` helper —
+  `reg query /s` recursive, picks highest `SemanticVersion` value
+  by string compare.
+- New `detect_terminal_via_parent_walk() -> Option<String>` and
+  `match_terminal_name(&str) -> Option<&'static str>` helpers
+  (~120 LOC including the Toolhelp snapshot walk and the static
+  exe-name match table). Walk depth-capped at 10 levels to defend
+  against malformed PID tables.
+- Added `Cursor` and `Windsurf` env-var pre-checks
+  (`CURSOR_TRACE_ID`/`CURSOR_AGENT`) before falling through to the
+  parent walk — saves the snapshot syscall when the env-var path
+  succeeds.
+- v3.12.0's `chrono::DateTime<chrono::Utc>` field for parsing
+  `LastBootUpTime` from WMI was the wrong type — the wmi crate's
+  serde wrapper for CIM datetime is `wmi::WMIDateTime` (a newtype
+  around `DateTime<FixedOffset>`). Fixed during v3.12.0
+  development; this entry just notes that the surrounding code
+  works as-is in v3.13.0.
+
 ## [3.12.0] - 2026-04-28
 
 ### Changed

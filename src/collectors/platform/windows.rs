@@ -90,15 +90,28 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     let (windows_edition, virtualization, gpus, battery) = if let Some(ref wmi) = wmi_result {
         let edition = get_windows_edition_wmi(wmi).or_else(get_windows_edition_ps);
         let virt = detect_virtualization_wmi(wmi).or_else(detect_virtualization_ps);
+        // C.8 (v3.13.0+): the registry path used by `--fast` already
+        // returns only hardware adapters (the {4d36e968-...} Display class
+        // doesn't enumerate Microsoft Basic Render Driver or Hyper-V Video).
+        // Prefer it in full mode too, with WMI / PowerShell as fallbacks
+        // and a name-based filter to strip software adapters that historically
+        // leaked through the WMI path on some configs.
         let gpu_list = {
-            let wmi_gpus = get_gpus_wmi(wmi);
-            if wmi_gpus.is_empty() {
-                get_gpus_ps()
-            } else {
-                wmi_gpus
+            let mut gpus = get_gpus_fast();
+            if gpus.is_empty() {
+                gpus = get_gpus_wmi(wmi);
             }
+            if gpus.is_empty() {
+                gpus = get_gpus_ps();
+            }
+            filter_software_gpus(gpus)
         };
-        let bat = get_battery_wmi(wmi).or_else(get_battery_ps);
+        // C.10: prefer the native GetSystemPowerStatus call (~1 ms, no COM, no
+        // PowerShell). Falls back through WMI → PowerShell only if the kernel
+        // call somehow returns no data — basically never on real hardware.
+        let bat = get_battery_native()
+            .or_else(|| get_battery_wmi(wmi))
+            .or_else(get_battery_ps);
         (edition, virt, gpu_list, bat)
     } else {
         // WMI connection failed entirely — fall back to PowerShell for everything
@@ -474,7 +487,93 @@ pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
     Some((name, version, kernel))
 }
 
+/// Native socket count via `GetLogicalProcessorInformationEx` (kernel32),
+/// counting `RelationProcessorPackage` entries. ~3 ms vs ~30 ms for the WMI
+/// path. Returns `None` on any failure — caller falls back to the WMI path.
+///
+/// The two-call pattern: first call with `Buffer = null_mut` returns FALSE +
+/// `ERROR_INSUFFICIENT_BUFFER (122)` and writes `returned_length`; we then
+/// allocate exactly that size and call again. Each
+/// `SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX` is variable-length, so we walk
+/// the buffer by reading the `Size` field at each entry's offset.
+pub fn get_socket_count_native() -> Option<usize> {
+    use winapi::shared::winerror::ERROR_INSUFFICIENT_BUFFER;
+    use winapi::um::errhandlingapi::GetLastError;
+    use winapi::um::sysinfoapi::GetLogicalProcessorInformationEx;
+    use winapi::um::winnt::RelationProcessorPackage;
+
+    let mut returned_length: u32 = 0;
+    // SAFETY: First call with null buffer + 0 length is the documented sizing
+    // protocol. Returns FALSE; we read the size from `returned_length` and
+    // verify the error code is ERROR_INSUFFICIENT_BUFFER before allocating.
+    let ok = unsafe {
+        GetLogicalProcessorInformationEx(
+            RelationProcessorPackage,
+            std::ptr::null_mut(),
+            &mut returned_length,
+        )
+    };
+    if ok != 0 || returned_length == 0 {
+        return None;
+    }
+    if unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
+        return None;
+    }
+
+    let mut buffer: Vec<u8> = vec![0u8; returned_length as usize];
+    // SAFETY: `buffer` is exactly `returned_length` bytes; the cast to
+    // `*mut SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX` is the documented
+    // calling convention. The function writes 1+ variable-length records.
+    let ok = unsafe {
+        GetLogicalProcessorInformationEx(
+            RelationProcessorPackage,
+            buffer.as_mut_ptr() as *mut _,
+            &mut returned_length,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+
+    // Walk variable-length records. Each starts with `Relationship: u32` then
+    // `Size: u32`; advance `offset` by `Size`. Count entries that report
+    // `RelationProcessorPackage` (defensive — we asked for that filter, so
+    // every record should match, but the API contract doesn't strictly
+    // promise it).
+    //
+    // We read the two `u32` header fields via `from_le_bytes` rather than a
+    // raw `*(ptr as *const u32)` cast. SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX
+    // records are sized in 4-byte multiples in practice, so the offsets land
+    // on aligned boundaries — but Rust spec doesn't guarantee that
+    // `Vec<u8>::as_ptr().add(offset)` produces a u32-aligned pointer, and
+    // dereferencing through a misaligned `*const u32` is UB even on x86
+    // (LLVM is free to optimize assuming alignment). `from_le_bytes` works
+    // on any byte boundary. (Caught in v3.13.0 Codex review.)
+    let mut offset: usize = 0;
+    let mut sockets: usize = 0;
+    while offset + 8 <= buffer.len() {
+        let mut header = [0u8; 8];
+        header.copy_from_slice(&buffer[offset..offset + 8]);
+        let relationship = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+        let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+        if size == 0 || offset + size > buffer.len() {
+            break; // Defensive: malformed record stops the walk.
+        }
+        if relationship == RelationProcessorPackage {
+            sockets += 1;
+        }
+        offset += size;
+    }
+
+    if sockets == 0 {
+        None
+    } else {
+        Some(sockets)
+    }
+}
+
 /// Get socket count via WMI, with PowerShell fallback (used from cpu.rs)
+#[allow(dead_code)] // Kept for one release as a fallback under C.13/C.14 transition.
 pub fn get_socket_count_wmi() -> usize {
     // Try WMI first
     let count = COMLibrary::new()
@@ -708,8 +807,112 @@ fn get_terminal() -> Option<String> {
     if env::var("TERM_PROGRAM").ok().as_deref() == Some("vscode") {
         return Some("VS Code".to_string());
     }
-    // Env-var only, no PowerShell parent process check
+    if env::var("CURSOR_TRACE_ID").is_ok() || env::var("CURSOR_AGENT").is_ok() {
+        return Some("Cursor".to_string());
+    }
+
+    // C.12 (v3.13.0+): walk the parent-process chain via Toolhelp32. Catches
+    // Windows Terminal / WezTerm / Alacritty / Tabby / Hyper / Cursor / VS
+    // Code launches that don't inherit a recognizable env var (e.g. when
+    // the user spawned a fresh subshell that lost the parent's environment,
+    // or launched via a desktop shortcut). ~5 ms cost; full-mode-only via
+    // the existing collect()-time call site.
+    if let Some(name) = detect_terminal_via_parent_walk() {
+        return Some(name);
+    }
+
     Some("Console".to_string())
+}
+
+/// Walk the parent-process chain (cap 10 levels) looking for a known
+/// terminal-host executable name. Returns `None` if no match.
+fn detect_terminal_via_parent_walk() -> Option<String> {
+    use std::collections::HashMap;
+    use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
+    use winapi::um::processthreadsapi::GetCurrentProcessId;
+    use winapi::um::tlhelp32::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    // SAFETY: CreateToolhelp32Snapshot returns INVALID_HANDLE_VALUE on
+    // failure or a valid HANDLE on success; we check before walking.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return None;
+    }
+
+    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+    let mut pid_to_parent_name: HashMap<u32, (u32, String)> = HashMap::new();
+
+    // SAFETY: snapshot is a valid HANDLE; entry.dwSize is set; W variants
+    // expect UTF-16. Process32FirstW returns 0 on failure (incl. empty list).
+    if unsafe { Process32FirstW(snapshot, &mut entry) } != 0 {
+        loop {
+            // szExeFile is null-terminated UTF-16, max 260 chars (MAX_PATH).
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+            pid_to_parent_name.insert(entry.th32ProcessID, (entry.th32ParentProcessID, name));
+            if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
+                break;
+            }
+        }
+    }
+    // SAFETY: snapshot was a valid HANDLE; CloseHandle accepts that.
+    unsafe { CloseHandle(snapshot) };
+
+    // Walk parent chain from current PID (cap 10 levels — defensive against
+    // corrupted PID tables that could form cycles).
+    let mut current_pid = unsafe { GetCurrentProcessId() };
+    for _ in 0..10 {
+        let (parent_pid, name) = match pid_to_parent_name.get(&current_pid) {
+            Some(v) => v.clone(),
+            None => break,
+        };
+        if let Some(label) = match_terminal_name(&name) {
+            return Some(label.to_string());
+        }
+        if parent_pid == 0 || parent_pid == current_pid {
+            break;
+        }
+        current_pid = parent_pid;
+    }
+    None
+}
+
+/// Match a process exe name (basename, with .exe) to a terminal label.
+/// Case-insensitive. Returns `None` if not a recognized terminal host (the
+/// caller keeps walking the parent chain). Includes AI-shell hosts (Claude
+/// Code, Cursor, Windsurf) so users running TR-300 inside an AI agent see
+/// the right thing instead of "Console".
+fn match_terminal_name(exe: &str) -> Option<&'static str> {
+    let lower = exe.to_lowercase();
+    match lower.as_str() {
+        "windowsterminal.exe" => Some("Windows Terminal"),
+        "wezterm-gui.exe" | "wezterm.exe" => Some("WezTerm"),
+        "alacritty.exe" => Some("Alacritty"),
+        "code.exe" => Some("VS Code"),
+        "cursor.exe" => Some("Cursor"),
+        "windsurf.exe" => Some("Windsurf"),
+        "hyper.exe" => Some("Hyper"),
+        "tabby.exe" => Some("Tabby"),
+        "ghostty.exe" => Some("Ghostty"),
+        "kitty.exe" => Some("Kitty"),
+        "mintty.exe" => Some("MinTTY"),
+        "claude.exe" => Some("Claude Code"),
+        "antigravity.exe" => Some("Antigravity"),
+        // Intermediate process hosts — keep walking the parent chain.
+        "conhost.exe" | "powershell.exe" | "pwsh.exe" | "cmd.exe" | "bash.exe" | "sh.exe"
+        | "zsh.exe" | "fish.exe" | "nu.exe" | "tr300.exe" | "node.exe" | "python.exe"
+        | "python3.exe" => None,
+        _ => None,
+    }
 }
 
 /// Get shell name and version
@@ -734,6 +937,15 @@ fn get_shell() -> Option<String> {
         }
     }
 
+    // C.11 (v3.13.0+): check PowerShell 7+ ("PowerShell Core") first. PSCore
+    // installs register under HKLM\SOFTWARE\Microsoft\PowerShellCore\
+    // InstalledVersions\<GUID>\SemanticVersion. We pick the highest version
+    // string found (string compare works for 3-tuple semver). Falls back to
+    // legacy Windows PowerShell 5.x detection below if no PSCore subkey.
+    if let Some(v) = get_powershell_core_version() {
+        return Some(format!("PowerShell {}", v));
+    }
+
     // Check PowerShell version via registry (no subprocess)
     if let Ok(output) = Command::new("reg")
         .args([
@@ -755,6 +967,62 @@ fn get_shell() -> Option<String> {
     }
 
     Some("PowerShell".to_string())
+}
+
+/// Recursive `reg query` of `HKLM\SOFTWARE\Microsoft\PowerShellCore\
+/// InstalledVersions` returns lines like:
+///   HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>
+///       SemanticVersion    REG_SZ    7.4.6
+/// We pick the highest version found. Returns `None` if no PSCore subkey.
+///
+/// Versions are compared as semver tuples `(u64, u64, u64)` rather than by
+/// string compare — naive string compare puts `"7.9.0" > "7.10.0"` because
+/// `'9' > '1'`. PowerShell Core is at 7.5 today but will eventually ship a
+/// 2-digit segment. (Caught in v3.13.0 Codex review.)
+fn get_powershell_core_version() -> Option<String> {
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions",
+            "/s",
+            "/v",
+            "SemanticVersion",
+        ])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut best_tuple: Option<(u64, u64, u64)> = None;
+    let mut best_string: Option<String> = None;
+    for line in stdout.lines() {
+        if line.contains("SemanticVersion") {
+            // Format: "    SemanticVersion    REG_SZ    7.4.6"
+            if let Some(version) = line.split_whitespace().last() {
+                let version_clean = version.trim();
+                if let Some(tuple) = parse_semver_tuple(version_clean) {
+                    if best_tuple.map(|b| tuple > b).unwrap_or(true) {
+                        best_tuple = Some(tuple);
+                        best_string = Some(version_clean.to_string());
+                    }
+                }
+            }
+        }
+    }
+    best_string
+}
+
+/// Parse a 3-tuple semver string like "7.4.6" into `(major, minor, patch)`.
+/// Pre-release / build-metadata suffixes (e.g. "7.5.0-preview.1") are
+/// stripped from the patch segment before parsing. Returns `None` if the
+/// string isn't shaped like 3 dot-separated integer segments.
+fn parse_semver_tuple(s: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = s.splitn(3, '.');
+    let major: u64 = parts.next()?.parse().ok()?;
+    let minor: u64 = parts.next()?.parse().ok()?;
+    // Strip any trailing pre-release / build-metadata before parsing patch.
+    let patch_raw = parts.next()?;
+    let patch_clean = patch_raw.split(['-', '+']).next().unwrap_or(patch_raw);
+    let patch: u64 = patch_clean.parse().ok()?;
+    Some((major, minor, patch))
 }
 
 /// Get display resolution via Win32 API (no PowerShell)
@@ -881,6 +1149,139 @@ fn get_battery_ps() -> Option<String> {
         .replace("(8)", "(Charging Low)")
         .replace("(9)", "(Charging Critical)");
     Some(battery)
+}
+
+// --- C.8: GPU software-adapter filter (v3.13.0+) ---
+//
+// The Win32_VideoController WMI path historically returned
+// "Microsoft Basic Render Driver" and "Microsoft Hyper-V Video" on some
+// configurations alongside the real hardware adapter. The registry-based
+// `get_gpus_fast()` doesn't enumerate those (the {4d36e968-...} Display
+// class only contains hardware adapters), so preferring registry-first
+// + filtering known software names by string is a layered safeguard
+// against future WMI configs that re-introduce the issue. Strict
+// substring match on `Description` — case-insensitive.
+fn filter_software_gpus(gpus: Vec<String>) -> Vec<String> {
+    const SOFTWARE_GPU_NEEDLES: &[&str] = &[
+        "Microsoft Basic Render Driver",
+        "Microsoft Basic Display",
+        "Microsoft Hyper-V Video",
+        "Microsoft Remote Display Adapter",
+        "Microsoft Indirect Display",
+        "RDPDD Chained DD",
+        "RDP Encoder Mirror",
+    ];
+    gpus.into_iter()
+        .filter(|name| {
+            let lower = name.to_lowercase();
+            !SOFTWARE_GPU_NEEDLES
+                .iter()
+                .any(|n| lower.contains(&n.to_lowercase()))
+        })
+        .collect()
+}
+
+// --- C.10: native battery via GetSystemPowerStatus (v3.13.0+) ---
+//
+// `GetSystemPowerStatus` is a single Win32 API call (~1 ms) that returns
+// charge percentage + AC/charging flags. The historical WMI `Win32_Battery`
+// path costs ~40 ms on laptops because of the COM round-trip; replacing it
+// is the cheapest single speed win in PR #5.
+// Reference: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getsystempowerstatus
+
+// BATTERY_FLAG_HIGH (0x01, >66% charge) is intentionally unused — the
+// percentage already conveys charge level; we don't need a "(High)" label.
+const BATTERY_FLAG_LOW: u8 = 0x02; // < 33%
+const BATTERY_FLAG_CRITICAL: u8 = 0x04; // < 5%
+const BATTERY_FLAG_CHARGING: u8 = 0x08;
+const BATTERY_FLAG_NO_BATTERY: u8 = 0x80;
+const BATTERY_FLAG_UNKNOWN: u8 = 0xFF;
+
+fn get_battery_native() -> Option<String> {
+    let mut sps: winapi::um::winbase::SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+    // SAFETY: `GetSystemPowerStatus` writes a SYSTEM_POWER_STATUS struct to
+    // the supplied pointer. We pass a stack-allocated, zero-initialized
+    // struct of exactly that type. Returns nonzero on success.
+    let ok = unsafe { winapi::um::winbase::GetSystemPowerStatus(&mut sps) };
+    if ok == 0 {
+        return None;
+    }
+    // BatteryFlag = 128 (0x80) → no system battery (desktops).
+    if sps.BatteryFlag == BATTERY_FLAG_NO_BATTERY {
+        return None;
+    }
+    // BatteryLifePercent: 0-100, or 255 (0xFF) when unknown. Skip on unknown
+    // so we never render "255% (Unknown)".
+    let percent = sps.BatteryLifePercent;
+    if percent == 0xFF {
+        return None;
+    }
+    if sps.BatteryFlag == BATTERY_FLAG_UNKNOWN {
+        return Some(format!("{}% (Unknown)", percent));
+    }
+
+    // 3-state model (v3.13.0+, gaming-laptop friendly):
+    //
+    //   1. On AC, fully topped up (≥ 95%, not actively charging) → "AC Power"
+    //      with no percentage. The battery is full and idle; the percentage
+    //      is uninformative and adds noise.
+    //   2. On AC, battery still in play (charging OR firmware-limited
+    //      charging OR PSU undersized for peak load — common on Alienware /
+    //      ROG / Razer with discrete GPUs that can momentarily exceed the
+    //      brick's wattage, OR on ThinkPad / ASUS with battery-longevity
+    //      modes capping charge at 60-80%) → "X% (Plugged in)" or
+    //      "X% (Charging)" so the percentage is visible. Distinguishes
+    //      "supplementing from battery while plugged in" from "discharging
+    //      while unplugged".
+    //   3. Off AC (battery only) → "X% (Discharging)" / "X% (Low)" /
+    //      "X% (Critical)" depending on flags. Critical/Low take precedence
+    //      so the user sees the urgency.
+    //
+    // The Windows API doesn't directly expose "battery is currently
+    // supplementing AC" — we infer it from `ACLineStatus == 1 (online) AND
+    // CHARGING bit not set AND percent < 95`. That covers both the "PSU
+    // can't keep up" and "firmware-limited charging" scenarios.
+    // ACLineStatus: 0 = offline (battery), 1 = online (AC), 255 = unknown.
+    // The unknown case is rare but real (some VMs, some hypervisor-passthrough
+    // batteries); show the percentage with no AC label rather than guessing.
+    let ac_status = sps.ACLineStatus;
+    let on_ac = ac_status == 1;
+    let ac_unknown = ac_status == 0xFF;
+    let charging = sps.BatteryFlag & BATTERY_FLAG_CHARGING != 0;
+    let critical = sps.BatteryFlag & BATTERY_FLAG_CRITICAL != 0;
+    let low = sps.BatteryFlag & BATTERY_FLAG_LOW != 0;
+
+    if ac_unknown {
+        // We have charge level but no idea if it's plugged in. Honest output:
+        // just the percentage. Better than fabricating "AC Power" or
+        // "Discharging".
+        return Some(format!("{}%", percent));
+    }
+
+    if on_ac {
+        if charging {
+            return Some(format!("{}% (Charging)", percent));
+        }
+        // Fully topped up on AC: percentage is noise. Just say "AC Power".
+        if percent >= 95 {
+            return Some("AC Power".to_string());
+        }
+        // On AC but battery is at < 95% and not charging — either firmware
+        // is intentionally holding charge low (battery-longevity mode) OR
+        // the PSU can't keep up with the current load (gaming-laptop case).
+        // Either way, the percentage matters.
+        return Some(format!("{}% (Plugged in)", percent));
+    }
+
+    // Off AC.
+    let label = if critical {
+        "Critical"
+    } else if low {
+        "Low"
+    } else {
+        "Discharging"
+    };
+    Some(format!("{}% ({})", percent, label))
 }
 
 // --- C.4: VPN-aware default-route detection (v3.12.0+) ---
