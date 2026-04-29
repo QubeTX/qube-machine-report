@@ -391,15 +391,26 @@ tagged but produced no GitHub Release (3/6 build-local-artifacts jobs
 failed; cargo-dist is all-or-nothing).
 
 The fix is `rust-toolchain.toml` at repo root with `[toolchain] channel =
-"1.95"`. Rustup is pre-installed on every GitHub-hosted runner image, and
-when cargo runs from a workspace containing `rust-toolchain.toml`, the
-rustup proxy auto-installs the pinned channel before delegating to cargo.
-This works in `release.yml` (which never invokes rustup directly), in
-`ci.yml` (which still calls `dtolnay/rust-toolchain@stable` but the
-`rust-toolchain.toml` override wins — same toolchain in CI as in
-releases, single source of truth), and locally for any contributor who
-clones fresh. See [rustup overrides](https://rust-lang.github.io/rustup/overrides.html)
+"1.95"` AND `components = ["rustfmt", "clippy"]`. Rustup is pre-installed
+on every GitHub-hosted runner image, and when cargo runs from a workspace
+containing `rust-toolchain.toml`, the rustup proxy auto-installs the
+pinned channel before delegating to cargo. This works in `release.yml`
+(which never invokes rustup directly), in `ci.yml` (which still calls
+`dtolnay/rust-toolchain@stable` but the `rust-toolchain.toml` override
+wins — same toolchain in CI as in releases, single source of truth), and
+locally for any contributor who clones fresh. See [rustup overrides](https://rust-lang.github.io/rustup/overrides.html)
 for the precedence rules.
+
+The `components = ["rustfmt", "clippy"]` half is non-obvious but
+load-bearing: when rustup processes a `rust-toolchain.toml` that does
+not list components, it installs only the default profile (rustc, cargo,
+rust-std) and *ignores* the `components:` field passed to action-level
+toolchain installers like `dtolnay/rust-toolchain@stable`. The result is
+that the `Format` and `Clippy` CI jobs fail with `error: 'cargo-fmt' is
+not installed for the toolchain '1.95-x86_64-unknown-linux-gnu'` and
+their clippy equivalent. Listing them in the file is the canonical way
+to make rustup install them alongside the channel. Release.yml runners
+get the extra ~few MB download too, which is harmless.
 
 The MSRV is now expressed in **two** places that must move together:
 `Cargo.toml`'s `rust-version` (the cargo-side declaration that produces

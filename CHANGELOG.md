@@ -19,12 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejecting the build with `error: rustc 1.94.1 is not supported`,
   causing 3/6 target builds to fail and no GitHub Release artifact to be
   published since v3.10.0. Adding a `rust-toolchain.toml` at repo root
-  pinning `channel = "1.95"` makes rustup auto-install the right
-  toolchain on every runner before cargo runs, without needing to
-  hand-edit the auto-generated release.yml or bump cargo-dist. CI on
-  every commit also now uses the same pinned toolchain (rust-toolchain.toml
-  overrides `dtolnay/rust-toolchain@stable`), giving a single source of
-  truth between local builds, CI, and release builds.
+  pinning `channel = "1.95"` plus `components = ["rustfmt", "clippy"]`
+  makes rustup auto-install the right toolchain (with the components
+  the `Format` and `Clippy` CI jobs require) on every runner before
+  cargo runs, without needing to hand-edit the auto-generated release.yml
+  or bump cargo-dist. CI on every commit also now uses the same pinned
+  toolchain (rust-toolchain.toml overrides `dtolnay/rust-toolchain@stable`),
+  giving a single source of truth between local builds, CI, and release
+  builds. The `components` field is required because rustup honors
+  rust-toolchain.toml in preference to action-level `components:` fields,
+  and without it `cargo fmt` / `cargo clippy` fail with `'cargo-fmt' is
+  not installed for the toolchain '1.95-x86_64-unknown-linux-gnu'`.
 
   This supersedes the MASTER_PLAN's earlier hypothesis that task #54 was
   a cargo-dist v0.31.0 installer-step regression on
