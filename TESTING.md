@@ -137,3 +137,18 @@ Pending verification (deferred to future sessions):
 - Gaming laptop running an active GPU-heavy load that exceeds AC brick wattage: BATTERY row should show `X% (Plugged in)` with percentage decreasing over time (validates the C.10b heuristic for the supplementing-from-battery case)
 - ThinkPad / ASUS with battery-longevity firmware mode capping charge at 60-80%: BATTERY row should also show `X% (Plugged in)` (the same heuristic catches both the "PSU undersized" and "firmware limit" cases since they're indistinguishable from a single-snapshot SYSTEM_POWER_STATUS)
 - Windows host with admin shell: BATTERY / CORES / GPU rows unchanged (no admin-gated behavior in v3.13.0); E.6 RDP login history pending in task #58
+
+### v3.13.1 — 2026-04-29
+
+Release infrastructure fix (task #54). No runtime behavior changes — the binary is byte-identical to v3.13.0 modulo the version string. Verified on Windows 11 25H2 (build 26200.8246), unelevated user session:
+
+- **Local build sanity** — `cargo fmt --check`, `cargo clippy --all-targets --workspace -- -D warnings`, `cargo test --workspace --all-targets`, `cargo build --release --workspace` all green. `target/release/tr300 --version` reports `3.13.1`. `--fast --json | head -5` parses; `--ascii` renders identically to v3.13.0.
+- **`rust-toolchain.toml` doesn't break local development** — the file pins to `1.95`, the same minor that `Cargo.toml`'s `rust-version` already declares. Existing rustup-managed toolchains on the dev host satisfy the pin transparently.
+
+Verification deferred until after tag push:
+
+- **`release.yml` succeeds for all 6 targets** (vs 3/6 on v3.13.0). Specifically: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `x86_64-pc-windows-msvc` all green; `build-global-artifacts` + `host` + `announce` jobs no longer skipped.
+- **`gh release view v3.13.1 -R QubeTX/qube-machine-report --json assets`** returns the expected list: 6 platform binaries (`.zip` + `.zip.sha256` for each), the Windows MSI, and the shell + PowerShell installer one-liners. The README installer one-liner (`irm .../tr-300-installer.ps1 | iex`) fetches v3.13.1 successfully.
+- **Smoke-test the installer end-to-end** on a fresh shell — confirms users browsing https://github.com/QubeTX/qube-machine-report/releases/latest see a working release for the first time since v3.10.0.
+
+If `release.yml` still fails on any target after the tag push, do NOT revert. Fix-forward in v3.13.2 — most likely follow-on options: (a) bump `cargo-dist-version` from 0.31.0 to current and run `dist init` to regenerate `release.yml`; (b) inject `rustup install 1.95` via `[workspace.metadata.dist].extra-build-cmds`.

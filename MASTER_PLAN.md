@@ -5,8 +5,8 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-04-28 (after v3.13.0 push)
-**Current version:** 3.13.0
+**Last updated:** 2026-04-29 (after v3.13.1 release.yml fix)
+**Current version:** 3.13.1
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
 
@@ -39,15 +39,17 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | (untagged) | `14e0d97` | 2026-04-28 | CI: dropped `macos-13` (Intel macOS) from test+build matrices; rolled into v3.12.0 changelog |
 | v3.12.0 | `28bda98` | 2026-04-28 | **Windows accuracy refinements (PR #4b)** — VPN-aware default-route detection via `GetBestInterfaceEx` (the WMI adapter list is reordered so the kernel's preferred-route adapter wins, correct on multi-homed/VPN configs), Fast Startup uptime annotation (`HiberbootEnabled` + WMI `LastBootUpTime` divergence > 1h → `UPTIME` row renders `9d 4h 12m (session: 7h 14m)`), nullable `os.session_uptime_seconds` JSON key, `os::collect()` takes `CollectMode` to gate the Fast Startup WMI cost, `wmi::WMIDateTime` for CIM datetime parsing |
 | v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history + C.13 batched-PowerShell fallback deferred to a future session |
+| v3.13.1 | _pending tag_ | 2026-04-29 | **Release infrastructure fix (task #54)** — adds `rust-toolchain.toml` at repo root pinning `channel = "1.95"`. Resolves `release.yml` failures on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners that ship with rustc 1.94.1 (below MSRV 1.95 declared in v3.11.1). The auto-generated cargo-dist v0.31.0 release workflow has no rustup setup step; pinning at the workspace level lets rustup auto-install the right toolchain before cargo runs. Single source of truth between `Cargo.toml`'s `rust-version` and the rust-toolchain pin going forward. |
 
-**Tag status (as of 2026-04-28):**
-- `v3.10.0` (`58812cc`): tagged + pushed; cargo-dist `release.yml` ran, 4/6 binaries built (Linux glibc, macOS ARM, Windows, Linux ARM); **2/6 failed** with cargo-dist v0.31.0 installer regression on `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` (`dist: command not found` after the install step); no GitHub release artifact created (cargo-dist is all-or-nothing). See task #54.
-- `v3.11.0` (`3a252df`): NOT tagged. Same release.yml as v3.10.0; would hit the same regression.
-- `v3.11.1` (`22f2002`): NOT tagged. Same regression.
-- `v3.12.0` (`28bda98`): tagged + pushed; release.yml status pending observation in next session.
-- `v3.13.0` (`f34e981`): NOT tagged yet — waiting for CI green on the commit before tag push.
+**Tag status (as of 2026-04-29):**
+- `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
+- `v3.11.0` (`3a252df`): NOT tagged.
+- `v3.11.1` (`22f2002`): NOT tagged.
+- `v3.12.0` (`28bda98`): tagged + pushed; release.yml run failed (3/6 targets failed with `error: rustc 1.94.1 is not supported by the following packages: tr-300@3.12.0 requires rustc 1.95`); no GitHub Release artifact published.
+- `v3.13.0` (`f34e981`): tagged + pushed; release.yml run failed identically (same rustc 1.94.1 < MSRV 1.95 mismatch on 3/6 targets); no GitHub Release artifact published. Run 25039719372.
+- `v3.13.1` (pending): adds `rust-toolchain.toml`. Tag push deferred until CI is green on the commit.
 
-The session that tagged v3.10.0 deliberately stopped retroactively tagging v3.11.0 / v3.11.1 because (a) all three share the same broken release.yml at their respective commits, and (b) v3.12.0 supersedes them on master and ships the same code path forward. The historical tags are documentation-only; users should install v3.13.0 (or latest) which subsumes everything.
+The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install v3.13.1 (or latest) which subsumes everything once it's published. **No GitHub Release artifact has actually been visible to users since v3.10.0** — the README installer one-liner has been broken for months. v3.13.1 is the fix.
 
 ### Live behavior changes already on master (as of v3.13.0)
 
@@ -77,13 +79,13 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 - **PR #3** — Linux accuracy (15 sub-tasks) — systemd-resolved DNS priority, aarch64 CPU brand, in-process systemd-detect-virt port, POSIX locale precedence, power_supply iteration with type filter + battery health, `ip route get` for local IP, terminal env-var priority, last-login fallback chain, ZFS health, dmidecode-backed motherboard/BIOS/RAM (sudo only). Needs Linux distros + RPi to validate.
 - **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing, C.13 batched-PowerShell fallback (single `pwsh ConvertTo-Json` call when WMI fails). Deferred from v3.13.0 because (a) E.6 needs elevated-shell validation, (b) C.13 needs WMI-failure simulation, (c) v3.13.0 already shipped substantial improvements without them.
 - **Cross-platform 3-state battery model** (task #56) — extend the v3.13.0 Windows 5-state model to Linux + macOS. Linux can land independently using `/sys/class/power_supply/AC*/online` + `BAT*/status`; macOS waits on PR #2 hardware.
-- **Cargo-dist installer regression** (task #54) — v0.31.0's `dist` install step fails for `x86_64-apple-darwin` and `x86_64-unknown-linux-musl` runners. Result: tag pushes produce partial builds (4/6 binaries) but no GitHub release artifact. Options: switch to the `astral-sh/cargo-dist` fork (currently at v0.28.7), drop those targets from `[workspace.metadata.dist].targets`, or hand-edit `release.yml`. v3.10.0's release.yml run from this session is the canonical evidence.
+- ~~**Cargo-dist installer regression** (task #54)~~ — **resolved in v3.13.1.** What looked like a cargo-dist v0.31.0 installer regression on `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` (observed on the v3.10.0 release.yml run) actually resolved itself in those runner images at some point between v3.10.0 and v3.12.0. The MSRV bump to 1.95 in v3.11.1 then surfaced a *different* failure on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners — those images ship rustc 1.94.1, and `release.yml` (auto-generated by cargo-dist) does not run rustup before invoking `dist build`. Fix: `rust-toolchain.toml` at repo root pinning `channel = "1.95"`. Rustup is pre-installed on every GitHub-hosted runner and respects the pin transparently. v3.10.0 retains its broken release.yml run as historic record; v3.13.1 is the first release with a working artifact since then.
 - **PR #6** *(optional, deferred unless explicitly requested)* — `--security` flag adding TPM 2.0 + Secure Boot + FileVault + SELinux/AppArmor rows.
 
 ### Recommended next steps (in order)
 
-1. **Watch CI on `f34e981`** (the v3.13.0 commit): https://github.com/QubeTX/qube-machine-report/actions . If green, tag: `git tag v3.13.0 f34e981 && git push origin v3.13.0`.
-2. **Investigate cargo-dist regression** (task #54). Until this is fixed, every tag push produces partial binaries with no GitHub release. Likely fastest fix: switch to `astral-sh/cargo-dist` fork (newer install script).
+1. **Watch CI on the v3.13.1 commit.** If green, tag: `git tag v3.13.1 <commit> && git push origin v3.13.1` and watch the auto-triggered release.yml run. Expected: all 6 `build-local-artifacts` jobs succeed (vs 3/6 on v3.13.0); `gh release view v3.13.1 -R QubeTX/qube-machine-report` returns the 6 binaries + shell/PowerShell/MSI installers (vs `release not found`). If anything still fails, fix-forward in v3.13.2 — likely follow-on options: bump `cargo-dist-version` from 0.31.0 to current and run `dist init`, or inject `rustup install 1.95` via `[workspace.metadata.dist].extra-build-cmds`.
+2. ~~**Investigate cargo-dist regression** (task #54)~~ — **done in v3.13.1.** The fix turned out to be smaller than the original plan suggested: `rust-toolchain.toml` at repo root, no cargo-dist version bump, no migration to the astral-sh fork.
 3. Pick the next PR. Recommendation:
    - **If validating on Mac** → PR #2 (macOS accuracy). The user's primary platforms are Windows + Apple Silicon; PR #2 touches the most-impactful M-series accuracy bugs.
    - **If on Linux / RPi** → PR #3.
@@ -458,7 +460,7 @@ Land in this order. PR #1 unblocks every later PR. PR #4 already shipped, but C.
 | 5b | ⏳ pending (task #58) | — | E.6 admin RDP login history + C.13 batched-PowerShell fallback (the deferred half of PR #5) |
 | 6 | ⏸ optional | — | `--security` flag with TPM + Secure Boot + FileVault + SELinux/AppArmor |
 | (cross-cutting) | ⏳ pending (task #56) | — | Battery 3-state model for Linux + macOS (mirror v3.13.0 Windows C.10b) |
-| (infra) | ⏳ pending (task #54) | — | cargo-dist v0.31.0 release.yml installer regression on `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` (consider switching to astral-sh/cargo-dist fork) |
+| (infra) | ✅ shipped (task #54) | (v3.13.1) | release.yml MSRV/runner-image mismatch: added `rust-toolchain.toml` pinning `channel = "1.95"` so rustup auto-installs the right toolchain on every GitHub-hosted runner before `dist build` invokes cargo. Resolves `error: rustc 1.94.1 is not supported by ... tr-300 requires rustc 1.95` on Windows + Linux gnu + Linux ARM gnu runners. Single source of truth between `Cargo.toml` `rust-version` and the rust-toolchain pin. |
 
 Within each PR, sub-tasks can be tackled in any order that compiles. Per-PR documentation block (F.1–F.6) runs at the end before commit. Verification runs before the push.
 

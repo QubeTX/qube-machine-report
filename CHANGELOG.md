@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.1] - 2026-04-29
+
+### Fixed
+- **`release.yml` builds for `x86_64-pc-windows-msvc`,
+  `x86_64-unknown-linux-gnu`, and `aarch64-unknown-linux-gnu` (task #54).**
+  The auto-generated cargo-dist v0.31.0 release workflow was using each
+  GitHub-hosted runner image's pre-installed rustc, which on those three
+  targets is currently 1.94.1 — below the v3.11.1 MSRV bump to 1.95.
+  `Cargo.toml`'s `rust-version = "1.95"` declaration was correctly
+  rejecting the build with `error: rustc 1.94.1 is not supported`,
+  causing 3/6 target builds to fail and no GitHub Release artifact to be
+  published since v3.10.0. Adding a `rust-toolchain.toml` at repo root
+  pinning `channel = "1.95"` makes rustup auto-install the right
+  toolchain on every runner before cargo runs, without needing to
+  hand-edit the auto-generated release.yml or bump cargo-dist. CI on
+  every commit also now uses the same pinned toolchain (rust-toolchain.toml
+  overrides `dtolnay/rust-toolchain@stable`), giving a single source of
+  truth between local builds, CI, and release builds.
+
+  This supersedes the MASTER_PLAN's earlier hypothesis that task #54 was
+  a cargo-dist v0.31.0 installer-step regression on
+  `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` — that earlier
+  failure mode (observed on the v3.10.0 release run) appears to have
+  resolved itself in the runner images, but the MSRV mismatch took
+  its place starting at v3.11.1. The two targets the plan said were
+  broken now succeed; the three new failures all share the same root
+  cause.
+
 ## [3.13.0] - 2026-04-28
 
 ### Added
