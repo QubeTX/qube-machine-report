@@ -40,6 +40,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   broken now succeed; the three new failures all share the same root
   cause.
 
+  **Outcome:** the v3.13.1 tag (`086ef0a`) triggered release.yml run
+  25096833278, all 10 jobs succeeded across 6 build-local-artifacts
+  targets + plan + build-global-artifacts + host + announce, and the
+  GitHub Release was published with 20 assets — 6 platform binaries
+  as `.tar.xz` + matching `.sha256`, Windows `.zip` + `.sha256` + `.msi`
+  + `.msi.sha256`, source tarball + `.sha256`, `dist-manifest.json`,
+  `sha256.sum`, plus the shell + PowerShell installer one-liners. This
+  is the **first successful GitHub Release publication since v3.10.0**;
+  the README installer one-liners (`irm .../tr-300-installer.ps1 | iex`
+  and `curl ... | sh`) once again resolve to a current binary instead
+  of `404` or stale v3.10.0.
+
+  **Internal note (two-commit publication):** v3.13.1 was published as
+  two commits — `c2e6a65` shipped only `channel = "1.95"` and tripped
+  the `cargo-fmt is not installed` issue described above; `086ef0a`
+  added `components = ["rustfmt", "clippy"]` and the tag points at
+  `086ef0a`. The two-commit shape is preserved in the master history
+  rather than rewritten to keep the lesson discoverable in
+  `git log` / `git blame`.
+
 ## [3.13.0] - 2026-04-28
 
 ### Added

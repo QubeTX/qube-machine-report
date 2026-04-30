@@ -3,14 +3,15 @@
 This file is the working guide for AI coding agents in this repository.
 Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
-Last verified against source: 2026-04-27
+Last verified against source: 2026-04-29
 
 ## Project Snapshot
 
 - Project: TR-300, the Rust successor to TR-200 Machine Report
 - Cargo package name: `tr-300`
 - Library import path: `tr_300`
-- Current version: `3.13.0` (`Cargo.toml`)
+- Current version: `3.13.1` (`Cargo.toml`)
+- MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
 - License: PolyForm-Noncommercial-1.0.0
@@ -30,7 +31,10 @@ Keep both surfaces working when refactoring.
   settings.local.json         # Claude Code local output style setting
 
 .github/workflows/
+  ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
   release.yml                 # cargo-dist generated release workflow
+
+rust-toolchain.toml           # rustup pin (channel = "1.95", rustfmt + clippy components) — see "Toolchain pinning"
 
 man/
   tr300.1                     # generated man page
@@ -475,14 +479,13 @@ Triggers:
 1. Update version in `Cargo.toml`.
 2. Update `CHANGELOG.md`.
 3. Run checks:
-   - `cargo test`
-   - `cargo clippy -- -D warnings`
+   - `cargo test --workspace --all-targets`
+   - `cargo clippy --all-targets --workspace -- -D warnings`
    - `cargo fmt -- --check`
 4. Commit with message `release: vX.Y.Z - <summary>`.
-5. Tag with `git tag vX.Y.Z`.
-6. Push commit and tag:
-   - `git push`
-   - `git push --tags`
+5. Push commit, **wait for `ci.yml` to go green on the commit**, then:
+6. Tag with `git tag vX.Y.Z`.
+7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the workflow trigger; an explicit single-tag push is sufficient).
 
 After changing `[workspace.metadata.dist]`, regenerate the workflow with:
 
@@ -491,6 +494,27 @@ dist init
 ```
 
 The binary is `dist`, not `cargo dist`.
+
+### Toolchain pinning (load-bearing — read before touching `rust-toolchain.toml`)
+
+The repo pins the toolchain in two places that MUST move in lockstep when MSRV changes:
+
+1. **`Cargo.toml` `rust-version = "1.95"`** — cargo-side declaration. Produces the user-facing `error: package tr-300@X.Y.Z cannot be built because it requires rustc N.M ...` message for users on older toolchains.
+2. **`rust-toolchain.toml`**:
+   ```toml
+   [toolchain]
+   channel = "1.95"
+   components = ["rustfmt", "clippy"]
+   ```
+   Rustup-side override. **Both fields are required.**
+
+   **Why both fields:**
+   - `channel = "1.95"` is the actual fix for the v3.10.0–v3.13.0 release.yml regression (task #54). The auto-generated cargo-dist v0.31.0 `release.yml` has no rustup setup step — it uses each runner image's pre-installed rustc. As of late April 2026, `ubuntu-22.04`, `ubuntu-22.04-arm`, and `windows-2022` runners ship rustc 1.94.1, below MSRV 1.95. The pin makes rustup auto-install 1.95 before cargo runs.
+   - `components = ["rustfmt", "clippy"]` is non-obvious but load-bearing. When rustup honors a `rust-toolchain.toml` it installs only the default profile (rustc + cargo + rust-std) and **ignores any action-level `components:` field** passed to `dtolnay/rust-toolchain@stable` in `ci.yml`. Without the components list in the file, ci.yml's `Format` and `Clippy` jobs fail with `error: 'cargo-fmt' is not installed for the toolchain '1.95-x86_64-unknown-linux-gnu'`. v3.13.1 was published as two commits because the first attempt (`c2e6a65`) shipped only the `channel` pin and tripped this; `086ef0a` added the components.
+
+   **Future MSRV bumps:** edit BOTH `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` in the same commit. The minor pin (e.g. `"1.95"`, not `"1.95.0"` and not `"stable"`) lets rustup install the latest patch in the line without churn for patch releases.
+
+Reference: https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file
 
 ## Development Commands
 

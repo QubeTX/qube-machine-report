@@ -46,3 +46,6 @@ coverage/
 
 # Claude Code per-machine settings (the project-scope settings.json IS committed)
 .claude/settings.local.json
+# Claude Code runtime artifacts: per-session lock from ScheduleWakeup, etc.
+# Contents are sessionId + pid + epoch — stale if pulled on another machine.
+.claude/*.lock
