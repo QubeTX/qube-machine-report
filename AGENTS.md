@@ -3,6 +3,12 @@
 This file is the working guide for AI coding agents in this repository.
 Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
+Companion docs:
+- [`CLAUDE.md`](./CLAUDE.md) — edit-time rules, the canonical 7-phase development workflow, CI gates, code patterns.
+- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — long-form rationale for major decisions (MSRV / `rust-toolchain.toml`, auto-rustup self-update, Intel macOS CI coverage policy, Windows accuracy patterns by version). Open this when you're about to undo or revise an existing decision and need the original reasoning + rejected alternatives.
+- [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
+- [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
+
 Last verified against source: 2026-04-29
 
 ## Project Snapshot
@@ -33,6 +39,9 @@ Keep both surfaces working when refactoring.
 .github/workflows/
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
   release.yml                 # cargo-dist generated release workflow
+
+docs/
+  architecture-decisions.md   # long-form rationale for MSRV policy, Windows accuracy patterns, etc.
 
 rust-toolchain.toml           # rustup pin (channel = "1.95", rustfmt + clippy components) — see "Toolchain pinning"
 

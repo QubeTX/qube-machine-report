@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Companion file:** Long-form rationale for major architectural decisions
+> (Windows accuracy patterns by version, MSRV / `rust-toolchain.toml` policy,
+> auto-rustup self-update reasoning, Intel macOS CI coverage policy) lives in
+> [`docs/architecture-decisions.md`](./docs/architecture-decisions.md). This
+> file keeps the load-bearing **edit-time rules** — what to do, what not to
+> undo, and which constants and APIs are required. Open the decisions doc
+> when you need the **why**: rejected alternatives, prior failure modes, and
+> historical context.
+>
+> Forward-looking work tracking (what's shipped, what's pending, who picks up
+> next session) is in [`MASTER_PLAN.md`](./MASTER_PLAN.md). Per-version
+> verification logs are in [`TESTING.md`](./TESTING.md). Agent-facing
+> repository tour and release checklist are in [`AGENTS.md`](./AGENTS.md).
+
 ## Project Overview
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in the exact TR-200 format using Unicode box-drawing tables with bar graphs for resource usage.
@@ -91,182 +105,34 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 ### Windows accuracy patterns (v3.11.0+)
 
-- **OS detection** reads `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
-  directly (`get_os_info_from_registry`) and overrides sysinfo. Detects Win11
-  by `CurrentBuild >= 22000` because the registry `ProductName` is frozen at
-  "Windows 10". Adds `DisplayVersion` (release ID like `25H2`) and `UBR` to the
-  kernel string for richer output.
-- **Architecture detection** (`get_architecture`) calls `IsWow64Process2` via a
-  manual `extern "system"` linked against `kernel32`. Returns the host's
-  native machine even when the binary itself runs under emulation. Handles
-  `IMAGE_FILE_MACHINE_AMD64`, `_ARM64`, `_I386`, `_ARM`. Annotates emulation
-  in the form `aarch64 (x86_64 emulation)` when process arch ≠ host arch.
-- **CPU frequency** (`cpu.rs::collect`) combines CPUID leaf 16h + Windows
-  `CallNtPowerInformation(ProcessorInformation)` + sysinfo, using
-  `Iterator::max`. Leaf 16h returns 0 on Intel hybrid (Meteor/Lunar/Arrow Lake)
-  — that's a documented Intel microcode change, not a bug. Falls through to
-  the next source.
-- **Hypervisor detection** (`detect_virtualization_wmi`) calls
-  `cpuid_hypervisor_brand()` first (CPUID leaf 0x40000000, 12-byte vendor
-  string) and disambiguates the Win11 VBS edge case: if CPUID returns
-  `Microsoft Hv` but the SMBIOS manufacturer is a normal OEM (not Microsoft
-  Corp), the result is `Bare Metal (Hyper-V/VBS)` instead of `Hyper-V`. Real
-  Hyper-V VMs always have Microsoft Corp as manufacturer.
-- **Last-login** (`get_last_login_windows`) calls `WTSQuerySessionInformation`
-  via a manual `extern "system"` linked against `wtsapi32` (the constants
-  `WTS_CURRENT_SESSION = 0xFFFFFFFF`, `WTSLogonTime = 17`,
-  `WTSConnectTime = 14` are declared inline). Falls back to a boot-time
-  derivation from `GetTickCount64` because Windows leaves the WTS time fields
-  at 0 for local console sessions on most modern installs (auto-login + Fast
-  Startup mask the actual logon timestamp). The previous `net user`-based
-  parsing returned localized strings and "Never" — gone.
-- **BitLocker** (`get_bitlocker_status`) queries `Win32_EncryptableVolume` in
-  the `ROOT\CIMV2\Security\MicrosoftVolumeEncryption` namespace via the `wmi`
-  crate's `WMIConnection::with_namespace_path`. Try-and-degrade pattern: on
-  modern Win11 Device Encryption hosts this is readable non-admin and the
-  `ENCRYPTION` row renders; on older Win10 / domain configurations the WMI
-  call returns access-denied → `None` and the row is gracefully omitted; the
-  elevation footer hint covers the unelevated case.
+Edit-time rules:
+- **OS** — `get_os_info_from_registry` reads `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` directly and overrides sysinfo. Detect Win11 by `CurrentBuild >= 22000` (registry `ProductName` is frozen at "Windows 10"). Append `DisplayVersion` + `UBR` to the kernel string.
+- **Arch** — `get_architecture` calls `IsWow64Process2` via manual `extern "system"` against `kernel32`. Returns native machine even under emulation. Handles AMD64 / ARM64 / I386 / ARM. Annotate emulation as `aarch64 (x86_64 emulation)` when process arch ≠ host arch.
+- **CPU freq** — combine CPUID leaf 16h + `CallNtPowerInformation(ProcessorInformation)` + sysinfo via `Iterator::max`. Leaf 16h returns 0 on Intel hybrid (Meteor/Lunar/Arrow Lake) — Intel microcode change, not a bug; the fallthrough is intentional.
+- **Hypervisor** — `cpuid_hypervisor_brand()` (CPUID leaf 0x40000000, 12-byte vendor string) first. Disambiguate the Win11 VBS edge case: CPUID returns `Microsoft Hv` AND SMBIOS manufacturer is a normal OEM → `Bare Metal (Hyper-V/VBS)`, not `Hyper-V`. Real Hyper-V VMs always have Microsoft Corp as manufacturer.
+- **Last-login** — `WTSQuerySessionInformation` via manual extern against `wtsapi32` with inline `WTS_CURRENT_SESSION = 0xFFFFFFFF`, `WTSLogonTime = 17`, `WTSConnectTime = 14` constants. Falls back to `GetTickCount64`-derived boot time because WTS time fields are 0 for local console sessions on modern installs (auto-login + Fast Startup mask the actual logon timestamp). Don't reintroduce `net user` parsing — localized strings, returned "Never".
+- **BitLocker** — `Win32_EncryptableVolume` in `ROOT\CIMV2\Security\MicrosoftVolumeEncryption` namespace via `wmi::WMIConnection::with_namespace_path`. Try-and-degrade: readable non-admin on Win11 Device Encryption → `ENCRYPTION` row renders; access-denied on older Win10 / domain configs → `None` and row is omitted; elevation footer covers the gap.
+
+— Full reasoning, every constant's purpose, the prior-`net user` failure mode, the VBS disambiguation logic in detail: see [`docs/architecture-decisions.md` § "v3.11.0+ — registry OS, IsWow64Process2, WTS last-login, CPUID hypervisor, BitLocker"](./docs/architecture-decisions.md#v3110--registry-os-iswow64process2-wts-last-login-cpuid-hypervisor-bitlocker).
 
 ### Windows accuracy patterns (v3.13.0+)
 
-- **5-state battery awareness via `GetSystemPowerStatus`** (`get_battery_native`
-  in `platform/windows.rs`). Replaces the WMI `Win32_Battery` query (~40 ms,
-  COM round-trip) with a single Win32 API call (~1 ms). The output state
-  machine layered on top is the v3.13.0 user-visible improvement and was
-  expanded mid-implementation (originally a 3-state plan; the user requested
-  better gaming-laptop awareness):
-    1. `BatteryFlag == 0x80` (no system battery — desktops) → `None`, BATTERY
-       row omitted entirely.
-    2. `BatteryLifePercent == 0xFF` (unknown charge) → `None`.
-    3. `BatteryFlag == 0xFF` (unknown state) → `X% (Unknown)` so the user
-       sees something rather than nothing.
-    4. `ACLineStatus == 0xFF` (AC status unknown — rare; some VMs,
-       hypervisor-passthrough batteries) → `X%` with no AC label, since
-       guessing would be misleading.
-    5. On AC + Charging bit set → `X% (Charging)`.
-    6. On AC + percent ≥ 95 + not charging → `AC Power` with NO percentage.
-       The percentage at full charge is uninformative; suppressing it
-       eliminates the v3.11.x output `100% (AC Power)` which was redundant.
-    7. On AC + percent < 95 + not charging → `X% (Plugged in)`. Covers two
-       distinct but indistinguishable scenarios from a single-snapshot API:
-       (a) gaming laptop where peak GPU draw exceeds the AC brick's
-       wattage (Alienware, ROG, Razer with discrete GPUs); (b) firmware-
-       limited charging (ThinkPad / ASUS / Lenovo battery-longevity modes
-       capping at 60-80%). Either way, the percentage matters and we can't
-       distinguish without time-series sampling — the label is honest about
-       the ambiguity.
-    8. Off AC + Critical bit → `X% (Critical)`; Low bit → `X% (Low)`;
-       otherwise → `X% (Discharging)`. Critical/Low take precedence so
-       the urgency is visible.
-  The `BATTERY_FLAG_HIGH` bit (0x01, > 66% charge) is intentionally NOT
-  surfaced as a label suffix — early v3.13.0 testing on a fully-charged
-  laptop on AC produced `100% (Discharging (High))` which was incoherent
-  (charging bit OFF + ACLineStatus=1 + High set is the "fully topped up
-  on AC" case, not "discharging"). The percentage already conveys charge
-  level. Reference:
-  [GetSystemPowerStatus](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getsystempowerstatus).
-- **Native socket count via `GetLogicalProcessorInformationEx`**
-  (`get_socket_count_native` in `platform/windows.rs`). Replaces the
-  `Win32_Processor` WMI count (~30 ms COM round-trip) with the standard
-  two-call buffer-sizing pattern: first call with `Buffer = null_mut`
-  returns FALSE + `ERROR_INSUFFICIENT_BUFFER` and writes
-  `returned_length`; allocate exactly that size and call again. Walks the
-  resulting variable-length `SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX`
-  records by reading the `Size` field at each entry's offset (the records
-  aren't fixed-size — different `Relationship` values pack different
-  payloads). Counts entries with `Relationship == RelationProcessorPackage`.
-  WMI fallback (`get_socket_count_wmi`) retained as a safety net during
-  the C.9 → C.14 transition. Reference:
-  [GetLogicalProcessorInformationEx](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformationex).
-- **GPU enumeration prefers the registry path** (`filter_software_gpus` +
-  the existing `get_gpus_fast` registry walk). The `--fast` mode already
-  used the `{4d36e968-e325-11ce-bfc1-08002be10318}` Display class registry
-  walk because it's COM-free and fast (~5 ms), and it has the additional
-  property that it only enumerates hardware adapters — Microsoft Basic
-  Render Driver, Microsoft Hyper-V Video, and similar software-only
-  adapters don't appear there. Full mode now also prefers it (with WMI /
-  PowerShell as fallbacks), and a `filter_software_gpus()` name-based
-  filter strips known-bad strings as belt-and-suspenders. This is a
-  deliberate simplification of the originally-planned C.8 (full DXGI
-  `IDXGIFactory1::EnumAdapters1` COM enumeration) — the simpler approach
-  achieves the same user-visible outcome (no software adapters in the GPU
-  row) at 25 LOC vs ~100 LOC of unsafe COM. DXGI remains an option if
-  vendor/device-ID filtering ever becomes necessary that name-based
-  filtering can't do.
-- **PowerShell 7+ ("PowerShell Core") detection** (`get_powershell_core_version`
-  in `platform/windows.rs`). The historical `get_shell()` only knew about
-  Windows PowerShell 5.x via `HKLM\SOFTWARE\Microsoft\PowerShell\3\
-  PowerShellEngine\PowerShellVersion`. PowerShell 7+ installs register
-  under a different hive: `HKLM\SOFTWARE\Microsoft\PowerShellCore\
-  InstalledVersions\<GUID>\SemanticVersion`. We do a recursive
-  `reg query /s` and pick the highest `SemanticVersion` value found by
-  string-compare (works for 3-tuple semver since each component fits in
-  2 digits — no zero-padding needed). Falls back to the legacy 5.x
-  detection when no PSCore subkey exists.
-- **Terminal parent-process walk via Toolhelp32**
-  (`detect_terminal_via_parent_walk` + `match_terminal_name` in
-  `platform/windows.rs`). When neither `WT_SESSION` nor `TERM_PROGRAM`
-  nor the new Cursor env vars are set (common when launched from a
-  desktop shortcut, a fresh subshell that lost the parent's environment,
-  or by an AI agent), `get_terminal()` walks the parent-process chain:
-  `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`, then iterate via
-  `Process32FirstW` / `Process32NextW`, build a
-  `HashMap<pid, (parent_pid, name)>`, then climb from `GetCurrentProcessId()`
-  upward (cap 10 levels — defensive against PID-table cycles, which
-  happen in practice on Windows when a parent dies and its PID gets
-  recycled). Recognizes Windows Terminal, WezTerm, Alacritty, VS Code,
-  Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code,
-  Antigravity. Intermediate hosts (`conhost.exe`, `powershell.exe`,
-  `pwsh.exe`, `cmd.exe`, `bash.exe`, `sh.exe`, `zsh.exe`, `fish.exe`,
-  `nu.exe`, `tr300.exe`, `node.exe`, `python.exe`) are skipped so the
-  walk continues through them; unrecognized exes break the walk silently
-  and the row falls back to `Console`. Verified on this dev host: when
-  TR-300 runs inside Claude Code's Bash tool, the chain
-  `tr300.exe → bash.exe → claude.exe → powershell.exe` correctly
-  resolves to `Claude Code`. Reference:
-  [CreateToolhelp32Snapshot](https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot).
+Edit-time rules:
+- **Battery** — `get_battery_native` calls `GetSystemPowerStatus` (~1 ms vs ~40 ms WMI). 8-state output machine: `BatteryFlag == 0x80` → row omitted (desktop); `0xFF` → `X% (Unknown)`; AC+charging → `X% (Charging)`; AC+≥95%+not charging → `AC Power` (no percent — uninformative at full); AC+<95%+not charging → `X% (Plugged in)` (gaming-laptop PSU-undersized OR firmware battery-longevity, indistinguishable from a single snapshot); off-AC + Critical/Low → labels with that priority; off-AC default → `X% (Discharging)`; `ACLineStatus == 0xFF` → bare `X%`. **Never surface `BATTERY_FLAG_HIGH` as a label suffix** — early v3.13.0 produced `100% (Discharging (High))` which was incoherent.
+- **Cores** — `get_socket_count_native` uses `GetLogicalProcessorInformationEx` two-call buffer-sizing pattern (null buffer → `ERROR_INSUFFICIENT_BUFFER` writes required size; allocate, call again). **Walk the variable-length `SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX` records via `u32::from_le_bytes` on the `Size` field** — records aren't fixed-size, raw casts are technically UB. Count `Relationship == RelationProcessorPackage`. WMI fallback (`get_socket_count_wmi`) kept as safety net.
+- **GPU** — full mode prefers the registry path (`get_gpus_fast` walks the `{4d36e968-…}` Display class) before WMI/PowerShell; software adapters (Microsoft Basic Render Driver, Hyper-V Video) don't appear there. `filter_software_gpus()` strips known-bad names as belt-and-suspenders. **Don't replace this with full DXGI `IDXGIFactory1::EnumAdapters1`** unless name-based filtering proves insufficient — it's 25 LOC vs ~100 LOC of unsafe COM for the same user-visible outcome.
+- **PowerShell 7+ ("PSCore")** — `get_powershell_core_version` does recursive `reg query /s` on `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\SemanticVersion`. **Pick the highest version via `(u64, u64, u64)` semver tuple comparison, NOT string sort** — string-compare puts `"7.10.0" < "7.9.0"` (caught in Codex review). Fall through to legacy WinPS-5.x detection on miss.
+- **Terminal** — env-var pre-checks (`WT_SESSION`, `TERM_PROGRAM`, `CURSOR_TRACE_ID`/`CURSOR_AGENT`) THEN `detect_terminal_via_parent_walk` via `CreateToolhelp32Snapshot` + `Process32FirstW`/`Process32NextW`. Build `HashMap<pid, (parent_pid, name)>`, climb from `GetCurrentProcessId()` upward, **cap at 10 levels** (defensive against PID-table cycles when parent dies and PID gets recycled). Skip intermediate hosts (`conhost.exe`, `powershell.exe`, `pwsh.exe`, `cmd.exe`, shells, `tr300.exe`, `node.exe`, `python.exe`). Recognized: Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity. Unrecognized → `Console`.
+
+— Full reasoning, all 8 battery-state branches with rationale, the gaming-laptop vs firmware-limit ambiguity, the alignment-safe walk justification, the DXGI vs registry trade-off, the PSCore semver-sort bug catch, the Toolhelp32 PID-cycle defense: see [`docs/architecture-decisions.md` § "v3.13.0+ — 5-state battery, native cores, GPU registry-prefer, PSCore detection, terminal walk"](./docs/architecture-decisions.md#v3130--5-state-battery-native-cores-gpu-registry-prefer-pscore-detection-terminal-walk).
 
 ### Windows accuracy patterns (v3.12.0+)
 
-- **VPN-aware default-route detection** (`get_best_route_interface_index` +
-  `get_network_info_wmi`). The historical Windows network collector queried
-  `Win32_NetworkAdapterConfiguration WHERE IPEnabled = TRUE` and picked the
-  first IPv4 address it found — coin-flip behavior on multi-homed hosts and
-  on hosts with active VPN tunnels (Tailscale, WireGuard, OpenVPN, Cisco
-  AnyConnect). v3.12.0 calls `GetBestInterfaceEx` (manual `extern` linked
-  against `iphlpapi`) for `1.1.1.1`; the kernel returns the interface index
-  that *would* carry packets to the public internet right now. We then
-  reorder the WMI result list so that adapter is picked first, falling back
-  transparently to the original first-match logic when the kernel lookup
-  fails (IP Helper service disabled, no default route, etc.). The `winapi`
-  features `iphlpapi`/`ws2def`/`ws2ipdef`/`winerror`/`inaddr`/`in6addr`/
-  `ifdef` were added for this — `SOCKADDR_IN` is declared inline (3 fields,
-  layout-stable since Win95) to keep the surface area minimal. Reference:
-  [GetBestInterfaceEx](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getbestinterfaceex).
-- **Fast Startup uptime annotation** (`detect_fast_startup` +
-  `last_cold_boot_seconds` in `platform/windows.rs`, threaded through
-  `OsInfo.session_uptime_seconds` and `SystemInfo.uptime_formatted()`).
-  Windows 10/11 default to `HiberbootEnabled = 1` — at "shut down" the
-  kernel session is hibernated to `hiberfil.sys` and resumed at "boot",
-  so `GetTickCount64` (sysinfo's uptime) reports the resumed-session age,
-  while `Win32_OperatingSystem.LastBootUpTime` reports the actual cold-boot
-  time. They diverge by days on a daily-use laptop. The collector probes
-  the registry key `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\
-  Power\HiberbootEnabled` (DWORD), and when enabled AND the WMI cold-boot
-  time is >1h older than the kernel session age, swaps `uptime_seconds` to
-  the cold-boot value AND populates `session_uptime_seconds` with the
-  resumed-session value. The renderer surfaces both as
-  `9d 4h 12m (session: 7h 14m)`. Both values are right; surfacing both
-  avoids the "wait, I restarted three days ago, why does this say 47 days"
-  confusion. The WMI cold-boot query is full-mode-only (~80 ms cost);
-  `--fast` uses sysinfo's uptime exclusively. The CIM datetime field is
-  deserialized via `wmi::WMIDateTime` (the `wmi` crate's serde-aware
-  wrapper around `chrono::DateTime<FixedOffset>`) — manual hand-parsing of
-  the `yyyymmddHHMMSS.mmmmmmsUUU` format is unnecessary and was tried-
-  and-discarded in early v3.12.0 development. References:
-  [Microsoft Q&A: Fast Startup boot time](https://learn.microsoft.com/en-us/answers/questions/1443763/how-to-get-oss-start-time-when-fast-startup-mode-i),
-  [Win32_OperatingSystem](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem).
+Edit-time rules:
+- **VPN-aware default-route** — `get_best_route_interface_index` calls `GetBestInterfaceEx` (manual extern, `iphlpapi`) for `1.1.1.1`; reorders the WMI `Win32_NetworkAdapterConfiguration` result list so the kernel-preferred adapter wins. Falls back transparently to first-match when the kernel lookup fails (IP Helper service disabled, no default route). **Don't reintroduce naive first-match** — coin-flip behavior on multi-homed hosts and on Tailscale / WireGuard / OpenVPN / Cisco AnyConnect tunnels. **`SOCKADDR_IN` is declared inline** (3 fields, layout-stable since Win95) to keep the unsafe surface minimal — don't pull in additional winapi features for it.
+- **Fast Startup uptime** — `detect_fast_startup` reads `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power\HiberbootEnabled` (DWORD); `last_cold_boot_seconds` queries `Win32_OperatingSystem.LastBootUpTime`. When enabled AND cold-boot is >1h older than `GetTickCount64` (sysinfo uptime, which is hibernation-resumed session age), swap `uptime_seconds` to cold-boot AND populate `session_uptime_seconds` with the resumed value. Renderer outputs `9d 4h 12m (session: 7h 14m)`. **Full-mode only** (~80 ms WMI cost); `--fast` keeps sysinfo's uptime. **Use `wmi::WMIDateTime` for the CIM datetime field** — manual hand-parsing of `yyyymmddHHMMSS.mmmmmmsUUU` was tried and discarded in early v3.12.0.
+
+— Full reasoning, the inline `SOCKADDR_IN` justification, the `wmi::WMIDateTime` discovery: see [`docs/architecture-decisions.md` § "v3.12.0+ — VPN-aware default-route, Fast Startup uptime annotation"](./docs/architecture-decisions.md#v3120--vpn-aware-default-route-fast-startup-uptime-annotation).
 
 ### Self-Update (`--update`)
 
@@ -276,153 +142,33 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 `--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
 
-**Auto-rustup on the cargo path (v3.11.1+).** When `execute_update()` takes the
-`InstallMethod::Cargo` branch it first calls `rustup_update_stable_best_effort()`,
-which probes for `rustup` on PATH (via `rustup --version`, redirecting both
-stdout and stderr to `Stdio::null()` so the probe is silent) and, if found,
-runs `rustup update stable` and prints `Updating Rust toolchain (rustup
-update stable)…` so the user sees what's happening. Any failure — rustup
-absent, network timeout, locked toolchain, permission error — is *non-fatal*:
-we discard the result with `let _ =` and proceed straight to the
-`cargo install tr-300 --force` call. The Installer (cargo-dist shell/PS)
-branch never touches Rust because it downloads a prebuilt binary.
+**Auto-rustup on the cargo path (v3.11.1+).** Before `cargo install tr-300 --force`, `execute_update()` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. The Installer (cargo-dist shell/PS) branch never touches Rust (it downloads a prebuilt binary). Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
 
-*Why this exists — the failure mode it prevents:* TR-300's MSRV tracks the
-GitHub Actions `stable` toolchain and moves whenever Rust ships a stable
-release that promotes a lint we trigger or changes safety classifications
-on stdlib intrinsics we use (cf. the 1.95 `__cpuid` reclassification that
-prompted this change). Without auto-rustup, a user who installed via
-`cargo install tr-300` on Rust 1.94 and then later runs `tr300 --update`
-against a release built with `rust-version = "1.95"` would see cargo print
-`error: rustc 1.94.0 is not supported by the following package: tr-300@…
-requires rustc 1.95`, our `execute_update` would propagate that as a
-non-zero exit, and the user would be silently stuck on the stale binary
-forever — they'd assume `--update` "doesn't work" and either give up or
-manually research the toolchain pin themselves. The 5–30 seconds spent on
-a redundant `rustup update stable` (effectively a no-op when already
-current — rustup just prints `info: cleaning up downloads & tmp directories`
-and exits) is dramatically cheaper than that user-experience failure, and
-this pattern means MSRV bumps in future releases stop being a coordination
-problem with users.
-
-*Why best-effort instead of "fail loudly if rustup isn't there":* not every
-user manages Rust through rustup. Distro packages (Debian's `rustc`/`cargo`,
-Homebrew's `rust`, NixOS's nixpkgs Rust), CI environments where rustup is
-intentionally absent, and corporate-managed toolchains all install Rust
-without putting `rustup` on PATH. Hard-failing in those cases would be
-worse than the status quo (we'd block working updates on a tool we don't
-need). Probing first and silently skipping when it's missing means we help
-the rustup majority while not surprising the minority — they just see the
-plain `cargo install` path and any MSRV mismatch surfaces normally, with
-the standard cargo error pointing at `rust-version` so they can update
-their distro/Homebrew Rust on their own terms.
-
-*Why we don't probe rustc version and conditionally call rustup:* the
-naive alternative — parse `rustc --version`, compare against an MSRV
-constant, only run rustup when older — adds two new failure modes (parse
-errors, drift between the constant and `Cargo.toml`'s `rust-version`) and
-saves at most a few seconds. Always running `rustup update stable` is
-simpler, idempotent, and self-correcting; rustup itself decides whether
-work is needed.
+— Full reasoning, the rustup-managed-vs-distro-managed split, the rejected `rustc --version` probe alternative, the failure-mode this prevents: see [`docs/architecture-decisions.md` § "Self-update auto-rustup (v3.11.1+)"](./docs/architecture-decisions.md#self-update-auto-rustup-v3111).
 
 ### MSRV policy (v3.11.1+)
 
-`rust-version` is pinned in `Cargo.toml` and tracks the GitHub Actions
-`stable` toolchain. As of 3.11.1 it's `1.95` because `std::arch::x86::__cpuid`
-and `std::arch::x86_64::__cpuid` were reclassified as safe-to-call in
-Rust 1.95 (no safety preconditions on x86/x86_64 — CPUID is universally
-available), which made our `unsafe { __cpuid(_) }` wrappers in
-`src/collectors/cpu.rs` and `src/collectors/platform/windows.rs` trip the
-`unused_unsafe` lint. Under our `-D warnings` policy that's a hard build
-error. Bump `rust-version` whenever a new stable lint or stdlib change
-forces source edits — and at the same release pin so that users running
-older toolchains hit cargo's MSRV check, not E0133s deep in collector
-modules.
+MSRV pinned in **two places that move in lockstep on every bump**:
 
-*Why pin MSRV instead of supporting older Rust via shims:* there are three
-realistic alternatives, and we considered each.
+1. **`Cargo.toml` `rust-version = "1.95"`** — cargo-side declaration. Produces the user-facing `error: package tr-300@X.Y.Z cannot be built because it requires rustc N.M ...` for users on older toolchains.
+2. **`rust-toolchain.toml`** at repo root:
+   ```toml
+   [toolchain]
+   channel = "1.95"
+   components = ["rustfmt", "clippy"]
+   ```
+   Rustup-side override. **Both fields are required.**
 
-1. **`#[allow(unused_unsafe)]` on every `unsafe { __cpuid(_) }` block.**
-   Compiles on both old and new toolchains. *Rejected* because the `allow`
-   is permanent — once added, even Rust toolchains where the lint is
-   correct (i.e. the unsafe block really is necessary because someone
-   added a genuinely-unsafe call inside it later) will silently swallow
-   the warning and we'd miss real safety regressions. It also bloats every
-   CPUID callsite with attribute noise that has to be re-justified at
-   review time, and it propagates: every future stable lint we want to
-   straddle adds another permanent `allow`. Tech debt that compounds.
+   - `channel = "1.95"` — `release.yml` is auto-generated by cargo-dist v0.31.0 and has NO rustup setup step; without this, runners use their pre-installed rustc (currently 1.94.1 on `ubuntu-22.04`, `ubuntu-22.04-arm`, `windows-2022`) and the build fails with `error: rustc 1.94.1 is not supported`. This is the v3.13.1 fix for task #54 — no GitHub Release artifact had been published since v3.10.0 because of this.
+   - `components = ["rustfmt", "clippy"]` — non-obvious but load-bearing. When rustup honors a `rust-toolchain.toml`, it installs only the default profile (rustc + cargo + rust-std) and **ignores any action-level `components:` field** passed to `dtolnay/rust-toolchain@stable`. Without the components list, ci.yml's `Format` and `Clippy` jobs fail with `error: 'cargo-fmt' is not installed for the toolchain '1.95-x86_64-unknown-linux-gnu'`. v3.13.1 was published in two commits because the first attempt missed this.
 
-2. **`#[cfg(rustc_version)]` ladders to gate per Rust version.** Requires
-   pulling in `rustversion` or `rustc_version` build-script crates, adds a
-   build-time fingerprint to every release, and means our source has two
-   parallel implementations of the same logic — one with `unsafe`, one
-   without — that have to be kept in lockstep. *Rejected* as
-   over-engineering for a tool whose CI deliberately uses
-   `dtolnay/rust-toolchain@stable` and ships from a single toolchain.
+**Why pinned MSRV** rather than `#[allow(unused_unsafe)]` shims or `#[cfg(rustc_version)]` ladders: cargo's `rust-version` field already enforces this without source-level shims; combined with auto-rustup in `--update` (above), rustup-managed users never see the error and distro-managed users get a clear actionable message.
 
-3. **Pin MSRV to the CI toolchain (this approach).** Cargo's existing
-   `rust-version` field already enforces this without any source-level
-   shims. Older toolchains get `error: package tr-300@3.11.1 cannot be
-   built because it requires rustc 1.95.0 or newer, while the currently
-   active rustc version is 1.94.0` — clear, actionable, and points at
-   exactly the right knob to fix. Combined with auto-rustup in
-   `--update`, users on rustup-managed toolchains never see the error at
-   all because `tr300 --update` brings their stable forward in lockstep
-   with the MSRV pin. Users on distro-managed toolchains see the clear
-   error and can update on their own schedule.
+**Channel format**: minor pin (`"1.95"`, not `"1.95.0"` and not `"stable"`). Rustup installs the latest patch in the 1.95.x line — patch releases land without a bump; minor floats stay explicit.
 
-The combination — pin in `Cargo.toml`, auto-rustup in `--update`, README
-mentions `rustup update stable` ahead of `cargo install tr-300` — gives us
-a coherent toolchain story across all three install paths (binary
-installer, fresh `cargo install`, self-update) without source-level
-compatibility shims.
+**On every MSRV bump**: edit `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` in the same commit. See [rustup overrides](https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file) for the precedence rules.
 
-**v3.13.1 addendum — `rust-toolchain.toml` is the fourth leg.** `Cargo.toml`'s
-`rust-version` declaration alone is not enough to keep `release.yml` green.
-The release workflow is auto-generated by cargo-dist v0.31.0 (see
-`.github/workflows/release.yml` line 1: `# This file was autogenerated by
-dist`); its only Rust setup is downloading the `dist` binary itself and
-immediately invoking `dist build`. There is no `rustup install` step.
-Each `build-local-artifacts` job uses whatever rustc the
-GitHub-hosted runner image happens to have pre-installed, which on
-`ubuntu-22.04`, `ubuntu-22.04-arm`, and `windows-2022` is currently 1.94.1
-— below MSRV 1.95. The result was that v3.10.0 / v3.12.0 / v3.13.0 all
-tagged but produced no GitHub Release (3/6 build-local-artifacts jobs
-failed; cargo-dist is all-or-nothing).
-
-The fix is `rust-toolchain.toml` at repo root with `[toolchain] channel =
-"1.95"` AND `components = ["rustfmt", "clippy"]`. Rustup is pre-installed
-on every GitHub-hosted runner image, and when cargo runs from a workspace
-containing `rust-toolchain.toml`, the rustup proxy auto-installs the
-pinned channel before delegating to cargo. This works in `release.yml`
-(which never invokes rustup directly), in `ci.yml` (which still calls
-`dtolnay/rust-toolchain@stable` but the `rust-toolchain.toml` override
-wins — same toolchain in CI as in releases, single source of truth), and
-locally for any contributor who clones fresh. See [rustup overrides](https://rust-lang.github.io/rustup/overrides.html)
-for the precedence rules.
-
-The `components = ["rustfmt", "clippy"]` half is non-obvious but
-load-bearing: when rustup processes a `rust-toolchain.toml` that does
-not list components, it installs only the default profile (rustc, cargo,
-rust-std) and *ignores* the `components:` field passed to action-level
-toolchain installers like `dtolnay/rust-toolchain@stable`. The result is
-that the `Format` and `Clippy` CI jobs fail with `error: 'cargo-fmt' is
-not installed for the toolchain '1.95-x86_64-unknown-linux-gnu'` and
-their clippy equivalent. Listing them in the file is the canonical way
-to make rustup install them alongside the channel. Release.yml runners
-get the extra ~few MB download too, which is harmless.
-
-The MSRV is now expressed in **two** places that must move together:
-`Cargo.toml`'s `rust-version` (the cargo-side declaration that produces
-the clear `error: package tr-300@X.Y.Z cannot be built because it
-requires rustc N.M ...` message for users on older toolchains) and
-`rust-toolchain.toml`'s `channel` (the rustup-side override that ensures
-GitHub-hosted runners and contributor machines actually pull the right
-toolchain). Future MSRV bumps must update both. Channel choice is a
-minor pin (`"1.95"`, not `"stable"` or `"1.95.0"`): rustup installs the
-latest patch in the 1.95.x line so we benefit from patch releases
-without having to bump for them, but we don't float forward across
-minors silently.
+— Full reasoning, the three rejected alternatives (allow / cfg ladder / no-pin), the v3.10.0–v3.13.0 partial-release history, the v3.13.1 two-commit fix-forward narrative: see [`docs/architecture-decisions.md` § "MSRV policy"](./docs/architecture-decisions.md#msrv-policy-v3111-addendum-v3131).
 
 ### Elevation Tier (v3.10.0+)
 
@@ -542,99 +288,18 @@ If a CI job fails, click into the job logs first — `clippy` and `test` failure
 
 ### Intel macOS coverage policy (v3.11.2+)
 
-**What changed.** On 2026-04-28 the `macos-13` matrix entries were removed
-from both the `test` and `build` jobs in `.github/workflows/ci.yml`. CI no
-longer exercises Intel macOS x86_64. The Intel binary continues to ship
-from tag-push releases — `[workspace.metadata.dist].targets` in
-`Cargo.toml` still lists `x86_64-apple-darwin`, and cargo-dist's
-`release.yml` still builds it on a `macos-13` runner at every `vX.Y.Z`
-tag. CI on every commit no longer touches that runner.
+**Contract: CI never blocks on Intel; releases still produce the artifact.**
 
-**The triggering symptom.** The five CI runs immediately preceding this
-change all stalled exclusively on the two Intel macOS jobs while every
-other matrix cell finished within minutes. Concrete examples (run IDs +
-queue times before manual cancellation): `#25023039347` ("fix(audit):
-migrate users → uzers") sat queued **3h 20m+** before being cancelled to
-unblock the next push, `#25022743655` (v3.11.1 release) cancelled at 7m
-59s, `#25021879374` (docs commit) cancelled at 22m 34s, `#25021109459`
-(v3.11.0 release) cancelled at 18m 41s, and `#24978816648` (v3.10.0
-release) sat for **15h 50m** before cancellation. The repeated workflow
-was: push → wait → realise Intel never picked up → `gh run cancel ...` →
-push next commit, which the `concurrency: cancel-in-progress: true`
-group then auto-cancelled anyway. Hours of latency per push, no Intel
-runtime ever exercised.
+- `.github/workflows/ci.yml` — **no `macos-13` entry**. The default state is "Intel is not in CI, period." Tested matrix is Linux x64 glibc + macOS ARM + Windows x64.
+- `[workspace.metadata.dist].targets` in `Cargo.toml` — **still includes `x86_64-apple-darwin`**. cargo-dist's `release.yml` still builds it on a `macos-13` runner at every `vX.Y.Z` tag. The mismatch between tested (3) and shipped (6) targets is intentional.
 
-**Why it's structural, not a glitch.** `macos-13` is GitHub's last public
-Intel x86_64 macOS hosted runner label. There is no `macos-14`,
-`macos-15`, or `macos-latest` Intel variant — Apple Silicon is the only
-forward path on hosted runners. GitHub has been progressively winding
-down the Intel hosted-fleet capacity through 2025 as Apple Silicon
-became default; on top of that thin baseline, transient incidents like
-the 2026-04-27 16:31 UTC "Actions experiencing degraded performance"
-event push queue depth from "slow" to "indefinite." This is not a
-problem we can wait out — capacity is not coming back.
+**Don't re-add `macos-13` to ci.yml** without a concrete reason and a capacity-risk discussion. `macos-13` is GitHub's last public Intel x86_64 macOS hosted runner label and capacity is structurally winding down (no `macos-14`/`-15`/`-latest` Intel variant exists). Pre-removal CI runs queued 3h+ to 15h+ on Intel before manual cancellation; `continue-on-error: true` is theatrical coverage — same UX. Hard removal was the only fix that actually changed the dashboard state.
 
-**Why dropping CI coverage is acceptable for this project.** Apple
-stopped selling Intel Macs in June 2023; the newest hardware Apple
-shipped with an Intel CPU (the 2019 Mac Pro / 2020 Intel iMac /
-MacBook Pro) is roughly three years old by 2026-04-28 and falling out
-of macOS support tiers release-over-release. Critically, dropping Intel
-*CI* does not mean dropping Intel *correctness coverage*: the
-`#[cfg(target_os = "macos")]` gates in `src/collectors/platform/macos.rs`
-are arch-agnostic, so Apple Silicon CI exercises every line of the
-macOS path. The only thing ARM CI doesn't catch is genuinely
-arch-specific behavior, of which TR-300's macOS path has effectively
-none — no inline asm, `format_bytes()` and the table renderer are
-arch-agnostic, sysinfo's `System` API hides arch internally, and the
-`sysctl`/`scutil`/`pmset`/`ioreg` subprocess calls produce identical
-output regardless of CPU. The accuracy delta from losing Intel CI
-coverage is close to zero in practice, and any drift would show up at
-tag-push time when cargo-dist builds the Intel target anyway.
+**Don't drop `x86_64-apple-darwin` from cargo-dist targets** unless `release.yml` starts taking >2h at tag time because of `macos-13` queue depth. Tag cadence is weekly-to-monthly, willing to absorb the wait — users on 2019/2020-era Intel hardware deserve a working binary download.
 
-**Why not just `continue-on-error: true` on the Intel matrix entry.**
-Considered. Rejected because it leaves the queued-3-hours-and-then-
-cancel UX intact for every push: the workflow's overall conclusion
-would be `success`, but the dashboard would still show two perpetually
-pending cells, and the run wouldn't be considered "complete" until
-either the runner finally picked up (rare) or `cancel-in-progress`
-killed it on the next push. That's theatrical coverage — the user
-experience is identical to the current pain. Hard removal is the only
-fix that actually changes the dashboard state.
+**For Intel-specific bugs**: reproduce locally on Intel hardware (or one-shot self-hosted runner). The arch-agnostic `#[cfg(target_os = "macos")]` paths mean Apple Silicon CI exercises every line of the macOS code path; bug rate doesn't justify the queue cost.
 
-**Why not also drop Intel from cargo-dist's release targets.**
-Considered. Rejected per maintainer direction. Release-time builds run
-on a tag push (cadence: minor/patch releases, ~weekly to monthly), and
-that cadence is willing to absorb a multi-hour Intel queue wait — we
-don't tag releases on a deadline. The cost of keeping
-`x86_64-apple-darwin` in `[workspace.metadata.dist].targets` is one
-extra `macos-13` job per *tag*, not per *commit*. Any user still on
-2019/2020-era Intel hardware deserves a working binary download
-without having to build from source. The contract is: **CI never
-blocks on Intel; releases still produce the artifact.**
-
-**What this implies for future contributors.**
-
-1. Don't re-add `macos-13` to `ci.yml` without a concrete reason and a
-   discussion of capacity risk. The default state is "Intel is not in
-   CI, period."
-2. If GitHub ever ships a hosted Intel macOS replacement label
-   (unlikely), prefer that label over `macos-13` and re-evaluate
-   whether re-adding to CI makes sense at that point.
-3. If `release.yml` starts taking longer than ~2 hours at tag time
-   because of `macos-13` queue depth, *that* is the signal to revisit
-   dropping `x86_64-apple-darwin` from cargo-dist's targets. Until
-   then, releases tolerate the wait.
-4. If a macOS-arch-specific bug is reported by an Intel user, reproduce
-   locally on Intel hardware (or via a one-shot self-hosted runner)
-   rather than re-introducing CI coverage. The bug-rate doesn't justify
-   the queue cost.
-
-**Why "Builds 6 targets" in `## Release Process` still says 6.** Six
-binary targets continue to ship from `release.yml`: Windows x64, macOS
-Intel (x86_64), macOS ARM (aarch64), Linux x64 glibc, Linux x64 musl,
-Linux ARM64. CI tests three of them (Linux x64 glibc, macOS ARM,
-Windows x64). The mismatch between *tested* and *shipped* platforms
-is intentional and is exactly what this section documents — see above.
+— Full reasoning, the five concrete CI run IDs / queue times that triggered the removal, the rejected `continue-on-error` and target-drop alternatives, the per-architecture correctness analysis: see [`docs/architecture-decisions.md` § "Intel macOS coverage policy (v3.11.2+)"](./docs/architecture-decisions.md#intel-macos-coverage-policy-v3112).
 
 ## Release Process
 

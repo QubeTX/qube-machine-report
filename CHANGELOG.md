@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+- **Documentation restructure (zero behavior change).** Moved the
+  long-form rationale for six load-bearing decisions out of `CLAUDE.md`
+  into a new file at `docs/architecture-decisions.md`: MSRV policy +
+  v3.13.1 `rust-toolchain.toml` addendum, self-update auto-rustup
+  reasoning, Intel macOS CI coverage policy, and the three Windows
+  accuracy pattern blocks (v3.11.0+, v3.12.0+, v3.13.0+). CLAUDE.md
+  retains substantive **edit-time rules** (which APIs to use, which
+  constants are required, which alternatives not to undo), each capped
+  with a deep-link to the corresponding decisions section. Result:
+  CLAUDE.md drops from 45 KB → 31.5 KB (~30 %, ~3.4 k tokens saved on
+  every session load) while preserving every fact in at least one place.
+  AGENTS.md gains a "Companion docs" header pointing at the new file
+  alongside CLAUDE.md / MASTER_PLAN.md / TESTING.md, and the repo map
+  now lists `docs/architecture-decisions.md`. No version bump (pure
+  internal refactor; the next release will pick this up in its CHANGELOG).
+
 ## [3.13.1] - 2026-04-29
 
 ### Fixed
