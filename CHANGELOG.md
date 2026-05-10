@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (BitLocker status). Admin-only RDP login history remains deferred.
 
 ### Internal
+- **2026-05-10 18:40 CDT — Release publication status.** Updated
+  `MASTER_PLAN.md` and `TESTING.md` after the v3.14.0 GitHub Release
+  completed: recorded tag commit `54dbae1`, CI run 25642712712, release
+  run 25642853066, and the 20 published cargo-dist assets.
 - **2026-05-10 17:28 CDT — Codex plugin settings migration.** Mirrored the
   project Claude plugin setting for `codex@openai-codex` into
   `.codex/config.toml`, including the `openai-codex` Git marketplace source,

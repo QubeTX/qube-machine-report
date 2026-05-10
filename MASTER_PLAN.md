@@ -5,7 +5,7 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-10 (after v3.14.0 cross-platform stability/action syntax release prep)
+**Last updated:** 2026-05-10 (after v3.14.0 GitHub Release publication)
 **Current version:** 3.14.0
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
@@ -40,20 +40,20 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.12.0 | `28bda98` | 2026-04-28 | **Windows accuracy refinements (PR #4b)** — VPN-aware default-route detection via `GetBestInterfaceEx` (the WMI adapter list is reordered so the kernel's preferred-route adapter wins, correct on multi-homed/VPN configs), Fast Startup uptime annotation (`HiberbootEnabled` + WMI `LastBootUpTime` divergence > 1h → `UPTIME` row renders `9d 4h 12m (session: 7h 14m)`), nullable `os.session_uptime_seconds` JSON key, `os::collect()` takes `CollectMode` to gate the Fast Startup WMI cost, `wmi::WMIDateTime` for CIM datetime parsing |
 | v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history + C.13 batched-PowerShell fallback deferred to a future session |
 | v3.13.1 | `086ef0a` | 2026-04-29 | **Release infrastructure fix (task #54)** — adds `rust-toolchain.toml` at repo root pinning `channel = "1.95"` AND `components = ["rustfmt", "clippy"]`. Resolves `release.yml` failures on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners that shipped with rustc 1.94.1 (below MSRV 1.95 declared in v3.11.1). The auto-generated cargo-dist v0.31.0 release workflow has no rustup setup step; pinning at the workspace level lets rustup auto-install the right toolchain before cargo runs. The components addition was a fix-forward (`086ef0a` superseded `c2e6a65`) — when rustup honors a rust-toolchain.toml it ignores action-level `components:` fields, so listing rustfmt/clippy in the file is required to keep ci.yml's Format + Clippy jobs working. **All 10 release.yml jobs green; v3.13.1 GitHub Release published with 20 assets** (6 platform binaries + MSI + source tarball + shell/PowerShell installers). First successful Release publication since v3.10.0. |
-| v3.14.0 | `pending` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
+| v3.14.0 | `54dbae1` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
 
-**Tag status (as of 2026-04-29):**
+**Tag status (as of 2026-05-10):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
 - `v3.11.0` (`3a252df`): NOT tagged.
 - `v3.11.1` (`22f2002`): NOT tagged.
 - `v3.12.0` (`28bda98`): tagged + pushed; release.yml run failed (3/6 targets failed with `error: rustc 1.94.1 is not supported by the following packages: tr-300@3.12.0 requires rustc 1.95`); no GitHub Release artifact published.
 - `v3.13.0` (`f34e981`): tagged + pushed; release.yml run failed identically (same rustc 1.94.1 < MSRV 1.95 mismatch on 3/6 targets); no GitHub Release artifact published. Run 25039719372.
 - `v3.13.1` (`086ef0a`): tagged + pushed; all 10 release.yml jobs succeeded (6 build-local-artifacts + plan + build-global-artifacts + host + announce); GitHub Release published with the standard 6 binaries + Windows MSI + shell/PowerShell installer one-liners + source tarball. README installer one-liner now functional for the first time since v3.10.0.
-- `v3.14.0`: prepared locally on 2026-05-10; push/tag/release monitoring in progress.
+- `v3.14.0` (`54dbae1`): tagged + pushed; CI run 25642712712 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; release.yml run 25642853066 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
 
 The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install the latest published release, which subsumes them.
 
-### Live behavior changes already on master (as of v3.13.0)
+### Live behavior changes already on master (as of v3.14.0)
 
 After a fresh `git pull` and `cargo build --release`, you'll see (verified on Windows 11 25H2 build 26200.8246, unelevated user session, Alienware on AC):
 
@@ -74,6 +74,9 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 - `--no-elevation-hint` flag suppresses the footer
 - `--fast` mode never shows the footer (auto-run safety)
 - JSON output gains `schema_version: 1`, `elevated`, `elevation_unlocks_more`, `session.encryption`, `os.session_uptime_seconds`
+- Positional actions now work without double-dash syntax: `tr300 update`, `tr300 install`, and `tr300 uninstall`. Existing `--update`, `--install`, and `--uninstall` remain supported.
+- Reports now render optional platform rows only when populated: `MODEL`, `CPU TOPOLOGY`, `MOTHERBOARD`, `BIOS`, `RAM SLOTS`, and `ZFS HEALTH`. Matching JSON keys are additive nullable fields under schema version 1.
+- Collector subprocesses use bounded timeouts and degrade missing, hung, or malformed platform data to omitted rows / `null` values instead of blocking report generation.
 
 ### Pending (not yet shipped)
 
@@ -88,7 +91,7 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 
 1. ~~**Watch CI on the v3.13.1 commit, then tag.**~~ Done. CI run 25096685639 green on `086ef0a`; tag `v3.13.1` pushed; release.yml run 25096833278 succeeded across all 10 jobs; GitHub Release published with 20 assets.
 2. ~~**Investigate cargo-dist regression** (task #54)~~ — **done in v3.13.1.** The fix turned out to be smaller than the original plan suggested: `rust-toolchain.toml` at repo root with both `channel` and `components`, no cargo-dist version bump, no migration to the astral-sh fork.
-3. Finish the v3.14.0 release flow: push `master`, wait for `ci.yml`, tag `v3.14.0`, push the single tag, and monitor `release.yml` until all artifacts publish.
+3. ~~**Ship v3.14.0**~~ — done. `master` pushed, CI green, tag `v3.14.0` pushed, release.yml green, GitHub Release published.
 4. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
 
 ---
@@ -168,14 +171,14 @@ Research grounded in [systemd-resolved.service(8)](https://man7.org/linux/man-pa
 
 **PR #4 (already shipped — see commit `3a252df`):** C.1 (registry OS), C.2 (IsWow64Process2 arch), C.3 (WTS last-login), C.6 (CPUID 16h + CallNtPowerInformation freq), C.7 (CPUID 0x40000000 hypervisor + VBS disambiguation), E.5 (BitLocker).
 
-**PR #4b (deferred, pending):**
+**PR #4b (already shipped — see commit `28bda98` / v3.12.0):**
 
 | ID | Fix | File |
 |---|---|---|
 | C.4 | DNS+IP via `GetBestInterfaceEx` + `GetAdaptersAddresses` (VPN-aware default-route detection); replaces WMI Win32_NetworkAdapterConfiguration | `platform/windows.rs:88-109` |
 | C.5 | Fast Startup uptime annotation: registry `HiberbootEnabled` + `GetTickCount64` vs `LastBootUpTime`; append `(session: Xh)` suffix when divergent | `os.rs`, `platform/windows.rs` |
 
-**PR #5 (Windows polish, pending):**
+**PR #5 (Windows polish, mostly shipped across v3.13.0 + v3.14.0):**
 
 | ID | Fix | File |
 |---|---|---|
@@ -194,7 +197,7 @@ Research grounded in [systemd-resolved.service(8)](https://man7.org/linux/man-pa
 
 | ID | Status | Note |
 |---|---|---|
-| X1 | Pending | ZFS Health row: when `zpool` is on `$PATH`, run `zpool list -H -o health` and aggregate worst-of. Skip in `--fast`. Render only when zpool exists. (Folded into PR #3 B.11.) |
+| X1 | Done in v3.14.0 | ZFS Health row: when `zpool` is on `$PATH`, run `zpool list -H -o health` and aggregate worst-of. Skip in `--fast`. Render only when zpool exists. |
 | X2 | Done in PR #1 | BTRFS/APFS volume-semantics note in CLAUDE.md so contributors don't "fix" what isn't broken. |
 | X3 | Done in PR #1 | JSON `schema_version: 1` in every output. |
 
@@ -202,9 +205,9 @@ Research grounded in [systemd-resolved.service(8)](https://man7.org/linux/man-pa
 
 | ID | Optimization | Status | Saves |
 |---|---|---|---|
-| S1 | Linux: collapse 3 sequential `ps` calls into one `ps -e -o pid,ppid,comm` | Pending (PR #3 B.10) | ~20–30 ms |
-| S2 | Windows: replace WMI paths with Win32 APIs, eliminate COM init from hot path | Partial (PR #4) — full elimination in PR #5 C.14 | ~150–400 ms cold |
-| S3 | Windows: batched PowerShell fallback when WMI fails | Pending (PR #5 C.13) | ~150–250 ms (uncommon path) |
+| S1 | Linux: collapse 3 sequential `ps` calls into one `ps -e -o pid,ppid,comm` | Done in v3.14.0 | ~20–30 ms |
+| S2 | Windows: replace WMI paths with Win32 APIs, eliminate COM init from hot path | Done for `--fast`; native paths remain primary in full mode | ~150–400 ms cold |
+| S3 | Windows: batched PowerShell fallback when WMI fails | Done in v3.14.0 | ~150–250 ms (uncommon path) |
 | S4 | macOS: already optimal, no action | N/A | — |
 
 ---
@@ -252,38 +255,38 @@ Status legend: `[x]` done, `[ ]` pending, `[~]` deferred to a later PR than orig
 - [x] **CI.6** Document CI in README + CLAUDE.md + TESTING.md
 - [x] Tests: footer logic + JSON schema baseline
 
-### PR #2 — macOS accuracy (⏳ pending; needs Apple Silicon + Intel Mac for validation)
+### PR #2 — macOS accuracy (✅ low-risk subset shipped in v3.14.0)
 
-- [ ] **A.1** macOS CPU brand via `sysctl machdep.cpu.brand_string`
-- [ ] **A.2** Apple Silicon CPU frequency lookup table (M1/M1Pro/Max/Ultra, M2 family, M3 family, M4 family)
-- [ ] **A.3** Rosetta 2 architecture detection (`sysctl.proc_translated`)
-- [ ] **A.4** `scutil --get ComputerName` for hostname
-- [ ] **A.5** `scutil --nwi` for primary interface IP
-- [ ] **A.6** Locale via `defaults read -g AppleLocale` first; strip `@rg=...`
-- [ ] **A.7** P/E core breakdown via `hw.perflevel0/1.physicalcpu`
-- [ ] **A.8** Mac model marketing-name lookup via SIMachineAttributes.plist
-- [ ] **A.9** Memory verification + `vm_stat` fallback if sysinfo diverges
-- [ ] **A.10** Battery health via `system_profiler SPPowerDataType -json`
-- [ ] **F.1–F.5** macOS PR documentation block
-- [ ] Tests: macOS unit + manual matrix
+- [x] **A.1** macOS CPU brand via `sysctl machdep.cpu.brand_string`
+- [x] **A.2** Apple Silicon CPU frequency lookup table (M1/M2/M3/M4 families)
+- [x] **A.3** Rosetta 2 architecture detection (`sysctl.proc_translated`)
+- [x] **A.4** `scutil --get ComputerName` for hostname
+- [x] **A.5** `scutil --nwi` for primary interface IP
+- [x] **A.6** Locale via `defaults read -g AppleLocale` first; strip `@rg=...`
+- [x] **A.7** P/E core breakdown via `hw.perflevel0/1.physicalcpu`
+- [~] **A.8** Mac model row shipped via `hw.model`; marketing-name lookup remains optional future polish
+- [x] **A.9** Memory verification + `vm_stat` fallback if sysinfo diverges
+- [x] **A.10** Battery health via `system_profiler SPPowerDataType -json`
+- [x] **F.1–F.5** macOS PR documentation block
+- [x] Tests: macOS parser/unit coverage + local Apple Silicon verification; Intel Mac remains CI-only for release artifact build coverage
 
-### PR #3 — Linux accuracy + dmidecode tier (⏳ pending; needs Linux distros + RPi for validation)
+### PR #3 — Linux accuracy + dmidecode tier (✅ low-risk subset shipped in v3.14.0)
 
-- [ ] **B.1** DNS priority chain: `/run/systemd/resolve/resolv.conf` → NetworkManager → `/etc/resolv.conf`
-- [ ] **B.2** aarch64 CPU brand fallback chain
-- [ ] **B.3** In-process `systemd-detect-virt` port (covers cloud + containers + WSL1/WSL2)
-- [ ] **B.4** POSIX locale precedence
-- [ ] **B.5** Iterate `/sys/class/power_supply/*` with type filter + battery health
-- [ ] **B.6** Local IP via `ip route get`
-- [ ] **B.7** Terminal env-var priority over ps-walk
-- [ ] **B.8** WSL1/WSL2 detection (folded into B.3)
-- [ ] **B.9** Last-login fallback chain (lastlog2 → lastlog → last -F -1 -w)
-- [ ] **B.10** Single ps call for terminal detection (was 3) — speed win S1
-- [ ] **B.11** ZFS Health when `zpool` present
-- [ ] **E.3** Linux dmidecode motherboard/BIOS (sudo only)
-- [ ] **E.4** Linux dmidecode RAM slot summary (sudo only)
-- [ ] **F.1–F.5** Linux PR documentation block
-- [ ] Tests: Linux unit + manual matrix
+- [x] **B.1** DNS priority chain: `/run/systemd/resolve/resolv.conf` → NetworkManager → `/etc/resolv.conf`
+- [x] **B.2** aarch64 CPU brand fallback chain
+- [x] **B.3** In-process virtualization detection subset (cloud + containers + WSL)
+- [x] **B.4** POSIX locale precedence
+- [x] **B.5** Iterate `/sys/class/power_supply/*` with type filter + battery health
+- [x] **B.6** Local IP via `ip route get`
+- [x] **B.7** Terminal env-var priority over ps-walk
+- [x] **B.8** WSL1/WSL2 detection (folded into B.3)
+- [x] **B.9** Last-login fallback chain (lastlog2 → lastlog → last -F -1 -w)
+- [x] **B.10** Single ps call for terminal detection (was 3) — speed win S1
+- [x] **B.11** ZFS Health when `zpool` present
+- [x] **E.3** Linux dmidecode motherboard/BIOS (sudo only)
+- [x] **E.4** Linux dmidecode RAM slot summary (sudo only)
+- [x] **F.1–F.5** Linux PR documentation block
+- [x] Tests: Linux parser fixture coverage + GitHub Actions Linux validation; distro/Raspberry Pi/manual hardware stamps remain future matrix work
 
 ### PR #4 — Windows accuracy + BitLocker (✅ shipped as v3.11.0, commit `3a252df`)
 
@@ -450,12 +453,12 @@ Land in this order. PR #1 unblocks every later PR. PR #4 already shipped, but C.
 | PR | Status | Commit | Purpose |
 |---|---|---|---|
 | 1 | ✅ shipped | `58812cc` (v3.10.0) | Foundation: elevation tier scaffolding + CI + Codex config + workflow doc |
-| 2 | ✅ shipped (v3.14.0) | `pending` | macOS accuracy subset: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, model row, full-mode battery health, vm_stat fallback |
-| 3 | ✅ shipped (v3.14.0) | `pending` | Linux accuracy subset: systemd-resolved DNS, default-route source IP, locale precedence, power_supply battery iteration, terminal detection, WSL/container/VM detection, aarch64 CPU fallback, ZFS health, elevated dmidecode rows |
+| 2 | ✅ shipped (v3.14.0) | `54dbae1` | macOS accuracy subset: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, model row, full-mode battery health, vm_stat fallback |
+| 3 | ✅ shipped (v3.14.0) | `54dbae1` | Linux accuracy subset: systemd-resolved DNS, default-route source IP, locale precedence, power_supply battery iteration, terminal detection, WSL/container/VM detection, aarch64 CPU fallback, ZFS health, elevated dmidecode rows |
 | 4 | ✅ shipped | `3a252df` (v3.11.0) | Windows accuracy (C.1, C.2, C.3, C.6, C.7) + BitLocker (E.5) + Windows PR docs |
 | (4.5) | ✅ shipped | `22f2002` (v3.11.1) | Rust 1.95 MSRV + auto-rustup self-update + uzers RUSTSEC migration |
 | 4b | ✅ shipped | `28bda98` (v3.12.0) | Deferred Windows accuracy: VPN-aware default-route (C.4 simplified design) + Fast Startup uptime annotation (C.5) |
-| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) + v3.14.0 | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14), batched PowerShell WMI-failure fallback (C.13). E.6 admin RDP history remains deferred to task #58. |
+| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) + `54dbae1` (v3.14.0) | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14), batched PowerShell WMI-failure fallback (C.13). E.6 admin RDP history remains deferred to task #58. |
 | 5b | ⏳ pending (task #58) | — | E.6 admin RDP login history only; requires elevated Windows validation |
 | 6 | ⏸ optional | — | `--security` flag with TPM + Secure Boot + FileVault + SELinux/AppArmor |
 | (cross-cutting) | ⏳ pending (task #56) | — | Battery 3-state model for Linux + macOS (mirror v3.13.0 Windows C.10b) |

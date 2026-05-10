@@ -105,6 +105,10 @@ for runtime validation.
   the fixed-width report.
 - **Fast timing** — sorted 7-run local macOS `--fast` times:
   `0.17, 0.18, 0.20, 0.21, 0.21, 0.23, 0.24` seconds; median `0.21s`.
+- **CI verification** — `master` CI run 25642712712 passed fmt, clippy, tests,
+  release builds, security audit, dist plan, and auto-run speed gates on macOS
+  ARM, Linux, and Windows. Release run 25642853066 passed and published the
+  v3.14.0 GitHub Release with 20 assets.
 - **Deferred** — admin-only Windows RDP history is not implemented in this pass;
   current Windows elevation wording is limited to BitLocker status.
 
