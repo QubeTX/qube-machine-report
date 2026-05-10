@@ -1,10 +1,10 @@
 //! User session information collector
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::collectors::command::{run_output, CommandTimeout};
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::process::Command;
 
 /// Session/user information
 #[derive(Debug, Clone)]
@@ -172,7 +172,7 @@ fn get_last_login(username: &str) -> (String, Option<String>) {
 #[cfg(target_os = "linux")]
 fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     // Try lastlog2 first (newer systems)
-    if let Ok(output) = Command::new("lastlog2").args(["--user", username]).output() {
+    if let Some(output) = run_output("lastlog2", ["--user", username], CommandTimeout::Normal) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
@@ -188,7 +188,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     }
 
     // Try lastlog (older systems)
-    if let Ok(output) = Command::new("lastlog").args(["-u", username]).output() {
+    if let Some(output) = run_output("lastlog", ["-u", username], CommandTimeout::Normal) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
@@ -208,7 +208,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     }
 
     // Try last command
-    if let Ok(output) = Command::new("last").args(["-1", username]).output() {
+    if let Some(output) = run_output("last", ["-F", "-1", "-w", username], CommandTimeout::Normal) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().next() {
@@ -237,7 +237,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
 #[cfg(target_os = "macos")]
 fn get_last_login_macos(username: &str) -> (String, Option<String>) {
     // Use last command on macOS
-    if let Ok(output) = Command::new("last").args(["-1", username]).output() {
+    if let Some(output) = run_output("last", ["-1", username], CommandTimeout::Normal) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().next() {
@@ -355,7 +355,13 @@ fn wts_query_filetime(info_class: u32) -> Option<i64> {
     }
 
     // Read the LARGE_INTEGER (FILETIME) — 100-ns intervals since 1601-01-01 UTC.
-    let filetime: i64 = unsafe { *(buffer_ptr as *const i64) };
+    // Copy bytes instead of dereferencing an i64 pointer; WTS gives us a byte
+    // buffer and Rust cannot assume i64 alignment for that pointer.
+    let mut raw = [0u8; 8];
+    unsafe {
+        std::ptr::copy_nonoverlapping(buffer_ptr as *const u8, raw.as_mut_ptr(), raw.len());
+    }
+    let filetime = i64::from_le_bytes(raw);
     unsafe { WTSFreeMemory(buffer_ptr as *mut _) };
     Some(filetime)
 }

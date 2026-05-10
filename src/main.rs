@@ -5,7 +5,7 @@
 
 use clap::Parser;
 use tr_300::{
-    cli::Cli,
+    cli::{Action, Cli},
     collectors::{CollectMode, SystemInfo},
     config::{Config, OutputFormat},
     error::Result,
@@ -14,6 +14,7 @@ use tr_300::{
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let action = cli.action;
 
     // Build configuration from CLI args (needed by --update)
     let mut config = Config::new().with_colors(!cli.no_color);
@@ -41,16 +42,16 @@ fn main() -> Result<()> {
     }
 
     // Handle action commands (early exit)
-    if cli.update {
+    if cli.update || action == Some(Action::Update) {
         let exit_code = update::run(&config);
         std::process::exit(exit_code);
     }
 
-    if cli.install {
+    if cli.install || action == Some(Action::Install) {
         return run_install();
     }
 
-    if cli.uninstall {
+    if cli.uninstall || action == Some(Action::Uninstall) {
         return run_uninstall();
     }
 

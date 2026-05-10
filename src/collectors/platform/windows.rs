@@ -3,9 +3,9 @@
 //! Uses WMI crate for direct queries (replaces PowerShell subprocess spawns).
 
 use super::{CollectMode, PlatformInfo};
+use crate::collectors::command::{run_output, run_stdout, CommandTimeout};
 use serde::Deserialize;
 use std::env;
-use std::process::Command;
 use wmi::{COMLibrary, WMIConnection};
 
 // --- WMI query structs ---
@@ -75,8 +75,14 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             gpus: get_gpus_fast(),
             terminal: get_terminal_fast(),
             shell: None,
+            machine_model: None,
+            cpu_core_topology: None,
             display_resolution: None,
             battery: None,
+            zfs_health: None,
+            motherboard: None,
+            bios: None,
+            ram_slots: None,
             locale: None,
             encryption: None,
         };
@@ -115,11 +121,17 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         (edition, virt, gpu_list, bat)
     } else {
         // WMI connection failed entirely — fall back to PowerShell for everything
+        let fallback = get_batched_powershell_fallback();
+        let gpus = if fallback.gpus.is_empty() {
+            get_gpus_ps()
+        } else {
+            fallback.gpus
+        };
         (
-            get_windows_edition_ps(),
-            detect_virtualization_ps(),
-            get_gpus_ps(),
-            get_battery_ps(),
+            fallback.windows_edition.or_else(get_windows_edition_ps),
+            fallback.virtualization.or_else(detect_virtualization_ps),
+            gpus,
+            fallback.battery.or_else(get_battery_ps),
         )
     };
 
@@ -132,10 +144,16 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         macos_codename: None,
         gpus,
         architecture: get_architecture(),
+        machine_model: None,
+        cpu_core_topology: None,
         terminal: get_terminal(),
         shell: get_shell(),
         display_resolution: get_display_resolution(),
         battery,
+        zfs_health: None,
+        motherboard: None,
+        bios: None,
+        ram_slots: None,
         locale: get_locale(),
         encryption: get_bitlocker_status(),
     }
@@ -235,16 +253,17 @@ fn get_terminal_fast() -> Option<String> {
 /// Get GPU names from registry (fast, no WMI/PowerShell needed, ~5-10ms)
 fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
-    if let Ok(output) = Command::new("reg")
-        .args([
+    if let Some(output) = run_output(
+        "reg",
+        [
             "query",
             r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
             "/s",
             "/v",
             "DriverDesc",
-        ])
-        .output()
-    {
+        ],
+        CommandTimeout::Normal,
+    ) {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.contains("DriverDesc") {
@@ -418,14 +437,14 @@ pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
     let mut ubr: Option<u32> = None;
     let mut product_name: Option<String> = None;
 
-    let output = Command::new("reg")
-        .args([
+    let stdout = run_stdout(
+        "reg",
+        [
             "query",
             r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-        ])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
+        ],
+        CommandTimeout::Normal,
+    )?;
 
     for line in stdout.lines() {
         // Format: "    <Name>    <Type>    <Value>" — split on whitespace and
@@ -588,15 +607,15 @@ pub fn get_socket_count_wmi() -> usize {
     }
 
     // Fallback: PowerShell
-    if let Ok(output) = Command::new("powershell")
-        .args([
+    if let Some(stdout) = run_stdout(
+        "powershell",
+        [
             "-NoProfile",
             "-Command",
             "(Get-CimInstance Win32_Processor).Count",
-        ])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        ],
+        CommandTimeout::Slow,
+    ) {
         if let Ok(c) = stdout.trim().parse::<usize>() {
             return c.max(1);
         }
@@ -675,14 +694,16 @@ pub fn get_network_info_wmi() -> (Option<String>, Vec<String>) {
 
     // Fallback: PowerShell for IP
     let mut machine_ip: Option<String> = None;
-    if let Ok(output) = Command::new("powershell")
-        .args([
+    if let Some(stdout) = run_stdout(
+        "powershell",
+        [
             "-NoProfile", "-Command",
             "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress",
-        ])
-        .output()
+        ],
+        CommandTimeout::Slow,
+    )
     {
-        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let ip = stdout.trim().to_string();
         if !ip.is_empty() && ip != "127.0.0.1" {
             machine_ip = Some(ip);
         }
@@ -690,19 +711,22 @@ pub fn get_network_info_wmi() -> (Option<String>, Vec<String>) {
 
     // Fallback: PowerShell for DNS
     let mut dns_servers = Vec::new();
-    if let Ok(output) = Command::new("powershell")
-        .args([
+    if let Some(stdout) = run_stdout(
+        "powershell",
+        [
             "-NoProfile", "-Command",
             "(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -ExpandProperty ServerAddresses) -join \"`n\"",
-        ])
-        .output()
+        ],
+        CommandTimeout::Slow,
+    )
     {
-        let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             let ip = line.trim();
             if !ip.is_empty() && !dns_servers.contains(&ip.to_string()) {
                 dns_servers.push(ip.to_string());
-                if dns_servers.len() >= 5 { break; }
+                if dns_servers.len() >= 5 {
+                    break;
+                }
             }
         }
     }
@@ -785,11 +809,12 @@ fn detect_boot_mode() -> Option<String> {
         }
     }
     // Fallback: check bcdedit (fast native command, not PowerShell)
-    if let Ok(output) = Command::new("cmd")
-        .args(["/c", "bcdedit", "/enum", "{current}"])
-        .output()
-    {
-        let info = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    if let Some(info) = run_stdout(
+        "cmd",
+        ["/c", "bcdedit", "/enum", "{current}"],
+        CommandTimeout::Normal,
+    ) {
+        let info = info.to_lowercase();
         if info.contains("winload.efi") {
             return Some("UEFI".to_string());
         }
@@ -920,8 +945,7 @@ fn get_shell() -> Option<String> {
     // Check SHELL env var first (for Git Bash, etc.)
     if let Ok(shell) = env::var("SHELL") {
         if shell.contains("bash") {
-            if let Ok(output) = Command::new("bash").args(["--version"]).output() {
-                let version = String::from_utf8_lossy(&output.stdout);
+            if let Some(version) = run_stdout("bash", ["--version"], CommandTimeout::Normal) {
                 if let Some(line) = version.lines().next() {
                     if let Some(ver_start) = line.find("version ") {
                         let ver_part = &line[ver_start + 8..];
@@ -947,16 +971,16 @@ fn get_shell() -> Option<String> {
     }
 
     // Check PowerShell version via registry (no subprocess)
-    if let Ok(output) = Command::new("reg")
-        .args([
+    if let Some(stdout) = run_stdout(
+        "reg",
+        [
             "query",
             r"HKLM\SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine",
             "/v",
             "PowerShellVersion",
-        ])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        ],
+        CommandTimeout::Normal,
+    ) {
         for line in stdout.lines() {
             if line.contains("PowerShellVersion") {
                 if let Some(version) = line.split_whitespace().last() {
@@ -980,17 +1004,17 @@ fn get_shell() -> Option<String> {
 /// `'9' > '1'`. PowerShell Core is at 7.5 today but will eventually ship a
 /// 2-digit segment. (Caught in v3.13.0 Codex review.)
 fn get_powershell_core_version() -> Option<String> {
-    let output = Command::new("reg")
-        .args([
+    let stdout = run_stdout(
+        "reg",
+        [
             "query",
             r"HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions",
             "/s",
             "/v",
             "SemanticVersion",
-        ])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
+        ],
+        CommandTimeout::Normal,
+    )?;
     let mut best_tuple: Option<(u64, u64, u64)> = None;
     let mut best_string: Option<String> = None;
     for line in stdout.lines() {
@@ -1055,16 +1079,86 @@ fn get_locale() -> Option<String> {
 
 // --- PowerShell fallbacks (used when WMI fails) ---
 
+#[derive(Default)]
+struct WindowsPowerShellFallback {
+    windows_edition: Option<String>,
+    virtualization: Option<String>,
+    gpus: Vec<String>,
+    battery: Option<String>,
+}
+
+fn get_batched_powershell_fallback() -> WindowsPowerShellFallback {
+    let script = r#"
+$os = Get-CimInstance Win32_OperatingSystem
+$cs = Get-CimInstance Win32_ComputerSystem
+$gpu = @(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name })
+$b = Get-CimInstance Win32_Battery
+$battery = $null
+if ($b) { $battery = "$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))" }
+[pscustomobject]@{
+  edition = $os.Caption
+  computer = "$($cs.Manufacturer)|$($cs.Model)|$($cs.HypervisorPresent)"
+  gpus = $gpu
+  battery = $battery
+} | ConvertTo-Json -Compress
+"#;
+
+    let Some(stdout) = run_stdout(
+        "powershell",
+        ["-NoProfile", "-Command", script],
+        CommandTimeout::Slow,
+    ) else {
+        return WindowsPowerShellFallback::default();
+    };
+    parse_batched_powershell_fallback(&stdout).unwrap_or_default()
+}
+
+fn parse_batched_powershell_fallback(json: &str) -> Option<WindowsPowerShellFallback> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let windows_edition = value["edition"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let virtualization = value["computer"]
+        .as_str()
+        .and_then(parse_virtualization_from_ps_computer_system);
+    let gpus = match &value["gpus"] {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        serde_json::Value::String(s) if !s.trim().is_empty() => vec![s.trim().to_string()],
+        _ => Vec::new(),
+    };
+    let battery = value["battery"]
+        .as_str()
+        .map(normalize_powershell_battery_status)
+        .filter(|s| !s.is_empty() && s.contains('%'));
+
+    Some(WindowsPowerShellFallback {
+        windows_edition,
+        virtualization,
+        gpus,
+        battery,
+    })
+}
+
 fn get_windows_edition_ps() -> Option<String> {
-    let output = Command::new("powershell")
-        .args([
+    let caption = run_stdout(
+        "powershell",
+        [
             "-NoProfile",
             "-Command",
             "(Get-CimInstance Win32_OperatingSystem).Caption",
-        ])
-        .output()
-        .ok()?;
-    let caption = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        ],
+        CommandTimeout::Slow,
+    )?
+    .trim()
+    .to_string();
     if caption.is_empty() {
         None
     } else {
@@ -1073,14 +1167,19 @@ fn get_windows_edition_ps() -> Option<String> {
 }
 
 fn detect_virtualization_ps() -> Option<String> {
-    let output = Command::new("powershell")
-        .args([
+    let info = run_stdout(
+        "powershell",
+        [
             "-NoProfile", "-Command",
             "(Get-CimInstance Win32_ComputerSystem).Manufacturer + '|' + (Get-CimInstance Win32_ComputerSystem).Model + '|' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent",
-        ])
-        .output()
-        .ok()?;
-    let info = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        ],
+        CommandTimeout::Slow,
+    )?;
+    parse_virtualization_from_ps_computer_system(&info)
+}
+
+fn parse_virtualization_from_ps_computer_system(info: &str) -> Option<String> {
+    let info = info.to_lowercase();
     if info.contains("vmware") {
         return Some("VMware".to_string());
     }
@@ -1107,15 +1206,15 @@ fn detect_virtualization_ps() -> Option<String> {
 
 fn get_gpus_ps() -> Vec<String> {
     let mut gpus = Vec::new();
-    if let Ok(output) = Command::new("powershell")
-        .args([
+    if let Some(stdout) = run_stdout(
+        "powershell",
+        [
             "-NoProfile",
             "-Command",
             "(Get-CimInstance Win32_VideoController).Name -join \"`n\"",
-        ])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        ],
+        CommandTimeout::Slow,
+    ) {
         for line in stdout.lines() {
             let gpu = line.trim();
             if !gpu.is_empty() {
@@ -1127,18 +1226,24 @@ fn get_gpus_ps() -> Vec<String> {
 }
 
 fn get_battery_ps() -> Option<String> {
-    let output = Command::new("powershell")
-        .args([
+    let battery = run_stdout(
+        "powershell",
+        [
             "-NoProfile", "-Command",
             "$b = Get-CimInstance Win32_Battery; if ($b) { \"$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))\" }",
-        ])
-        .output()
-        .ok()?;
-    let battery = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        ],
+        CommandTimeout::Slow,
+    )?
+    .trim()
+    .to_string();
     if battery.is_empty() || !battery.contains('%') {
         return None;
     }
-    let battery = battery
+    Some(normalize_powershell_battery_status(&battery))
+}
+
+fn normalize_powershell_battery_status(battery: &str) -> String {
+    battery
         .replace("(1)", "(Discharging)")
         .replace("(2)", "(AC Power)")
         .replace("(3)", "(Charging)")
@@ -1147,8 +1252,50 @@ fn get_battery_ps() -> Option<String> {
         .replace("(6)", "(Charging)")
         .replace("(7)", "(Charging High)")
         .replace("(8)", "(Charging Low)")
-        .replace("(9)", "(Charging Critical)");
-    Some(battery)
+        .replace("(9)", "(Charging Critical)")
+}
+
+#[cfg(test)]
+mod powershell_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn parses_batched_powershell_fallback_json() {
+        let json = r#"{
+            "edition": "Microsoft Windows 11 Pro",
+            "computer": "Microsoft Corporation|Virtual Machine|True",
+            "gpus": ["Intel Arc Graphics", "NVIDIA RTX"],
+            "battery": "87% (2)"
+        }"#;
+
+        let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
+        assert_eq!(
+            parsed.windows_edition.as_deref(),
+            Some("Microsoft Windows 11 Pro")
+        );
+        assert_eq!(parsed.virtualization.as_deref(), Some("Hyper-V"));
+        assert_eq!(
+            parsed.gpus,
+            vec!["Intel Arc Graphics".to_string(), "NVIDIA RTX".to_string()]
+        );
+        assert_eq!(parsed.battery.as_deref(), Some("87% (AC Power)"));
+    }
+
+    #[test]
+    fn parses_single_gpu_string_from_batched_fallback() {
+        let json = r#"{
+            "edition": "",
+            "computer": "QEMU|Standard PC|True",
+            "gpus": "Virtio GPU",
+            "battery": null
+        }"#;
+
+        let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
+        assert_eq!(parsed.windows_edition, None);
+        assert_eq!(parsed.virtualization.as_deref(), Some("QEMU"));
+        assert_eq!(parsed.gpus, vec!["Virtio GPU".to_string()]);
+        assert_eq!(parsed.battery, None);
+    }
 }
 
 // --- C.8: GPU software-adapter filter (v3.13.0+) ---
@@ -1364,19 +1511,19 @@ fn get_best_route_interface_index() -> Option<u32> {
 /// `HiberbootEnabled` (DWORD). Returns `true` only when explicitly = 1.
 /// Default-safe: any read or parse error returns `false`.
 pub fn detect_fast_startup() -> bool {
-    let output = match Command::new("reg")
-        .args([
+    let stdout = match run_stdout(
+        "reg",
+        [
             "query",
             r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power",
             "/v",
             "HiberbootEnabled",
-        ])
-        .output()
-    {
-        Ok(o) => o,
-        Err(_) => return false,
+        ],
+        CommandTimeout::Normal,
+    ) {
+        Some(stdout) => stdout,
+        None => return false,
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         if line.contains("HiberbootEnabled") {
             // Format: "    HiberbootEnabled    REG_DWORD    0x1"

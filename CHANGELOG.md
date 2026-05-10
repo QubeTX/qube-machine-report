@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-05-10
+
+### Added
+- **2026-05-10 18:00 CDT — Positional action syntax.** Added
+  `tr300 update`, `tr300 install`, and `tr300 uninstall` as no-double-dash
+  equivalents for the legacy `--update`, `--install`, and `--uninstall`
+  flags. The installed `report` alias inherits the same parser, so
+  `report update` now works too. Clap rejects mixed actions such as
+  `tr300 update --install` with an argument-conflict error.
+- **2026-05-10 18:00 CDT — Conditional platform rows.** Added nullable
+  report fields for machine model, CPU core topology, motherboard, BIOS,
+  and RAM slot summary. Rows render only when collectors populate them,
+  and JSON receives additive nullable keys without a schema-version bump.
+
+### Changed
+- **2026-05-10 18:00 CDT — Cross-platform collector hardening.** Added a
+  shared subprocess helper with bounded fast/normal/slow timeouts and moved
+  collector command probes onto it so missing tools, blocked subprocesses,
+  and bad platform responses degrade to omitted data instead of hanging.
+  Rendering now guards non-finite percentages, disk aggregation saturates
+  instead of overflowing, markdown cells escape table-breaking characters,
+  and Windows WTS time buffers are copied before decoding.
+- **2026-05-10 18:00 CDT — Platform accuracy pass.** Improved macOS model,
+  hostname, locale, Rosetta, Apple Silicon frequency, P/E core, battery
+  health, and `vm_stat` fallback behavior; improved Linux default-route IP,
+  systemd-resolved DNS, locale, battery, terminal, container/VM/WSL,
+  aarch64 CPU, ZFS, and elevated `dmidecode` paths; and added a batched
+  PowerShell fallback for Windows WMI-failure cases while keeping fast mode
+  free of COM/WMI work.
+- **2026-05-10 18:00 CDT — Windows elevation wording.** The runtime footer
+  and docs now advertise only implemented elevated Windows data
+  (BitLocker status). Admin-only RDP login history remains deferred.
+
 ### Internal
+- **2026-05-10 17:28 CDT — Codex plugin settings migration.** Mirrored the
+  project Claude plugin setting for `codex@openai-codex` into
+  `.codex/config.toml`, including the `openai-codex` Git marketplace source,
+  and added `CODEX_PROJECT.md` with the current project summary and filetree.
 - **Documentation restructure (zero behavior change).** Moved the
   long-form rationale for six load-bearing decisions out of `CLAUDE.md`
   into a new file at `docs/architecture-decisions.md`: MSRV policy +
@@ -445,8 +482,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table on platforms where running with sudo/Administrator would unlock additional data
   points. The hint is shown only in full mode (never during `--fast` auto-run), on
   Linux (`Run with sudo for motherboard, BIOS, and RAM slot details`) and Windows
-  (`Run as Administrator for BitLocker status and full login history`). macOS shows no
-  hint — there is no equivalent unlock on Apple platforms. (E.1, E.7)
+  (administrator BitLocker access). macOS shows no hint — there is no equivalent
+  unlock on Apple platforms. (E.1, E.7)
 - `--no-elevation-hint` flag to suppress the footer hint for users who find it noisy. (E.2)
 - JSON `schema_version` field (initial value `1`) for forward-compatibility of
   programmatic consumers. Bumps only on breaking renames or removals; additive new keys

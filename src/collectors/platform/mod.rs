@@ -33,6 +33,10 @@ pub struct PlatformInfo {
     pub gpus: Vec<String>,
     /// System architecture (x86_64, aarch64, etc.)
     pub architecture: Option<String>,
+    /// Hardware model / marketing name when available.
+    pub machine_model: Option<String>,
+    /// CPU topology details such as Apple Silicon P/E core split.
+    pub cpu_core_topology: Option<String>,
     /// Terminal emulator name
     pub terminal: Option<String>,
     /// Shell name and version
@@ -41,6 +45,14 @@ pub struct PlatformInfo {
     pub display_resolution: Option<String>,
     /// Battery status (percentage and charging state)
     pub battery: Option<String>,
+    /// ZFS pool health summary when zpool is available.
+    pub zfs_health: Option<String>,
+    /// Motherboard/baseboard summary, populated only when safely readable.
+    pub motherboard: Option<String>,
+    /// BIOS/firmware summary, populated only when safely readable.
+    pub bios: Option<String>,
+    /// RAM slot summary, populated only when safely readable.
+    pub ram_slots: Option<String>,
     /// System locale
     pub locale: Option<String>,
     /// Disk encryption status — BitLocker on Windows, FileVault on macOS, LUKS on Linux.

@@ -37,6 +37,8 @@ pub fn collect(mode: CollectMode) -> Result<OsInfo> {
     let version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
     let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
     let hostname = System::host_name().unwrap_or_else(|| "Unknown".to_string());
+    #[cfg(target_os = "macos")]
+    let hostname = crate::collectors::platform::macos::get_computer_name().unwrap_or(hostname);
     let architecture = std::env::consts::ARCH.to_string();
     let uptime_seconds = System::uptime();
 

@@ -66,7 +66,7 @@ pub fn is_elevated() -> bool {
 /// surfacing in a footer hint when running unelevated.
 ///
 /// Linux: yes — dmidecode unlocks motherboard, BIOS, and RAM slot details.
-/// Windows: yes — BitLocker on older domain configs and full RDP login history.
+/// Windows: yes — BitLocker on older domain configs.
 /// macOS: no — sudo doesn't unlock anything aesthetically meaningful for the report.
 pub fn platform_has_elevated_data() -> bool {
     cfg!(target_os = "linux") || cfg!(target_os = "windows")

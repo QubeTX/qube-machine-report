@@ -1,0 +1,8 @@
+# Migrated from .claude/settings.json on 2026-05-10.
+
+[plugins."codex@openai-codex"]
+enabled = true
+
+[marketplaces.openai-codex]
+source_type = "git"
+source = "https://github.com/openai/codex-plugin-cc.git"

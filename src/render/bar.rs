@@ -11,7 +11,11 @@
 /// * `filled_char` - Character for filled portion (e.g., '█')
 /// * `empty_char` - Character for empty portion (e.g., '░')
 pub fn render_bar(percent: f64, width: usize, filled_char: char, empty_char: char) -> String {
-    let percent = percent.clamp(0.0, 100.0);
+    let percent = if percent.is_finite() {
+        percent.clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
     let filled_count = ((percent / 100.0) * width as f64).round() as usize;
     let empty_count = width.saturating_sub(filled_count);
 
@@ -63,6 +67,12 @@ mod tests {
     #[test]
     fn test_bar_clamp_under() {
         let bar = render_bar_unicode(-50.0, 10);
+        assert_eq!(bar, "░░░░░░░░░░");
+    }
+
+    #[test]
+    fn test_bar_nan_renders_empty() {
+        let bar = render_bar_unicode(f64::NAN, 10);
         assert_eq!(bar, "░░░░░░░░░░");
     }
 }

@@ -23,13 +23,74 @@ pub fn collect() -> Result<MemoryInfo> {
     let mut sys = System::new();
     sys.refresh_memory();
 
+    let mut used_bytes = sys.used_memory();
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(activity_monitor_used) = macos_activity_monitor_used_bytes() {
+            let sysinfo_used = used_bytes.max(1);
+            let delta = activity_monitor_used.abs_diff(sysinfo_used);
+            if delta as f64 / sysinfo_used as f64 > 0.05 {
+                used_bytes = activity_monitor_used;
+            }
+        }
+    }
+
     Ok(MemoryInfo {
         total_bytes: sys.total_memory(),
-        used_bytes: sys.used_memory(),
+        used_bytes,
         available_bytes: sys.available_memory(),
         swap_total_bytes: sys.total_swap(),
         swap_used_bytes: sys.used_swap(),
     })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_activity_monitor_used_bytes() -> Option<u64> {
+    let stdout = crate::collectors::command::run_stdout(
+        "vm_stat",
+        std::iter::empty::<&str>(),
+        crate::collectors::command::CommandTimeout::Normal,
+    )?;
+    parse_vm_stat_used_bytes(&stdout)
+}
+
+fn parse_vm_stat_used_bytes(output: &str) -> Option<u64> {
+    let mut page_size = None;
+    let mut active = None;
+    let mut wired = None;
+    let mut compressed = None;
+
+    for line in output.lines() {
+        if line.contains("page size of") {
+            let digits = line
+                .split_whitespace()
+                .find_map(|word| word.parse::<u64>().ok());
+            page_size = digits;
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let pages = value
+            .trim()
+            .trim_end_matches('.')
+            .replace('.', "")
+            .parse::<u64>()
+            .ok();
+        match key.trim() {
+            "Pages active" => active = pages,
+            "Pages wired down" => wired = pages,
+            "Pages occupied by compressor" => compressed = pages,
+            _ => {}
+        }
+    }
+
+    Some(
+        active?
+            .saturating_add(wired?)
+            .saturating_add(compressed.unwrap_or(0))
+            .saturating_mul(page_size?),
+    )
 }
 
 impl MemoryInfo {
@@ -79,5 +140,21 @@ impl MemoryInfo {
             self.total_formatted(),
             self.usage_percent()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_vm_stat_activity_monitor_used_memory() {
+        let vm_stat = "\
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages active:                               10.
+Pages wired down:                           20.
+Pages occupied by compressor:               30.
+";
+        assert_eq!(parse_vm_stat_used_bytes(vm_stat), Some(60 * 16384));
     }
 }
