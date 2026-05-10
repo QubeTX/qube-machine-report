@@ -47,6 +47,15 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     output.push_str(&renderer.render_row("OS", &os_display));
     output.push_str(&renderer.render_row("KERNEL", &info.kernel));
     output.push_str(&renderer.render_row("ARCH", &info.architecture));
+    if let Some(ref model) = info.machine_model {
+        output.push_str(&renderer.render_row("MODEL", model));
+    }
+    if let Some(ref board) = info.motherboard {
+        output.push_str(&renderer.render_row("BOARD", board));
+    }
+    if let Some(ref bios) = info.bios {
+        output.push_str(&renderer.render_row("BIOS", bios));
+    }
     output.push_str(&renderer.render_middle_divider());
 
     // Network Section
@@ -71,6 +80,9 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     // CPU Section
     output.push_str(&renderer.render_row("PROCESSOR", &info.processor));
     output.push_str(&renderer.render_row("CORES", &info.cores_str()));
+    if let Some(ref topology) = info.cpu_core_topology {
+        output.push_str(&renderer.render_row("CORE TYPE", topology));
+    }
 
     // GPU display: if ≤3 GPUs, show each on own row; if >3, show as compact list
     if !info.gpus.is_empty() {
@@ -122,6 +134,9 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
 
     // Memory Section
     output.push_str(&renderer.render_row("MEMORY", &info.memory_usage_str()));
+    if let Some(ref ram_slots) = info.ram_slots {
+        output.push_str(&renderer.render_row("RAM SLOTS", ram_slots));
+    }
     let mem_bar = render_bar(info.mem_percent, bar_width, bar_filled, bar_empty);
     output.push_str(&renderer.render_row("USAGE", &mem_bar));
     output.push_str(&renderer.render_middle_divider());
@@ -189,7 +204,7 @@ pub(crate) fn render_elevation_footer(use_colors: bool) -> String {
     let hint: &str = if cfg!(target_os = "linux") {
         "Run with sudo for motherboard, BIOS, and RAM slot details"
     } else if cfg!(target_os = "windows") {
-        "Run as Administrator for BitLocker status and full login history"
+        "Run as Administrator for BitLocker status"
     } else {
         return String::new();
     };
@@ -226,11 +241,16 @@ fn generate_json(info: &SystemInfo) -> String {
   "schema_version": {},
   "elevated": {},
   "elevation_unlocks_more": {},
+  "system": {{
+    "motherboard": {},
+    "bios": {}
+  }},
   "os": {{
     "name": "{}",
     "version": "{}",
     "kernel": "{}",
     "architecture": "{}",
+    "machine_model": {},
     "session_uptime_seconds": {}
   }},
   "network": {{
@@ -242,6 +262,7 @@ fn generate_json(info: &SystemInfo) -> String {
   "cpu": {{
     "processor": "{}",
     "cores": {},
+    "core_topology": {},
     "sockets": {},
     "hypervisor": {},
     "frequency_ghz": {:.2},
@@ -258,7 +279,8 @@ fn generate_json(info: &SystemInfo) -> String {
   "memory": {{
     "used_bytes": {},
     "total_bytes": {},
-    "percent": {:.2}
+    "percent": {:.2},
+    "ram_slots": {}
   }},
   "session": {{
     "username": "{}",
@@ -274,10 +296,13 @@ fn generate_json(info: &SystemInfo) -> String {
         SCHEMA_VERSION,
         info.is_elevated,
         crate::platform_has_elevated_data() && !info.is_elevated,
+        opt_str(&info.motherboard),
+        opt_str(&info.bios),
         escape_json(&info.os_name),
         escape_json(&info.os_version),
         escape_json(&info.kernel),
         escape_json(&info.architecture),
+        opt_str(&info.machine_model),
         opt_u64(info.session_uptime_seconds),
         escape_json(&info.hostname),
         opt_str(&info.machine_ip),
@@ -289,6 +314,7 @@ fn generate_json(info: &SystemInfo) -> String {
             .join(", "),
         escape_json(&info.processor),
         info.cores,
+        opt_str(&info.cpu_core_topology),
         opt_usize(info.sockets),
         opt_str(&info.hypervisor),
         info.cpu_freq_ghz,
@@ -306,6 +332,7 @@ fn generate_json(info: &SystemInfo) -> String {
         info.mem_used_bytes,
         info.mem_total_bytes,
         info.mem_percent,
+        opt_str(&info.ram_slots),
         escape_json(&info.username),
         opt_str(&info.last_login),
         info.uptime_seconds,
@@ -338,6 +365,14 @@ fn escape_json(s: &str) -> String {
         .collect()
 }
 
+/// Escape markdown table cell delimiters and line breaks.
+fn escape_markdown_cell(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('\r', "")
+        .replace('\n', "<br>")
+}
+
 /// Get the user's Downloads directory (cross-platform)
 fn downloads_dir() -> PathBuf {
     #[cfg(windows)]
@@ -368,54 +403,77 @@ fn downloads_dir() -> PathBuf {
 fn generate_markdown(info: &SystemInfo) -> String {
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let version = env!("CARGO_PKG_VERSION");
+    let cell = |s: &str| escape_markdown_cell(s);
 
     let mut md = String::new();
 
     md.push_str("# TR-300 Machine Report\n\n");
     md.push_str(&format!("**Date:** {}\n", timestamp));
-    md.push_str(&format!("**Hostname:** {}\n", info.hostname));
+    md.push_str(&format!(
+        "**Hostname:** {}\n",
+        escape_markdown_cell(&info.hostname)
+    ));
     md.push_str("\n---\n\n");
 
     // System section
     md.push_str("## System\n\n");
     md.push_str("| Field | Value |\n|-------|-------|\n");
-    md.push_str(&format!("| OS | {} {} |\n", info.os_name, info.os_version));
-    md.push_str(&format!("| Kernel | {} |\n", info.kernel));
-    md.push_str(&format!("| Architecture | {} |\n", info.architecture));
+    md.push_str(&format!(
+        "| OS | {} {} |\n",
+        cell(&info.os_name),
+        cell(&info.os_version)
+    ));
+    md.push_str(&format!("| Kernel | {} |\n", cell(&info.kernel)));
+    md.push_str(&format!(
+        "| Architecture | {} |\n",
+        cell(&info.architecture)
+    ));
+    if let Some(ref model) = info.machine_model {
+        md.push_str(&format!("| Machine Model | {} |\n", cell(model)));
+    }
+    if let Some(ref motherboard) = info.motherboard {
+        md.push_str(&format!("| Motherboard | {} |\n", cell(motherboard)));
+    }
+    if let Some(ref bios) = info.bios {
+        md.push_str(&format!("| BIOS | {} |\n", cell(bios)));
+    }
     md.push('\n');
 
     // Network section
     md.push_str("## Network\n\n");
     md.push_str("| Field | Value |\n|-------|-------|\n");
-    md.push_str(&format!("| Hostname | {} |\n", info.hostname));
+    md.push_str(&format!("| Hostname | {} |\n", cell(&info.hostname)));
     if let Some(ref ip) = info.machine_ip {
-        md.push_str(&format!("| Machine IP | {} |\n", ip));
+        md.push_str(&format!("| Machine IP | {} |\n", cell(ip)));
     }
     md.push_str(&format!(
         "| Client IP | {} |\n",
-        info.client_ip.as_deref().unwrap_or("Not connected")
+        cell(info.client_ip.as_deref().unwrap_or("Not connected"))
     ));
     for (i, dns) in info.dns_servers.iter().take(5).enumerate() {
-        md.push_str(&format!("| DNS Server {} | {} |\n", i + 1, dns));
+        md.push_str(&format!("| DNS Server {} | {} |\n", i + 1, cell(dns)));
     }
-    md.push_str(&format!("| User | {} |\n", info.username));
+    md.push_str(&format!("| User | {} |\n", cell(&info.username)));
     md.push('\n');
 
     // CPU section
     md.push_str("## CPU\n\n");
     md.push_str("| Field | Value |\n|-------|-------|\n");
-    md.push_str(&format!("| Processor | {} |\n", info.processor));
+    md.push_str(&format!("| Processor | {} |\n", cell(&info.processor)));
     md.push_str(&format!("| Cores | {} |\n", info.cores_str()));
+    if let Some(ref topology) = info.cpu_core_topology {
+        md.push_str(&format!("| Core Topology | {} |\n", cell(topology)));
+    }
     for (i, gpu) in info.gpus.iter().enumerate() {
         let label = if info.gpus.len() == 1 {
             "GPU".to_string()
         } else {
             format!("GPU {}", i + 1)
         };
-        md.push_str(&format!("| {} | {} |\n", label, gpu));
+        md.push_str(&format!("| {} | {} |\n", label, cell(gpu)));
     }
     if let Some(ref hypervisor) = info.hypervisor {
-        md.push_str(&format!("| Hypervisor | {} |\n", hypervisor));
+        md.push_str(&format!("| Hypervisor | {} |\n", cell(hypervisor)));
     }
     md.push_str(&format!("| Frequency | {} |\n", info.freq_str()));
     if let (Some(l1), Some(l5), Some(l15)) = (info.load_1m, info.load_5m, info.load_15m) {
@@ -431,7 +489,7 @@ fn generate_markdown(info: &SystemInfo) -> String {
     md.push_str(&format!("| Volume | {} |\n", info.disk_usage_str()));
     md.push_str(&format!("| Disk Usage | {:.2}% |\n", info.disk_percent));
     if let Some(ref zfs_health) = info.zfs_health {
-        md.push_str(&format!("| ZFS Health | {} |\n", zfs_health));
+        md.push_str(&format!("| ZFS Health | {} |\n", cell(zfs_health)));
     }
     md.push('\n');
 
@@ -439,6 +497,9 @@ fn generate_markdown(info: &SystemInfo) -> String {
     md.push_str("## Memory\n\n");
     md.push_str("| Field | Value |\n|-------|-------|\n");
     md.push_str(&format!("| Memory | {} |\n", info.memory_usage_str()));
+    if let Some(ref ram_slots) = info.ram_slots {
+        md.push_str(&format!("| RAM Slots | {} |\n", cell(ram_slots)));
+    }
     md.push_str(&format!("| Usage | {:.1}% |\n", info.mem_percent));
     md.push('\n');
 
@@ -446,20 +507,20 @@ fn generate_markdown(info: &SystemInfo) -> String {
     md.push_str("## Session\n\n");
     md.push_str("| Field | Value |\n|-------|-------|\n");
     if let Some(ref last_login) = info.last_login {
-        md.push_str(&format!("| Last Login | {} |\n", last_login));
+        md.push_str(&format!("| Last Login | {} |\n", cell(last_login)));
     }
     md.push_str(&format!("| Uptime | {} |\n", info.uptime_formatted()));
     if let Some(ref shell) = info.shell {
-        md.push_str(&format!("| Shell | {} |\n", shell));
+        md.push_str(&format!("| Shell | {} |\n", cell(shell)));
     }
     if let Some(ref terminal) = info.terminal {
-        md.push_str(&format!("| Terminal | {} |\n", terminal));
+        md.push_str(&format!("| Terminal | {} |\n", cell(terminal)));
     }
     if let Some(ref locale) = info.locale {
-        md.push_str(&format!("| Locale | {} |\n", locale));
+        md.push_str(&format!("| Locale | {} |\n", cell(locale)));
     }
     if let Some(ref battery) = info.battery {
-        md.push_str(&format!("| Battery | {} |\n", battery));
+        md.push_str(&format!("| Battery | {} |\n", cell(battery)));
     }
 
     md.push_str("\n---\n\n");
@@ -556,5 +617,71 @@ mod tests {
     fn schema_version_is_one() {
         // Bump only on breaking changes (renames/removals); additive new keys do not bump.
         assert_eq!(SCHEMA_VERSION, 1);
+    }
+
+    fn fixture_info() -> SystemInfo {
+        SystemInfo {
+            os_name: "TestOS".to_string(),
+            os_version: "1.0".to_string(),
+            kernel: "1.0.0".to_string(),
+            architecture: "test-arch".to_string(),
+            machine_model: Some("Model | One".to_string()),
+            hostname: "host".to_string(),
+            machine_ip: Some("192.0.2.10".to_string()),
+            client_ip: None,
+            dns_servers: vec!["1.1.1.1".to_string()],
+            username: "user".to_string(),
+            processor: "CPU".to_string(),
+            cores: 8,
+            sockets: Some(1),
+            cpu_core_topology: Some("4P + 4E".to_string()),
+            hypervisor: Some("Bare Metal".to_string()),
+            cpu_freq_ghz: 3.2,
+            load_1m: Some(10.0),
+            load_5m: Some(20.0),
+            load_15m: Some(30.0),
+            gpus: vec!["GPU".to_string()],
+            disk_used_bytes: 1,
+            disk_total_bytes: 2,
+            disk_percent: 50.0,
+            zfs_health: Some("ONLINE".to_string()),
+            mem_used_bytes: 1,
+            mem_total_bytes: 2,
+            mem_percent: 50.0,
+            motherboard: Some("Board | Vendor".to_string()),
+            bios: Some("BIOS | 1.2".to_string()),
+            ram_slots: Some("2x16GB | DDR5".to_string()),
+            last_login: Some("now".to_string()),
+            last_login_ip: None,
+            uptime_seconds: 60,
+            session_uptime_seconds: None,
+            shell: Some("shell".to_string()),
+            terminal: Some("term".to_string()),
+            locale: Some("en-US".to_string()),
+            battery: None,
+            encryption: None,
+            mode: CollectMode::Full,
+            is_elevated: true,
+        }
+    }
+
+    #[test]
+    fn json_includes_new_nullable_platform_keys_without_schema_bump() {
+        let json = generate_json(&fixture_info());
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["os"]["machine_model"], "Model | One");
+        assert_eq!(value["cpu"]["core_topology"], "4P + 4E");
+        assert_eq!(value["memory"]["ram_slots"], "2x16GB | DDR5");
+        assert_eq!(value["system"]["motherboard"], "Board | Vendor");
+        assert_eq!(value["system"]["bios"], "BIOS | 1.2");
+    }
+
+    #[test]
+    fn markdown_escapes_table_cell_pipes() {
+        let markdown = generate_markdown(&fixture_info());
+        assert!(markdown.contains("| Machine Model | Model \\| One |"));
+        assert!(markdown.contains("| Motherboard | Board \\| Vendor |"));
+        assert!(markdown.contains("| RAM Slots | 2x16GB \\| DDR5 |"));
     }
 }

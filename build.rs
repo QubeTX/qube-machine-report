@@ -12,6 +12,14 @@ fn main() {
     let man = clap_mangen::Man::new(cmd);
     let mut buffer = Vec::new();
     man.render(&mut buffer).expect("Failed to render man page");
+    let rendered = String::from_utf8(buffer).expect("Generated man page should be UTF-8");
+    let normalized = rendered
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let buffer = normalized.into_bytes();
 
     // Write to OUT_DIR for packaging
     let man_dir = out_dir.join("man");

@@ -5,8 +5,8 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-04-29 (after v3.13.1 release.yml fix)
-**Current version:** 3.13.1
+**Last updated:** 2026-05-10 (after v3.14.0 cross-platform stability/action syntax release prep)
+**Current version:** 3.14.0
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
 
@@ -40,6 +40,7 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.12.0 | `28bda98` | 2026-04-28 | **Windows accuracy refinements (PR #4b)** — VPN-aware default-route detection via `GetBestInterfaceEx` (the WMI adapter list is reordered so the kernel's preferred-route adapter wins, correct on multi-homed/VPN configs), Fast Startup uptime annotation (`HiberbootEnabled` + WMI `LastBootUpTime` divergence > 1h → `UPTIME` row renders `9d 4h 12m (session: 7h 14m)`), nullable `os.session_uptime_seconds` JSON key, `os::collect()` takes `CollectMode` to gate the Fast Startup WMI cost, `wmi::WMIDateTime` for CIM datetime parsing |
 | v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history + C.13 batched-PowerShell fallback deferred to a future session |
 | v3.13.1 | `086ef0a` | 2026-04-29 | **Release infrastructure fix (task #54)** — adds `rust-toolchain.toml` at repo root pinning `channel = "1.95"` AND `components = ["rustfmt", "clippy"]`. Resolves `release.yml` failures on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners that shipped with rustc 1.94.1 (below MSRV 1.95 declared in v3.11.1). The auto-generated cargo-dist v0.31.0 release workflow has no rustup setup step; pinning at the workspace level lets rustup auto-install the right toolchain before cargo runs. The components addition was a fix-forward (`086ef0a` superseded `c2e6a65`) — when rustup honors a rust-toolchain.toml it ignores action-level `components:` fields, so listing rustfmt/clippy in the file is required to keep ci.yml's Format + Clippy jobs working. **All 10 release.yml jobs green; v3.13.1 GitHub Release published with 20 assets** (6 platform binaries + MSI + source tarball + shell/PowerShell installers). First successful Release publication since v3.10.0. |
+| v3.14.0 | `pending` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
 
 **Tag status (as of 2026-04-29):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
@@ -48,8 +49,9 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 - `v3.12.0` (`28bda98`): tagged + pushed; release.yml run failed (3/6 targets failed with `error: rustc 1.94.1 is not supported by the following packages: tr-300@3.12.0 requires rustc 1.95`); no GitHub Release artifact published.
 - `v3.13.0` (`f34e981`): tagged + pushed; release.yml run failed identically (same rustc 1.94.1 < MSRV 1.95 mismatch on 3/6 targets); no GitHub Release artifact published. Run 25039719372.
 - `v3.13.1` (`086ef0a`): tagged + pushed; all 10 release.yml jobs succeeded (6 build-local-artifacts + plan + build-global-artifacts + host + announce); GitHub Release published with the standard 6 binaries + Windows MSI + shell/PowerShell installer one-liners + source tarball. README installer one-liner now functional for the first time since v3.10.0.
+- `v3.14.0`: prepared locally on 2026-05-10; push/tag/release monitoring in progress.
 
-The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install v3.13.1 (or latest) which subsumes everything once it's published. **No GitHub Release artifact has actually been visible to users since v3.10.0** — the README installer one-liner has been broken for months. v3.13.1 is the fix.
+The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install the latest published release, which subsumes them.
 
 ### Live behavior changes already on master (as of v3.13.0)
 
@@ -67,7 +69,7 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 - `GPU` rows: registry-prefer in full mode + `filter_software_gpus()` name filter (strips Microsoft Basic Render Driver, Hyper-V Video, etc.) — only hardware adapters appear
 - New footer line below the table on Linux + Windows when unelevated:
   - Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`
-  - Windows: `Run as Administrator for BitLocker status and full login history`
+  - Windows: `Run as Administrator for BitLocker status`
   - macOS: no footer (no meaningful elevated unlocks)
 - `--no-elevation-hint` flag suppresses the footer
 - `--fast` mode never shows the footer (auto-run safety)
@@ -75,9 +77,9 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 
 ### Pending (not yet shipped)
 
-- **PR #2** — macOS accuracy (12 sub-tasks) — Apple Silicon CPU brand/freq, Rosetta detection, scutil hostname/IP, AppleLocale, P/E core split, Mac model marketing name, vm_stat memory, battery health. Needs Apple Silicon hardware to validate per §7.5 #11.
-- **PR #3** — Linux accuracy (15 sub-tasks) — systemd-resolved DNS priority, aarch64 CPU brand, in-process systemd-detect-virt port, POSIX locale precedence, power_supply iteration with type filter + battery health, `ip route get` for local IP, terminal env-var priority, last-login fallback chain, ZFS health, dmidecode-backed motherboard/BIOS/RAM (sudo only). Needs Linux distros + RPi to validate.
-- **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing, C.13 batched-PowerShell fallback (single `pwsh ConvertTo-Json` call when WMI fails). Deferred from v3.13.0 because (a) E.6 needs elevated-shell validation, (b) C.13 needs WMI-failure simulation, (c) v3.13.0 already shipped substantial improvements without them.
+- ~~**PR #2** — macOS accuracy~~ — substantially shipped in v3.14.0 for the low-risk, verifiable paths on the current Mac: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, machine model row, full-mode battery health, and `vm_stat` fallback.
+- ~~**PR #3** — Linux accuracy~~ — substantially shipped in v3.14.0 with fixture coverage and CI validation: systemd-resolved DNS priority, aarch64 CPU fallback, locale precedence, power_supply battery iteration + health, `ip route get ... src`, terminal env priority + single `ps` fallback, WSL/container/VM detection, ZFS health, and elevated `dmidecode` rows.
+- **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing. Deferred because it needs elevated-shell validation on Windows. C.13 batched-PowerShell fallback is shipped in v3.14.0.
 - **Cross-platform 3-state battery model** (task #56) — extend the v3.13.0 Windows 5-state model to Linux + macOS. Linux can land independently using `/sys/class/power_supply/AC*/online` + `BAT*/status`; macOS waits on PR #2 hardware.
 - ~~**Cargo-dist installer regression** (task #54)~~ — **resolved in v3.13.1.** What looked like a cargo-dist v0.31.0 installer regression on `x86_64-apple-darwin` + `x86_64-unknown-linux-musl` (observed on the v3.10.0 release.yml run) actually resolved itself in those runner images at some point between v3.10.0 and v3.12.0. The MSRV bump to 1.95 in v3.11.1 then surfaced a *different* failure on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners — those images ship rustc 1.94.1, and `release.yml` (auto-generated by cargo-dist) does not run rustup before invoking `dist build`. Fix: `rust-toolchain.toml` at repo root pinning `channel = "1.95"`. Rustup is pre-installed on every GitHub-hosted runner and respects the pin transparently. v3.10.0 retains its broken release.yml run as historic record; v3.13.1 is the first release with a working artifact since then.
 - **PR #6** *(optional, deferred unless explicitly requested)* — `--security` flag adding TPM 2.0 + Secure Boot + FileVault + SELinux/AppArmor rows.
@@ -86,11 +88,8 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 
 1. ~~**Watch CI on the v3.13.1 commit, then tag.**~~ Done. CI run 25096685639 green on `086ef0a`; tag `v3.13.1` pushed; release.yml run 25096833278 succeeded across all 10 jobs; GitHub Release published with 20 assets.
 2. ~~**Investigate cargo-dist regression** (task #54)~~ — **done in v3.13.1.** The fix turned out to be smaller than the original plan suggested: `rust-toolchain.toml` at repo root with both `channel` and `components`, no cargo-dist version bump, no migration to the astral-sh fork.
-3. Pick the next PR. Recommendation:
-   - **If validating on Mac** → PR #2 (macOS accuracy). The user's primary platforms are Windows + Apple Silicon; PR #2 touches the most-impactful M-series accuracy bugs.
-   - **If on Linux / RPi** → PR #3.
-   - **If on Windows with admin shell** → finish PR #5 leftovers (task #58: E.6 admin RDP history + C.13 batched-PowerShell fallback).
-   - **Cross-platform** → task #56 (battery 3-state for Linux/macOS).
+3. Finish the v3.14.0 release flow: push `master`, wait for `ci.yml`, tag `v3.14.0`, push the single tag, and monitor `release.yml` until all artifacts publish.
+4. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
 
 ---
 
@@ -451,13 +450,13 @@ Land in this order. PR #1 unblocks every later PR. PR #4 already shipped, but C.
 | PR | Status | Commit | Purpose |
 |---|---|---|---|
 | 1 | ✅ shipped | `58812cc` (v3.10.0) | Foundation: elevation tier scaffolding + CI + Codex config + workflow doc |
-| 2 | ⏳ pending | — | macOS accuracy (A.1–A.10) + macOS PR docs (F.1–F.5) |
-| 3 | ⏳ pending | — | Linux accuracy (B.1–B.11) + dmidecode tier (E.3–E.4) + Linux PR docs |
+| 2 | ✅ shipped (v3.14.0) | `pending` | macOS accuracy subset: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, model row, full-mode battery health, vm_stat fallback |
+| 3 | ✅ shipped (v3.14.0) | `pending` | Linux accuracy subset: systemd-resolved DNS, default-route source IP, locale precedence, power_supply battery iteration, terminal detection, WSL/container/VM detection, aarch64 CPU fallback, ZFS health, elevated dmidecode rows |
 | 4 | ✅ shipped | `3a252df` (v3.11.0) | Windows accuracy (C.1, C.2, C.3, C.6, C.7) + BitLocker (E.5) + Windows PR docs |
 | (4.5) | ✅ shipped | `22f2002` (v3.11.1) | Rust 1.95 MSRV + auto-rustup self-update + uzers RUSTSEC migration |
 | 4b | ✅ shipped | `28bda98` (v3.12.0) | Deferred Windows accuracy: VPN-aware default-route (C.4 simplified design) + Fast Startup uptime annotation (C.5) |
-| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14). E.6 admin RDP history + C.13 batched-PowerShell fallback deferred to task #58. |
-| 5b | ⏳ pending (task #58) | — | E.6 admin RDP login history + C.13 batched-PowerShell fallback (the deferred half of PR #5) |
+| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) + v3.14.0 | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14), batched PowerShell WMI-failure fallback (C.13). E.6 admin RDP history remains deferred to task #58. |
+| 5b | ⏳ pending (task #58) | — | E.6 admin RDP login history only; requires elevated Windows validation |
 | 6 | ⏸ optional | — | `--security` flag with TPM + Secure Boot + FileVault + SELinux/AppArmor |
 | (cross-cutting) | ⏳ pending (task #56) | — | Battery 3-state model for Linux + macOS (mirror v3.13.0 Windows C.10b) |
 | (infra) | ✅ shipped (task #54) | (v3.13.1) | release.yml MSRV/runner-image mismatch: added `rust-toolchain.toml` pinning `channel = "1.95"` so rustup auto-installs the right toolchain on every GitHub-hosted runner before `dist build` invokes cargo. Resolves `error: rustc 1.94.1 is not supported by ... tr-300 requires rustc 1.95` on Windows + Linux gnu + Linux ARM gnu runners. Single source of truth between `Cargo.toml` `rust-version` and the rust-toolchain pin. |
@@ -495,7 +494,7 @@ When a teammate or future-you on a fresh machine first opens the folder, Claude 
 `report::SCHEMA_VERSION` is currently `1`. Bump rules:
 
 - **Bump on breaking changes**: rename, remove, or change-type any existing key.
-- **Do NOT bump on additive changes**: new keys (e.g., adding `cpu.p_cores`/`cpu.e_cores` in PR #2) don't bump the version.
+- **Do NOT bump on additive changes**: new nullable keys such as `os.machine_model`, `cpu.core_topology`, `memory.ram_slots`, and `system.{motherboard,bios}` do not bump the schema version.
 
 Top-level keys in the JSON output:
 

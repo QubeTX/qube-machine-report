@@ -3,6 +3,7 @@
 //! Each module is responsible for collecting a specific category
 //! of system information in a platform-agnostic way.
 
+pub mod command;
 pub mod cpu;
 pub mod disk;
 pub mod memory;
@@ -30,6 +31,7 @@ pub struct SystemInfo {
     pub os_version: String,
     pub kernel: String,
     pub architecture: String,
+    pub machine_model: Option<String>,
 
     // Network Section
     pub hostname: String,
@@ -48,6 +50,7 @@ pub struct SystemInfo {
     pub load_5m: Option<f64>,
     pub load_15m: Option<f64>,
     pub gpus: Vec<String>,
+    pub cpu_core_topology: Option<String>,
 
     // Disk Section
     pub disk_used_bytes: u64,
@@ -59,6 +62,9 @@ pub struct SystemInfo {
     pub mem_used_bytes: u64,
     pub mem_total_bytes: u64,
     pub mem_percent: f64,
+    pub motherboard: Option<String>,
+    pub bios: Option<String>,
+    pub ram_slots: Option<String>,
 
     // Session Section
     pub last_login: Option<String>,
@@ -163,6 +169,7 @@ impl SystemInfo {
             architecture: platform_info
                 .architecture
                 .unwrap_or_else(|| std::env::consts::ARCH.to_string()),
+            machine_model: platform_info.machine_model,
             hostname: os_info.hostname,
             machine_ip: net_info.machine_ip,
             client_ip: net_info.client_ip,
@@ -177,13 +184,17 @@ impl SystemInfo {
             load_5m: cpu_info.load_5m,
             load_15m: cpu_info.load_15m,
             gpus: platform_info.gpus,
+            cpu_core_topology: platform_info.cpu_core_topology,
             disk_used_bytes: disk_used,
             disk_total_bytes: disk_total,
             disk_percent,
-            zfs_health: None, // TODO: implement ZFS check
+            zfs_health: platform_info.zfs_health,
             mem_used_bytes: mem_info.used_bytes,
             mem_total_bytes: mem_info.total_bytes,
             mem_percent,
+            motherboard: platform_info.motherboard,
+            bios: platform_info.bios,
+            ram_slots: platform_info.ram_slots,
             last_login: session_info.last_login,
             last_login_ip: session_info.last_login_ip,
             uptime_seconds: os_info.uptime_seconds,
@@ -289,8 +300,8 @@ fn aggregate_disk_usage(disks: &[disk::DiskInfo]) -> (u64, u64) {
     let mut total_size = 0u64;
     for d in disks {
         if !d.is_removable {
-            total_used += d.used_bytes;
-            total_size += d.total_bytes;
+            total_used = total_used.saturating_add(d.used_bytes);
+            total_size = total_size.saturating_add(d.total_bytes);
         }
     }
 

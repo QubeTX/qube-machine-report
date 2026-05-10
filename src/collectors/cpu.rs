@@ -1,5 +1,6 @@
 //! CPU information collector
 
+use crate::collectors::command::{run_stdout, CommandTimeout};
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::thread;
@@ -44,10 +45,24 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     let physical_cores = sys.physical_core_count().unwrap_or(cpus.len());
     let logical_cores = cpus.len();
 
-    let brand = cpus
+    let mut brand = cpus
         .first()
         .map(|c| c.brand().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(macos_brand) = crate::collectors::platform::macos::get_cpu_brand() {
+            brand = macos_brand;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if brand.trim().is_empty() || brand == "Unknown CPU" {
+            if let Some(linux_brand) = linux_cpu_brand_fallback() {
+                brand = linux_brand;
+            }
+        }
+    }
 
     // Frequency strategy:
     //   1. Prefer CPUID leaf 16h (Intel "Processor Frequency Information") — EBX
@@ -62,6 +77,9 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     let frequency_mhz_raw = cpuid_16h_max_mhz();
     #[cfg(target_os = "windows")]
     let frequency_mhz_raw = frequency_mhz_raw.or_else(|| cpu_max_mhz_windows(logical_cores));
+    #[cfg(target_os = "macos")]
+    let frequency_mhz_raw = frequency_mhz_raw
+        .or_else(|| crate::collectors::platform::macos::apple_silicon_max_frequency_mhz(&brand));
     let frequency_mhz = frequency_mhz_raw
         .map(|v| v.max(sysinfo_mhz))
         .unwrap_or(sysinfo_mhz);
@@ -113,7 +131,7 @@ fn get_load_averages(
             let load15: f64 = parts[2].parse().unwrap_or(0.0);
 
             // Convert to percentage of cores
-            let max_load = core_count as f64;
+            let max_load = core_count.max(1) as f64;
             return (
                 Some((load1 / max_load * 100.0).min(100.0)),
                 Some((load5 / max_load * 100.0).min(100.0)),
@@ -126,7 +144,7 @@ fn get_load_averages(
     let mut loadavg: [f64; 3] = [0.0; 3];
     unsafe {
         if libc::getloadavg(loadavg.as_mut_ptr(), 3) == 3 {
-            let max_load = core_count as f64;
+            let max_load = core_count.max(1) as f64;
             return (
                 Some((loadavg[0] / max_load * 100.0).min(100.0)),
                 Some((loadavg[1] / max_load * 100.0).min(100.0)),
@@ -170,11 +188,8 @@ fn get_load_averages(
 /// Get number of CPU sockets
 #[cfg(target_os = "linux")]
 fn get_socket_count() -> usize {
-    use std::process::Command;
-
     // Try lscpu first
-    if let Ok(output) = Command::new("lscpu").output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(stdout) = run_stdout("lscpu", std::iter::empty::<&str>(), CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.starts_with("Socket(s):") {
                 if let Some(num) = line.split(':').nth(1) {
@@ -201,11 +216,8 @@ fn get_socket_count() -> usize {
 
 #[cfg(target_os = "macos")]
 fn get_socket_count() -> usize {
-    use std::process::Command;
-
     // Use sysctl to get package count
-    if let Ok(output) = Command::new("sysctl").args(["-n", "hw.packages"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(stdout) = run_stdout("sysctl", ["-n", "hw.packages"], CommandTimeout::Normal) {
         if let Ok(count) = stdout.trim().parse::<usize>() {
             return count.max(1);
         }
@@ -217,6 +229,35 @@ fn get_socket_count() -> usize {
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn get_socket_count() -> usize {
     1
+}
+
+#[cfg(target_os = "linux")]
+fn linux_cpu_brand_fallback() -> Option<String> {
+    use std::fs;
+
+    if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") {
+        for key in ["model name", "Hardware", "Processor"] {
+            for line in cpuinfo.lines() {
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.trim() == key {
+                        let value = value.trim();
+                        if !value.is_empty() {
+                            return Some(value.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(model) = fs::read_to_string("/sys/firmware/devicetree/base/model") {
+        let model = model.trim_matches(char::from(0)).trim();
+        if !model.is_empty() {
+            return Some(model.to_string());
+        }
+    }
+
+    None
 }
 
 // CPUID leaf 16h ("Processor Frequency Information") returns the silicon-rated

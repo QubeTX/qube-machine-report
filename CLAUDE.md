@@ -40,7 +40,10 @@ cargo fmt -- --check             # Check formatting
 cargo run -- --fast              # Quick run (skips slow collectors)
 cargo run -- --json              # JSON output
 cargo run -- --ascii             # ASCII fallback mode
+cargo run -- update              # Self-update from GitHub releases
 cargo run -- --update            # Self-update from GitHub releases
+cargo run -- install             # Add shell profile alias + auto-run
+cargo run -- uninstall           # Interactive profile/binary cleanup
 ```
 
 ## Architecture
@@ -62,6 +65,7 @@ cargo run -- --update            # Self-update from GitHub releases
 - **JSON escaping** handles control characters (0x00-0x1F) via `\u00xx` encoding in `escape_json()` in `report.rs`.
 - **UTF-8 / ASCII auto-fallback** — `main.rs::is_utf8_locale()` checks `LC_ALL`/`LC_CTYPE`/`LANG` on Unix and force-applies `--ascii` if none indicate UTF-8. Windows is treated as UTF-8 because `enable_utf8_console()` calls `SetConsoleOutputCP(65001)` when stdout is a terminal. Don't add code that prints box-drawing chars before this auto-detection runs.
 - **Markdown auto-save** — Manual full-mode runs (no `--fast`, no `--json`) call `report::save_markdown_report()` which writes to the user's Downloads folder and prints the path to stderr. `--fast` (auto-run) deliberately skips this to keep startup quiet and fast.
+- **Collector subprocesses use bounded helpers** — optional platform probes should go through `src/collectors/command.rs` instead of raw `Command::output()`. Use the established fast/normal/slow budgets so missing tools and blocked commands return `None` rather than hanging the report.
 
 ### Platform-Specific Code
 
@@ -96,7 +100,7 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 ### Installation System
 
-`--install` / `--uninstall` modify shell profiles to add a `report` alias and auto-run. Installation blocks are wrapped in marker comments for idempotent cleanup. Legacy TR-100/TR-200 configs are removed automatically.
+`tr300 install` / `tr300 uninstall` modify shell profiles to add/remove the `report` alias and auto-run. The legacy `--install` / `--uninstall` flags are backward compatible aliases. Installation blocks are wrapped in marker comments for idempotent cleanup. Legacy TR-100/TR-200 configs are removed automatically.
 
 - **Unix/macOS** — `src/install/unix.rs` modifies `~/.bashrc` and/or `~/.zshrc`
 - **Windows** — `src/install/windows.rs` modifies PowerShell `$PROFILE`
@@ -134,13 +138,13 @@ Edit-time rules:
 
 — Full reasoning, the inline `SOCKADDR_IN` justification, the `wmi::WMIDateTime` discovery: see [`docs/architecture-decisions.md` § "v3.12.0+ — VPN-aware default-route, Fast Startup uptime annotation"](./docs/architecture-decisions.md#v3120--vpn-aware-default-route-fast-startup-uptime-annotation).
 
-### Self-Update (`--update`)
+### Self-Update (`tr300 update` / `--update`)
 
 `src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and re-runs the install method that placed the binary:
 - `~/.cargo/bin/...` → `cargo install tr-300 --force`
 - Otherwise → re-pipes the shell or PowerShell installer URL
 
-`--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
+`tr300 update --json`, `tr300 --json update`, and `tr300 --update --json` emit a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
 
 **Auto-rustup on the cargo path (v3.11.1+).** Before `cargo install tr-300 --force`, `execute_update()` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. The Installer (cargo-dist shell/PS) branch never touches Rust (it downloads a prebuilt binary). Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
 
@@ -178,13 +182,13 @@ TR-300 detects whether the current process is elevated (Unix `geteuid() == 0` / 
 - `tr_300::platform_has_elevated_data()` — compile-time per-target constant: `true` on Linux + Windows, `false` on macOS. macOS gets no footer because sudo doesn't aesthetically unlock anything (`powermetrics` for live CPU freq is the main candidate, and the chip-name → frequency lookup table on Apple Silicon already gives a reasonable answer non-elevated).
 - `report::should_render_elevation_footer(is_elevated, mode, no_elevation_hint)` — the gate. Returns `true` only when the user is unelevated, on a platform with elevated data, in `Full` mode (never in `Fast` — the auto-run prompt must stay free), and hasn't passed `--no-elevation-hint`.
 - `report::render_elevation_footer(use_colors)` — emits the line with ANSI dim (`\x1b[2m...\x1b[0m`) when colors are enabled, plain text otherwise. Returns an empty string on macOS even if the gate is bypassed.
-- The hint strings are hardcoded per platform in `render_elevation_footer`. Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`. Windows: `Run as Administrator for BitLocker status and full login history`.
+- The hint strings are hardcoded per platform in `render_elevation_footer`. Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`. Windows: `Run as Administrator for BitLocker status`.
 
 When adding a new elevated-only collector (e.g. `dmidecode` on Linux), gate it on `info.is_elevated` and let the footer hint cover the unelevated case rather than rendering a stub or warning row inside the table.
 
 ### JSON Schema Versioning (v3.10.0+)
 
-Top-level `schema_version` (currently `1`) on every JSON output. Defined as `report::SCHEMA_VERSION`. Bump only on **breaking** schema changes — renames, type changes, or removals. Additive new keys do **not** require a bump (so adding `cpu.p_cores`/`cpu.e_cores` in a later PR is fine without a schema bump). Document every nullable key in CLAUDE.md as it lands so contributors know which absences are intentional.
+Top-level `schema_version` (currently `1`) on every JSON output. Defined as `report::SCHEMA_VERSION`. Bump only on **breaking** schema changes — renames, type changes, or removals. Additive new keys do **not** require a bump. Current additive nullable keys include `os.machine_model`, `cpu.core_topology`, `memory.ram_slots`, and `system.{motherboard,bios}`; absence means the platform collector could not populate the value cheaply/reliably.
 
 Top-level `elevated: bool` and `elevation_unlocks_more: bool` are also emitted on every JSON output. The latter is `true` only when the platform has elevated-only data AND the user isn't currently elevated — i.e. `true` indicates "re-running with sudo/Administrator would give you more". On macOS this is always `false`.
 

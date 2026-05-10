@@ -9,14 +9,14 @@ Companion docs:
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 
-Last verified against source: 2026-04-29
+Last verified against source: 2026-05-10
 
 ## Project Snapshot
 
 - Project: TR-300, the Rust successor to TR-200 Machine Report
 - Cargo package name: `tr-300`
 - Library import path: `tr_300`
-- Current version: `3.13.1` (`Cargo.toml`)
+- Current version: `3.14.0` (`Cargo.toml`)
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -61,6 +61,7 @@ src/
     table.rs                  # fixed-width table renderer
     bar.rs                    # percent bar renderer
   collectors/
+    command.rs                # subprocess timeout helper for optional probes
     mod.rs                    # SystemInfo aggregate + parallel collection pipeline
     os.rs
     cpu.rs
@@ -101,10 +102,13 @@ TR200-OLD/                    # legacy bash/PowerShell implementation
 3. Apply `--ascii` or automatic ASCII fallback when Unix locale is not UTF-8.
 4. Apply `--json`, `--no-color`, and custom `--title`.
 5. On Windows terminals, set console output code page to UTF-8.
-6. Handle action flags with early exit:
+6. Handle action flags or positional actions with early exit:
    - `--update`
    - `--install`
    - `--uninstall`
+   - `update`
+   - `install`
+   - `uninstall`
 7. Choose collection mode:
    - `CollectMode::Fast` when `--fast` is set
    - `CollectMode::Full` otherwise
@@ -134,7 +138,14 @@ Current supported flags:
 - `--no-color` -> disables update-flow ANSI styling
 - `--fast` -> skip slow collectors for quick auto-run startup
 
-There are no subcommands; behavior is flag-based.
+Current supported positional actions:
+- `update` -> self-update from GitHub releases
+- `install` -> install alias + shell auto-run block
+- `uninstall` -> interactive uninstall path
+
+These are optional positional values, not clap subcommands. They intentionally
+share the same dispatch paths as the legacy flags, and clap rejects mixed
+actions such as `tr300 update --install`.
 
 ### Data pipeline (`src/collectors/mod.rs`)
 
@@ -195,6 +206,9 @@ Rendered order:
    - `OS`
    - `KERNEL`
    - `ARCH`
+   - optional `MODEL`
+   - optional `BOARD`
+   - optional `BIOS`
 3. Network section
    - `HOSTNAME`
    - optional `MACHINE IP`
@@ -204,6 +218,7 @@ Rendered order:
 4. CPU section
    - `PROCESSOR`
    - `CORES`
+   - optional `CORE TYPE`
    - GPU rows:
      - 1 GPU: `GPU`
      - 2-3 GPUs: `GPU 1`, `GPU 2`, `GPU 3`
@@ -217,6 +232,7 @@ Rendered order:
    - `ZFS HEALTH` only when available
 6. Memory section
    - `MEMORY`
+   - optional `RAM SLOTS`
    - `USAGE` bar
 7. Session section
    - optional `LAST LOGIN`
@@ -238,6 +254,10 @@ Bar behavior (`src/render/bar.rs`):
 ### JSON output shape
 
 Top-level keys:
+- `schema_version`
+- `elevated`
+- `elevation_unlocks_more`
+- `system`
 - `os`
 - `network`
 - `cpu`
@@ -250,6 +270,9 @@ Important implementation details:
 - `escape_json(...)` must escape control characters `0x00..0x1F` as `\u00xx`.
 - Optional values are emitted as string literals or `null`.
 - `--update --json` is a separate JSON shape implemented in `src/update.rs`.
+- Additive nullable keys currently include `system.motherboard`,
+  `system.bios`, `os.machine_model`, `cpu.core_topology`, and
+  `memory.ram_slots`.
 
 ## Collector Behavior By Module
 
@@ -333,6 +356,11 @@ Adds OS-specific enrichments, some not currently rendered:
 - virtualization/hypervisor signals
 - GPU names
 - architecture
+- machine model
+- CPU core topology where available
+- motherboard, BIOS, and RAM slot details when elevated Linux `dmidecode`
+  can provide them
+- ZFS health in full mode where `zpool` is available
 - shell and terminal details
 - locale
 - battery
@@ -340,9 +368,14 @@ Adds OS-specific enrichments, some not currently rendered:
 - desktop/display server/edition/codename/boot mode metadata
 
 Platform implementations:
-- `linux.rs`: `/proc`, `lscpu`, `lspci`, `/sys`, ZFS commands where available
-- `macos.rs`: `sysctl`, `scutil`, `pmset`, `ioreg`
-- `windows.rs`: WMI via `wmi`, Win32 APIs, registry, PowerShell fallbacks
+- `linux.rs`: `/proc`, `lscpu`, `/sys`, `ip`, resolver files, ZFS and elevated `dmidecode` commands where available
+- `macos.rs`: `sysctl`, `scutil`, `pmset`, `ioreg`, `system_profiler` JSON in full mode
+- `windows.rs`: Win32 APIs and registry first, WMI/PowerShell fallbacks in full mode only
+
+Optional subprocess probes should use `collectors::command` timeout helpers.
+Missing tools, timeouts, malformed output, and permission failures should
+return `None`/fallback values silently rather than blocking or failing the
+whole report.
 
 ## Install/Uninstall System
 
@@ -426,7 +459,8 @@ Behavior:
   - otherwise -> shell or PowerShell installer from the latest GitHub release
 
 JSON mode:
-- `tr300 --update --json` prints a single JSON object
+- `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json`
+  print a single JSON object
 - fields include `action`, `success`, `message`, `current_version`, `latest_version`, and `update_available` when available
 
 Exit codes:
@@ -552,9 +586,13 @@ cargo run -- --json
 cargo run -- --title "MY TITLE"
 cargo run -- --no-color
 cargo run -- --update
+cargo run -- update
 cargo run -- --update --json
+cargo run -- --json update
 cargo run -- --install
+cargo run -- install
 cargo run -- --uninstall
+cargo run -- uninstall
 ```
 
 ## Error Model
@@ -613,9 +651,9 @@ For markdown-only guide edits, Rust tests are not required. For source changes, 
 
 - `Config` fields `show_network`, `show_disks`, `width`, and `compact` exist but are not fully wired into report rendering/section toggling.
 - `use_colors` currently affects update-flow styling, not the normal table renderer.
-- `zfs_health` is currently always `None` in `SystemInfo::collect()` despite platform collectors containing ZFS-related helpers.
+- `zfs_health` is populated only on full-mode hosts where `zpool` is available.
 - JSON report output is manual; schema changes require careful escaping and integration test updates.
-- `--install`, `--uninstall`, and `--update` have real user-environment side effects. Treat them carefully in tests and automation.
+- `--install`, `--uninstall`, `--update`, and their positional equivalents have real user-environment side effects. Treat them carefully in tests and automation.
 - Some historical docs/examples may mention older behaviors; source code is authoritative.
 - PowerShell can be unavailable or restricted on some Windows environments; Windows collectors and installers should retain graceful fallbacks.
 

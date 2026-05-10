@@ -21,6 +21,7 @@ cargo fmt -- --check
 cargo clippy --all-targets --workspace -- -D warnings
 cargo test --workspace --all-targets
 cargo run -- --json | jq .            # parses without error
+cargo run -- --json update | jq .     # update action JSON shape
 cargo run -- --fast --json | jq .     # same, fast mode
 cargo run -- --ascii                  # visual inspection
 ```
@@ -52,7 +53,7 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | 3.10.0 (footer hint visible; arch / OS / DNS unchanged in PR1) |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
 | **Windows 11 (BitLocker OFF)** | "Encryption" row shows "Off" or absent + footer hint when not elevated | — |
-| **Windows 11 as Administrator** | Encryption shows full method + protection level; full RDP login history visible; **footer hint absent** | — |
+| **Windows 11 as Administrator** | Encryption shows full method + protection level; **footer hint absent** | — |
 | **Linux as root (sudo)** | Motherboard, BIOS, RAM slot rows present; **footer hint absent** | — |
 | **Linux as user (no sudo)** | Motherboard / BIOS / RAM rows absent; one-line footer hint visible (full mode); footer ABSENT in `--fast` | — |
 | **Windows 11 ARM** | Arch via IsWow64Process2 correct under both x64 and ARM64 native processes | — |
@@ -79,6 +80,34 @@ Foundation scaffolding only — no collector changes. Verified:
 
 Pending hardware verification (no collector changes that would affect them, but matrix entries should be stamped on next per-platform PR): macOS Intel/AS, all Linux distros, WSL2.
 
+### v3.14.0 — 2026-05-10
+
+Cross-platform stability and action syntax pass. Verified on local macOS Apple
+Silicon during implementation; Linux and Windows hardware-specific behavior is
+fixture-covered locally and left to the GitHub Actions matrix / real machines
+for runtime validation.
+
+- **Action syntax** — unit tests cover `tr300 update`, `tr300 --update`,
+  `tr300 --json update`, `tr300 install`, `tr300 uninstall`, and mixed-action
+  rejection.
+- **Collector stability** — subprocess helper tests cover success and timeout
+  behavior; collector parser fixtures cover macOS battery/sysctl/vm_stat/scutil,
+  Linux resolver/route/ZFS/dmidecode paths, and Windows PowerShell fallback
+  JSON on Windows CI.
+- **Output stability** — integration tests parse JSON with `serde_json`, verify
+  fixed-width ASCII table rows, assert `--fast` omits slow conditional rows, and
+  confirm help documents both action forms.
+- **Local gate** — `cargo fmt -- --check`, `cargo clippy --all-targets
+  --workspace -- -D warnings`, `cargo test --workspace --all-targets`, and
+  `cargo build --release --workspace` pass on this Mac.
+- **Runtime smoke** — `./target/release/tr300 --fast --json | python3 -m
+  json.tool` parses successfully, and `./target/release/tr300 --ascii` renders
+  the fixed-width report.
+- **Fast timing** — sorted 7-run local macOS `--fast` times:
+  `0.17, 0.18, 0.20, 0.21, 0.21, 0.23, 0.24` seconds; median `0.21s`.
+- **Deferred** — admin-only Windows RDP history is not implemented in this pass;
+  current Windows elevation wording is limited to BitLocker status.
+
 ### v3.11.0 — 2026-04-27
 
 Windows accuracy + BitLocker (PR #4). Verified on Windows 11 25H2 (build 26200.8246), unelevated user session:
@@ -90,12 +119,12 @@ Windows accuracy + BitLocker (PR #4). Verified on Windows 11 25H2 (build 26200.8
 - **Hypervisor row** — was `Hypervisor Present`, now `Bare Metal (Hyper-V/VBS)`. CPUID returned `Microsoft Hv` correctly; SMBIOS manufacturer disambiguated to "physical host with VBS active".
 - **Encryption row** — absent on this user's unelevated session (Win32_EncryptableVolume returned access-denied as expected). Footer hint covers the gap. Will surface on Win11 Device Encryption laptops and admin sessions.
 - **Architecture row** — `x86_64` (unchanged on x64 host running x64 binary; IsWow64Process2 implementation will activate on ARM64 hosts).
-- **Footer hint** — still renders correctly with the BitLocker mention; on hosts where the encryption row appears non-admin, the hint is harmless extra info about RDP login history (also admin-gated per E.6, deferred to PR #5).
+- **Footer hint** — still renders correctly with the BitLocker mention; wording was later narrowed to implemented BitLocker-only elevated data.
 - Integration tests: 13 passed (1 new for JSON `encryption` key); library tests: 15 passed.
 
 Pending verification (deferred or platform-locked):
 - Windows 11 ARM64 host (C.2 IsWow64Process2 emulation annotation)
-- Windows 11 with admin shell (BitLocker full method visible; E.6 RDP history would land in PR #5)
+- Windows 11 with admin shell (BitLocker full method visible)
 - Windows 11 with Device Encryption ON, unelevated (BitLocker row should appear)
 - Windows 11 in a real Hyper-V VM (CPUID `Microsoft Hv` + Microsoft Corp manufacturer → `Hyper-V`, not `Bare Metal (Hyper-V/VBS)`)
 - Windows running inside KVM / VMware / VirtualBox (CPUID-based hypervisor brand detection)
@@ -125,7 +154,7 @@ PR #5 partial — Windows polish. Verified on Windows 11 25H2 (build 26200.8246)
 - **GPU rows (C.8)** — three hardware adapters detected: Intel Arc Graphics, NVIDIA GeForce RTX 4070 Laptop GPU, Trigger 6 External Graphics. No "Microsoft Basic Render Driver" or other software adapters (registry-prefer path doesn't enumerate them; `filter_software_gpus` name-based filter is the second line of defense).
 - **SHELL row (C.11)** — `bash` (we're in Git Bash). PSCore detection fell through correctly (no PowerShell 7+ installed on this host); legacy WinPS-5.x path works as before. The PSCore detection logic was unit-verified by inspecting the `reg query` output format.
 - **TERMINAL row (C.12)** — was `Console`, now `Claude Code`. Parent-process walk via Toolhelp32 correctly traversed `tr300.exe → bash.exe → claude.exe` and matched the "Claude Code" label. Verified by manual `Get-Process` parent-walk in PowerShell which produced the same chain.
-- **Elevation footer** — `Run as Administrator for BitLocker status and full login history` still renders correctly in v3.13.0 (feature shipped v3.10.0, no regression). Suppressed by `--no-elevation-hint` flag and never rendered in `--fast` mode.
+- **Elevation footer** — the Windows admin hint still renders correctly in v3.13.0 (feature shipped v3.10.0, no regression; wording was later narrowed to BitLocker-only). Suppressed by `--no-elevation-hint` flag and never rendered in `--fast` mode.
 - **JSON additive keys** — `cpu.gpus` and existing keys all present; no new top-level keys added in v3.13.0 (no schema bump per MASTER_PLAN §4.9).
 - **`--fast` median timing** — 338 ms (sorted-7 middle: 0.332, 0.333, 0.337, 0.338, 0.339, 0.376, 0.394). +30 ms vs v3.11 baseline ~308 ms. Within 100 ms budget per MASTER_PLAN §5; well under 1500 ms CI gate. Slight regression attributed to additional winapi feature bindings linked into the binary; full-mode collectors are equal-or-faster (C.9 saves ~30 ms via native socket count, C.10 saves ~40 ms via native battery, neither on the fast path).
 - Integration tests: 14 passed (no new tests in v3.13.0; the existing test suite covers the additive changes); library tests: 15 passed.
@@ -136,7 +165,7 @@ Pending verification (deferred to future sessions):
 - Windows 11 host launched from WezTerm / Alacritty / Cursor / Tabby / Hyper / Ghostty / Kitty: parent walk should match the respective terminal label
 - Gaming laptop running an active GPU-heavy load that exceeds AC brick wattage: BATTERY row should show `X% (Plugged in)` with percentage decreasing over time (validates the C.10b heuristic for the supplementing-from-battery case)
 - ThinkPad / ASUS with battery-longevity firmware mode capping charge at 60-80%: BATTERY row should also show `X% (Plugged in)` (the same heuristic catches both the "PSU undersized" and "firmware limit" cases since they're indistinguishable from a single-snapshot SYSTEM_POWER_STATUS)
-- Windows host with admin shell: BATTERY / CORES / GPU rows unchanged (no admin-gated behavior in v3.13.0); E.6 RDP login history pending in task #58
+- Windows host with admin shell: BATTERY / CORES / GPU rows unchanged (no admin-gated behavior in v3.13.0)
 
 ### v3.13.1 — 2026-04-29
 

@@ -25,6 +25,8 @@ TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground
 - JSON output for scripting
 - Auto-save markdown report to Downloads folder on manual runs
 - Fast mode (`--fast`) for sub-second auto-run startup
+- Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
+- Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
 - Self-installation with shell alias and auto-run
 
 ## Installation
@@ -81,10 +83,19 @@ tr300 --title "MY SERVER"
 # Disable colors
 tr300 --no-color
 
+# Self-update to the latest release
+tr300 update
+# Legacy form still works:
+tr300 --update
+
 # Install to shell profile (adds 'report' alias + auto-run)
+tr300 install
+# Legacy form still works:
 tr300 --install
 
 # Remove from shell profile
+tr300 uninstall
+# Legacy form still works:
 tr300 --uninstall
 
 # Show help
@@ -130,6 +141,15 @@ tr300 --help
 
 ## Command Line Options
 
+Positional actions can be written without a double dash. They are mutually
+exclusive with each other and with the legacy action flags.
+
+| Action | Description |
+|--------|-------------|
+| `update` | Check for updates and install the latest version |
+| `install` | Add to shell profile with alias and auto-run |
+| `uninstall` | Remove from shell profile |
+
 | Option | Description |
 |--------|-------------|
 | `--ascii` | Use ASCII characters instead of Unicode |
@@ -138,6 +158,7 @@ tr300 --help
 | `--no-color` | Disable colored output |
 | `--fast` | Fast mode: skip slow collectors for quick auto-run |
 | `--no-elevation-hint` | Suppress the "Run with sudo / Administrator" footer hint |
+| `--update` | Legacy flag form of `tr300 update` |
 | `--install` | Add to shell profile with alias and auto-run |
 | `--uninstall` | Remove from shell profile |
 | `-h, --help` | Print help information |
@@ -151,9 +172,8 @@ Administrator on Windows) and surfaces additional data when it is.
 - **Default (unelevated)** — the report renders exactly as it always has, with one
   small addition on Linux and Windows: a single dim line below the table noting that
   running with sudo / Administrator would unlock more details (motherboard / BIOS /
-  RAM slots on Linux; BitLocker / full RDP login history on Windows). This hint is
-  **never** shown during `--fast` auto-run, so the prompt-ready experience is
-  unchanged.
+  RAM slots on Linux; BitLocker status on Windows). This hint is **never** shown
+  during `--fast` auto-run, so the prompt-ready experience is unchanged.
 - **Elevated** — extra rows render inline (motherboard, BIOS, RAM slot summary on
   Linux when `dmidecode` is available; BitLocker status when readable on Windows).
 - **macOS** — no elevation tier; everything TR-300 needs is accessible without sudo.
@@ -166,20 +186,20 @@ The JSON output exposes this state under top-level keys `elevated` and
 
 ## Installation to Shell Profile
 
-Running `tr300 --install` will:
+Running `tr300 install` or `tr300 --install` will:
 
 1. **Remove legacy configurations** (TR-100 and TR-200 auto-run blocks)
 2. **Remove existing TR-300 configuration** (if present)
 3. Add a `report` alias so you can type `report` instead of `tr300`
 4. Configure auto-run on new interactive shell sessions
 
-This means you can safely run `--install` multiple times or upgrade from TR-100/TR-200 without manual cleanup.
+This means you can safely run `tr300 install` multiple times or upgrade from TR-100/TR-200 without manual cleanup.
 
 **On Unix/macOS:** Modifies `~/.bashrc` and/or `~/.zshrc`
 
 **On Windows:** Modifies PowerShell profile
 
-To remove these additions, run `tr300 --uninstall`.
+To remove these additions, run `tr300 uninstall` or `tr300 --uninstall`.
 
 ## Building from Source
 

@@ -7,6 +7,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
 
 fn tr300() -> Command {
     Command::new(env!("CARGO_BIN_EXE_tr300"))
@@ -58,6 +59,21 @@ fn test_json_flag() {
         .stdout(predicate::str::contains("\"os\":"))
         .stdout(predicate::str::contains("\"cpu\":"))
         .stdout(predicate::str::contains("\"memory\":"));
+}
+
+#[test]
+fn test_json_output_parses() {
+    let output = tr300()
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value = serde_json::from_slice(&output).expect("--json output should parse");
+    assert_eq!(value["schema_version"], 1);
+    assert!(value["os"].is_object());
+    assert!(value["system"].is_object());
 }
 
 #[test]
@@ -133,6 +149,49 @@ fn test_fast_mode_no_elevation_footer() {
         .success()
         .stdout(predicate::str::contains("Run with sudo").not())
         .stdout(predicate::str::contains("Run as Administrator").not());
+}
+
+#[test]
+fn test_fast_mode_omits_slow_conditional_rows() {
+    tr300()
+        .args(["--fast", "--ascii"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ZFS HEALTH").not())
+        .stdout(predicate::str::contains("RAM SLOTS").not())
+        .stdout(predicate::str::contains("BOARD").not())
+        .stdout(predicate::str::contains("BIOS").not());
+}
+
+#[test]
+fn test_ascii_table_lines_keep_fixed_width() {
+    let output = tr300()
+        .args(["--ascii", "--no-elevation-hint"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output = String::from_utf8(output).expect("stdout should be utf-8");
+    for line in output.lines().filter(|line| line.starts_with(['+', '|'])) {
+        assert_eq!(
+            line.chars().count(),
+            51,
+            "line has unexpected width: {line}"
+        );
+    }
+}
+
+#[test]
+fn test_help_documents_positional_actions() {
+    tr300()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[ACTION]"))
+        .stdout(predicate::str::contains(
+            "[possible values: update, install, uninstall]",
+        ));
 }
 
 // --- v3.11.0 additions ---

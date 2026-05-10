@@ -1,9 +1,9 @@
 //! Network information collector
 
+use crate::collectors::command::{run_stdout, CommandTimeout};
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
-use std::process::Command;
 
 /// Network information for TR-300
 #[derive(Debug, Clone)]
@@ -97,7 +97,11 @@ fn get_machine_ip_windows() -> String {
     }
 
     // Fallback: try ipconfig
-    if let Ok(output) = Command::new("ipconfig").output() {
+    if let Some(output) = crate::collectors::command::run_output(
+        "ipconfig",
+        std::iter::empty::<&str>(),
+        CommandTimeout::Normal,
+    ) {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.contains("IPv4 Address") {
@@ -116,27 +120,18 @@ fn get_machine_ip_windows() -> String {
 
 #[cfg(target_os = "linux")]
 fn get_machine_ip_linux() -> String {
-    // Try hostname -I
-    if let Ok(output) = Command::new("hostname").args(["-I"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(ip) = stdout.split_whitespace().next() {
-            if !ip.is_empty() && ip != "127.0.0.1" {
-                return ip.to_string();
-            }
+    // Ask the kernel which source IP it would use for the default route.
+    if let Some(stdout) = run_stdout("ip", ["route", "get", "1.1.1.1"], CommandTimeout::Normal) {
+        if let Some(ip) = parse_route_src_ip(&stdout) {
+            return ip;
         }
     }
 
-    // Try ip route
-    if let Ok(output) = Command::new("ip").args(["route", "get", "1"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for part in stdout.split_whitespace() {
-            if part.contains('.') && !part.starts_with("1.") {
-                // Skip the destination "1.0.0.0"
-                if let Some(prev_part) = stdout.split(part).next() {
-                    if prev_part.ends_with("src ") {
-                        return part.to_string();
-                    }
-                }
+    // Fallback: hostname -I
+    if let Some(stdout) = run_stdout("hostname", ["-I"], CommandTimeout::Normal) {
+        if let Some(ip) = stdout.split_whitespace().next() {
+            if !ip.is_empty() && ip != "127.0.0.1" {
+                return ip.to_string();
             }
         }
     }
@@ -146,10 +141,25 @@ fn get_machine_ip_linux() -> String {
 
 #[cfg(target_os = "macos")]
 fn get_machine_ip_macos() -> String {
+    if let Some(stdout) = run_stdout("scutil", ["--nwi"], CommandTimeout::Normal) {
+        if let Some(iface) = parse_scutil_nwi_primary_interface(&stdout) {
+            if let Some(ip) = run_stdout(
+                "ipconfig",
+                ["getifaddr", iface.as_str()],
+                CommandTimeout::Normal,
+            ) {
+                let ip = ip.trim().to_string();
+                if !ip.is_empty() && ip != "127.0.0.1" {
+                    return ip;
+                }
+            }
+        }
+    }
+
     // Try ipconfig getifaddr en0 (WiFi) or en1 (Ethernet)
     for iface in &["en0", "en1", "en2"] {
-        if let Ok(output) = Command::new("ipconfig").args(["getifaddr", iface]).output() {
-            let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if let Some(output) = run_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal) {
+            let ip = output.trim().to_string();
             if !ip.is_empty() && ip != "127.0.0.1" {
                 return ip;
             }
@@ -157,15 +167,15 @@ fn get_machine_ip_macos() -> String {
     }
 
     // Fallback: try route
-    if let Ok(output) = Command::new("route").args(["get", "default"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(stdout) = run_stdout("route", ["get", "default"], CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.trim().starts_with("interface:") {
-                if let Some(iface) = line.split(':').last() {
+                if let Some(iface) = line.split(':').next_back() {
                     let iface = iface.trim();
-                    if let Ok(output) = Command::new("ipconfig").args(["getifaddr", iface]).output()
+                    if let Some(output) =
+                        run_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal)
                     {
-                        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        let ip = output.trim().to_string();
                         if !ip.is_empty() && ip != "127.0.0.1" {
                             return ip;
                         }
@@ -232,7 +242,9 @@ fn get_dns_servers_windows() -> Vec<String> {
 
     // Fallback: parse ipconfig /all
     let mut servers = Vec::new();
-    if let Ok(output) = Command::new("ipconfig").args(["/all"]).output() {
+    if let Some(output) =
+        crate::collectors::command::run_output("ipconfig", ["/all"], CommandTimeout::Normal)
+    {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut in_dns_section = false;
         for line in stdout.lines() {
@@ -267,38 +279,30 @@ fn get_dns_servers_windows() -> Vec<String> {
 fn get_dns_servers_linux() -> Vec<String> {
     use std::fs;
 
-    let mut servers = Vec::new();
-
-    // Try /etc/resolv.conf
-    if let Ok(content) = fs::read_to_string("/etc/resolv.conf") {
-        for line in content.lines() {
-            let line = line.trim();
-            if line.starts_with("nameserver") {
-                if let Some(ip) = line.split_whitespace().nth(1) {
-                    if !servers.contains(&ip.to_string()) {
-                        servers.push(ip.to_string());
-                        if servers.len() >= 5 {
-                            break;
-                        }
-                    }
-                }
+    for path in [
+        "/run/systemd/resolve/resolv.conf",
+        "/run/NetworkManager/resolv.conf",
+        "/etc/resolv.conf",
+    ] {
+        if let Ok(content) = fs::read_to_string(path) {
+            let servers = parse_resolv_conf_servers(&content, path != "/etc/resolv.conf");
+            if !servers.is_empty() {
+                return servers;
             }
         }
     }
 
     // Try systemd-resolved if no servers found
-    if servers.is_empty() {
-        if let Ok(output) = Command::new("resolvectl").args(["status"]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if line.contains("DNS Servers:") {
-                    if let Some(ips) = line.split(':').next_back() {
-                        for ip in ips.split_whitespace() {
-                            if !servers.contains(&ip.to_string()) {
-                                servers.push(ip.to_string());
-                                if servers.len() >= 5 {
-                                    break;
-                                }
+    let mut servers = Vec::new();
+    if let Some(stdout) = run_stdout("resolvectl", ["status"], CommandTimeout::Normal) {
+        for line in stdout.lines() {
+            if line.contains("DNS Servers:") {
+                if let Some(ips) = line.split(':').next_back() {
+                    for ip in ips.split_whitespace() {
+                        if !servers.contains(&ip.to_string()) {
+                            servers.push(ip.to_string());
+                            if servers.len() >= 5 {
+                                break;
                             }
                         }
                     }
@@ -315,12 +319,11 @@ fn get_dns_servers_macos() -> Vec<String> {
     let mut servers = Vec::new();
 
     // Try scutil --dns
-    if let Ok(output) = Command::new("scutil").args(["--dns"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(stdout) = run_stdout("scutil", ["--dns"], CommandTimeout::Normal) {
         for line in stdout.lines() {
             let line = line.trim();
             if line.starts_with("nameserver[") {
-                if let Some(ip) = line.split(':').last() {
+                if let Some(ip) = line.split(':').next_back() {
                     let ip = ip.trim();
                     if !ip.is_empty() && !servers.contains(&ip.to_string()) {
                         servers.push(ip.to_string());
@@ -334,6 +337,57 @@ fn get_dns_servers_macos() -> Vec<String> {
     }
 
     servers
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_route_src_ip(route_output: &str) -> Option<String> {
+    let mut parts = route_output.split_whitespace();
+    while let Some(part) = parts.next() {
+        if part == "src" {
+            let ip = parts.next()?;
+            if !ip.is_empty() && ip != "127.0.0.1" {
+                return Some(ip.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_resolv_conf_servers(content: &str, skip_loopback: bool) -> Vec<String> {
+    let mut servers = Vec::new();
+    for line in content.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if !line.starts_with("nameserver") {
+            continue;
+        }
+        let Some(ip) = line.split_whitespace().nth(1) else {
+            continue;
+        };
+        if skip_loopback && (ip.starts_with("127.") || ip == "::1") {
+            continue;
+        }
+        if !servers.contains(&ip.to_string()) {
+            servers.push(ip.to_string());
+            if servers.len() >= 5 {
+                break;
+            }
+        }
+    }
+    servers
+}
+
+fn parse_scutil_nwi_primary_interface(output: &str) -> Option<String> {
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if let Some((iface, rest)) = trimmed.split_once(':') {
+            let iface = iface.trim();
+            if rest.contains("IPv4") && !iface.is_empty() {
+                return Some(iface.to_string());
+            }
+        }
+    }
+    None
 }
 
 // Keep the old interface struct for backwards compatibility if needed
@@ -396,5 +450,45 @@ impl NetworkInterface {
 
     pub fn is_active(&self) -> bool {
         self.rx_bytes > 0 || self.tx_bytes > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_linux_route_src_ip() {
+        let route = "1.1.1.1 via 10.0.0.1 dev wlan0 src 10.0.0.42 uid 1000";
+        assert_eq!(parse_route_src_ip(route), Some("10.0.0.42".to_string()));
+    }
+
+    #[test]
+    fn resolv_conf_skips_comments_and_deduplicates() {
+        let content = "\
+# comment
+nameserver 127.0.0.53
+nameserver 1.1.1.1
+nameserver 1.1.1.1
+nameserver 2606:4700:4700::1111
+";
+        assert_eq!(
+            parse_resolv_conf_servers(content, true),
+            vec!["1.1.1.1".to_string(), "2606:4700:4700::1111".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_macos_scutil_nwi_primary_interface() {
+        let nwi = "\
+Network information
+IPv4 network interface information
+     en0 : flags      : 0x5 (IPv4,DNS)
+           reach      : 0x00000002 (Reachable)
+";
+        assert_eq!(
+            parse_scutil_nwi_primary_interface(nwi),
+            Some("en0".to_string())
+        );
     }
 }
