@@ -23,17 +23,7 @@ pub fn collect() -> Result<MemoryInfo> {
     let mut sys = System::new();
     sys.refresh_memory();
 
-    let mut used_bytes = sys.used_memory();
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(activity_monitor_used) = macos_activity_monitor_used_bytes() {
-            let sysinfo_used = used_bytes.max(1);
-            let delta = activity_monitor_used.abs_diff(sysinfo_used);
-            if delta as f64 / sysinfo_used as f64 > 0.05 {
-                used_bytes = activity_monitor_used;
-            }
-        }
-    }
+    let used_bytes = platform_used_bytes(sys.used_memory());
 
     Ok(MemoryInfo {
         total_bytes: sys.total_memory(),
@@ -42,6 +32,23 @@ pub fn collect() -> Result<MemoryInfo> {
         swap_total_bytes: sys.total_swap(),
         swap_used_bytes: sys.used_swap(),
     })
+}
+
+#[cfg(target_os = "macos")]
+fn platform_used_bytes(sysinfo_used: u64) -> u64 {
+    if let Some(activity_monitor_used) = macos_activity_monitor_used_bytes() {
+        let baseline = sysinfo_used.max(1);
+        let delta = activity_monitor_used.abs_diff(baseline);
+        if delta as f64 / baseline as f64 > 0.05 {
+            return activity_monitor_used;
+        }
+    }
+    sysinfo_used
+}
+
+#[cfg(not(target_os = "macos"))]
+fn platform_used_bytes(sysinfo_used: u64) -> u64 {
+    sysinfo_used
 }
 
 #[cfg(target_os = "macos")]
@@ -54,6 +61,7 @@ fn macos_activity_monitor_used_bytes() -> Option<u64> {
     parse_vm_stat_used_bytes(&stdout)
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_vm_stat_used_bytes(output: &str) -> Option<u64> {
     let mut page_size = None;
     let mut active = None;

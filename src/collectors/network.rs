@@ -1,6 +1,8 @@
 //! Network information collector
 
-use crate::collectors::command::{run_stdout, CommandTimeout};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::collectors::command::run_stdout;
+use crate::collectors::command::CommandTimeout;
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
@@ -377,6 +379,7 @@ fn parse_resolv_conf_servers(content: &str, skip_loopback: bool) -> Vec<String> 
     servers
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_scutil_nwi_primary_interface(output: &str) -> Option<String> {
     for line in output.lines() {
         let trimmed = line.trim();

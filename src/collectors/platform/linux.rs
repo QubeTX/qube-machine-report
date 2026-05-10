@@ -613,14 +613,13 @@ fn parse_dmidecode_memory_summary(output: &str) -> Option<String> {
     let mut dimms = Vec::new();
     let mut current: Vec<&str> = Vec::new();
     for line in output.lines() {
-        if line.trim() == "Memory Device" {
-            if !current.is_empty() {
-                let parsed = parse_memory_device(&current);
-                if let Some(dimm) = parsed {
-                    dimms.push(dimm);
-                }
-                current.clear();
+        let starts_new_device = line.trim() == "Memory Device";
+        if starts_new_device && !current.is_empty() {
+            let parsed = parse_memory_device(&current);
+            if let Some(dimm) = parsed {
+                dimms.push(dimm);
             }
+            current.clear();
         }
         current.push(line);
     }

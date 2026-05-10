@@ -1,5 +1,6 @@
 //! CPU information collector
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::collectors::command::{run_stdout, CommandTimeout};
 use crate::collectors::CollectMode;
 use crate::error::Result;
@@ -45,24 +46,11 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     let physical_cores = sys.physical_core_count().unwrap_or(cpus.len());
     let logical_cores = cpus.len();
 
-    let mut brand = cpus
+    let brand = cpus
         .first()
         .map(|c| c.brand().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(macos_brand) = crate::collectors::platform::macos::get_cpu_brand() {
-            brand = macos_brand;
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if brand.trim().is_empty() || brand == "Unknown CPU" {
-            if let Some(linux_brand) = linux_cpu_brand_fallback() {
-                brand = linux_brand;
-            }
-        }
-    }
+    let brand = platform_cpu_brand(brand);
 
     // Frequency strategy:
     //   1. Prefer CPUID leaf 16h (Intel "Processor Frequency Information") — EBX
@@ -258,6 +246,25 @@ fn linux_cpu_brand_fallback() -> Option<String> {
     }
 
     None
+}
+
+#[cfg(target_os = "macos")]
+fn platform_cpu_brand(brand: String) -> String {
+    crate::collectors::platform::macos::get_cpu_brand().unwrap_or(brand)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_cpu_brand(brand: String) -> String {
+    if brand.trim().is_empty() || brand == "Unknown CPU" {
+        linux_cpu_brand_fallback().unwrap_or(brand)
+    } else {
+        brand
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_cpu_brand(brand: String) -> String {
+    brand
 }
 
 // CPUID leaf 16h ("Processor Frequency Information") returns the silicon-rated
