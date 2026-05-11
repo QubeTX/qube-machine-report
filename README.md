@@ -211,9 +211,10 @@ GitHub Actions handles both release assets and crates.io publishing:
 - `CI` runs formatting, clippy, tests, release builds, speed checks, audit, and
   cargo-dist planning on pushes to the default branch.
 - `Crates.io Publish` runs only after `CI` succeeds for that default-branch
-  commit, checks whether the manifest version is already on crates.io, reruns
-  fmt/clippy/tests/package/dry-run with `--locked`, and publishes `tr-300` only
-  when the repository `CARGO_REGISTRY_TOKEN` Actions secret is configured.
+  commit, checks whether the manifest version is already on crates.io with a
+  descriptive data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run
+  with `--locked`, and publishes `tr-300` only when the repository
+  `CARGO_REGISTRY_TOKEN` Actions secret is configured.
 - `Release` is the cargo-dist workflow triggered by an explicit version tag such
   as `v3.14.2`; it builds the cross-platform archives and installers.
 

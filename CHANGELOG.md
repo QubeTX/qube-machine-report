@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **2026-05-11 — CI-gated crates.io publishing.** Added `Crates.io Publish`,
   a GitHub Actions workflow that runs only after the `CI` workflow succeeds
   for a default-branch push, checks out the exact CI-tested SHA, skips versions
-  already present on crates.io, reruns fmt/clippy/tests/package/dry-run, and
-  publishes with the repository `CARGO_REGISTRY_TOKEN`.
+  already present on crates.io using a descriptive crates.io data-access
+  `User-Agent`, reruns fmt/clippy/tests/package/dry-run, and publishes with
+  the repository `CARGO_REGISTRY_TOKEN`.
 - **2026-05-11 — project identity cleanup.** Removed embedded unrelated
   historical implementation files and public lineage wording so TR-300 is
   documented as a standalone QubeTX project.

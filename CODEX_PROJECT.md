@@ -46,7 +46,8 @@ only after GitHub Actions CI succeeds for the default-branch commit.
   Windows) with per-attempt diagnostics.
 - Release publishing uses two GitHub Actions stages: `Crates.io Publish` runs
   after successful default-branch `CI` on the exact tested SHA and publishes
-  `tr-300` with `CARGO_REGISTRY_TOKEN`; `Release` runs after the explicit
+  `tr-300` with `CARGO_REGISTRY_TOKEN` after checking crates.io with a
+  descriptive data-access `User-Agent`; `Release` runs after the explicit
   `vX.Y.Z` tag and publishes cargo-dist binary archives/installers.
 - `Cargo.lock` is tracked so local `cargo publish --dry-run --locked` and the
   GitHub crates.io publish workflow use the same resolved dependency set.

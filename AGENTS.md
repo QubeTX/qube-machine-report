@@ -517,9 +517,10 @@ Triggers:
 The crates.io workflow is intentionally separate from the auto-generated
 `release.yml`. It is triggered by `workflow_run` after `CI` completes on
 `master`/`main`, checks out the exact CI-tested commit SHA, skips when the
-manifest version is already present on crates.io, and runs `cargo publish
---locked` only when `CARGO_REGISTRY_TOKEN` is configured as a repository
-Actions secret. It reruns `cargo fmt --all -- --check`,
+manifest version is already present on crates.io using a descriptive
+data-access `User-Agent`, and runs `cargo publish --locked` only when
+`CARGO_REGISTRY_TOKEN` is configured as a repository Actions secret. It reruns
+`cargo fmt --all -- --check`,
 `cargo clippy --all-targets --workspace -- -D warnings`,
 `cargo test --workspace --all-targets`, `cargo package --locked --list`, and
 `cargo publish --dry-run --locked` before the real publish.

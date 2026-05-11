@@ -46,6 +46,7 @@ jobs:
         id: crates
         run: |
           status="$(curl -sS -o "$RUNNER_TEMP/crate-version.json" -w '%{http_code}' \
+            -H "User-Agent: QubeTX/qube-machine-report crates-publish (https://github.com/QubeTX/qube-machine-report)" \
             "https://crates.io/api/v1/crates/tr-300/${{ steps.package.outputs.version }}")"
           case "$status" in
             200)
