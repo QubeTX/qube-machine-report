@@ -5,7 +5,7 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-11 (v3.14.3 canonical `tr300` crate published)
+**Last updated:** 2026-05-11 (documentation consistency pass after v3.14.3)
 **Current version:** 3.14.3
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
@@ -38,7 +38,7 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | (untagged) | `24fdc60` | 2026-04-27 | RUSTSEC audit fix folded into v3.11.1 (no separate tag needed) |
 | (untagged) | `14e0d97` | 2026-04-28 | CI: dropped `macos-13` (Intel macOS) from test+build matrices; rolled into v3.12.0 changelog |
 | v3.12.0 | `28bda98` | 2026-04-28 | **Windows accuracy refinements (PR #4b)** — VPN-aware default-route detection via `GetBestInterfaceEx` (the WMI adapter list is reordered so the kernel's preferred-route adapter wins, correct on multi-homed/VPN configs), Fast Startup uptime annotation (`HiberbootEnabled` + WMI `LastBootUpTime` divergence > 1h → `UPTIME` row renders `9d 4h 12m (session: 7h 14m)`), nullable `os.session_uptime_seconds` JSON key, `os::collect()` takes `CollectMode` to gate the Fast Startup WMI cost, `wmi::WMIDateTime` for CIM datetime parsing |
-| v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history + C.13 batched-PowerShell fallback deferred to a future session |
+| v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history and C.13 batched-PowerShell fallback were still open at this tag. C.13 later shipped in v3.14.0; task #58 tracks E.6. |
 | v3.13.1 | `086ef0a` | 2026-04-29 | **Release infrastructure fix (task #54)** — adds `rust-toolchain.toml` at repo root pinning `channel = "1.95"` AND `components = ["rustfmt", "clippy"]`. Resolves `release.yml` failures on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners that shipped with rustc 1.94.1 (below MSRV 1.95 declared in v3.11.1). The auto-generated cargo-dist v0.31.0 release workflow has no rustup setup step; pinning at the workspace level lets rustup auto-install the right toolchain before cargo runs. The components addition was a fix-forward (`086ef0a` superseded `c2e6a65`) — when rustup honors a rust-toolchain.toml it ignores action-level `components:` fields, so listing rustfmt/clippy in the file is required to keep ci.yml's Format + Clippy jobs working. **All 10 release.yml jobs green; v3.13.1 GitHub Release published with 20 assets** (6 platform binaries + MSI + source tarball + shell/PowerShell installers). First successful Release publication since v3.10.0. |
 | v3.14.0 | `54dbae1` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
 | v3.14.1 | `3328a8e` | 2026-05-11 | **Release confidence patch** — no new runtime behavior; bumps package metadata for a patch release after the v3.14.0 CI warning-as-error fix-forward and follow-up release-publication docs were verified green on `master`. |
@@ -333,7 +333,10 @@ Status legend: `[x]` done, `[ ]` pending, `[~]` deferred to a later PR than orig
 - [x] **C.10b** *(plan addition, user-requested)* Extended C.10 from 3-state to 5+ states: `AC Power` (≥95% on AC, no charging — clean, no percentage), `X% (Charging)`, `X% (Plugged in)` (gaming-laptop PSU-undersized OR firmware battery-longevity), `X% (Discharging)` / `Critical` / `Low` overrides off AC, `X% (Unknown)` fallback. AC-status-unknown edge case renders bare `X%`.
 - [x] **C.11** PowerShell 7+ detection via `PowerShellCore` registry. *Caught in Codex review:* original string-compare approach put `"7.9.0" > "7.10.0"`; fixed via `parse_semver_tuple` comparing `(u64, u64, u64)`.
 - [x] **C.12** Terminal parent-process walk via Toolhelp32 — `CreateToolhelp32Snapshot` + `Process32FirstW`/`Process32NextW`, build `HashMap<pid, (parent_pid, name)>`, climb cap 10 levels. Recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity. Intermediate hosts (`conhost.exe`, `powershell.exe`, `pwsh.exe`, `cmd.exe`, shells) skipped.
-- [ ] **C.13** Batched-PowerShell fallback into single JSON call — **deferred to task #58**; rare WMI-failure path, awkward to validate without breaking the test host.
+- [x] **C.13** Batched-PowerShell fallback into single JSON call — shipped in
+  v3.14.0 (`get_batched_powershell_fallback()` plus parser fixtures). It is
+  used only when the full-mode WMI connection fails, keeping the common path
+  native/WMI-first and the `--fast` path COM-free.
 - [x] **C.14** Drop COM/WMI init from `--fast` hot path — verified by audit: fast mode early-returns at `platform/windows.rs:66` BEFORE any `COMLibrary::new()` call; structurally already done.
 - [ ] **E.6** Admin-only full RDP login history — **deferred to task #58**; needs elevated-shell validation. Implementation plan: `wevtutil qe Security /q:"*[System[EventID=4624]]" /c:50 /rd:true /f:xml`, hand-rolled XML parse, filter `LogonType ∈ {3,7,10,11}`, render 1-5 conditional rows under LAST LOGIN.
 - [x] **F.1–F.6** PR #5 documentation block — CHANGELOG, README, CLAUDE.md, Cargo.toml, auto-memory, TESTING.md.
@@ -351,7 +354,9 @@ Status legend: `[x]` done, `[ ]` pending, `[~]` deferred to a later PR than orig
 
 ## 4.5 Files modified / to-be-modified (full inventory)
 
-Per the implementation plan. Items prefixed `[done]` were touched by PR #1 or #4; everything else is pending.
+Historical inventory from the original implementation plan, reconciled against
+the current v3.14.3 source. Items below reflect current repository state, not
+only the first PR that touched them.
 
 **Source files:**
 
@@ -367,20 +372,38 @@ Per the implementation plan. Items prefixed `[done]` were touched by PR #1 or #4
 - [done] `src/collectors/session.rs` — `wts_query_session_connect_time`, `boot_time_local_string`, manual `WTSQuerySessionInformationW` extern
 - [done] `src/collectors/platform/mod.rs` — `encryption` field on `PlatformInfo`
 - [done] `src/collectors/platform/windows.rs` — `get_os_info_from_registry`, `cpuid_hypervisor_brand`, `map_hypervisor_vendor`, `get_bitlocker_status`, `format_bitlocker_status`, `bitlocker_method_name`, manual `IsWow64Process2`/`GetCurrentProcess` externs, `IMAGE_FILE_MACHINE_*` constants
-- [done, stub] `src/collectors/platform/linux.rs` — `encryption: None` placeholder added; B.1–B.11 + E.3 + E.4 to land in PR #3
-- [done, stub] `src/collectors/platform/macos.rs` — `encryption: None` placeholder added; A.1–A.10 to land in PR #2
-- [ ] `src/collectors/network.rs` — pending macOS/Linux/Windows VPN-aware default-route detection (M5, L6, C.4)
-- [ ] `src/collectors/disk.rs` — battery health additions per platform
-- [ ] `src/collectors/memory.rs` — A.9 potential `vm_stat` fallback if sysinfo's used-memory diverges from Activity Monitor
+- [done] `src/collectors/platform/linux.rs` — Linux accuracy subset, battery
+  iteration/health, virtualization/container detection, ZFS health, elevated
+  dmidecode motherboard/BIOS/RAM rows
+- [done] `src/collectors/platform/macos.rs` — macOS accuracy subset, Computer
+  Name, AppleLocale, Rosetta label, P/E core data, model row, battery health
+- [done] `src/collectors/network.rs` — Linux default-route source IP, macOS
+  `scutil --nwi` primary interface, systemd-resolved DNS priority, macOS
+  `scutil --dns`, Windows WMI/native-first network path with graceful
+  subprocess fallbacks
+- [done] `src/collectors/disk.rs` — sysinfo disk enumeration, zero-size skip,
+  removable/root-volume aggregation support through `SystemInfo`
+- [done] `src/collectors/memory.rs` — sysinfo memory counters plus macOS
+  `vm_stat` Activity Monitor-style used-memory fallback
 
 **Documentation:**
 
-- [done] `CHANGELOG.md` — v3.10.0 + v3.11.0 sections at top with task-ID cross-references
-- [done] `CLAUDE.md` — § Development Workflow (the canonical 7-phase cadence) + § CI + § Windows accuracy patterns + § Elevation Tier + § JSON Schema Versioning + § Disk volume semantics
-- [done] `README.md` — CI badge, flag table, Elevation Tier subsection, updated features list with hypervisor/last-login/encryption notes
-- [done] `TESTING.md` — manual matrix + per-version verification log (v3.10.0 + v3.11.0 entries)
+- [done] `CHANGELOG.md` — current release history through v3.14.3 plus
+  unreleased docs-consistency notes
+- [done] `CLAUDE.md` — edit-time rules, CI gates, release process, updater
+  strategy, crates.io workflow, and cargo-dist alias customization
+- [done] `AGENTS.md` — agent-facing project guide, release checklist, updater
+  and publishing workflow
+- [done] `README.md` — current user-facing install/update/release docs for
+  `cargo install tr300`, canonical installers, MSI, and crates.io
+- [done] `CODEX_PROJECT.md` — current status, filetree, and v3.14.3 release
+  evidence
+- [done] `TESTING.md` — manual matrix plus per-version verification log through
+  v3.14.3
+- [done] `docs/architecture-decisions.md` — rationale for MSRV pinning,
+  updater strategy, canonical `tr300` package naming, and release workflow
+  compatibility aliases
 - [done] `MASTER_PLAN.md` — this file
-- [ ] CHANGELOG/README/CLAUDE.md updates per future PR (F.1–F.3 of each PR's documentation block)
 
 **CI / build:**
 
@@ -475,7 +498,7 @@ Land in this order. PR #1 unblocks every later PR. PR #4 already shipped, but C.
 | 4 | ✅ shipped | `3a252df` (v3.11.0) | Windows accuracy (C.1, C.2, C.3, C.6, C.7) + BitLocker (E.5) + Windows PR docs |
 | (4.5) | ✅ shipped | `22f2002` (v3.11.1) | Rust 1.95 MSRV + auto-rustup self-update + uzers RUSTSEC migration |
 | 4b | ✅ shipped | `28bda98` (v3.12.0) | Deferred Windows accuracy: VPN-aware default-route (C.4 simplified design) + Fast Startup uptime annotation (C.5) |
-| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) + `54dbae1` (v3.14.0) | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14), batched PowerShell WMI-failure fallback (C.13). E.6 admin RDP history remains deferred to task #58. |
+| 5 | ✅ shipped (partial) | `f34e981` (v3.13.0) + `54dbae1` (v3.14.0) | Windows polish: native battery+5-state model (C.10/C.10b), native cores (C.9), GPU registry-prefer + name filter (C.8), PSCore detection (C.11), terminal parent walk (C.12), `--fast` COM-free verified (C.14), batched PowerShell WMI-failure fallback (C.13). Task #58 tracks E.6 admin RDP history. |
 | 5b | ⏳ pending (task #58) | — | E.6 admin RDP login history only; requires elevated Windows validation |
 | 6 | ⏸ optional | — | `--security` flag with TPM + Secure Boot + FileVault + SELinux/AppArmor |
 | (cross-cutting) | ⏳ pending (task #56) | — | Battery 3-state model for Linux + macOS (mirror v3.13.0 Windows C.10b) |

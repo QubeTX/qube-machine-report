@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **2026-05-11 — documentation consistency pass.** Rechecked README,
+  CHANGELOG, CODEX_PROJECT, AGENTS, CLAUDE, TESTING, MASTER_PLAN,
+  architecture decisions, workflow files, and the global Codex agent guide for
+  stale release/install/update wording after v3.14.3. Reconciled the internal
+  MASTER_PLAN task inventory with shipped v3.14.0/v3.14.3 behavior and
+  expanded release-checklist docs guidance so future agents update the full
+  documentation set.
+
 ## [3.14.3] - 2026-05-11
 
 ### Changed

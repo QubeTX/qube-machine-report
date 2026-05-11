@@ -547,9 +547,12 @@ release.
 ### Release checklist
 
 1. Update version in `Cargo.toml`.
-2. Update `CHANGELOG.md`, `README.md`, `CODEX_PROJECT.md`, `AGENTS.md`, and
-   `CLAUDE.md` for any user-visible release, install, update, or deployment
-   behavior changes.
+2. Update the full documentation set for any user-visible release, install,
+   update, or deployment behavior change: `CHANGELOG.md`, `README.md`,
+   `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`,
+   `TESTING.md`, and `docs/architecture-decisions.md` when rationale or
+   release workflow changes. Update the global Codex guide at
+   `/Users/realemmetts/.codex/AGENTS.md` when repo deployment workflow changes.
 3. Run checks:
    - `cargo fmt --all -- --check`
    - `cargo clippy --all-targets --workspace -- -D warnings`

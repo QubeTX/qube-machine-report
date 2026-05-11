@@ -316,7 +316,12 @@ Uses **cargo-dist** (v0.31.0) for fully automated cross-platform releases.
 **Every release requires ALL of these steps:**
 
 1. Bump `version` in `Cargo.toml`
-2. Update `CHANGELOG.md` with new version section
+2. Update the full documentation set for any user-visible release, install,
+   update, or deployment behavior change: `CHANGELOG.md`, `README.md`,
+   `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`,
+   `TESTING.md`, and `docs/architecture-decisions.md` when rationale or
+   release workflow changes. Update `/Users/realemmetts/.codex/AGENTS.md`
+   when repo deployment workflow changes.
 3. Commit with message `release: vX.Y.Z - <summary>`
 4. Push the commit and wait for `ci.yml` to pass on that exact commit
 5. Confirm `crates-publish.yml` published the new crates.io version from that same SHA or skipped because it already existed
