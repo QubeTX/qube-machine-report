@@ -5,7 +5,7 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-11 (v3.14.3 canonical `tr300` crate release prep)
+**Last updated:** 2026-05-11 (v3.14.3 canonical `tr300` crate published)
 **Current version:** 3.14.3
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
@@ -43,7 +43,7 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.14.0 | `54dbae1` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
 | v3.14.1 | `3328a8e` | 2026-05-11 | **Release confidence patch** — no new runtime behavior; bumps package metadata for a patch release after the v3.14.0 CI warning-as-error fix-forward and follow-up release-publication docs were verified green on `master`. |
 | v3.14.2 | `a6c3841` | 2026-05-11 | **Crates.io + resilient updater release** — publishes the `tr-300` crate, tracks `Cargo.lock`, adds CI-gated crates.io publishing after default-branch CI, ports self-update to a cargo-first probe-and-retry strategy chain, documents all install paths, and removes unrelated historical implementation files/references. |
-| v3.14.3 | pending | 2026-05-11 | **Canonical crates.io package name** — recreates the crate as lowercase `tr300`, changes the Rust library import path to `tr300`, points self-update at `cargo install tr300 --force`, and keeps `tr-300-installer.*` release aliases for v3.14.2 updater compatibility via a cargo-dist `allow-dirty = ["ci"]` workflow customization. |
+| v3.14.3 | `25305d8` | 2026-05-11 | **Canonical crates.io package name** — recreates the crate as lowercase `tr300`, changes the Rust library import path to `tr300`, points self-update at `cargo install tr300 --force`, and keeps `tr-300-installer.*` release aliases for v3.14.2 updater compatibility via a cargo-dist `allow-dirty = ["ci"]` workflow customization. |
 
 **Tag status (as of 2026-05-11):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
@@ -55,7 +55,7 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 - `v3.14.0` (`54dbae1`): tagged + pushed; CI run 25642712712 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; release.yml run 25642853066 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
 - `v3.14.1` (`3328a8e`): tagged + pushed; CI run 25645894617 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; release.yml run 25645999755 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
 - `v3.14.2` (`a6c3841`): tagged + pushed; CI run 25647466576 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; crates-publish run 25647553585 published `tr-300` 3.14.2 to crates.io after rerunning fmt/clippy/tests/package/dry-run; release.yml run 25647597021 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
-- `v3.14.3`: pending release. `tr300` returned 404 from the crates.io API before release, so this version recreates the package under the corrected lowercase package name. The previous `tr-300` package name was removed and is treated as a legacy updater-compatibility concern only.
+- `v3.14.3` (`25305d8`): tagged + pushed; CI run 25648618096 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; crates-publish run 25648707510 published `tr300` 3.14.3 to crates.io after rerunning fmt/clippy/tests/package/dry-run; release.yml run 25648740343 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 22 assets, including canonical `tr300-installer.*` installers and `tr-300-installer.*` compatibility aliases. `tr300` returned 404 from the crates.io API before release, so this version recreated the package under the corrected lowercase package name. The previous `tr-300` package name is treated as a legacy updater-compatibility concern only.
 
 The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install the latest published release, which subsumes them.
 
@@ -86,9 +86,9 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
   `cargo --version` succeeds, then `curl`/`wget` shell installers on Unix or
   `powershell`/`pwsh` installers on Windows. JSON update output preserves
   legacy `"method"` and adds precise `"strategy"` or failed `"attempts"`.
-- Users can install from crates.io with `cargo install tr300`; GitHub Actions
-  automatically publishes future crate versions after successful default-branch
-  CI using `.github/workflows/crates-publish.yml`.
+- Users can install from crates.io with `cargo install tr300`; v3.14.3 was
+  published by GitHub Actions, and future crate versions publish after
+  successful default-branch CI using `.github/workflows/crates-publish.yml`.
 - Reports now render optional platform rows only when populated: `MODEL`, `CPU TOPOLOGY`, `MOTHERBOARD`, `BIOS`, `RAM SLOTS`, and `ZFS HEALTH`. Matching JSON keys are additive nullable fields under schema version 1.
 - Collector subprocesses use bounded timeouts and degrade missing, hung, or malformed platform data to omitted rows / `null` values instead of blocking report generation.
 
@@ -108,7 +108,7 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 3. ~~**Ship v3.14.0**~~ — done. `master` pushed, CI green, tag `v3.14.0` pushed, release.yml green, GitHub Release published.
 4. ~~**Ship v3.14.1**~~ — done. `master` pushed, CI green, tag `v3.14.1` pushed, release.yml green, GitHub Release published.
 5. ~~**Ship v3.14.2 + crates.io**~~ — done. `master` pushed, CI green, crates.io publish workflow green, tag `v3.14.2` pushed, release.yml green, GitHub Release published.
-6. **Ship v3.14.3 canonical `tr300` crate** — push the release commit, wait for CI/crates publishing, tag `v3.14.3`, and verify GitHub Release assets include `tr300-installer.*` plus legacy `tr-300-installer.*` aliases.
+6. ~~**Ship v3.14.3 canonical `tr300` crate**~~ — done. `master` pushed, CI green, crates.io publish workflow green, tag `v3.14.3` pushed, release.yml green, GitHub Release published with `tr300-installer.*` plus legacy `tr-300-installer.*` aliases.
 7. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
 
 ---

@@ -6,11 +6,12 @@ TR-300 is a standalone Rust CLI machine-report tool. The repo currently exposes 
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: v3.14.3 canonicalizes the crates.io package as
-`tr300`, bumps the Rust library import path to `tr300`, and keeps the ND-style
-probe-and-retry updater pointed at `cargo install tr300 --force` before
-installer fallbacks. The deleted v3.14.2 `tr-300` crate name is treated only as
-a legacy compatibility concern for already-installed binaries.
+Current implementation status: v3.14.3 is published as the canonical
+lowercase crates.io package `tr300`, uses the Rust library import path
+`tr300`, and keeps the ND-style probe-and-retry updater pointed at
+`cargo install tr300 --force` before installer fallbacks. The deleted v3.14.2
+`tr-300` crate name is treated only as a legacy compatibility concern for
+already-installed binaries.
 
 ## Project Status
 
@@ -54,6 +55,9 @@ a legacy compatibility concern for already-installed binaries.
   `tr-300-installer.*` aliases for v3.14.2 updater compatibility. The
   cargo-dist config uses `allow-dirty = ["ci"]` for that checked-in workflow
   customization.
+- v3.14.3 release status: commit `25305d8`; CI run 25648618096 passed;
+  crates-publish run 25648707510 published `tr300` 3.14.3; release.yml run
+  25648740343 published the GitHub Release with 22 assets.
 - `Cargo.lock` is tracked so local `cargo publish --dry-run --locked` and the
   GitHub crates.io publish workflow use the same resolved dependency set.
 - `src/collectors/command.rs` is the shared timeout wrapper for optional

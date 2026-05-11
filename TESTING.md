@@ -185,12 +185,28 @@ name, and release documentation updates.
 - **Package verification** — `cargo package --locked --allow-dirty --list`
   listed the expected 36 release files, and
   `cargo publish --dry-run --locked --allow-dirty` packaged and verified
-  `tr300 v3.14.3` successfully.
+  `tr300 v3.14.3` successfully before the release commit. After committing,
+  the strict `cargo package --locked --list` and
+  `cargo publish --dry-run --locked` gates also passed.
 - **cargo-dist verification** — `dist plan` passed and announced canonical
   `tr300-*` release artifacts, including `tr300-installer.sh`,
   `tr300-installer.ps1`, six platform archives, the Windows MSI, checksums,
   and source tarball. The checked-in release workflow adds legacy
   `tr-300-installer.*` aliases for v3.14.2 updater compatibility.
+- **CI verification** — `master` CI run 25648618096 passed on commit
+  `25305d8` across fmt, clippy, tests, release builds, security audit, dist
+  plan, and auto-run speed gates on macOS ARM, Linux, and Windows.
+- **Crates.io verification** — crates-publish run 25648707510 checked the
+  exact CI-tested SHA, reran fmt/clippy/tests/package/dry-run, and published
+  `tr300` 3.14.3 to crates.io with license
+  `PolyForm-Noncommercial-1.0.0`, binary `tr300`, library target `tr300`,
+  and rust-version `1.95`.
+- **Release verification** — release.yml run 25648740343 passed plan, six
+  target artifact builds, global artifacts, host, and announce jobs. The
+  v3.14.3 GitHub Release is non-draft, non-prerelease, and published with
+  22 cargo-dist assets: canonical `tr300-*` archives/installers/checksums,
+  source assets, `dist-manifest.json`, and the legacy
+  `tr-300-installer.sh` / `tr-300-installer.ps1` aliases.
 
 ### v3.11.0 — 2026-04-27
 

@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **2026-05-11 — crates.io availability check.** Confirmed the canonical
   `tr300` package name returned 404 from the crates.io API before publishing,
   so the v3.14.3 release can recreate the package under the correct name.
+- **2026-05-11 — Release publication status.** Published `tr300` v3.14.3 to
+  crates.io from GitHub Actions after `master` CI run 25648618096 passed on
+  commit `25305d8`; crates publish run 25648707510 reran fmt, clippy, tests,
+  package list, dry-run publish, and publish successfully. Pushed tag
+  `v3.14.3`; release.yml run 25648740343 published the GitHub Release with 22
+  cargo-dist assets, including canonical `tr300-installer.*` installers plus
+  the `tr-300-installer.*` compatibility aliases.
 
 ## [3.14.2] - 2026-05-11
 

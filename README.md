@@ -8,7 +8,7 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v3.14.3](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.3) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is `tr300`.
+Latest release: [v3.14.3](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.3) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is [`tr300`](https://crates.io/crates/tr300).
 
 ## Features
 
@@ -36,7 +36,8 @@ Latest release: [v3.14.3](https://github.com/QubeTX/qube-machine-report/releases
 
 ### Cargo
 
-Requires Rust **1.95.0 or later**:
+Available on crates.io as [`tr300`](https://crates.io/crates/tr300). Requires
+Rust **1.95.0 or later**:
 
 ```bash
 cargo install tr300
