@@ -1,12 +1,11 @@
-//! TR-200-style Unicode box-drawing table renderer
+//! Unicode box-drawing table renderer
 //!
-//! Creates the exact table format used by TR-200 Machine Report
-//! with proper dividers and centered headers.
+//! Creates TR-300's fixed-width table with proper dividers and centered headers.
 
 use crate::config::BoxChars;
 use unicode_width::UnicodeWidthStr;
 
-/// Table renderer matching TR-200 format
+/// Fixed-width table renderer
 pub struct TableRenderer {
     /// Label column width
     label_width: usize,

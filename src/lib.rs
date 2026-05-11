@@ -1,7 +1,7 @@
 //! TR-300: Cross-platform system information report
 //!
 //! This library provides the core functionality for collecting
-//! and displaying system information in the TR-200 format.
+//! and displaying system information in TR-300's table and JSON formats.
 //!
 //! # Example
 //!

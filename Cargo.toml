@@ -1,6 +1,6 @@
 [package]
 name = "tr-300"
-version = "3.14.1"
+version = "3.14.2"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -13,6 +13,17 @@ license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/QubeTX/qube-machine-report"
 keywords = ["cli", "system", "sysinfo", "report", "cross-platform"]
 categories = ["command-line-utilities"]
+include = [
+    "/Cargo.lock",
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+    "/build.rs",
+    "/man/**",
+    "/src/**",
+    "/tests/**",
+    "/wix/**",
+]
 
 [package.metadata.wix]
 upgrade-guid = "5CD540A8-AD16-4B0F-8CE4-51FF641DE181"

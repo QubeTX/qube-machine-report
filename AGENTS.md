@@ -13,10 +13,10 @@ Last verified against source: 2026-05-11
 
 ## Project Snapshot
 
-- Project: TR-300, the Rust successor to TR-200 Machine Report
+- Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr-300`
 - Library import path: `tr_300`
-- Current version: `3.14.1` (`Cargo.toml`)
+- Current version: `3.14.2` (`Cargo.toml`)
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -38,6 +38,7 @@ Keep both surfaces working when refactoring.
 
 .github/workflows/
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
+  crates-publish.yml          # publishes new crates.io versions after successful default-branch CI
   release.yml                 # cargo-dist generated release workflow
 
 docs/
@@ -87,10 +88,10 @@ wix/
   main.wxs                    # MSI packaging template
 
 build.rs                      # generates man/tr300.1 via clap_mangen
+Cargo.lock                    # tracked for locked local checks and crates.io publishing
 Cargo.toml                    # package metadata, dependencies, cargo-dist config
 CHANGELOG.md                  # release history
 README.md                     # user-facing docs
-TR200-OLD/                    # legacy bash/PowerShell implementation
 ```
 
 ## How The Program Works
@@ -180,7 +181,7 @@ Install profile auto-run uses `tr300 --fast`; the `report` alias still runs full
 
 ### Rendering flow (`src/report.rs`)
 
-- `Config::format == OutputFormat::Table`: render TR-200-style table.
+- `Config::format == OutputFormat::Table`: render fixed-width terminal table.
 - `Config::format == OutputFormat::Json`: render manually formatted JSON.
 - Full table mode auto-save calls `save_markdown_report(info)`.
 
@@ -416,7 +417,6 @@ case "$-" in *i*)
 
 Behavior:
 - removes existing TR-300 block first
-- removes known TR-100/TR-200 legacy blocks
 - uses POSIX-compatible `case "$-"` rather than bash-only `[[ ... ]]`
 - idempotent re-install behavior
 
@@ -441,7 +441,6 @@ if ($Host.Name -eq 'ConsoleHost') {
 
 Behavior:
 - removes existing TR-300 block first
-- removes known TR-100/TR-200 legacy blocks
 - complete uninstall deletes the binary and attempts to remove an empty parent directory when path contains `tr300`
 
 ## Self-Update System
@@ -454,14 +453,19 @@ Behavior:
 - sends `User-Agent: tr300/<current version>`
 - strips leading `v` from release tags
 - compares semver-like numeric components
-- detects install method from current executable path:
-  - `.cargo/.../bin/...` -> `cargo install tr-300 --force`
-  - otherwise -> shell or PowerShell installer from the latest GitHub release
+- builds an ordered probe-and-retry strategy list:
+  - `cargo install tr-300 --force` first when `cargo --version` succeeds
+  - macOS/Linux fallback: cargo-dist shell installer through `curl`, then `wget`
+  - Windows fallback: cargo-dist PowerShell installer through `powershell`, then `pwsh`
+- runs `rustup update stable` best-effort before the cargo strategy when rustup is available
+- records skipped/failed strategy attempts and falls through until one strategy succeeds
 
 JSON mode:
 - `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json`
   print a single JSON object
 - fields include `action`, `success`, `message`, `current_version`, `latest_version`, and `update_available` when available
+- successful updates include legacy `"method"` plus precise `"strategy"`
+- failed updates include an `"attempts"` array with per-strategy diagnostics
 
 Exit codes:
 - `0`: success or already current
@@ -508,6 +512,23 @@ Triggers:
 - PowerShell installer (`tr-300-installer.ps1`) for Windows
 - MSI installer for Windows
 
+### crates.io publishing (`.github/workflows/crates-publish.yml`)
+
+The crates.io workflow is intentionally separate from the auto-generated
+`release.yml`. It is triggered by `workflow_run` after `CI` completes on
+`master`/`main`, checks out the exact CI-tested commit SHA, skips when the
+manifest version is already present on crates.io, and runs `cargo publish
+--locked` only when `CARGO_REGISTRY_TOKEN` is configured as a repository
+Actions secret. It reruns `cargo fmt --all -- --check`,
+`cargo clippy --all-targets --workspace -- -D warnings`,
+`cargo test --workspace --all-targets`, `cargo package --locked --list`, and
+`cargo publish --dry-run --locked` before the real publish.
+
+`Cargo.lock` is tracked and included in the crate package because both local
+release verification and the GitHub publish workflow use `--locked`. Do not
+re-ignore or remove it unless the publish workflow is changed in the same
+release.
+
 ### MSI specifics (`wix/main.wxs`)
 
 - Product name: `tr-300`
@@ -520,15 +541,25 @@ Triggers:
 ### Release checklist
 
 1. Update version in `Cargo.toml`.
-2. Update `CHANGELOG.md`.
+2. Update `CHANGELOG.md`, `README.md`, `CODEX_PROJECT.md`, `AGENTS.md`, and
+   `CLAUDE.md` for any user-visible release, install, update, or deployment
+   behavior changes.
 3. Run checks:
-   - `cargo test --workspace --all-targets`
+   - `cargo fmt --all -- --check`
    - `cargo clippy --all-targets --workspace -- -D warnings`
-   - `cargo fmt -- --check`
+   - `cargo test --workspace --all-targets`
+   - `cargo package --locked --list`
+   - `cargo publish --dry-run --locked`
 4. Commit with message `release: vX.Y.Z - <summary>`.
-5. Push commit, **wait for `ci.yml` to go green on the commit**, then:
+5. Push the default branch, **wait for `ci.yml` to go green on the exact
+   commit**, then confirm `crates-publish.yml` either published the new
+   crates.io version from that same SHA or skipped because it was already
+   present.
 6. Tag with `git tag vX.Y.Z`.
-7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the workflow trigger; an explicit single-tag push is sufficient).
+7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
+   workflow trigger; an explicit single-tag push is sufficient).
+8. Wait for `.github/workflows/release.yml` to publish the GitHub Release
+   assets and installers.
 
 After changing `[workspace.metadata.dist]`, regenerate the workflow with:
 
@@ -687,14 +718,10 @@ For markdown-only guide edits, Rust tests are not required. For source changes, 
 
 ### Change table rendering
 
-1. Preserve fixed TR-200 layout unless the user explicitly requests a format change.
+1. Preserve fixed-width table layout unless the user explicitly requests a format change.
 2. Use display-width-aware truncation/padding from `unicode-width`.
 3. Keep ASCII mode equivalent to Unicode mode.
 4. Test with long strings and non-ASCII text when alignment changes.
-
-## Legacy Reference
-
-`TR200-OLD/` keeps the previous shell/PowerShell implementation for behavior comparison and migration context.
 
 ## Maintenance Rule
 

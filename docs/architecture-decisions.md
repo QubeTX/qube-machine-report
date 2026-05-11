@@ -126,22 +126,32 @@ minors silently.
 
 ### Self-update auto-rustup (v3.11.1+)
 
-`src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and re-runs the install method that placed the binary:
-- `~/.cargo/bin/...` → `cargo install tr-300 --force`
-- Otherwise → re-pipes the shell or PowerShell installer URL
+`src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and runs an ordered probe-and-retry chain:
+- `cargo install tr-300 --force` first when `cargo --version` succeeds
+- macOS/Linux fallback: cargo-dist shell installer via `curl`, then `wget`
+- Windows fallback: cargo-dist PowerShell installer via `powershell`, then `pwsh`
 
-`--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
+`--update --json` emits a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Success includes legacy `"method"` plus precise `"strategy"`; failure includes an `"attempts"` array. Exit codes: `0` success, `2` failure.
 
-**Auto-rustup on the cargo path (v3.11.1+).** When `execute_update()` takes the
-`InstallMethod::Cargo` branch it first calls `rustup_update_stable_best_effort()`,
+**v3.14.2 addendum — path detection is retired.** Earlier releases inferred the
+update method from the current executable path (`.cargo/.../bin/...` meant
+`cargo install`). That turned out to be the wrong signal once cargo-dist was
+configured with `install-path = "CARGO_HOME"`: the official shell installer can
+also place `tr300` under `.cargo/bin`, so path-based detection could choose
+cargo on machines that do not have cargo installed. The updater now probes
+tools directly and falls through to installer strategies on any preflight or
+runtime failure.
+
+**Auto-rustup on the cargo strategy (v3.11.1+).** When the strategy chain tries
+`UpdateStrategy::Cargo` it first calls `rustup_update_stable_best_effort()`,
 which probes for `rustup` on PATH (via `rustup --version`, redirecting both
 stdout and stderr to `Stdio::null()` so the probe is silent) and, if found,
 runs `rustup update stable` and prints `Updating Rust toolchain (rustup
 update stable)…` so the user sees what's happening. Any failure — rustup
 absent, network timeout, locked toolchain, permission error — is *non-fatal*:
 we discard the result with `let _ =` and proceed straight to the
-`cargo install tr-300 --force` call. The Installer (cargo-dist shell/PS)
-branch never touches Rust because it downloads a prebuilt binary.
+`cargo install tr-300 --force` call. Installer strategies never touch Rust
+because they download a prebuilt binary.
 
 *Why this exists — the failure mode it prevents:* TR-300's MSRV tracks the
 GitHub Actions `stable` toolchain and moves whenever Rust ships a stable

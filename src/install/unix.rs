@@ -1,7 +1,6 @@
 //! Unix/macOS installation utilities
 //!
 //! Adds TR-300 alias and auto-run to shell profiles.
-//! Removes legacy TR-100 and TR-200 configurations before installing.
 
 use crate::error::{AppError, Result};
 use std::env;
@@ -11,17 +10,6 @@ use std::path::PathBuf;
 /// Marker comments for shell profile modifications
 const MARKER_START: &str = "# TR-300 Machine Report";
 const MARKER_END: &str = "# End TR-300";
-
-/// TR-100 legacy markers (bash scripts)
-const TR100_MARKERS: &[&str] = &["# Run Machine Report only when in interactive mode"];
-
-/// TR-200 legacy markers (various installation styles)
-const TR200_MARKERS: &[&str] = &[
-    "# TR-200 Machine Report configuration",
-    "# TR-200 Machine Report - run on login",
-    "# TR-200 Machine Report - run on bash login",
-    "# TR-200 Machine Report (npm) - auto-run",
-];
 
 /// Shell profile content to add
 const SHELL_ADDITIONS: &str = r#"# TR-300 Machine Report
@@ -117,13 +105,11 @@ pub fn uninstall() -> Result<()> {
 }
 
 /// Update a shell profile with TR-300 additions
-/// First removes any legacy TR-100, TR-200, or existing TR-300 config
 fn update_shell_profile(path: &PathBuf) -> Result<bool> {
     let content = fs::read_to_string(path)
         .map_err(|e| AppError::platform(format!("Failed to read {}: {}", path.display(), e)))?;
 
-    // Remove legacy configurations and existing TR-300
-    let cleaned_content = remove_legacy_blocks(&content);
+    let cleaned_content = remove_tr300_block(&content);
 
     // Append TR-300 config to cleaned content
     let new_content = if cleaned_content.trim().is_empty() {
@@ -138,22 +124,12 @@ fn update_shell_profile(path: &PathBuf) -> Result<bool> {
     Ok(true)
 }
 
-/// Remove legacy TR-100, TR-200, and existing TR-300 blocks from content
-fn remove_legacy_blocks(content: &str) -> String {
+/// Remove existing TR-300 blocks from content
+fn remove_tr300_block(content: &str) -> String {
     let mut lines: Vec<&str> = content.lines().collect();
 
     // Remove TR-300 blocks (between MARKER_START and MARKER_END)
     lines = remove_delimited_block(&lines, MARKER_START, MARKER_END);
-
-    // Remove TR-200 blocks - each marker starts a block ending at next blank line or EOF
-    for marker in TR200_MARKERS {
-        lines = remove_marker_block(&lines, marker);
-    }
-
-    // Remove TR-100 blocks - these use if...fi blocks
-    for marker in TR100_MARKERS {
-        lines = remove_if_fi_block(&lines, marker);
-    }
 
     // Clean up multiple consecutive blank lines
     let mut result = Vec::new();
@@ -196,62 +172,6 @@ fn remove_delimited_block<'a>(lines: &[&'a str], start: &str, end: &str) -> Vec<
         if !in_block {
             result.push(*line);
         }
-    }
-
-    result
-}
-
-/// Remove a block starting with a marker and ending at next blank line or significant content change
-fn remove_marker_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
-    let mut result = Vec::new();
-    let mut skip_until_blank = false;
-
-    for line in lines {
-        if line.contains(marker) {
-            skip_until_blank = true;
-            continue;
-        }
-        if skip_until_blank {
-            // Skip lines until we hit a blank line, then include the blank and continue
-            if line.trim().is_empty() {
-                skip_until_blank = false;
-                // Don't include this blank line (it was part of the block)
-            }
-            continue;
-        }
-        result.push(*line);
-    }
-
-    result
-}
-
-/// Remove an if...fi block that starts with a marker comment
-fn remove_if_fi_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
-    let mut result = Vec::new();
-    let mut skip_if_block = false;
-    let mut if_depth = 0;
-
-    for line in lines {
-        if line.contains(marker) {
-            skip_if_block = true;
-            continue;
-        }
-        if skip_if_block {
-            let trimmed = line.trim();
-            // Track nested if statements
-            if trimmed.starts_with("if ") || trimmed.starts_with("if[") {
-                if_depth += 1;
-            } else if (trimmed == "fi" || trimmed.starts_with("fi ") || trimmed.starts_with("fi;"))
-                && if_depth > 0
-            {
-                if_depth -= 1;
-                if if_depth == 0 {
-                    skip_if_block = false;
-                }
-            }
-            continue;
-        }
-        result.push(*line);
     }
 
     result

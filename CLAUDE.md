@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TR-300 is a cross-platform system information report tool written in Rust. It displays system information in the exact TR-200 format using Unicode box-drawing tables with bar graphs for resource usage.
+TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
 **Crate name:** `tr-300` (hyphenated — used by `cargo install tr-300` and as the library import path `tr_300`)
 **Binary name:** `tr300` (no hyphen — set via `[[bin]] name = "tr300"`)
@@ -53,13 +53,13 @@ cargo run -- uninstall           # Interactive profile/binary cleanup
 1. **CLI parsing** (`src/cli.rs`) — `Cli` struct via clap derive macros
 2. **Collection** (`src/collectors/mod.rs`) — `SystemInfo::collect_with_mode()` spawns 7 threads via `std::thread::scope` to gather data in parallel
 3. **Rendering** (`src/report.rs`) — Converts `SystemInfo` → table or JSON string
-4. **Output** (`src/render/table.rs`) — Draws Unicode/ASCII tables with exact TR-200 layout
+4. **Output** (`src/render/table.rs`) — Draws Unicode/ASCII fixed-width tables
 
 ### Key Architectural Constraints
 
 - **`src/cli.rs` must use `//` comments, not `//!`** — `build.rs` uses `include!("src/cli.rs")` to generate man pages via `clap_mangen`, and inner doc comments fail in that context.
 - **Table rendering uses `unicode-width`** for display column calculation. Use `UnicodeWidthStr::width()` instead of `.chars().count()` in `render/table.rs`.
-- **Fixed-width columns** match TR-200: 12-char labels, 32-char data, 51 total width including borders.
+- **Fixed-width columns** are 12-char labels, 32-char data, 51 total width including borders.
 - **Thread panics are caught** — collector threads use `.unwrap_or_else()` instead of `.unwrap()` on join handles, returning errors gracefully.
 - **Shared utility** — `format_bytes()` lives in `src/lib.rs`; the per-module methods in `disk.rs`, `memory.rs`, `network.rs` delegate to it.
 - **JSON escaping** handles control characters (0x00-0x1F) via `\u00xx` encoding in `escape_json()` in `report.rs`.
@@ -100,7 +100,7 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 ### Installation System
 
-`tr300 install` / `tr300 uninstall` modify shell profiles to add/remove the `report` alias and auto-run. The legacy `--install` / `--uninstall` flags are backward compatible aliases. Installation blocks are wrapped in marker comments for idempotent cleanup. Legacy TR-100/TR-200 configs are removed automatically.
+`tr300 install` / `tr300 uninstall` modify shell profiles to add/remove the `report` alias and auto-run. The legacy `--install` / `--uninstall` flags are backward compatible aliases. Installation blocks are wrapped in marker comments for idempotent cleanup.
 
 - **Unix/macOS** — `src/install/unix.rs` modifies `~/.bashrc` and/or `~/.zshrc`
 - **Windows** — `src/install/windows.rs` modifies PowerShell `$PROFILE`
@@ -140,13 +140,16 @@ Edit-time rules:
 
 ### Self-Update (`tr300 update` / `--update`)
 
-`src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and re-runs the install method that placed the binary:
-- `~/.cargo/bin/...` → `cargo install tr-300 --force`
-- Otherwise → re-pipes the shell or PowerShell installer URL
+`src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and runs an ordered probe-and-retry chain:
+- `cargo install tr-300 --force` first when `cargo --version` succeeds
+- macOS/Linux fallback: cargo-dist shell installer via `curl`, then `wget`
+- Windows fallback: cargo-dist PowerShell installer via `powershell`, then `pwsh`
 
-`tr300 update --json`, `tr300 --json update`, and `tr300 --update --json` emit a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Exit codes: `0` success, `2` failure.
+Do not restore executable-path detection. cargo-dist installers can place binaries under `CARGO_HOME`, so `.cargo/bin` is not proof that the user installed through crates.io.
 
-**Auto-rustup on the cargo path (v3.11.1+).** Before `cargo install tr-300 --force`, `execute_update()` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. The Installer (cargo-dist shell/PS) branch never touches Rust (it downloads a prebuilt binary). Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
+`tr300 update --json`, `tr300 --json update`, and `tr300 --update --json` emit a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Successful updates include legacy `"method"` plus precise `"strategy"`; failures include an `"attempts"` array. Exit codes: `0` success, `2` failure.
+
+**Auto-rustup on the cargo strategy (v3.11.1+).** Before `cargo install tr-300 --force`, `try_strategy(UpdateStrategy::Cargo)` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. Installer strategies never touch Rust because they download prebuilt binaries. Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
 
 — Full reasoning, the rustup-managed-vs-distro-managed split, the rejected `rustc --version` probe alternative, the failure-mode this prevents: see [`docs/architecture-decisions.md` § "Self-update auto-rustup (v3.11.1+)"](./docs/architecture-decisions.md#self-update-auto-rustup-v3111).
 
@@ -257,7 +260,7 @@ Every PR completes this block before commit:
 
 - **Local commit**: `git-master` agent. No `ci-tester` needed for local-only operations.
 - **Push to remote**: `ci-tester` agent FIRST. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`), never bypass signing. Once `ci-tester` is `[PASS]`, hand off to `git-master` for the push.
-- **Tag a release**: bump version (already done in `F.4`), commit + push commits, then `git tag vX.Y.Z && git push --tags`. The tag push triggers cargo-dist's `release.yml`. Push the tag *only after* `ci.yml` has gone green on the commit being tagged.
+- **Tag a release**: bump version (already done in `F.4`), commit + push commits, wait for `ci.yml` to go green on the exact commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag push triggers cargo-dist's `release.yml`. Push a single explicit version tag; do not use broad `git push --tags`.
 
 ### Phase 7 — Close out
 
@@ -265,7 +268,7 @@ Mark the parent PR task `completed` in `TaskList`. Move on to the next PR's pare
 
 ## CI
 
-Two GitHub Actions workflows guard the project:
+Three GitHub Actions workflows guard release quality and publication:
 
 - **`.github/workflows/ci.yml`** — runs on every push to master and every pull request. Jobs:
   - `fmt` — `cargo fmt --check` (Linux only)
@@ -276,6 +279,7 @@ Two GitHub Actions workflows guard the project:
   - `audit` — `cargo audit` against RustSec advisories (advisory-only via `continue-on-error: true`; flagged vulnerabilities should be triaged within one release cycle but don't gate PRs)
   - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
 - **`.github/workflows/release.yml`** — auto-generated by cargo-dist v0.31.0. Triggered by tag push (`vX.Y.Z`). Builds 6 targets and produces shell + PowerShell + MSI installers. Do not hand-edit; regenerate via `dist init` after changing `[workspace.metadata.dist]` in `Cargo.toml`.
+- **`.github/workflows/crates-publish.yml`** — runs after successful `CI` workflow runs from pushes to `master`/`main`, checks out the exact CI-tested SHA, skips already-published crate versions, reruns fmt/clippy/tests/package/dry-run with `--locked`, and publishes with the repository Actions secret `CARGO_REGISTRY_TOKEN`.
 
 To reproduce the CI gates locally:
 
@@ -314,10 +318,15 @@ Uses **cargo-dist** (v0.31.0) for fully automated cross-platform releases.
 1. Bump `version` in `Cargo.toml`
 2. Update `CHANGELOG.md` with new version section
 3. Commit with message `release: vX.Y.Z - <summary>`
-4. Create git tag: `git tag vX.Y.Z`
-5. Push commits AND tags: `git push && git push --tags`
+4. Push the commit and wait for `ci.yml` to pass on that exact commit
+5. Confirm `crates-publish.yml` published the new crates.io version from that same SHA or skipped because it already existed
+6. Create git tag: `git tag vX.Y.Z`
+7. Push the single tag explicitly: `git push origin vX.Y.Z`
+8. Wait for the cargo-dist release workflow to publish GitHub Release assets
 
 The tag push triggers GitHub Actions to build all 6 targets (Windows x64, macOS Intel/ARM, Linux x64 glibc/musl, Linux ARM64) and generate shell/PowerShell/MSI installers.
+
+`crates-publish.yml` is separate from generated cargo-dist release automation. It runs only after the `CI` workflow succeeds on `master`/`main`, checks out the exact CI-tested SHA, skips already-published versions, and requires `CARGO_REGISTRY_TOKEN` to publish. `Cargo.lock` is intentionally tracked and included in the package because both local verification and the publish workflow use `cargo publish --locked`.
 
 ### Regenerating CI Workflow
 
@@ -327,7 +336,3 @@ dist init    # Regenerates .github/workflows/release.yml
 ```
 
 Note: The binary is `dist`, not `cargo dist` — it installs as a standalone command.
-
-## Legacy Reference
-
-`TR200-OLD/` contains the original TR-200 bash/PowerShell implementation for format reference.

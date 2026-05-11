@@ -1,7 +1,6 @@
-//! Report generation matching TR-200 format
+//! Report generation for TR-300
 //!
-//! Generates the complete system report using the exact
-//! layout and styling of TR-200 Machine Report.
+//! Generates the complete system report using a compact fixed-width layout.
 
 use std::path::PathBuf;
 
@@ -22,12 +21,12 @@ pub fn generate(info: &SystemInfo, config: &Config) -> String {
     }
 }
 
-/// Generate table format output (TR-200 style)
+/// Generate table format output
 fn generate_table(info: &SystemInfo, config: &Config) -> String {
     let chars = config.box_chars();
     let (bar_filled, bar_empty) = config.bar_chars();
 
-    // Use fixed column widths matching TR-200
+    // Use fixed column widths for stable terminal alignment.
     let label_width = 12; // "LAST LOGIN" is 10 chars, use 12 for padding
     let data_width = MAX_DATA_WIDTH;
 

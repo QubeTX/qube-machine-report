@@ -1,6 +1,6 @@
 //! Rendering modules for TR-300
 //!
-//! Provides table and bar graph rendering matching the TR-200 format.
+//! Provides table and bar graph rendering for fixed-width terminal output.
 
 pub mod bar;
 pub mod table;

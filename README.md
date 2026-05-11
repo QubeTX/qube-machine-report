@@ -6,14 +6,14 @@
 
 Cross-platform system information report with Unicode box-drawing tables.
 
-TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground up in Rust for performance, reliability, and beautiful terminal output.
+TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest published release: [v3.14.1](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.1) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, and MSI installers.
+Latest published release: [v3.14.2](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.2) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths.
 
 ## Features
 
 - Cross-platform support (Windows, macOS, Linux)
-- Beautiful Unicode box-drawing tables (TR-200 format)
+- Beautiful Unicode box-drawing tables with ASCII fallback
 - ASCII fallback mode for legacy terminals
 - Bar graphs for CPU load, memory, and disk usage
 - VPN-aware network information on Windows — `MACHINE IP` and `DNS IP` rows reflect the active default route (`GetBestInterfaceEx`-driven) so Tailscale / WireGuard / OpenVPN / corporate VPN tunnels are reported correctly instead of a coin-flip pick
@@ -28,10 +28,19 @@ Latest published release: [v3.14.1](https://github.com/QubeTX/qube-machine-repor
 - Auto-save markdown report to Downloads folder on manual runs
 - Fast mode (`--fast`) for sub-second auto-run startup
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
+- Resilient self-update with cargo-first probing and shell/PowerShell installer fallbacks
 - Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
 - Self-installation with shell alias and auto-run
 
 ## Installation
+
+### Cargo
+
+Requires Rust **1.95.0 or later**:
+
+```bash
+cargo install tr-300
+```
 
 ### Shell (macOS/Linux)
 
@@ -54,13 +63,12 @@ Download the latest MSI installer from the [Releases page](https://github.com/Qu
 Requires Rust **1.95.0 or later** (run `rustup update stable` if needed —
 older toolchains will fail with `rustc … is not supported by … tr-300`):
 
-TR-300 is currently distributed through GitHub Releases, not crates.io. Use the
-release installers above for normal installs, or install the published tag from
-Git for development workflows:
+Use the crates.io or release installers above for normal installs. For development
+workflows that need an exact Git tag:
 
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.1
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.2
 ```
 
 ### From Source
@@ -170,6 +178,48 @@ exclusive with each other and with the legacy action flags.
 | `-h, --help` | Print help information |
 | `-V, --version` | Print version information |
 
+## Self-Update
+
+Both action forms update to the latest release:
+
+```bash
+tr300 update
+tr300 --update
+```
+
+The updater runs a probe-and-retry chain so one missing or failing tool does not
+block the update:
+
+1. Checks the latest release on GitHub. If the installed version is current, it
+   exits 0 without changing anything.
+2. Tries `cargo install tr-300 --force` first when `cargo --version` succeeds.
+   If `rustup` is present, it first runs `rustup update stable` best-effort so
+   cargo installs against the current MSRV.
+3. Falls through to the cargo-dist installer for the platform if cargo is absent
+   or fails: `curl | sh` then `wget | sh` on macOS/Linux, `powershell` then
+   `pwsh` on Windows.
+4. Reports every skipped or failed strategy in both terminal and `--json` output.
+
+In `--json` mode, successful updates include the legacy `"method"` field plus a
+precise `"strategy"` value. Failed updates include an `"attempts"` array with each
+strategy result and diagnostic message.
+
+## Release Automation
+
+GitHub Actions handles both release assets and crates.io publishing:
+
+- `CI` runs formatting, clippy, tests, release builds, speed checks, audit, and
+  cargo-dist planning on pushes to the default branch.
+- `Crates.io Publish` runs only after `CI` succeeds for that default-branch
+  commit, checks whether the manifest version is already on crates.io, reruns
+  fmt/clippy/tests/package/dry-run with `--locked`, and publishes `tr-300` only
+  when the repository `CARGO_REGISTRY_TOKEN` Actions secret is configured.
+- `Release` is the cargo-dist workflow triggered by an explicit version tag such
+  as `v3.14.2`; it builds the cross-platform archives and installers.
+
+`Cargo.lock` is tracked so the crates.io publish workflow uses the same resolved
+dependency set that local release verification used.
+
 ## Elevation Tier
 
 TR-300 detects whether it is running with elevated privileges (root on Unix /
@@ -194,12 +244,11 @@ The JSON output exposes this state under top-level keys `elevated` and
 
 Running `tr300 install` or `tr300 --install` will:
 
-1. **Remove legacy configurations** (TR-100 and TR-200 auto-run blocks)
-2. **Remove existing TR-300 configuration** (if present)
-3. Add a `report` alias so you can type `report` instead of `tr300`
-4. Configure auto-run on new interactive shell sessions
+1. **Remove existing TR-300 configuration** (if present)
+2. Add a `report` alias so you can type `report` instead of `tr300`
+3. Configure auto-run on new interactive shell sessions
 
-This means you can safely run `tr300 install` multiple times or upgrade from TR-100/TR-200 without manual cleanup.
+This means you can safely run `tr300 install` multiple times without duplicating profile blocks.
 
 **On Unix/macOS:** Modifies `~/.bashrc` and/or `~/.zshrc`
 
@@ -255,7 +304,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the PolyForm Noncommercial License 1.0.0 - see the [LICENSE](LICENSE) file for details. This license permits noncommercial use, personal use, and use by charitable organizations, educational institutions, and government agencies.
-
-## Legacy
-
-TR-300 is the successor to [TR-200 Machine Report](TR200-OLD/). The legacy implementation is preserved in the `TR200-OLD` directory for reference.

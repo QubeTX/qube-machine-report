@@ -221,7 +221,7 @@ These were investigated during the planning research and **deliberately not adde
 
 - **Built-in pager / scrollback viewer** — modern terminals (Windows Terminal, iTerm2, Wezterm, Konsole, Alacritty, Ghostty) all have native scrollback. Auto-run depends on the prompt being free immediately. **Hard rejected by the user.**
 - **Thermal sensors** — opaque on macOS (`machdep.xcpm.cpu_thermal_level` is undocumented and Intel-only), fragile on Linux hwmon (thermal zone naming inconsistent across boards), gone from Windows in modern drivers.
-- **Top processes by CPU/RAM** — blows up the table layout, doesn't fit the 51-col TR-200 aesthetic.
+- **Top processes by CPU/RAM** — blows up the compact 51-column table layout.
 - **NIC link speed** — ethtool may not be installed on Linux; signal-to-noise is low for a one-line report.
 - **Disk SMART data** — requires elevated privileges on most platforms; smartctl + nvme-cli are platform-fragile.
 - **Package count** — unportable; nothing comparable across pacman/apt/dnf/brew/winget/snap/flatpak.

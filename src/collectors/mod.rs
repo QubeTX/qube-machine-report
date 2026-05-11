@@ -23,7 +23,7 @@ pub enum CollectMode {
     Fast,
 }
 
-/// Collected system information matching TR-200 fields
+/// Collected system information used by TR-300 reports
 #[derive(Debug, Clone)]
 pub struct SystemInfo {
     // OS Section
@@ -237,7 +237,7 @@ impl SystemInfo {
         format!("{:.2}", gib)
     }
 
-    /// Get disk usage string in TR-200 format
+    /// Get disk usage string for table output
     pub fn disk_usage_str(&self) -> String {
         format!(
             "{}/{} GB [{:.2}%]",
@@ -247,7 +247,7 @@ impl SystemInfo {
         )
     }
 
-    /// Get memory usage string in TR-200 format
+    /// Get memory usage string for table output
     pub fn memory_usage_str(&self) -> String {
         format!(
             "{}/{} GiB [{:.1}%]",
@@ -257,7 +257,7 @@ impl SystemInfo {
         )
     }
 
-    /// Get cores string in TR-200 format
+    /// Get cores string for table output
     pub fn cores_str(&self) -> String {
         if let Some(sockets) = self.sockets {
             format!("{} vCPU(s) / {} Socket(s)", self.cores, sockets)

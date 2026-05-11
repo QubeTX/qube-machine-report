@@ -1,7 +1,6 @@
 //! Bar graph rendering
 //!
-//! Creates visual bar graphs using Unicode block characters
-//! matching the TR-200 format.
+//! Creates visual bar graphs using Unicode block characters or ASCII fallback.
 
 /// Render a bar graph with the given percentage and width
 ///

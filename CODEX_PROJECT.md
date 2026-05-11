@@ -2,21 +2,21 @@
 
 ## TL;DR
 
-TR-300 is a Rust CLI machine-report tool and successor to the legacy TR-200 shell/PowerShell implementation. The repo currently exposes a `tr300` binary and `tr_300` library, with cross-platform collectors, table/JSON/markdown rendering, install/uninstall helpers, and self-update support.
+TR-300 is a standalone Rust CLI machine-report tool. The repo currently exposes a `tr300` binary and `tr_300` library, with cross-platform collectors, table/JSON/markdown rendering, install/uninstall helpers, and self-update support.
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: v3.14.1 is published. This patch release
-contains no new runtime behavior beyond the already-green v3.14.x
-cross-platform stability/action-syntax work; it bumps package metadata and
-republishes after the CI fix-forward was verified.
+Current implementation status: v3.14.2 is in progress. This patch release
+prepares the crate for crates.io publication, ports self-update to the ND-style
+probe-and-retry strategy chain, and adds a crates.io publish workflow that runs
+only after GitHub Actions CI succeeds for the default-branch commit.
 
 ## Project Status
 
 - Cargo package: `tr-300`
 - Binary: `tr300`
 - Library import path: `tr_300`
-- Current version: `3.14.1`
+- Current version: `3.14.2`
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
 - Primary guide: `AGENTS.md`
 - Companion docs: `CLAUDE.md`, `MASTER_PLAN.md`, `TESTING.md`, `docs/architecture-decisions.md`
@@ -25,10 +25,12 @@ republishes after the CI fix-forward was verified.
 ## Goals
 
 - Generate a compact machine report across macOS, Linux, and Windows.
-- Keep TR-200-compatible fixed-width table output unless a user explicitly requests a format change.
+- Keep compact fixed-width table output unless a user explicitly requests a format change.
 - Preserve both binary and library APIs when refactoring.
 - Keep fast-mode startup checks lightweight for shell auto-run use.
 - Maintain release reliability across cargo-dist targets and GitHub Actions.
+- Publish new crates.io versions only after the default-branch CI workflow has
+  completed successfully for the exact commit being published.
 
 ## Current Workspace Notes
 
@@ -39,6 +41,15 @@ republishes after the CI fix-forward was verified.
 - `tr300 update`, `tr300 install`, and `tr300 uninstall` are parser-level
   aliases for the legacy action flags. `report update` works through the same
   installed alias path.
+- `tr300 update` uses a cargo-first probe-and-retry chain, then falls back to
+  platform cargo-dist installers (`curl`/`wget` on Unix, `powershell`/`pwsh` on
+  Windows) with per-attempt diagnostics.
+- Release publishing uses two GitHub Actions stages: `Crates.io Publish` runs
+  after successful default-branch `CI` on the exact tested SHA and publishes
+  `tr-300` with `CARGO_REGISTRY_TOKEN`; `Release` runs after the explicit
+  `vX.Y.Z` tag and publishes cargo-dist binary archives/installers.
+- `Cargo.lock` is tracked so local `cargo publish --dry-run --locked` and the
+  GitHub crates.io publish workflow use the same resolved dependency set.
 - `src/collectors/command.rs` is the shared timeout wrapper for optional
   collector subprocesses; new platform probes should use it instead of raw
   `Command::output()`.
@@ -56,6 +67,7 @@ republishes after the CI fix-forward was verified.
 ├── .github
 │   └── workflows
 │       ├── ci.yml
+│       ├── crates-publish.yml
 │       └── release.yml
 ├── .gitignore
 ├── AGENTS.md
@@ -67,36 +79,7 @@ republishes after the CI fix-forward was verified.
 ├── LICENSE
 ├── MASTER_PLAN.md
 ├── README.md
-├── RUST_REWRITE_FEASIBILITY.md
 ├── TESTING.md
-├── TR200-OLD
-│   ├── .firecrawl
-│   │   ├── upstream-machine_report.md
-│   │   └── upstream-readme.md
-│   ├── .npmignore
-│   ├── AGENTS.md
-│   ├── CLAUDE.md
-│   ├── LICENSE
-│   ├── README.md
-│   ├── WINDOWS
-│   │   ├── README_WINDOWS.md
-│   │   ├── TR-200-MachineReport.ps1
-│   │   ├── Unix Shell to PowerShell Conversion Guide.md
-│   │   ├── build_tr200_exe.ps1
-│   │   ├── compass_artifact_wf-0b886add-c632-4a26-a15f-1ab2d9cbae20_text_markdown.md
-│   │   ├── install_windows.ps1
-│   │   └── unix_linux shell scripts_files -> converted to.md
-│   ├── bin
-│   │   └── tr200.js
-│   ├── dist
-│   │   └── .gitignore
-│   ├── install.sh
-│   ├── install_linux.sh
-│   ├── install_mac.command
-│   ├── machine_report.sh
-│   ├── package.json
-│   └── tools
-│       └── package_release.sh
 ├── build.rs
 ├── docs
 │   └── architecture-decisions.md

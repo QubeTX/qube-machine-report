@@ -1,7 +1,6 @@
 //! Windows installation utilities
 //!
 //! Adds TR-300 alias and auto-run to PowerShell profile.
-//! Removes legacy TR-100 and TR-200 configurations before installing.
 
 use crate::error::{AppError, Result};
 use std::env;
@@ -12,19 +11,6 @@ use std::process::Command;
 /// Marker comments for PowerShell profile modifications
 const MARKER_START: &str = "# TR-300 Machine Report";
 const MARKER_END: &str = "# End TR-300";
-
-/// TR-100 legacy markers (PowerShell scripts)
-const TR100_MARKERS: &[&str] = &[
-    "# Run Machine Report only when in interactive mode",
-    "# TR-100 Machine Report",
-];
-
-/// TR-200 delimited block markers
-const TR200_START: &str = "# >>> TR-200 Machine Report configuration >>>";
-const TR200_END: &str = "# <<< TR-200 Machine Report configuration <<<";
-
-/// TR-200 npm-style marker
-const TR200_NPM: &str = "# TR-200 Machine Report (npm) - auto-run";
 
 /// PowerShell profile content to add
 const POWERSHELL_ADDITIONS: &str = r#"# TR-300 Machine Report
@@ -105,8 +91,7 @@ pub fn install() -> Result<()> {
         String::new()
     };
 
-    // Remove legacy configurations and existing TR-300
-    let cleaned_content = remove_legacy_blocks(&existing_content);
+    let cleaned_content = remove_tr300_block(&existing_content);
 
     // Append TR-300 config to cleaned content
     let new_content = if cleaned_content.trim().is_empty() {
@@ -184,23 +169,12 @@ pub fn uninstall() -> Result<()> {
     Ok(())
 }
 
-/// Remove legacy TR-100, TR-200, and existing TR-300 blocks from content
-fn remove_legacy_blocks(content: &str) -> String {
+/// Remove existing TR-300 blocks from content
+fn remove_tr300_block(content: &str) -> String {
     let mut lines: Vec<&str> = content.lines().collect();
 
     // Remove TR-300 blocks (between MARKER_START and MARKER_END)
     lines = remove_delimited_block(&lines, MARKER_START, MARKER_END);
-
-    // Remove TR-200 delimited blocks (between >>> and <<<)
-    lines = remove_delimited_block(&lines, TR200_START, TR200_END);
-
-    // Remove TR-200 npm-style blocks
-    lines = remove_marker_block(&lines, TR200_NPM);
-
-    // Remove TR-100 blocks - these use if...} blocks in PowerShell
-    for marker in TR100_MARKERS {
-        lines = remove_if_block(&lines, marker);
-    }
 
     // Clean up multiple consecutive blank lines
     let mut result = Vec::new();
@@ -243,64 +217,6 @@ fn remove_delimited_block<'a>(lines: &[&'a str], start: &str, end: &str) -> Vec<
         if !in_block {
             result.push(*line);
         }
-    }
-
-    result
-}
-
-/// Remove a block starting with a marker and ending at next blank line
-fn remove_marker_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
-    let mut result = Vec::new();
-    let mut skip_until_blank = false;
-
-    for line in lines {
-        if line.contains(marker) {
-            skip_until_blank = true;
-            continue;
-        }
-        if skip_until_blank {
-            if line.trim().is_empty() {
-                skip_until_blank = false;
-            }
-            continue;
-        }
-        result.push(*line);
-    }
-
-    result
-}
-
-/// Remove an if...} block that starts with a marker comment (PowerShell style)
-fn remove_if_block<'a>(lines: &[&'a str], marker: &str) -> Vec<&'a str> {
-    let mut result = Vec::new();
-    let mut skip_if_block = false;
-    let mut brace_depth = 0;
-
-    for line in lines {
-        if line.contains(marker) {
-            skip_if_block = true;
-            continue;
-        }
-        if skip_if_block {
-            // Skip brace counting in comment lines to avoid miscounting
-            let trimmed = line.trim();
-            if !trimmed.starts_with('#') {
-                for ch in line.chars() {
-                    match ch {
-                        '{' => brace_depth += 1,
-                        '}' if brace_depth > 0 => {
-                            brace_depth -= 1;
-                            if brace_depth == 0 {
-                                skip_if_block = false;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            continue;
-        }
-        result.push(*line);
     }
 
     result

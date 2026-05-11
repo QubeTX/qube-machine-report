@@ -1,7 +1,7 @@
 //! Configuration management for TR-300
 //!
-//! Handles configuration constants and runtime settings
-//! matching the TR-200 output format.
+//! Handles configuration constants and runtime settings for the fixed-width
+//! terminal report.
 
 use crate::error::{AppError, Result};
 use std::path::PathBuf;

@@ -25,10 +25,11 @@ pub enum Action {
     version,
     about = "TR-300 Machine Report - Cross-platform system information"
 )]
-#[command(long_about = "TR-300 is the successor to TR-200 Machine Report.\n\n\
-    It displays comprehensive system information including OS, network, CPU, \n\
+#[command(
+    long_about = "TR-300 displays comprehensive system information including OS, network, CPU, \n\
     memory, disk usage, and session details in a formatted table.\n\n\
-    After installation with --install, you can also use the 'report' alias.")]
+    After installation with --install, you can also use the 'report' alias."
+)]
 pub struct Cli {
     /// Optional action command: update, install, or uninstall
     #[arg(value_enum, conflicts_with_all = ["update", "install", "uninstall"])]

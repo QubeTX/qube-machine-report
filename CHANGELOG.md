@@ -7,13 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.2] - 2026-05-11
+
+### Added
+- **2026-05-11 — crates.io publication path.** Prepared `tr-300` for
+  crates.io publication, documented `cargo install tr-300`, and tightened the
+  Cargo package include list so published crates contain only the release
+  manifest/lockfile, source, tests, build script, README, LICENSE, man page,
+  and packaging assets.
+- **2026-05-11 — CI-gated crates.io publishing.** Added `Crates.io Publish`,
+  a GitHub Actions workflow that runs only after the `CI` workflow succeeds
+  for a default-branch push, checks out the exact CI-tested SHA, skips versions
+  already present on crates.io, reruns fmt/clippy/tests/package/dry-run, and
+  publishes with the repository `CARGO_REGISTRY_TOKEN`.
+- **2026-05-11 — project identity cleanup.** Removed embedded unrelated
+  historical implementation files and public lineage wording so TR-300 is
+  documented as a standalone QubeTX project.
+
 ### Changed
-- **2026-05-11 — README release docs refresh.** Added the published
-  v3.14.1 release link, clarified that GitHub Releases are the current
-  distribution path while crates.io is not published, documented the
-  `cargo install --git ... --tag v3.14.1` developer path, and narrowed
-  README wording for Windows session and BitLocker behavior to match the
-  implemented surface.
+- **2026-05-11 — ND-style self-update strategy chain.** Replaced path-based
+  updater method detection with a probe-and-retry chain matching ND-300:
+  cargo first when `cargo` is invokable, then `curl`/`wget` shell installers on
+  Unix or `powershell`/`pwsh` on Windows. Failures now fall through to the next
+  strategy and surface per-attempt diagnostics in terminal and JSON output.
+- **2026-05-11 — update JSON diagnostics.** `tr300 update --json` now includes
+  a precise `"strategy"` on successful updates and an `"attempts"` array on
+  failure while preserving the legacy `"method"` field.
+- **2026-05-11 — README release docs refresh.** Updated install and release
+  documentation for v3.14.2, documented all supported install methods
+  (`cargo install tr-300`, shell installer, PowerShell installer, MSI, exact
+  Git tag, and source builds), described the automatic crates.io workflow, and
+  narrowed README wording for Windows session and BitLocker behavior to match
+  the implemented surface.
+- **2026-05-11 — release workflow docs.** Updated local repo agent guides,
+  project notes, and the global Codex agent guide with the v3.14.2 release
+  workflow: bump version, keep changelog/docs current, run local release gates,
+  push the default branch, wait for CI, let crates.io publishing run from the
+  CI-tested SHA, then push the explicit cargo-dist tag for installers.
+- **2026-05-11 — lockfile tracking.** Started tracking `Cargo.lock` so
+  `cargo publish --locked` and the GitHub publishing workflow use the same
+  resolved dependency set that local verification used.
 
 ## [3.14.1] - 2026-05-11
 
@@ -727,7 +760,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.0.1] - 2026-02-03
 
 ### Added
-- Legacy version cleanup during installation: `tr300 --install` now automatically removes TR-100 and TR-200 configurations before installing TR-300
 - Running `--install` multiple times is now idempotent (removes existing TR-300 config and reinstalls fresh)
 
 ### Changed
@@ -755,12 +787,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NSIS installer for Windows GUI installation
 
 ### Changed
-- Renamed from TR-200 to TR-300 to reflect major version bump
-- Binary name changed from `tr200` to `tr300`
+- Binary name set to `tr300`
 - Output format completely redesigned with modern Unicode tables
-
-### Deprecated
-- Legacy TR-200 bash/PowerShell implementation moved to `TR200-OLD/`
 
 ### Removed
 - Shell script implementation (replaced by native Rust)
