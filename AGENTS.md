@@ -9,14 +9,14 @@ Companion docs:
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 
-Last verified against source: 2026-05-10
+Last verified against source: 2026-05-11
 
 ## Project Snapshot
 
 - Project: TR-300, the Rust successor to TR-200 Machine Report
 - Cargo package name: `tr-300`
 - Library import path: `tr_300`
-- Current version: `3.14.0` (`Cargo.toml`)
+- Current version: `3.14.1` (`Cargo.toml`)
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`

@@ -112,6 +112,22 @@ for runtime validation.
 - **Deferred** — admin-only Windows RDP history is not implemented in this pass;
   current Windows elevation wording is limited to BitLocker status.
 
+### v3.14.1 — 2026-05-11
+
+Release confidence patch after the v3.14.0 CI fix-forward. No new runtime
+collector or renderer behavior.
+
+- **Latest pre-bump CI verification** — `master` CI run 25643018578 passed on
+  commit `5709f9a` across fmt, clippy, tests, release builds, security audit,
+  dist plan, and auto-run speed gates on macOS ARM, Linux, and Windows.
+- **Local gate before release prep** — `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets --workspace -- -D warnings`, and
+  `cargo test --workspace --all-targets` passed on this Mac before bumping
+  v3.14.1.
+- **Release gates to run before tagging** — repeat fmt, clippy, test, and
+  release build on the v3.14.1 commit; push `master`; wait for CI; then tag
+  and verify release.yml publishes the standard cargo-dist artifacts.
+
 ### v3.11.0 — 2026-04-27
 
 Windows accuracy + BitLocker (PR #4). Verified on Windows 11 25H2 (build 26200.8246), unelevated user session:

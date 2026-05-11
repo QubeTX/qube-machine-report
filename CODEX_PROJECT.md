@@ -6,16 +6,17 @@ TR-300 is a Rust CLI machine-report tool and successor to the legacy TR-200 shel
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: the working tree is on the cross-platform
-stability/action-syntax pass, adding no-double-dash actions, bounded collector
-subprocess helpers, conditional platform rows, and parser/fixture coverage.
+Current implementation status: the working tree is preparing the v3.14.1
+patch release. This release contains no new runtime behavior beyond the
+already-green v3.14.x cross-platform stability/action-syntax work; it bumps
+package metadata and republishes after the CI fix-forward was verified.
 
 ## Project Status
 
 - Cargo package: `tr-300`
 - Binary: `tr300`
 - Library import path: `tr_300`
-- Current version: `3.14.0`
+- Current version: `3.14.1`
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
 - Primary guide: `AGENTS.md`
 - Companion docs: `CLAUDE.md`, `MASTER_PLAN.md`, `TESTING.md`, `docs/architecture-decisions.md`

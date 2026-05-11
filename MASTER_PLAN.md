@@ -5,8 +5,8 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-10 (after v3.14.0 GitHub Release publication)
-**Current version:** 3.14.0
+**Last updated:** 2026-05-11 (v3.14.1 release prep)
+**Current version:** 3.14.1
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
 
@@ -41,8 +41,9 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.13.0 | `f34e981` | 2026-04-28 | **Windows polish (PR #5 partial)** — native battery via `GetSystemPowerStatus` with 5-state output model (AC Power / X% Charging / X% Plugged in / X% Discharging / Critical / Low / Unknown — "Plugged in" covers gaming-laptop PSU-undersized AND firmware battery-longevity modes), native socket count via `GetLogicalProcessorInformationEx` (alignment-safe walk via `from_le_bytes`), GPU registry-prefer + `filter_software_gpus()` name filter, PowerShell 7+ detection via `PowerShellCore` registry hive (semver tuple comparison, not string sort), terminal parent-process walk via Toolhelp32 (recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, Antigravity); E.6 admin RDP login history + C.13 batched-PowerShell fallback deferred to a future session |
 | v3.13.1 | `086ef0a` | 2026-04-29 | **Release infrastructure fix (task #54)** — adds `rust-toolchain.toml` at repo root pinning `channel = "1.95"` AND `components = ["rustfmt", "clippy"]`. Resolves `release.yml` failures on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners that shipped with rustc 1.94.1 (below MSRV 1.95 declared in v3.11.1). The auto-generated cargo-dist v0.31.0 release workflow has no rustup setup step; pinning at the workspace level lets rustup auto-install the right toolchain before cargo runs. The components addition was a fix-forward (`086ef0a` superseded `c2e6a65`) — when rustup honors a rust-toolchain.toml it ignores action-level `components:` fields, so listing rustfmt/clippy in the file is required to keep ci.yml's Format + Clippy jobs working. **All 10 release.yml jobs green; v3.13.1 GitHub Release published with 20 assets** (6 platform binaries + MSI + source tarball + shell/PowerShell installers). First successful Release publication since v3.10.0. |
 | v3.14.0 | `54dbae1` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
+| v3.14.1 | pending | 2026-05-11 | **Release confidence patch** — no new runtime behavior; bumps package metadata for a patch release after the v3.14.0 CI warning-as-error fix-forward and follow-up release-publication docs were verified green on `master`. |
 
-**Tag status (as of 2026-05-10):**
+**Tag status (as of 2026-05-11):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
 - `v3.11.0` (`3a252df`): NOT tagged.
 - `v3.11.1` (`22f2002`): NOT tagged.
@@ -50,10 +51,11 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 - `v3.13.0` (`f34e981`): tagged + pushed; release.yml run failed identically (same rustc 1.94.1 < MSRV 1.95 mismatch on 3/6 targets); no GitHub Release artifact published. Run 25039719372.
 - `v3.13.1` (`086ef0a`): tagged + pushed; all 10 release.yml jobs succeeded (6 build-local-artifacts + plan + build-global-artifacts + host + announce); GitHub Release published with the standard 6 binaries + Windows MSI + shell/PowerShell installer one-liners + source tarball. README installer one-liner now functional for the first time since v3.10.0.
 - `v3.14.0` (`54dbae1`): tagged + pushed; CI run 25642712712 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; release.yml run 25642853066 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
+- `v3.14.1`: release prep in progress. Push the release commit, wait for `master` CI to go green, then push tag `v3.14.1` and verify release.yml.
 
 The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install the latest published release, which subsumes them.
 
-### Live behavior changes already on master (as of v3.14.0)
+### Live behavior changes already on master (as of v3.14.1)
 
 After a fresh `git pull` and `cargo build --release`, you'll see (verified on Windows 11 25H2 build 26200.8246, unelevated user session, Alienware on AC):
 
@@ -92,7 +94,8 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 1. ~~**Watch CI on the v3.13.1 commit, then tag.**~~ Done. CI run 25096685639 green on `086ef0a`; tag `v3.13.1` pushed; release.yml run 25096833278 succeeded across all 10 jobs; GitHub Release published with 20 assets.
 2. ~~**Investigate cargo-dist regression** (task #54)~~ — **done in v3.13.1.** The fix turned out to be smaller than the original plan suggested: `rust-toolchain.toml` at repo root with both `channel` and `components`, no cargo-dist version bump, no migration to the astral-sh fork.
 3. ~~**Ship v3.14.0**~~ — done. `master` pushed, CI green, tag `v3.14.0` pushed, release.yml green, GitHub Release published.
-4. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
+4. **Ship v3.14.1** — push the release commit, wait for `master` CI to go green, tag `v3.14.1`, push that exact tag, and verify release.yml publishes the standard 20 cargo-dist assets.
+5. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
 
 ---
 

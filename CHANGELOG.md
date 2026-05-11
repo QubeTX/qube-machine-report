@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.1] - 2026-05-11
+
+### Fixed
+- **2026-05-11 — Release confidence patch after CI fix-forward.** Bumped
+  the patch version after confirming the latest `master` CI run was green
+  and local `fmt` / `clippy -D warnings` / test gates passed. This release
+  republishes the v3.14.x line after the warning-clean cross-platform
+  collector fixes from `54dbae1` and the v3.14.0 release-publication
+  documentation from `5709f9a`.
+
+### Internal
+- **2026-05-11 — Release metadata refresh.** Updated package metadata,
+  project status docs, and generated man-page version text for v3.14.1.
+
 ## [3.14.0] - 2026-05-10
 
 ### Added
