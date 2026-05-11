@@ -6,10 +6,10 @@ TR-300 is a Rust CLI machine-report tool and successor to the legacy TR-200 shel
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: the working tree is preparing the v3.14.1
-patch release. This release contains no new runtime behavior beyond the
-already-green v3.14.x cross-platform stability/action-syntax work; it bumps
-package metadata and republishes after the CI fix-forward was verified.
+Current implementation status: v3.14.1 is published. This patch release
+contains no new runtime behavior beyond the already-green v3.14.x
+cross-platform stability/action-syntax work; it bumps package metadata and
+republishes after the CI fix-forward was verified.
 
 ## Project Status
 

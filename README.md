@@ -8,6 +8,8 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground up in Rust for performance, reliability, and beautiful terminal output.
 
+Latest published release: [v3.14.1](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.1) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, and MSI installers.
+
 ## Features
 
 - Cross-platform support (Windows, macOS, Linux)
@@ -16,8 +18,8 @@ TR-300 is the modern successor to TR-200 Machine Report, rebuilt from the ground
 - Bar graphs for CPU load, memory, and disk usage
 - VPN-aware network information on Windows — `MACHINE IP` and `DNS IP` rows reflect the active default route (`GetBestInterfaceEx`-driven) so Tailscale / WireGuard / OpenVPN / corporate VPN tunnels are reported correctly instead of a coin-flip pick
 - Hypervisor / virtualization detection (CPUID-based; disambiguates Win11 VBS from real VMs)
-- Session info with last-login tracking (RDP-aware on Windows via WTS APIs)
-- Disk encryption status (BitLocker on Win11 Device Encryption laptops)
+- Session info with last-login/current-session tracking; Windows uses WTS APIs with a boot-time fallback
+- Disk encryption status (BitLocker on Windows when readable)
 - Fast Startup-aware uptime on Windows — when the kernel session age and the WMI cold-boot time diverge by >1h (typical on Win10/Win11 laptops with `HiberbootEnabled`), the `UPTIME` row renders both as `9d 4h 12m (session: 7h 14m)`
 - 5-state battery awareness on Windows — distinguishes `AC Power` (plugged in, fully topped up), `X% (Charging)`, `X% (Plugged in)` (gaming-laptop case where peak GPU draw exceeds the brick wattage, OR firmware-limited charging modes like ThinkPad battery longevity), `X% (Discharging)`, plus `Critical` / `Low` overrides
 - Smart terminal detection on Windows — env-var pre-checks (`WT_SESSION`, `TERM_PROGRAM`, `CURSOR_TRACE_ID`) then a parent-process walk via Toolhelp32 that recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, and Antigravity even when env vars are absent
@@ -47,14 +49,18 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/QubeTX/qube-machin
 
 Download the latest MSI installer from the [Releases page](https://github.com/QubeTX/qube-machine-report/releases).
 
-### Cargo
+### Cargo from Git
 
 Requires Rust **1.95.0 or later** (run `rustup update stable` if needed —
 older toolchains will fail with `rustc … is not supported by … tr-300`):
 
+TR-300 is currently distributed through GitHub Releases, not crates.io. Use the
+release installers above for normal installs, or install the published tag from
+Git for development workflows:
+
 ```bash
 rustup update stable
-cargo install tr-300
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.1
 ```
 
 ### From Source
@@ -215,10 +221,13 @@ cargo build
 cargo build --release
 
 # Run tests
-cargo test
+cargo test --workspace --all-targets
 
 # Run clippy
-cargo clippy
+cargo clippy --all-targets --workspace -- -D warnings
+
+# Check formatting
+cargo fmt --all -- --check
 
 # Run with arguments
 cargo run -- --ascii

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **2026-05-11 — README release docs refresh.** Added the published
+  v3.14.1 release link, clarified that GitHub Releases are the current
+  distribution path while crates.io is not published, documented the
+  `cargo install --git ... --tag v3.14.1` developer path, and narrowed
+  README wording for Windows session and BitLocker behavior to match the
+  implemented surface.
+
 ## [3.14.1] - 2026-05-11
 
 ### Fixed
@@ -20,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 - **2026-05-11 — Release metadata refresh.** Updated package metadata,
   project status docs, and generated man-page version text for v3.14.1.
+- **2026-05-11 — Release publication status.** Recorded tag commit
+  `3328a8e`, CI run 25645894617, release run 25645999755, and the 20
+  published cargo-dist assets for the v3.14.1 GitHub Release.
 
 ## [3.14.0] - 2026-05-10
 

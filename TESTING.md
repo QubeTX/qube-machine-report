@@ -124,9 +124,19 @@ collector or renderer behavior.
   `cargo clippy --all-targets --workspace -- -D warnings`, and
   `cargo test --workspace --all-targets` passed on this Mac before bumping
   v3.14.1.
-- **Release gates to run before tagging** — repeat fmt, clippy, test, and
-  release build on the v3.14.1 commit; push `master`; wait for CI; then tag
-  and verify release.yml publishes the standard cargo-dist artifacts.
+- **Release commit local gates** — repeated `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets --workspace -- -D warnings`,
+  `cargo test --workspace --all-targets`, and
+  `cargo build --release --workspace` on the v3.14.1 commit. Runtime smoke
+  also passed: `./target/release/tr300 --version` printed `tr300 3.14.1`,
+  and `./target/release/tr300 --fast --json | python3 -m json.tool` parsed.
+- **CI verification** — `master` CI run 25645894617 passed on commit
+  `3328a8e` across fmt, clippy, tests, release builds, security audit, dist
+  plan, and auto-run speed gates on macOS ARM, Linux, and Windows.
+- **Release verification** — release.yml run 25645999755 passed plan, six
+  target artifact builds, global artifacts, host, and announce jobs. The
+  v3.14.1 GitHub Release is non-draft, non-prerelease, and published with
+  20 cargo-dist assets.
 
 ### v3.11.0 — 2026-04-27
 
