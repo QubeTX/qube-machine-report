@@ -5,8 +5,8 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-11 (v3.14.1 release published)
-**Current version:** 3.14.1
+**Last updated:** 2026-05-11 (v3.14.2 release + crates.io publication completed)
+**Current version:** 3.14.2
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
 
@@ -42,6 +42,7 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.13.1 | `086ef0a` | 2026-04-29 | **Release infrastructure fix (task #54)** — adds `rust-toolchain.toml` at repo root pinning `channel = "1.95"` AND `components = ["rustfmt", "clippy"]`. Resolves `release.yml` failures on `x86_64-pc-windows-msvc` + `x86_64-unknown-linux-gnu` + `aarch64-unknown-linux-gnu` runners that shipped with rustc 1.94.1 (below MSRV 1.95 declared in v3.11.1). The auto-generated cargo-dist v0.31.0 release workflow has no rustup setup step; pinning at the workspace level lets rustup auto-install the right toolchain before cargo runs. The components addition was a fix-forward (`086ef0a` superseded `c2e6a65`) — when rustup honors a rust-toolchain.toml it ignores action-level `components:` fields, so listing rustfmt/clippy in the file is required to keep ci.yml's Format + Clippy jobs working. **All 10 release.yml jobs green; v3.13.1 GitHub Release published with 20 assets** (6 platform binaries + MSI + source tarball + shell/PowerShell installers). First successful Release publication since v3.10.0. |
 | v3.14.0 | `54dbae1` | 2026-05-10 | **Cross-platform stability + action syntax** — adds positional actions (`tr300 update/install/uninstall`, inherited by the `report` alias), bounded collector subprocess helpers, conditional model/core-topology/motherboard/BIOS/RAM/ZFS rows, additive nullable JSON keys, macOS/Linux accuracy improvements, Windows batched PowerShell WMI-failure fallback, fixed-width/JSON/markdown hardening, and documentation cleanup that removes unimplemented Windows RDP-history promises. |
 | v3.14.1 | `3328a8e` | 2026-05-11 | **Release confidence patch** — no new runtime behavior; bumps package metadata for a patch release after the v3.14.0 CI warning-as-error fix-forward and follow-up release-publication docs were verified green on `master`. |
+| v3.14.2 | `a6c3841` | 2026-05-11 | **Crates.io + resilient updater release** — publishes the `tr-300` crate, tracks `Cargo.lock`, adds CI-gated crates.io publishing after default-branch CI, ports self-update to a cargo-first probe-and-retry strategy chain, documents all install paths, and removes unrelated historical implementation files/references. |
 
 **Tag status (as of 2026-05-11):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
@@ -52,10 +53,11 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 - `v3.13.1` (`086ef0a`): tagged + pushed; all 10 release.yml jobs succeeded (6 build-local-artifacts + plan + build-global-artifacts + host + announce); GitHub Release published with the standard 6 binaries + Windows MSI + shell/PowerShell installer one-liners + source tarball. README installer one-liner now functional for the first time since v3.10.0.
 - `v3.14.0` (`54dbae1`): tagged + pushed; CI run 25642712712 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; release.yml run 25642853066 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
 - `v3.14.1` (`3328a8e`): tagged + pushed; CI run 25645894617 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; release.yml run 25645999755 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
+- `v3.14.2` (`a6c3841`): tagged + pushed; CI run 25647466576 succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; crates-publish run 25647553585 published `tr-300` 3.14.2 to crates.io after rerunning fmt/clippy/tests/package/dry-run; release.yml run 25647597021 succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 20 assets.
 
 The historical untagged versions (v3.11.0, v3.11.1) are documentation-only; users should install the latest published release, which subsumes them.
 
-### Live behavior changes already on master (as of v3.14.1)
+### Live behavior changes already on master (as of v3.14.2)
 
 After a fresh `git pull` and `cargo build --release`, you'll see (verified on Windows 11 25H2 build 26200.8246, unelevated user session, Alienware on AC):
 
@@ -77,6 +79,14 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 - `--fast` mode never shows the footer (auto-run safety)
 - JSON output gains `schema_version: 1`, `elevated`, `elevation_unlocks_more`, `session.encryption`, `os.session_uptime_seconds`
 - Positional actions now work without double-dash syntax: `tr300 update`, `tr300 install`, and `tr300 uninstall`. Existing `--update`, `--install`, and `--uninstall` remain supported.
+- `tr300 update` now uses a cargo-first probe-and-retry strategy chain instead
+  of executable-path install detection: `cargo install tr-300 --force` when
+  `cargo --version` succeeds, then `curl`/`wget` shell installers on Unix or
+  `powershell`/`pwsh` installers on Windows. JSON update output preserves
+  legacy `"method"` and adds precise `"strategy"` or failed `"attempts"`.
+- Users can install from crates.io with `cargo install tr-300`; GitHub Actions
+  automatically publishes future crate versions after successful default-branch
+  CI using `.github/workflows/crates-publish.yml`.
 - Reports now render optional platform rows only when populated: `MODEL`, `CPU TOPOLOGY`, `MOTHERBOARD`, `BIOS`, `RAM SLOTS`, and `ZFS HEALTH`. Matching JSON keys are additive nullable fields under schema version 1.
 - Collector subprocesses use bounded timeouts and degrade missing, hung, or malformed platform data to omitted rows / `null` values instead of blocking report generation.
 
@@ -95,7 +105,8 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 2. ~~**Investigate cargo-dist regression** (task #54)~~ — **done in v3.13.1.** The fix turned out to be smaller than the original plan suggested: `rust-toolchain.toml` at repo root with both `channel` and `components`, no cargo-dist version bump, no migration to the astral-sh fork.
 3. ~~**Ship v3.14.0**~~ — done. `master` pushed, CI green, tag `v3.14.0` pushed, release.yml green, GitHub Release published.
 4. ~~**Ship v3.14.1**~~ — done. `master` pushed, CI green, tag `v3.14.1` pushed, release.yml green, GitHub Release published.
-5. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
+5. ~~**Ship v3.14.2 + crates.io**~~ — done. `master` pushed, CI green, crates.io publish workflow green, tag `v3.14.2` pushed, release.yml green, GitHub Release published.
+6. Next functional work: task #58 E.6 admin-only RDP history, only from an elevated Windows validation session.
 
 ---
 

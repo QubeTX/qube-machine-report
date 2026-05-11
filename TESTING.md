@@ -138,6 +138,37 @@ collector or renderer behavior.
   v3.14.1 GitHub Release is non-draft, non-prerelease, and published with
   20 cargo-dist assets.
 
+### v3.14.2 — 2026-05-11
+
+Crates.io publication, ND-style updater strategy chain, install/release docs,
+and project identity cleanup. Runtime report collection/rendering behavior is
+unchanged outside `tr300 update`.
+
+- **Local release gates** — `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets --workspace -- -D warnings`,
+  `cargo test --workspace --all-targets`, `cargo package --locked --list`,
+  `cargo publish --dry-run --locked`, and `~/.cargo/bin/dist plan` passed on
+  this Mac before publishing. Package list contained 36 release files and
+  excluded `.codex`, `.claude`, `.firecrawl`, `.github`, agent guides, and
+  unrelated historical implementation files.
+- **Update behavior tests** — unit tests cover cargo-first ordering on Unix and
+  Windows, installer fallback ordering when cargo is unavailable, and JSON
+  legacy `"method"` mapping vs precise `"strategy"` values.
+- **CI verification** — `master` CI run 25647466576 passed on commit
+  `a6c3841` across fmt, clippy, tests, release builds, security audit, dist
+  plan, and auto-run speed gates on macOS ARM, Linux, and Windows.
+- **Crates.io verification** — crates-publish run 25647553585 checked the
+  exact CI-tested SHA, reran fmt/clippy/tests/package/dry-run, and published
+  `tr-300` 3.14.2 to crates.io with license
+  `PolyForm-Noncommercial-1.0.0`, binary `tr300`, and rust-version `1.95`.
+  Initial run 25647407638 failed before publishing due the crates.io version
+  check missing a descriptive data-access `User-Agent`; follow-up commit
+  `a6c3841` fixed the workflow.
+- **Release verification** — release.yml run 25647597021 passed plan, six
+  target artifact builds, global artifacts, host, and announce jobs. The
+  v3.14.2 GitHub Release is non-draft, non-prerelease, and published with
+  20 cargo-dist assets.
+
 ### v3.11.0 — 2026-04-27
 
 Windows accuracy + BitLocker (PR #4). Verified on Windows 11 25H2 (build 26200.8246), unelevated user session:

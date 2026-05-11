@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo publish --locked` and the GitHub publishing workflow use the same
   resolved dependency set that local verification used.
 
+### Internal
+- **2026-05-11 — Release publication status.** Published `tr-300` v3.14.2 to
+  crates.io from GitHub Actions after `master` CI run 25647466576 passed on
+  commit `a6c3841`; crates publish run 25647553585 reran fmt, clippy, tests,
+  package list, dry-run publish, and publish successfully. Pushed tag
+  `v3.14.2`; release.yml run 25647597021 published the GitHub Release with 20
+  cargo-dist assets. An initial crates workflow run 25647407638 failed before
+  publishing because the crates.io version check lacked a descriptive
+  data-access `User-Agent`; follow-up commit `a6c3841` fixed that workflow
+  before the successful publish.
+
 ## [3.14.1] - 2026-05-11
 
 ### Fixed

@@ -6,10 +6,12 @@ TR-300 is a standalone Rust CLI machine-report tool. The repo currently exposes 
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: v3.14.2 is in progress. This patch release
-prepares the crate for crates.io publication, ports self-update to the ND-style
+Current implementation status: v3.14.2 is published. This patch release
+published `tr-300` to crates.io, ports self-update to the ND-style
 probe-and-retry strategy chain, and adds a crates.io publish workflow that runs
-only after GitHub Actions CI succeeds for the default-branch commit.
+only after GitHub Actions CI succeeds for the default-branch commit. The
+release tag `v3.14.2` points at commit `a6c3841`; CI run 25647466576,
+crates-publish run 25647553585, and release run 25647597021 all passed.
 
 ## Project Status
 
