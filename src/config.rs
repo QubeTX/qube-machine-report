@@ -126,7 +126,7 @@ impl Config {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| AppError::config("Could not determine config directory"))?;
 
-        Ok(config_dir.join("tr-300").join("config.toml"))
+        Ok(config_dir.join("tr300").join("config.toml"))
     }
 
     /// Get the title to display

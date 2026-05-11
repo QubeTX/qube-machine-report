@@ -14,9 +14,9 @@ Last verified against source: 2026-05-11
 ## Project Snapshot
 
 - Project: TR-300, a standalone Rust machine-report CLI
-- Cargo package name: `tr-300`
-- Library import path: `tr_300`
-- Current version: `3.14.2` (`Cargo.toml`)
+- Cargo package name: `tr300`
+- Library import path: `tr300`
+- Current version: `3.14.3` (`Cargo.toml`)
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -454,7 +454,7 @@ Behavior:
 - strips leading `v` from release tags
 - compares semver-like numeric components
 - builds an ordered probe-and-retry strategy list:
-  - `cargo install tr-300 --force` first when `cargo --version` succeeds
+  - `cargo install tr300 --force` first when `cargo --version` succeeds
   - macOS/Linux fallback: cargo-dist shell installer through `curl`, then `wget`
   - Windows fallback: cargo-dist PowerShell installer through `powershell`, then `pwsh`
 - runs `rustup update stable` best-effort before the cargo strategy when rustup is available
@@ -480,6 +480,8 @@ Release automation uses cargo-dist and GitHub Actions.
 `Cargo.toml` (`[workspace.metadata.dist]`):
 - `cargo-dist-version = "0.31.0"`
 - `ci = "github"`
+- `allow-dirty = ["ci"]` so cargo-dist accepts the checked-in release workflow
+  alias-copy step for v3.14.2 updater compatibility
 - `installers = ["shell", "powershell", "msi"]`
 - targets:
   - `aarch64-apple-darwin`
@@ -508,8 +510,11 @@ Triggers:
 
 ### Installer outputs
 
-- Shell installer (`tr-300-installer.sh`) for macOS/Linux
-- PowerShell installer (`tr-300-installer.ps1`) for Windows
+- Shell installer (`tr300-installer.sh`) for macOS/Linux
+- PowerShell installer (`tr300-installer.ps1`) for Windows
+- Legacy shell/PowerShell aliases (`tr-300-installer.sh`,
+  `tr-300-installer.ps1`) are copied into GitHub Releases for v3.14.2 updater
+  compatibility after the crate name was canonicalized to `tr300`
 - MSI installer for Windows
 
 ### crates.io publishing (`.github/workflows/crates-publish.yml`)
@@ -532,10 +537,10 @@ release.
 
 ### MSI specifics (`wix/main.wxs`)
 
-- Product name: `tr-300`
+- Product name: `tr300`
 - Manufacturer: `Emmett S`
 - Install scope: `perMachine`
-- Default folder under Program Files (`tr-300` with `bin/tr300.exe`)
+- Default folder under Program Files (`tr300` with `bin/tr300.exe`)
 - Optional PATH feature included in MSI feature tree
 - Upgrade/path GUIDs are defined in `Cargo.toml` metadata
 
@@ -560,7 +565,8 @@ release.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
    workflow trigger; an explicit single-tag push is sufficient).
 8. Wait for `.github/workflows/release.yml` to publish the GitHub Release
-   assets and installers.
+   assets and installers, including the `tr300-installer.*` assets and
+   `tr-300-installer.*` compatibility aliases.
 
 After changing `[workspace.metadata.dist]`, regenerate the workflow with:
 
@@ -574,7 +580,7 @@ The binary is `dist`, not `cargo dist`.
 
 The repo pins the toolchain in two places that MUST move in lockstep when MSRV changes:
 
-1. **`Cargo.toml` `rust-version = "1.95"`** — cargo-side declaration. Produces the user-facing `error: package tr-300@X.Y.Z cannot be built because it requires rustc N.M ...` message for users on older toolchains.
+1. **`Cargo.toml` `rust-version = "1.95"`** — cargo-side declaration. Produces the user-facing `error: package tr300@X.Y.Z cannot be built because it requires rustc N.M ...` message for users on older toolchains.
 2. **`rust-toolchain.toml`**:
    ```toml
    [toolchain]

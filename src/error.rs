@@ -1,4 +1,4 @@
-//! Custom error types for tr-300
+//! Custom error types for tr300
 //!
 //! Uses thiserror for ergonomic error definitions with
 //! clear, actionable messages for end users.
@@ -8,7 +8,7 @@ use thiserror::Error;
 /// Result type alias using AppError
 pub type Result<T> = std::result::Result<T, AppError>;
 
-/// Application-level errors for tr-300
+/// Application-level errors for tr300
 #[derive(Error, Debug)]
 pub enum AppError {
     /// Failed to retrieve system information

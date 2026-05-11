@@ -15,15 +15,15 @@ const RELEASES_URL: &str =
 /// Shell installer URL (macOS/Linux).
 #[cfg(not(windows))]
 const SHELL_INSTALLER: &str =
-    "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh";
+    "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh";
 
 /// PowerShell installer URL (Windows).
 #[cfg(windows)]
 const PS_INSTALLER: &str =
-    "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1";
+    "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1";
 
 /// Crate name for cargo install.
-const CRATE_NAME: &str = "tr-300";
+const CRATE_NAME: &str = "tr300";
 
 const MANUAL_INSTALL_URL: &str = "https://github.com/QubeTX/qube-machine-report#installation";
 
@@ -428,7 +428,7 @@ fn build_strategy_list() -> Vec<UpdateStrategy> {
 /// Run `rustup update stable` if rustup is on PATH. Best-effort: any failure is
 /// non-fatal (we let the subsequent `cargo install` surface the real error).
 /// This keeps the user's toolchain in lock-step with whatever Rust version
-/// tr-300's MSRV (Cargo.toml `rust-version`) currently requires.
+/// tr300's MSRV (Cargo.toml `rust-version`) currently requires.
 fn rustup_update_stable_best_effort() {
     if !tool_exists("rustup") {
         return;

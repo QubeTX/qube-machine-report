@@ -8,7 +8,7 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest published release: [v3.14.2](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.2) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths.
+Latest release: [v3.14.3](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.3) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is `tr300`.
 
 ## Features
 
@@ -39,19 +39,19 @@ Latest published release: [v3.14.2](https://github.com/QubeTX/qube-machine-repor
 Requires Rust **1.95.0 or later**:
 
 ```bash
-cargo install tr-300
+cargo install tr300
 ```
 
 ### Shell (macOS/Linux)
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh | sh
 ```
 
 ### PowerShell (Windows)
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr-300-installer.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1 | iex"
 ```
 
 ### Windows Installer (.msi)
@@ -61,14 +61,14 @@ Download the latest MSI installer from the [Releases page](https://github.com/Qu
 ### Cargo from Git
 
 Requires Rust **1.95.0 or later** (run `rustup update stable` if needed —
-older toolchains will fail with `rustc … is not supported by … tr-300`):
+older toolchains will fail with `rustc … is not supported by … tr300`):
 
 Use the crates.io or release installers above for normal installs. For development
 workflows that need an exact Git tag:
 
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.2
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.3
 ```
 
 ### From Source
@@ -192,7 +192,7 @@ block the update:
 
 1. Checks the latest release on GitHub. If the installed version is current, it
    exits 0 without changing anything.
-2. Tries `cargo install tr-300 --force` first when `cargo --version` succeeds.
+2. Tries `cargo install tr300 --force` first when `cargo --version` succeeds.
    If `rustup` is present, it first runs `rustup update stable` best-effort so
    cargo installs against the current MSRV.
 3. Falls through to the cargo-dist installer for the platform if cargo is absent
@@ -213,10 +213,14 @@ GitHub Actions handles both release assets and crates.io publishing:
 - `Crates.io Publish` runs only after `CI` succeeds for that default-branch
   commit, checks whether the manifest version is already on crates.io with a
   descriptive data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run
-  with `--locked`, and publishes `tr-300` only when the repository
+  with `--locked`, and publishes `tr300` only when the repository
   `CARGO_REGISTRY_TOKEN` Actions secret is configured.
 - `Release` is the cargo-dist workflow triggered by an explicit version tag such
-  as `v3.14.2`; it builds the cross-platform archives and installers.
+  as `v3.14.3`; it builds the cross-platform archives and installers. New
+  installer assets use `tr300-installer.*`; the workflow also publishes
+  `tr-300-installer.*` compatibility aliases so v3.14.2 binaries can
+  self-update after the old package name was removed. The cargo-dist config
+  permits that checked-in workflow customization with `allow-dirty = ["ci"]`.
 
 `Cargo.lock` is tracked so the crates.io publish workflow uses the same resolved
 dependency set that local release verification used.

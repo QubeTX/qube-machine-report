@@ -1,6 +1,6 @@
 [package]
-name = "tr-300"
-version = "3.14.2"
+name = "tr300"
+version = "3.14.3"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -76,6 +76,8 @@ lto = "thin"
 cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
+# release.yml intentionally keeps a tiny post-dist alias step for v3.14.2 updater compatibility.
+allow-dirty = ["ci"]
 # The installers to generate for each app
 installers = ["shell", "powershell", "msi"]
 # Target platforms to build apps for (Rust target-triple syntax)

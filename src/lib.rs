@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use tr_300::{collectors::{CollectMode, SystemInfo}, config::Config, report};
+//! use tr300::{collectors::{CollectMode, SystemInfo}, config::Config, report};
 //!
 //! // Full report (default)
 //! let info = SystemInfo::collect().unwrap();

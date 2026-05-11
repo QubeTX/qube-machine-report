@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.3] - 2026-05-11
+
+### Changed
+- **2026-05-11 — canonical crates.io package name.** Renamed the Cargo
+  package from the deleted `tr-300` crate name to the lowercase canonical
+  `tr300` crate name, bumped the release to v3.14.3, and updated the Rust
+  library import path from `tr_300` to `tr300`.
+- **2026-05-11 — update and installer paths.** Updated self-update's cargo
+  strategy to run `cargo install tr300 --force`, changed canonical cargo-dist
+  installer URLs to `tr300-installer.sh` and `tr300-installer.ps1`, and kept
+  legacy `tr-300-installer.*` GitHub Release aliases so v3.14.2 binaries can
+  still fall through from the deleted old Cargo package to the installer
+  fallback.
+- **2026-05-11 — cargo-dist release workflow compatibility.** Marked the
+  cargo-dist CI file as intentionally customized with `allow-dirty = ["ci"]`
+  so the release workflow can keep the small legacy installer alias step
+  without failing the `dist plan` CI gate.
+- **2026-05-11 — documentation alignment.** Refreshed README, local agent
+  guides, project notes, architecture decisions, and the global Codex agent
+  guide so install, release, self-update, library-import, and crates.io
+  publishing instructions consistently point at `tr300`.
+
+### Internal
+- **2026-05-11 — crates.io availability check.** Confirmed the canonical
+  `tr300` package name returned 404 from the crates.io API before publishing,
+  so the v3.14.3 release can recreate the package under the correct name.
+
 ## [3.14.2] - 2026-05-11
 
 ### Added

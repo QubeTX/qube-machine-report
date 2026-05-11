@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-**Crate name:** `tr-300` (hyphenated — used by `cargo install tr-300` and as the library import path `tr_300`)
+**Crate name:** `tr300` (lowercase, no hyphen — used by `cargo install tr300` and as the library import path `tr300`)
 **Binary name:** `tr300` (no hyphen — set via `[[bin]] name = "tr300"`)
 **Convenience alias:** `report` (created by `--install`)
 
@@ -141,7 +141,7 @@ Edit-time rules:
 ### Self-Update (`tr300 update` / `--update`)
 
 `src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and runs an ordered probe-and-retry chain:
-- `cargo install tr-300 --force` first when `cargo --version` succeeds
+- `cargo install tr300 --force` first when `cargo --version` succeeds
 - macOS/Linux fallback: cargo-dist shell installer via `curl`, then `wget`
 - Windows fallback: cargo-dist PowerShell installer via `powershell`, then `pwsh`
 
@@ -149,7 +149,7 @@ Do not restore executable-path detection. cargo-dist installers can place binari
 
 `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json` emit a single JSON object with `current_version`, `latest_version`, `update_available`, and `success`. Successful updates include legacy `"method"` plus precise `"strategy"`; failures include an `"attempts"` array. Exit codes: `0` success, `2` failure.
 
-**Auto-rustup on the cargo strategy (v3.11.1+).** Before `cargo install tr-300 --force`, `try_strategy(UpdateStrategy::Cargo)` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. Installer strategies never touch Rust because they download prebuilt binaries. Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
+**Auto-rustup on the cargo strategy (v3.11.1+).** Before `cargo install tr300 --force`, `try_strategy(UpdateStrategy::Cargo)` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. Installer strategies never touch Rust because they download prebuilt binaries. Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
 
 — Full reasoning, the rustup-managed-vs-distro-managed split, the rejected `rustc --version` probe alternative, the failure-mode this prevents: see [`docs/architecture-decisions.md` § "Self-update auto-rustup (v3.11.1+)"](./docs/architecture-decisions.md#self-update-auto-rustup-v3111).
 
@@ -157,7 +157,7 @@ Do not restore executable-path detection. cargo-dist installers can place binari
 
 MSRV pinned in **two places that move in lockstep on every bump**:
 
-1. **`Cargo.toml` `rust-version = "1.95"`** — cargo-side declaration. Produces the user-facing `error: package tr-300@X.Y.Z cannot be built because it requires rustc N.M ...` for users on older toolchains.
+1. **`Cargo.toml` `rust-version = "1.95"`** — cargo-side declaration. Produces the user-facing `error: package tr300@X.Y.Z cannot be built because it requires rustc N.M ...` for users on older toolchains.
 2. **`rust-toolchain.toml`** at repo root:
    ```toml
    [toolchain]
@@ -181,8 +181,8 @@ MSRV pinned in **two places that move in lockstep on every bump**:
 
 TR-300 detects whether the current process is elevated (Unix `geteuid() == 0` / Windows `IsUserAnAdmin()` from shell32 — declared as a manual `extern` since `winapi-rs` doesn't bind it) and surfaces this via `SystemInfo.is_elevated`, plus a dim footer hint below the table on platforms where elevation unlocks more data.
 
-- `tr_300::is_elevated()` (in `src/lib.rs`) — runtime detection.
-- `tr_300::platform_has_elevated_data()` — compile-time per-target constant: `true` on Linux + Windows, `false` on macOS. macOS gets no footer because sudo doesn't aesthetically unlock anything (`powermetrics` for live CPU freq is the main candidate, and the chip-name → frequency lookup table on Apple Silicon already gives a reasonable answer non-elevated).
+- `tr300::is_elevated()` (in `src/lib.rs`) — runtime detection.
+- `tr300::platform_has_elevated_data()` — compile-time per-target constant: `true` on Linux + Windows, `false` on macOS. macOS gets no footer because sudo doesn't aesthetically unlock anything (`powermetrics` for live CPU freq is the main candidate, and the chip-name → frequency lookup table on Apple Silicon already gives a reasonable answer non-elevated).
 - `report::should_render_elevation_footer(is_elevated, mode, no_elevation_hint)` — the gate. Returns `true` only when the user is unelevated, on a platform with elevated data, in `Full` mode (never in `Fast` — the auto-run prompt must stay free), and hasn't passed `--no-elevation-hint`.
 - `report::render_elevation_footer(use_colors)` — emits the line with ANSI dim (`\x1b[2m...\x1b[0m`) when colors are enabled, plain text otherwise. Returns an empty string on macOS even if the gate is bypassed.
 - The hint strings are hardcoded per platform in `render_elevation_footer`. Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`. Windows: `Run as Administrator for BitLocker status`.
@@ -278,7 +278,7 @@ Three GitHub Actions workflows guard release quality and publication:
   - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
   - `audit` — `cargo audit` against RustSec advisories (advisory-only via `continue-on-error: true`; flagged vulnerabilities should be triaged within one release cycle but don't gate PRs)
   - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
-- **`.github/workflows/release.yml`** — auto-generated by cargo-dist v0.31.0. Triggered by tag push (`vX.Y.Z`). Builds 6 targets and produces shell + PowerShell + MSI installers. Do not hand-edit; regenerate via `dist init` after changing `[workspace.metadata.dist]` in `Cargo.toml`.
+- **`.github/workflows/release.yml`** — cargo-dist v0.31.0 release workflow. Triggered by tag push (`vX.Y.Z`). Builds 6 targets and produces shell + PowerShell + MSI installers. It also copies `tr300-installer.*` to legacy `tr-300-installer.*` aliases before creating the GitHub Release so v3.14.2 binaries can self-update after the old package name was removed. `Cargo.toml` sets `allow-dirty = ["ci"]` so `dist plan` accepts this checked-in customization. Regenerate via `dist init` after changing `[workspace.metadata.dist]` in `Cargo.toml`, then preserve the alias-copy step if v3.14.2 compatibility is still needed.
 - **`.github/workflows/crates-publish.yml`** — runs after successful `CI` workflow runs from pushes to `master`/`main`, checks out the exact CI-tested SHA, skips already-published crate versions using a descriptive crates.io data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run with `--locked`, and publishes with the repository Actions secret `CARGO_REGISTRY_TOKEN`.
 
 To reproduce the CI gates locally:
@@ -322,7 +322,7 @@ Uses **cargo-dist** (v0.31.0) for fully automated cross-platform releases.
 5. Confirm `crates-publish.yml` published the new crates.io version from that same SHA or skipped because it already existed
 6. Create git tag: `git tag vX.Y.Z`
 7. Push the single tag explicitly: `git push origin vX.Y.Z`
-8. Wait for the cargo-dist release workflow to publish GitHub Release assets
+8. Wait for the cargo-dist release workflow to publish GitHub Release assets, including canonical `tr300-installer.*` assets and legacy `tr-300-installer.*` aliases
 
 The tag push triggers GitHub Actions to build all 6 targets (Windows x64, macOS Intel/ARM, Linux x64 glibc/musl, Linux ARM64) and generate shell/PowerShell/MSI installers.
 

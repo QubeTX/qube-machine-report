@@ -2,23 +2,22 @@
 
 ## TL;DR
 
-TR-300 is a standalone Rust CLI machine-report tool. The repo currently exposes a `tr300` binary and `tr_300` library, with cross-platform collectors, table/JSON/markdown rendering, install/uninstall helpers, and self-update support.
+TR-300 is a standalone Rust CLI machine-report tool. The repo currently exposes a `tr300` binary and `tr300` library, with cross-platform collectors, table/JSON/markdown rendering, install/uninstall helpers, and self-update support.
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: v3.14.2 is published. This patch release
-published `tr-300` to crates.io, ports self-update to the ND-style
-probe-and-retry strategy chain, and adds a crates.io publish workflow that runs
-only after GitHub Actions CI succeeds for the default-branch commit. The
-release tag `v3.14.2` points at commit `a6c3841`; CI run 25647466576,
-crates-publish run 25647553585, and release run 25647597021 all passed.
+Current implementation status: v3.14.3 canonicalizes the crates.io package as
+`tr300`, bumps the Rust library import path to `tr300`, and keeps the ND-style
+probe-and-retry updater pointed at `cargo install tr300 --force` before
+installer fallbacks. The deleted v3.14.2 `tr-300` crate name is treated only as
+a legacy compatibility concern for already-installed binaries.
 
 ## Project Status
 
-- Cargo package: `tr-300`
+- Cargo package: `tr300`
 - Binary: `tr300`
-- Library import path: `tr_300`
-- Current version: `3.14.2`
+- Library import path: `tr300`
+- Current version: `3.14.3`
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
 - Primary guide: `AGENTS.md`
 - Companion docs: `CLAUDE.md`, `MASTER_PLAN.md`, `TESTING.md`, `docs/architecture-decisions.md`
@@ -48,9 +47,13 @@ crates-publish run 25647553585, and release run 25647597021 all passed.
   Windows) with per-attempt diagnostics.
 - Release publishing uses two GitHub Actions stages: `Crates.io Publish` runs
   after successful default-branch `CI` on the exact tested SHA and publishes
-  `tr-300` with `CARGO_REGISTRY_TOKEN` after checking crates.io with a
+  `tr300` with `CARGO_REGISTRY_TOKEN` after checking crates.io with a
   descriptive data-access `User-Agent`; `Release` runs after the explicit
-  `vX.Y.Z` tag and publishes cargo-dist binary archives/installers.
+  `vX.Y.Z` tag and publishes cargo-dist binary archives/installers. Release
+  assets use canonical `tr300-installer.*` names plus legacy
+  `tr-300-installer.*` aliases for v3.14.2 updater compatibility. The
+  cargo-dist config uses `allow-dirty = ["ci"]` for that checked-in workflow
+  customization.
 - `Cargo.lock` is tracked so local `cargo publish --dry-run --locked` and the
   GitHub crates.io publish workflow use the same resolved dependency set.
 - `src/collectors/command.rs` is the shared timeout wrapper for optional

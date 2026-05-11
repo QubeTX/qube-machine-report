@@ -4,7 +4,7 @@
 //! in a visually appealing Unicode box-drawing table format.
 
 use clap::Parser;
-use tr_300::{
+use tr300::{
     cli::{Action, Cli},
     collectors::{CollectMode, SystemInfo},
     config::{Config, OutputFormat},

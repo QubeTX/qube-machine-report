@@ -169,6 +169,29 @@ unchanged outside `tr300 update`.
   v3.14.2 GitHub Release is non-draft, non-prerelease, and published with
   20 cargo-dist assets.
 
+### v3.14.3 — 2026-05-11
+
+Canonical crates.io package rename from the deleted `tr-300` package name to
+`tr300`, plus matching self-update, library import path, installer URL, MSI
+name, and release documentation updates.
+
+- **Crates.io availability check** — `https://crates.io/api/v1/crates/tr300`
+  returned 404 before release, confirming the corrected package name is
+  available for creation.
+- **Local release gates** — `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets --workspace -- -D warnings`, and
+  `cargo test --workspace --all-targets` passed on this Mac after the package
+  rename. Test counts: 38 library tests and 18 integration tests.
+- **Package verification** — `cargo package --locked --allow-dirty --list`
+  listed the expected 36 release files, and
+  `cargo publish --dry-run --locked --allow-dirty` packaged and verified
+  `tr300 v3.14.3` successfully.
+- **cargo-dist verification** — `dist plan` passed and announced canonical
+  `tr300-*` release artifacts, including `tr300-installer.sh`,
+  `tr300-installer.ps1`, six platform archives, the Windows MSI, checksums,
+  and source tarball. The checked-in release workflow adds legacy
+  `tr-300-installer.*` aliases for v3.14.2 updater compatibility.
+
 ### v3.11.0 — 2026-04-27
 
 Windows accuracy + BitLocker (PR #4). Verified on Windows 11 25H2 (build 26200.8246), unelevated user session:

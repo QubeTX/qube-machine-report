@@ -62,7 +62,7 @@ realistic alternatives, and we considered each.
 
 3. **Pin MSRV to the CI toolchain (this approach).** Cargo's existing
    `rust-version` field already enforces this without any source-level
-   shims. Older toolchains get `error: package tr-300@3.11.1 cannot be
+   shims. Older toolchains get `error: package tr300@3.11.1 cannot be
    built because it requires rustc 1.95.0 or newer, while the currently
    active rustc version is 1.94.0` — clear, actionable, and points at
    exactly the right knob to fix. Combined with auto-rustup in
@@ -72,7 +72,7 @@ realistic alternatives, and we considered each.
    error and can update on their own schedule.
 
 The combination — pin in `Cargo.toml`, auto-rustup in `--update`, README
-mentions `rustup update stable` ahead of `cargo install tr-300` — gives us
+mentions `rustup update stable` ahead of `cargo install tr300` — gives us
 a coherent toolchain story across all three install paths (binary
 installer, fresh `cargo install`, self-update) without source-level
 compatibility shims.
@@ -114,7 +114,7 @@ get the extra ~few MB download too, which is harmless.
 
 The MSRV is now expressed in **two** places that must move together:
 `Cargo.toml`'s `rust-version` (the cargo-side declaration that produces
-the clear `error: package tr-300@X.Y.Z cannot be built because it
+the clear `error: package tr300@X.Y.Z cannot be built because it
 requires rustc N.M ...` message for users on older toolchains) and
 `rust-toolchain.toml`'s `channel` (the rustup-side override that ensures
 GitHub-hosted runners and contributor machines actually pull the right
@@ -127,7 +127,7 @@ minors silently.
 ### Self-update auto-rustup (v3.11.1+)
 
 `src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and runs an ordered probe-and-retry chain:
-- `cargo install tr-300 --force` first when `cargo --version` succeeds
+- `cargo install tr300 --force` first when `cargo --version` succeeds
 - macOS/Linux fallback: cargo-dist shell installer via `curl`, then `wget`
 - Windows fallback: cargo-dist PowerShell installer via `powershell`, then `pwsh`
 
@@ -142,6 +142,14 @@ cargo on machines that do not have cargo installed. The updater now probes
 tools directly and falls through to installer strategies on any preflight or
 runtime failure.
 
+**v3.14.3 addendum — canonical package name is `tr300`.** The crates.io package
+name is lowercase `tr300`, matching the binary and Rust library import path.
+The cargo strategy therefore runs `cargo install tr300 --force`. GitHub Release
+installer assets use `tr300-installer.sh` and `tr300-installer.ps1`; the release
+workflow also copies those files to legacy `tr-300-installer.*` aliases so
+v3.14.2 binaries, whose fallback URL used the deleted old package name, can
+still self-update through the installer path after cargo fails.
+
 **Auto-rustup on the cargo strategy (v3.11.1+).** When the strategy chain tries
 `UpdateStrategy::Cargo` it first calls `rustup_update_stable_best_effort()`,
 which probes for `rustup` on PATH (via `rustup --version`, redirecting both
@@ -150,7 +158,7 @@ runs `rustup update stable` and prints `Updating Rust toolchain (rustup
 update stable)…` so the user sees what's happening. Any failure — rustup
 absent, network timeout, locked toolchain, permission error — is *non-fatal*:
 we discard the result with `let _ =` and proceed straight to the
-`cargo install tr-300 --force` call. Installer strategies never touch Rust
+`cargo install tr300 --force` call. Installer strategies never touch Rust
 because they download a prebuilt binary.
 
 *Why this exists — the failure mode it prevents:* TR-300's MSRV tracks the
@@ -158,9 +166,9 @@ GitHub Actions `stable` toolchain and moves whenever Rust ships a stable
 release that promotes a lint we trigger or changes safety classifications
 on stdlib intrinsics we use (cf. the 1.95 `__cpuid` reclassification that
 prompted this change). Without auto-rustup, a user who installed via
-`cargo install tr-300` on Rust 1.94 and then later runs `tr300 --update`
+`cargo install tr300` on Rust 1.94 and then later runs `tr300 --update`
 against a release built with `rust-version = "1.95"` would see cargo print
-`error: rustc 1.94.0 is not supported by the following package: tr-300@…
+`error: rustc 1.94.0 is not supported by the following package: tr300@…
 requires rustc 1.95`, our `execute_update` would propagate that as a
 non-zero exit, and the user would be silently stuck on the stale binary
 forever — they'd assume `--update` "doesn't work" and either give up or

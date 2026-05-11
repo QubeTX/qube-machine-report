@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish tr-300
+    name: Publish tr300
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
@@ -34,9 +34,9 @@ jobs:
       - name: Read package version
         id: package
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tr-300") | .version')"
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tr300") | .version')"
           if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "::error::Could not read tr-300 package version"
+            echo "::error::Could not read tr300 package version"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -47,15 +47,15 @@ jobs:
         run: |
           status="$(curl -sS -o "$RUNNER_TEMP/crate-version.json" -w '%{http_code}' \
             -H "User-Agent: QubeTX/qube-machine-report crates-publish (https://github.com/QubeTX/qube-machine-report)" \
-            "https://crates.io/api/v1/crates/tr-300/${{ steps.package.outputs.version }}")"
+            "https://crates.io/api/v1/crates/tr300/${{ steps.package.outputs.version }}")"
           case "$status" in
             200)
               echo "publish=false" >> "$GITHUB_OUTPUT"
-              echo "tr-300 ${{ steps.package.outputs.version }} is already published; skipping."
+              echo "tr300 ${{ steps.package.outputs.version }} is already published; skipping."
               ;;
             404)
               echo "publish=true" >> "$GITHUB_OUTPUT"
-              echo "tr-300 ${{ steps.package.outputs.version }} is not on crates.io yet; publishing after checks."
+              echo "tr300 ${{ steps.package.outputs.version }} is not on crates.io yet; publishing after checks."
               ;;
             *)
               echo "::error::Unexpected crates.io API status: $status"
@@ -70,7 +70,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-            echo "::error::CARGO_REGISTRY_TOKEN is not configured; cannot publish tr-300 ${{ steps.package.outputs.version }}"
+            echo "::error::CARGO_REGISTRY_TOKEN is not configured; cannot publish tr300 ${{ steps.package.outputs.version }}"
             exit 1
           fi
 

@@ -266,6 +266,18 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
+      - name: Add legacy installer aliases
+        shell: bash
+        run: |
+          # v3.14.2 briefly used the deleted crates.io package name `tr-300`.
+          # Keep these aliases so those binaries can still self-update through
+          # their installer fallback after canonicalizing the package as `tr300`.
+          if [ -f artifacts/tr300-installer.sh ]; then
+            cp artifacts/tr300-installer.sh artifacts/tr-300-installer.sh
+          fi
+          if [ -f artifacts/tr300-installer.ps1 ]; then
+            cp artifacts/tr300-installer.ps1 artifacts/tr-300-installer.ps1
+          fi
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
