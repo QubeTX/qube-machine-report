@@ -5,7 +5,7 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-14 (Windows install execution-policy preflight, v3.14.4)
+**Last updated:** 2026-05-14 (Windows install error advisor + Display-formatted errors, v3.14.5)
 **Current version:** 3.14.3
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
@@ -45,6 +45,7 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.14.2 | `a6c3841` | 2026-05-11 | **Crates.io + resilient updater release** — publishes the `tr-300` crate, tracks `Cargo.lock`, adds CI-gated crates.io publishing after default-branch CI, ports self-update to a cargo-first probe-and-retry strategy chain, documents all install paths, and removes unrelated historical implementation files/references. |
 | v3.14.3 | `25305d8` | 2026-05-11 | **Canonical crates.io package name** — recreates the crate as lowercase `tr300`, changes the Rust library import path to `tr300`, points self-update at `cargo install tr300 --force`, and keeps `tr-300-installer.*` release aliases for v3.14.2 updater compatibility via a cargo-dist `allow-dirty = ["ci"]` workflow customization. |
 | v3.14.4 | `ac3fd34` | 2026-05-14 | **Windows install execution-policy preflight** — `tr300 install` now adjusts the Windows PowerShell `CurrentUser` execution policy to `RemoteSigned` when it's `Restricted`/`Undefined`, so the freshly written `$PROFILE` auto-run actually loads on fresh Windows machines. `AllSigned` is intentionally left alone (user warning, no silent downgrade). Verify-after-set catches GPO overrides and surfaces a `LocalMachine`-scope remediation. Non-fatal: the alias write half always succeeds. Drive-by cleanup: moved `mod powershell_fallback_tests` to the end of `src/collectors/platform/windows.rs` to satisfy `clippy::items_after_test_module` under local Windows clippy. |
+| v3.14.5 | _pending_ | 2026-05-14 | **Windows install error advisor + Display-formatted top-level errors** — when `tr300 install`/`uninstall` fails to create the profile directory, read/write the profile, or remove the binary, `fail_install(InstallStep, &Path, io::Error)` now streams a multi-paragraph advisory to stderr explaining the likely cause (OneDrive sync state, Intune/AD/AppLocker/WDAC restriction, antivirus block, sharing violation, storage-full, MAX_PATH overflow) with concrete remediation (path to allowlist, antivirus exclusion, `takeown` example). Dispatch keys: `(InstallStep, ErrorKind, raw_os_error, path-onedrive-vs-redirected-vs-local)`. Companion change: `fn main()` now dispatches into `fn run() -> Result<()>` so errors render via Display (`Error: Platform operation failed: ...`) instead of the Debug format (`Error: Platform { message: "..." }`). Affects every command, not just install. |
 
 **Tag status (as of 2026-05-14):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).

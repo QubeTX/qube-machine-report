@@ -115,6 +115,15 @@ Custom error types in `src/error.rs` using `thiserror`:
 - **Order matters.** Run the preflight first, then write the profile. The reverse surfaces the confusing `UnauthorizedAccess` PSSecurityException at the *next* shell start, far from the install-time context where the user can act on it.
 - The policy classification uses an enum (`PolicyState::{BlockedDefault, BlockedAllSigned, Permissive, Unknown}`) so unknown future PowerShell policy strings default to `Permissive` rather than triggering destructive action on values we can't reason about.
 
+**Windows install error advisor (v3.14.5+).** Every fallible `std::fs` call in the install/uninstall flow funnels through `fail_install(InstallStep, &Path, io::Error)` instead of the old `map_err(|e| AppError::platform(format!("Failed to ...: {}", e)))` pattern. Edit-time rules:
+- **Print the rich guidance to stderr, then return a concise `AppError`.** `fail_install()` streams a multi-paragraph advisory to stderr *before* returning, so it's never swallowed by anything that only captures the returned error. The returned `AppError::platform` is a short tag (`"write profile: ...err..."`) suitable for `main()`'s trailing `Error: ...` line — keep it short so the rich content above stays the focal point.
+- **Dispatch on `(InstallStep, io::ErrorKind, raw_os_error, path_inspection)`.** The combination matters: `PermissionDenied` on a OneDrive-redirected path gets OneDrive-specific text (sync state, "always keep on this device"); the same error on a non-OneDrive path gets AD/Intune/AppLocker/WDAC + antivirus + `takeown` guidance. Don't collapse these into one generic block — each cohort needs different remediation.
+- **`looks_like_onedrive_path()` checks for an "onedrive" path segment (case-insensitive)** so it catches both `\OneDrive\` and `\OneDrive - <TenantName>\` (OneDrive-for-Business). It will also match `\onedrive-migration.ps1\` etc.; the false-positive harms only the advisory text and is intentionally accepted to keep the predicate simple.
+- **Always close with "Manual `tr300` still works from the prompt".** Install failures don't break the binary's basic functionality; the user needs to know what they CAN still do while they sort out the underlying restriction.
+- **Don't move the rich output to stdout.** Stdout is for the normal install messages; rich error guidance belongs on stderr so it interleaves correctly with the trailing `Error: ...` line and so callers that capture stdout (e.g. CI scripts) still see the explanation.
+
+**Top-level error rendering (v3.14.5+).** `main()` is now a void function; it dispatches into `run() -> Result<()>` and renders errors via `{}` (Display, from `thiserror`'s `#[error("...")]` attributes) before `std::process::exit(1)`. Don't switch `main()` back to `fn main() -> Result<()>` — that prints errors with Debug, which renders `Platform { message: "..." }` and obscures the actual message. The exit-code contract is `0` on success, `1` on any other returned error.
+
 ### Windows accuracy patterns (v3.11.0+)
 
 Edit-time rules:

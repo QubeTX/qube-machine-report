@@ -5,7 +5,8 @@
 use crate::error::{AppError, Result};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Marker comments for PowerShell profile modifications
@@ -86,16 +87,15 @@ pub fn install() -> Result<()> {
     // Create profile directory if needed
     if let Some(parent) = profile_path.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent).map_err(|e| {
-                AppError::platform(format!("Failed to create profile directory: {}", e))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|e| fail_install(InstallStep::CreateProfileDir, parent, e))?;
         }
     }
 
     // Read existing profile or create empty
     let existing_content = if profile_path.exists() {
         fs::read_to_string(&profile_path)
-            .map_err(|e| AppError::platform(format!("Failed to read profile: {}", e)))?
+            .map_err(|e| fail_install(InstallStep::ReadProfile, &profile_path, e))?
     } else {
         String::new()
     };
@@ -114,7 +114,7 @@ pub fn install() -> Result<()> {
     };
 
     fs::write(&profile_path, new_content)
-        .map_err(|e| AppError::platform(format!("Failed to write profile: {}", e)))?;
+        .map_err(|e| fail_install(InstallStep::WriteProfile, &profile_path, e))?;
 
     println!("Modified PowerShell profile:");
     println!("  - {}", profile_path.display());
@@ -133,7 +133,7 @@ pub fn uninstall() -> Result<()> {
     }
 
     let content = fs::read_to_string(&profile_path)
-        .map_err(|e| AppError::platform(format!("Failed to read profile: {}", e)))?;
+        .map_err(|e| fail_install(InstallStep::ReadProfile, &profile_path, e))?;
 
     if !content.contains(MARKER_START) {
         println!("No TR-300 configuration found in PowerShell profile.");
@@ -170,7 +170,7 @@ pub fn uninstall() -> Result<()> {
     };
 
     fs::write(&profile_path, new_content)
-        .map_err(|e| AppError::platform(format!("Failed to write profile: {}", e)))?;
+        .map_err(|e| fail_install(InstallStep::WriteProfile, &profile_path, e))?;
 
     println!("Cleaned PowerShell profile:");
     println!("  - {}", profile_path.display());
@@ -260,13 +260,8 @@ pub fn remove_binary(binary_path: &PathBuf) -> Result<()> {
         return Ok(());
     }
 
-    fs::remove_file(binary_path).map_err(|e| {
-        AppError::platform(format!(
-            "Failed to remove binary {}: {}",
-            binary_path.display(),
-            e
-        ))
-    })?;
+    fs::remove_file(binary_path)
+        .map_err(|e| fail_install(InstallStep::RemoveBinary, binary_path.as_path(), e))?;
 
     println!("Removed binary: {}", binary_path.display());
     Ok(())
@@ -489,9 +484,169 @@ pub fn uninstall_complete() -> Result<()> {
     Ok(())
 }
 
+/// Identifies which step of install/uninstall failed, so we can render a
+/// step-appropriate guidance block alongside the raw OS error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallStep {
+    CreateProfileDir,
+    ReadProfile,
+    WriteProfile,
+    RemoveBinary,
+}
+
+impl InstallStep {
+    fn short_description(self) -> &'static str {
+        match self {
+            Self::CreateProfileDir => "Can't create your PowerShell profile directory.",
+            Self::ReadProfile => "Can't read your PowerShell profile.",
+            Self::WriteProfile => "Can't write to your PowerShell profile.",
+            Self::RemoveBinary => "Can't remove the tr300 binary.",
+        }
+    }
+
+    fn error_tag(self) -> &'static str {
+        match self {
+            Self::CreateProfileDir => "create profile dir",
+            Self::ReadProfile => "read profile",
+            Self::WriteProfile => "write profile",
+            Self::RemoveBinary => "remove binary",
+        }
+    }
+}
+
+/// Heuristic check for whether a path lives under a OneDrive Known Folder
+/// Move (KFM) — common on modern Windows where `Documents` is redirected
+/// to `C:\Users\<user>\OneDrive\Documents\` or similar. Case-insensitive.
+fn looks_like_onedrive_path(path: &Path) -> bool {
+    let s = path.to_string_lossy().to_ascii_lowercase();
+    // Match a path segment containing "onedrive" (handles "OneDrive",
+    // "OneDrive - Acme Corp", etc.) — guarded by separators so we don't
+    // false-positive on a random filename containing the substring.
+    s.split(['\\', '/']).any(|seg| seg.contains("onedrive"))
+}
+
+/// Heuristic for Folder Redirection / roaming-profile UNC paths.
+fn looks_like_redirected_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    s.starts_with(r"\\") || s.starts_with("//")
+}
+
+/// Print rich, multi-paragraph guidance to stderr describing why an
+/// install step failed and what the user can do about it, then return a
+/// concise `AppError` suitable for `main()`'s trailing `Error: ...` line.
+/// The detailed message goes to stderr so it isn't swallowed by anything
+/// that only captures the returned error.
+fn fail_install(step: InstallStep, path: &Path, err: io::Error) -> AppError {
+    let raw = err.raw_os_error();
+    let kind = err.kind();
+    let on_onedrive = looks_like_onedrive_path(path);
+    let on_redirected = looks_like_redirected_path(path);
+
+    eprintln!();
+    eprintln!("tr300 install: {}", step.short_description());
+    eprintln!();
+    eprintln!("  Path:  {}", path.display());
+    match raw {
+        Some(code) => eprintln!("  Cause: {} (Windows error {})", err, code),
+        None => eprintln!("  Cause: {}", err),
+    }
+    eprintln!();
+
+    // Step-and-kind specific guidance.
+    let mut printed = false;
+    let permission_denied = matches!(kind, io::ErrorKind::PermissionDenied) || raw == Some(5);
+    let sharing_violation = raw == Some(32);
+    let disk_full = matches!(kind, io::ErrorKind::StorageFull) || raw == Some(112);
+    let path_too_long = matches!(kind, io::ErrorKind::InvalidFilename) || raw == Some(206);
+    let not_found = matches!(kind, io::ErrorKind::NotFound) || raw == Some(2) || raw == Some(3);
+
+    if permission_denied {
+        eprintln!("Likely reasons (most common first):");
+        if on_onedrive {
+            eprintln!("  - OneDrive is offline, paused, or has Documents set to \"online-only\".");
+            eprintln!(
+                "      Open the OneDrive tray icon, make sure it is signed in and syncing, and"
+            );
+            eprintln!(
+                "      right-click the path above -> \"Always keep on this device\". Re-run install."
+            );
+            eprintln!(
+                "  - Your organization restricts writes to OneDrive-synced folders via Intune,"
+            );
+            eprintln!("      Group Policy, or a DLP agent. Ask IT to allow writes to:");
+            eprintln!("          {}", path.display());
+        } else if on_redirected {
+            eprintln!("  - The path is on a network share (folder redirection / roaming profile).");
+            eprintln!("      Confirm the share is reachable and you have write access; try again.");
+            eprintln!(
+                "  - Your organization may have policies that restrict writes to the redirected"
+            );
+            eprintln!("      profile. Ask IT to whitelist the path above.");
+        } else {
+            eprintln!(
+                "  - Your organization restricts writes via Intune MDM, Active Directory Group"
+            );
+            eprintln!(
+                "      Policy, AppLocker, or Windows Defender Application Control (WDAC). Ask"
+            );
+            eprintln!("      IT to allow writes to:");
+            eprintln!("          {}", path.display());
+            eprintln!(
+                "  - Antivirus / EDR (Defender, CrowdStrike, SentinelOne, etc.) is treating the"
+            );
+            eprintln!("      profile edit as suspicious. Add an exclusion for the path above.");
+        }
+        eprintln!("  - The file or folder is owned by another user or by SYSTEM. From an admin");
+        eprintln!("      PowerShell you can re-take ownership:");
+        eprintln!("          takeown /F \"{}\" /R", path.display());
+        printed = true;
+    } else if sharing_violation {
+        eprintln!("Likely reasons:");
+        eprintln!("  - The file is open in another process (editor, antivirus on-access scan,");
+        eprintln!("      OneDrive's sync engine). Close any open editors and re-run.");
+        eprintln!(
+            "  - An antivirus or EDR product is holding the file. If the path is in OneDrive,"
+        );
+        eprintln!("      wait a few seconds for the sync to complete and try again.");
+        printed = true;
+    } else if disk_full {
+        eprintln!("Likely reason:");
+        eprintln!("  - The drive is out of free space. Free some space on the volume containing");
+        eprintln!("      the path above, then re-run install.");
+        printed = true;
+    } else if path_too_long {
+        eprintln!("Likely reason:");
+        eprintln!(
+            "  - The path exceeds Windows' 260-character MAX_PATH limit. This is common when"
+        );
+        eprintln!(
+            "      Documents is redirected to a deep OneDrive folder. Either shorten the path,"
+        );
+        eprintln!("      or enable long-path support (LongPathsEnabled = 1 under");
+        eprintln!("      HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem) and reboot.");
+        printed = true;
+    } else if not_found && matches!(step, InstallStep::ReadProfile) {
+        eprintln!("Likely reason:");
+        eprintln!("  - The profile path disappeared between the existence check and the read.");
+        eprintln!("      Usually transient — re-run install.");
+        printed = true;
+    }
+
+    if printed {
+        eprintln!();
+    }
+
+    eprintln!("Manual `tr300` still works from the prompt; only the auto-run on new shells is");
+    eprintln!("affected. After addressing the cause above, re-run `tr300 install`.");
+    eprintln!();
+
+    AppError::platform(format!("{}: {}", step.error_tag(), err))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{policy_state, PolicyState};
+    use super::{looks_like_onedrive_path, looks_like_redirected_path, policy_state, PolicyState};
+    use std::path::Path;
 
     #[test]
     fn restricted_is_blocked_default() {
@@ -548,5 +703,64 @@ mod tests {
     fn surrounding_whitespace_does_not_confuse_classification() {
         // Get-ExecutionPolicy output is trimmed at the call site, but defensive.
         assert_eq!(policy_state("  Restricted  "), PolicyState::BlockedDefault);
+    }
+
+    #[test]
+    fn onedrive_kfm_path_is_detected() {
+        assert!(looks_like_onedrive_path(Path::new(
+            r"C:\Users\hey\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+        )));
+    }
+
+    #[test]
+    fn onedrive_for_business_path_is_detected() {
+        // "OneDrive - <TenantName>" is the standard naming for the
+        // OneDrive-for-Business folder.
+        assert!(looks_like_onedrive_path(Path::new(
+            r"C:\Users\hey\OneDrive - Acme Corp\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+        )));
+    }
+
+    #[test]
+    fn onedrive_detection_is_case_insensitive() {
+        assert!(looks_like_onedrive_path(Path::new(
+            r"C:\Users\hey\onedrive\Documents"
+        )));
+        assert!(looks_like_onedrive_path(Path::new(
+            r"C:\Users\hey\ONEDRIVE\Documents"
+        )));
+    }
+
+    #[test]
+    fn non_onedrive_path_is_not_flagged() {
+        assert!(!looks_like_onedrive_path(Path::new(
+            r"C:\Users\hey\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+        )));
+    }
+
+    #[test]
+    fn filename_containing_onedrive_does_not_falsepositive_when_isolated() {
+        // We don't have a path-segment guard tight enough to reject filenames
+        // that literally include the substring "onedrive" — that's a real
+        // edge case that's only a false-positive (advisory text mentions
+        // OneDrive when the cause is unrelated). Document the behavior so
+        // it's intentional, not accidental.
+        assert!(looks_like_onedrive_path(Path::new(
+            r"C:\notes\onedrive-migration.ps1"
+        )));
+    }
+
+    #[test]
+    fn unc_path_is_flagged_as_redirected() {
+        assert!(looks_like_redirected_path(Path::new(
+            r"\\fileserver\users\hey\Documents"
+        )));
+    }
+
+    #[test]
+    fn local_path_is_not_redirected() {
+        assert!(!looks_like_redirected_path(Path::new(
+            r"C:\Users\hey\Documents"
+        )));
     }
 }

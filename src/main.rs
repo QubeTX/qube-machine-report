@@ -12,7 +12,22 @@ use tr300::{
     install, report, update,
 };
 
-fn main() -> Result<()> {
+fn main() {
+    // Render errors via Display rather than the default Debug formatter so
+    // users see "Platform operation failed: write profile: ..." instead of
+    // the noisy `Error: Platform { message: "..." }` Debug print. Install
+    // failures separately stream multi-line guidance to stderr via
+    // `fail_install()` before returning; this is just the trailing summary.
+    std::process::exit(match run() {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("Error: {}", err);
+            1
+        }
+    });
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
     let action = cli.action;
 

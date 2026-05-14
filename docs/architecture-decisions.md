@@ -21,6 +21,7 @@
   - [v3.12.0+ — VPN-aware default-route, Fast Startup uptime annotation](#v3120--vpn-aware-default-route-fast-startup-uptime-annotation)
   - [v3.13.0+ — 5-state battery, native cores, GPU registry-prefer, PSCore detection, terminal walk](#v3130--5-state-battery-native-cores-gpu-registry-prefer-pscore-detection-terminal-walk)
   - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
+  - [v3.14.5+ — Windows install error advisor + Display-formatted top-level errors](#v3145--windows-install-error-advisor--display-formatted-top-level-errors)
 
 ---
 
@@ -606,3 +607,123 @@ gap but a separate scope expansion — tracked but not landed here.
 Reference:
 [Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies),
 [Set-ExecutionPolicy](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-executionpolicy).
+
+### v3.14.5+ — Windows install error advisor + Display-formatted top-level errors
+
+**Failure mode this prevents.** Prior to v3.14.5, when `tr300 install` hit
+a permissions error on a work machine — Intune-managed device, Active
+Directory Group Policy lockdown, AppLocker policy, Windows Defender
+Application Control (WDAC), antivirus / EDR write-block, or OneDrive
+Known Folder Move with offline files — the user saw something like:
+
+```
+Error: Platform { message: "Failed to write profile: Access is denied. (os error 5)" }
+```
+
+Two things wrong with that output:
+
+1. The Debug-format wrapper (`Platform { message: "..." }`) is `cargo
+   run`-grade developer output, not user-grade output. `thiserror` has a
+   perfectly good Display impl (`Platform operation failed: ...`) that
+   never gets used because `fn main() -> Result<()>` calls Debug on the
+   error before exiting non-zero.
+2. The message has no remediation. The user is told *what* failed but
+   not *why* it likely failed or *what to do next*. On corporate
+   machines this is the #1 friction point in install adoption — IT
+   doesn't know what to allowlist, and the user has no concrete
+   "give this to IT" path.
+
+**The fix.** Two related changes in `src/install/windows.rs` and
+`src/main.rs`:
+
+1. **`fail_install(InstallStep, &Path, io::Error) -> AppError`** in
+   `src/install/windows.rs`. Every `std::fs` call in install/uninstall
+   now goes through this advisor. It:
+   - Streams a multi-paragraph guidance block to *stderr* —
+     `step.short_description()` → `Path:` + `Cause:` (including the raw
+     Windows error code) → step-and-kind-specific "Likely reasons"
+     paragraph → "Manual `tr300` still works" reassurance closer.
+   - Then returns a concise `AppError::platform("write profile: <io
+     err>")` suitable for `main()`'s trailing summary line.
+   - The rich output is on stderr so it's never swallowed by code that
+     only captures the returned error, and so it interleaves correctly
+     with `main()`'s `Error: ...` line.
+
+2. **Dispatch on `(InstallStep, ErrorKind, raw_os_error, path
+   inspection)`.** The advisor branches on multiple inputs to pick the
+   right remediation paragraph:
+
+   | Condition | Guidance |
+   |---|---|
+   | `PermissionDenied` / Windows error 5, **OneDrive path** | OneDrive-specific: ensure synced, "Always keep on this device", or ask IT to allow OneDrive-folder writes |
+   | `PermissionDenied` / error 5, **redirected (UNC) path** | Network share / folder redirection: check share access, ask IT |
+   | `PermissionDenied` / error 5, **plain local path** | Intune / AD GPO / AppLocker / WDAC / antivirus, with `takeown /F "..." /R` example |
+   | Sharing violation (error 32) | OneDrive sync engine + EDR + open editor as causes; retry |
+   | Storage full / error 112 | Free disk space |
+   | Path too long / error 206 | MAX_PATH overflow; suggest LongPathsEnabled |
+   | NotFound on ReadProfile | Transient race; retry |
+
+   The OneDrive detection uses `looks_like_onedrive_path()`, a
+   case-insensitive segment scan matching both `\OneDrive\` and
+   `\OneDrive - <TenantName>\` (OneDrive-for-Business). False positives
+   on filenames containing "onedrive" are intentional — the
+   user-visible cost is just slightly off-topic advisory text, and
+   keeping the predicate simple is worth more than a perfect filter.
+
+3. **`fn main()` -> `fn run()` dispatch.** `main()` no longer returns
+   `Result<()>`. It calls `run() -> Result<()>` and renders any error
+   via `eprintln!("Error: {}", err)` (Display) before
+   `std::process::exit(1)`. The result is that the trailing line is
+   `Error: Platform operation failed: write profile: Access is denied.
+   (os error 5)` — readable, single-line, points back to the rich
+   guidance above. The change is global (every command, not just
+   install) because it's a strictly better default.
+
+**Why we don't put the rich guidance in the AppError message itself.**
+That would force the message into a single string with embedded
+newlines, which renders poorly in non-terminal consumers (CI logs,
+piped to other tools) and forces a hard coupling between the error type
+and the user-facing UX. Keeping the advisor as a side effect of
+`fail_install()` and the returned `AppError` as a short tag means
+programmatic consumers see a clean `"write profile: <io err>"` and
+human consumers see the rich stderr stream.
+
+**Why dispatch on `path` and not just `ErrorKind` + raw code.** The
+same Windows error 5 has *different remediations* depending on where
+the path lives: OneDrive sync state vs. corporate MDM policy vs.
+locally-mounted volume with weird ACLs. A one-size-fits-all "permission
+denied" paragraph would either be too vague (skip the actionable steps)
+or include OneDrive-specific advice for non-OneDrive paths (confusing).
+Splitting the branch on `looks_like_onedrive_path()` is the cheapest way
+to put the user on the right track.
+
+**Why we never abort install on the execution-policy preflight failure
+but we *do* abort on profile-write failure.** The preflight failure is
+recoverable manually (the alias write still happens; `tr300` keeps
+working as a binary on PATH). The profile-write failure means the
+install genuinely did not complete — there is no alias, there is no
+auto-run. The user needs to know that, with concrete remediation,
+rather than silently continuing.
+
+**Rejected alternatives.**
+- *Put the rich guidance into `AppError::Platform::message`* — turns
+  the message into a multi-line embedded string and couples the error
+  type to the rendering. Rejected.
+- *Use a separate error variant per scenario (e.g. `OneDriveBlocked`,
+  `IntuneBlocked`)* — would require detection logic that doesn't exist
+  (we can't reliably tell Intune from AppLocker from antivirus just
+  from an `io::Error`). The "Likely reasons (most common first)"
+  presentation is honest about that uncertainty. Rejected.
+- *Print only the short error and rely on documentation* — defeats the
+  purpose. The user already has the message in front of them; the
+  guidance should be there too. Rejected.
+- *Keep `fn main() -> Result<()>` and override Debug* — implementing
+  `Debug` to print like Display is unidiomatic and would surprise
+  anyone reading `dbg!(err)`. Cleaner to dispatch explicitly through
+  `run()`. Rejected.
+
+Reference:
+[`std::io::ErrorKind`](https://doc.rust-lang.org/std/io/enum.ErrorKind.html),
+[Windows System Error Codes](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes),
+[OneDrive Known Folder Move](https://learn.microsoft.com/en-us/onedrive/redirect-known-folders),
+[Long Paths in Windows](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation).

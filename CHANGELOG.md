@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.5] - 2026-05-14
+
+### Changed
+- **2026-05-14 — Windows install error messages now explain AD/Intune/OneDrive failures.**
+  When `tr300 install` (or `tr300 uninstall`) fails to create the profile
+  directory, read the profile, write the profile, or remove the binary, the
+  error renderer now streams a multi-line advisory to stderr explaining the
+  most likely cause and the remediation, before the trailing summary line.
+  The advisory is dispatched from `(InstallStep, io::ErrorKind,
+  raw_os_error, path_inspection)`: `PermissionDenied` / Windows error 5 on
+  a OneDrive-redirected path surfaces OneDrive-specific guidance ("ensure
+  Documents is locally available, not online-only"); the same error on a
+  non-OneDrive path surfaces AD / Intune / AppLocker / WDAC / antivirus
+  guidance with a `takeown` example; sharing-violation (error 32) calls
+  out OneDrive sync + EDR holds; storage-full (error 112) and path-too-
+  long (error 206) get their own branches. Manual `tr300` is always
+  noted as still working, so the user knows the binary itself is fine
+  and only the auto-run on new shells needs to be retried after fixing
+  the underlying restriction.
+- **2026-05-14 — top-level error rendering uses Display, not Debug.**
+  `main()` no longer returns `Result<()>` directly; it dispatches into a
+  `run()` helper and renders any returned error via `{}` (Display) before
+  `std::process::exit(1)`. The user-visible trailing line is now
+  `Error: Platform operation failed: write profile: Access is denied. (os
+  error 5)` instead of the noisier debug-format `Error: Platform {
+  message: "..." }`. Affects every command, not just install.
+
 ## [3.14.4] - 2026-05-14
 
 ### Fixed

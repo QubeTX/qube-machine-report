@@ -8,7 +8,7 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v3.14.4](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.4) (2026-05-14), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is [`tr300`](https://crates.io/crates/tr300).
+Latest release: [v3.14.5](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.5) (2026-05-14), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is [`tr300`](https://crates.io/crates/tr300).
 
 ## Features
 
@@ -69,7 +69,7 @@ workflows that need an exact Git tag:
 
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.4
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.5
 ```
 
 ### From Source
@@ -274,6 +274,19 @@ To remove these additions, run `tr300 uninstall` or `tr300 --uninstall`.
 The uninstall does not roll back your execution policy — other PowerShell
 tooling typically relies on `RemoteSigned`, so restoring it would surprise
 users.
+
+If `tr300 install` (or `uninstall`) hits a permissions error on Windows —
+common on work machines managed by Intune, Group Policy, AppLocker, or
+WDAC, and on personal machines where Documents is redirected to OneDrive
+— the tool now prints a multi-paragraph explanation of what likely caused
+the failure (OneDrive offline / online-only files, an MDM lockdown,
+antivirus blocking the profile edit, a sharing violation, a disk-full
+condition, or a MAX_PATH overflow) along with concrete next steps:
+which path to ask IT to allowlist, where to add an antivirus exclusion,
+or how to `takeown` ownership. Manual `tr300` invocations from the
+prompt always continue to work in this case; only the auto-run on new
+shells is affected, and you can re-run `tr300 install` once the
+underlying restriction is addressed.
 
 ## Building from Source
 

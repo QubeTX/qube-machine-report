@@ -169,6 +169,58 @@ unchanged outside `tr300 update`.
   v3.14.2 GitHub Release is non-draft, non-prerelease, and published with
   20 cargo-dist assets.
 
+### v3.14.5 — 2026-05-14
+
+Windows install error advisor + Display-formatted main()-level errors.
+Verified on the same Windows 11 25H2 (build 26200.8457) host as v3.14.4,
+unelevated user session.
+
+- **Permission-denied write path.** Reproduced via
+  `attrib +R "$PROFILE"` to force `fs::write` to fail with Windows
+  error 5. `tr300 install` output (excerpt):
+  ```
+  tr300 install: Can't write to your PowerShell profile.
+
+    Path:  C:\Users\hey\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
+    Cause: Access is denied. (os error 5) (Windows error 5)
+
+  Likely reasons (most common first):
+    - Your organization restricts writes via Intune MDM, Active Directory Group
+        Policy, AppLocker, or Windows Defender Application Control (WDAC). Ask
+        IT to allow writes to:
+            C:\Users\hey\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
+    - Antivirus / EDR (Defender, CrowdStrike, SentinelOne, etc.) is treating the
+        profile edit as suspicious. Add an exclusion for the path above.
+    - The file or folder is owned by another user or by SYSTEM. From an admin
+        PowerShell you can re-take ownership:
+            takeown /F "..." /R
+
+  Manual `tr300` still works from the prompt; only the auto-run on new shells is
+  affected. After addressing the cause above, re-run `tr300 install`.
+
+  Error: Platform operation failed: write profile: Access is denied. (os error 5)
+  ```
+  Exit code: 1. After `attrib -R` the next `tr300 install` succeeded.
+- **OneDrive-vs-plain path branch.** Pure-function unit tests verify
+  `looks_like_onedrive_path()` matches `\OneDrive\`,
+  `\OneDrive - Acme Corp\`, and case-variant forms; non-OneDrive paths
+  return false. The dispatch logic in `fail_install()` is direct
+  conditional logic from there.
+- **Happy path didn't regress.** `tr300 install` with the file writable
+  produced the same "Modified PowerShell profile:" / "Installation
+  complete!" output as v3.14.4, exit code 0.
+- **Display-vs-Debug at main level.** Trailing error line now reads
+  `Error: Platform operation failed: write profile: Access is denied.
+  (os error 5)` instead of v3.14.4's `Error: Platform { message: "..."
+  }` Debug print. The change is `fn main()` -> `fn run()` dispatch in
+  `src/main.rs`; affects every command that returns an error, not just
+  install.
+- **Local gates.** `cargo fmt -- --check`,
+  `cargo clippy --all-targets --workspace -- -D warnings`,
+  `cargo test --workspace` (54 lib + 18 integration + 1 doc — up from
+  v3.14.4's 47 lib via 7 new path-inspection tests) all passed on this
+  host.
+
 ### v3.14.4 — 2026-05-14
 
 Windows `tr300 install` execution-policy preflight. Verified on the same Windows
