@@ -20,6 +20,7 @@
   - [v3.11.0+ — registry OS, IsWow64Process2, WTS last-login, CPUID hypervisor, BitLocker](#v3110--registry-os-iswow64process2-wts-last-login-cpuid-hypervisor-bitlocker)
   - [v3.12.0+ — VPN-aware default-route, Fast Startup uptime annotation](#v3120--vpn-aware-default-route-fast-startup-uptime-annotation)
   - [v3.13.0+ — 5-state battery, native cores, GPU registry-prefer, PSCore detection, terminal walk](#v3130--5-state-battery-native-cores-gpu-registry-prefer-pscore-detection-terminal-walk)
+  - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
 
 ---
 
@@ -477,3 +478,131 @@ is intentional and is exactly what this section documents — see above.
   `tr300.exe → bash.exe → claude.exe → powershell.exe` correctly
   resolves to `Claude Code`. Reference:
   [CreateToolhelp32Snapshot](https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot).
+
+### v3.14.4+ — Windows install execution-policy preflight
+
+**Failure mode this prevents.** On a fresh Windows machine, `tr300 install`
+wrote a valid alias-plus-auto-run block to
+`Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`, but the next
+PowerShell session immediately errored:
+
+```
+File C:\Users\<user>\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
+cannot be loaded because running scripts is disabled on this system.
+    + FullyQualifiedErrorId : UnauthorizedAccess
+```
+
+Windows Client defaults `ExecutionPolicy` to `Restricted` at both
+`CurrentUser` and `LocalMachine` scopes — and when every scope is
+`Undefined`, scope-precedence resolves to `Restricted` too. `Restricted`
+blocks every `.ps1` file including `$PROFILE` itself, so the auto-run never
+fires on a freshly installed system. The user's prompt-driven `tr300`
+invocations still worked because `tr300.exe` is a native binary on PATH;
+execution policy governs `.ps1` only. The installer was silently failing
+its contract ("auto-run on new interactive shells") because it never
+inspected or adjusted execution policy.
+
+**The fix.** `src/install/windows.rs::run_execution_policy_preflight()`
+runs before the profile write. It calls `Get-ExecutionPolicy -Scope
+CurrentUser`, classifies the result via `policy_state()` into one of
+`{BlockedDefault, BlockedAllSigned, Permissive, Unknown}`, and only acts
+on `BlockedDefault` (`Restricted` / `Undefined`). For that case it runs
+`Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+-Force`, then re-reads the policy to confirm the change took. Three
+outcome branches:
+
+1. **Succeeded** — prints a one-line "Set PowerShell CurrentUser execution
+   policy: <previous> -> RemoteSigned" followed by the "(required to load
+   $PROFILE; only your account, no admin needed)" line, then proceeds with
+   the alias write. Verified on the user's exact failure-mode machine.
+2. **Set-ExecutionPolicy returned 0 but the policy is still blocking**
+   (`TrySetResult::StillBlocked`) — a higher-precedence `MachinePolicy` or
+   `UserPolicy` Group Policy wins scope precedence over `CurrentUser`.
+   Prints a fallback warning to stderr explaining what we tried, what the
+   effective policy still is, and a `LocalMachine`-scope remediation. The
+   alias write half still succeeds; only the auto-run UX is degraded.
+3. **Set-ExecutionPolicy itself failed** — print the same fallback
+   warning with the underlying error message. Same non-fatal posture.
+
+The `BlockedAllSigned` branch never touches `Set-ExecutionPolicy`. It
+prints a notice explaining `AllSigned` blocks the unsigned auto-run
+snippet, offers the user the choice between signing the block themselves
+or relaxing to `RemoteSigned`, and proceeds with the alias write. The
+policy is left alone.
+
+**Why `RemoteSigned` and not other policies.** PowerShell's execution
+policies, strictest to most permissive:
+
+| Policy | Loads our local profile? | Why we don't use it |
+|---|---|---|
+| `Restricted` | ❌ | The default — the bug we're fixing. |
+| `AllSigned` | ❌ (without code-signing the snippet) | Would require shipping an Authenticode cert. Rejected — it expands deploy surface dramatically for a one-user-facing-snippet win. |
+| **`RemoteSigned`** | ✅ | **Minimum policy that loads a local unsigned profile.** Downloaded scripts must still be Authenticode-signed. What we use. |
+| `Unrestricted` | ✅ | Loads downloaded scripts with a confirmation prompt. Strictly more permissive than needed. Rejected. |
+| `Bypass` | ✅ | Loads everything silently with no warnings. Strictly more permissive than needed. Rejected. |
+
+`RemoteSigned` is the policy [Microsoft's own
+documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
+recommends for non-server Windows installs and the policy Scoop,
+oh-my-posh, and starship all rely on. Using `Unrestricted` or persistent
+`Bypass` would meet the user's explicit constraint ("not overly
+permissive") with strictly less safety than `RemoteSigned` gives.
+
+**Why `CurrentUser` scope and not `LocalMachine`.** `CurrentUser`
+writes to `HKCU\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`
+and affects only the current user. It does not require Administrator,
+does not affect other accounts on the machine, and matches the rest of
+`tr300`'s install footprint (which targets `%LOCALAPPDATA%\Programs\tr300`
+and `$PROFILE` — both `CurrentUser` paths). `LocalMachine` would require
+an elevated process and would impose our policy choice on every account
+on the box; we never want that.
+
+**Why verify after `Set-ExecutionPolicy`.** Scope precedence is
+`MachinePolicy > UserPolicy > Process > CurrentUser > LocalMachine`.
+Domain-managed Windows machines can set `MachinePolicy` or `UserPolicy`
+via GPO, and those scopes are read-only from user processes.
+`Set-ExecutionPolicy -Scope CurrentUser` succeeds (exits 0) — it really
+does write the HKCU key — but the *effective* policy seen by the next
+shell is still whatever GPO enforces. Re-reading
+`Get-ExecutionPolicy -Scope CurrentUser` immediately after the set
+confirms whether the change actually took effect under the active scope
+precedence. Without this check, the `StillBlocked` path would be invisible
+and the user would silently get the same `UnauthorizedAccess` error on
+the next shell start.
+
+**Why uninstall doesn't roll back execution policy.** The user's pre-install
+policy is unknown by the time `tr300 uninstall` runs (we don't persist it
+anywhere — that would expand the install footprint to a state file), and
+other PowerShell tooling installed on the same machine — Scoop, oh-my-posh,
+starship, dev module loaders — typically depends on `RemoteSigned` too.
+Reverting to `Restricted` on uninstall would break those tools. Leaving
+the policy alone is the least-surprising behavior. Documented in README.
+
+**Why not write to both Windows PowerShell 5.x and PowerShell 7+
+profiles.** PowerShell 7+ (`pwsh.exe`) uses
+`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`, separate from
+WinPS 5.x's `Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`.
+The reporting user was on WinPS 5.x and the current installer only
+targets WinPS 5.x via `powershell.exe -NoProfile -Command "$PROFILE"`,
+so this fix unblocks their case. PowerShell 7+ profile coverage is real
+gap but a separate scope expansion — tracked but not landed here.
+
+**Rejected alternatives.**
+- *Always set `Bypass`* — would meet the user's "minimum" constraint with
+  strictly less safety than `RemoteSigned`. Rejected.
+- *Touch `LocalMachine` instead of `CurrentUser`* — requires admin,
+  affects all users on the box. Rejected.
+- *Skip the preflight, document the failure in README and point users at
+  `Set-ExecutionPolicy`* — every fresh-Windows user runs `tr300 install`
+  and hits the failure mode the very first time; the install command's
+  job is to make the tool work, not to print a workaround. Rejected.
+- *Sign the auto-run snippet ourselves so `AllSigned` works too* —
+  requires Authenticode cert infrastructure, ongoing key rotation, and a
+  release-time signing step. Not worth it for the AllSigned user count.
+- *Write a `.cmd` shim that PowerShell can `Invoke-Item` from a profile
+  that's allowed under `Restricted`* — there is no such profile under
+  `Restricted`. Rejected.
+
+Reference:
+[Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies),
+[Set-ExecutionPolicy](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-executionpolicy).

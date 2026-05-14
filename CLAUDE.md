@@ -107,6 +107,14 @@ Custom error types in `src/error.rs` using `thiserror`:
 
 `--uninstall` is interactive (`src/install/prompt.rs`): the user picks `ProfileOnly`, `Complete` (also deletes the binary), or `Cancel`. The `Complete` path uses `find_binary_location()` + `confirm_complete_uninstall()` to show the path before deleting. Don't bypass the prompt unless the user has explicitly opted into a non-interactive variant.
 
+**Windows execution-policy preflight (v3.14.4+).** `install()` runs `run_execution_policy_preflight()` **before** writing `$PROFILE`. Edit-time rules:
+- The preflight is the *minimum-permissions* fix: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force` *only* when the current `CurrentUser` policy is `Restricted` or `Undefined`. `RemoteSigned` is the strictest of PowerShell's policies that loads a local unsigned profile — it does **not** weaken protection against downloaded unsigned scripts. Never widen beyond `RemoteSigned`. Never touch `LocalMachine` scope (requires admin and affects all users). Never use persistent `Bypass`.
+- **Never silently downgrade `AllSigned`.** That's a deliberate security choice — `policy_state("AllSigned")` returns `PolicyState::BlockedAllSigned`; the preflight prints a notice explaining the auto-run won't fire and leaves the policy alone.
+- **Verify after set.** `Set-ExecutionPolicy` can exit 0 while a higher-precedence `MachinePolicy` / `UserPolicy` GPO still wins; `try_set_execution_policy()` re-reads `Get-ExecutionPolicy -Scope CurrentUser` and returns `TrySetResult::StillBlocked` so we can surface a fallback warning with the `LocalMachine`-scope remediation.
+- **Failures are non-fatal.** `run_execution_policy_preflight()` returns `()` and never propagates an error to `install()`'s `Result` — the alias write half still succeeds even when the policy can't be fixed, so manual `tr300` invocations from the prompt keep working.
+- **Order matters.** Run the preflight first, then write the profile. The reverse surfaces the confusing `UnauthorizedAccess` PSSecurityException at the *next* shell start, far from the install-time context where the user can act on it.
+- The policy classification uses an enum (`PolicyState::{BlockedDefault, BlockedAllSigned, Permissive, Unknown}`) so unknown future PowerShell policy strings default to `Permissive` rather than triggering destructive action on values we can't reason about.
+
 ### Windows accuracy patterns (v3.11.0+)
 
 Edit-time rules:

@@ -5,7 +5,7 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-11 (documentation consistency pass after v3.14.3)
+**Last updated:** 2026-05-14 (Windows install execution-policy preflight, v3.14.4)
 **Current version:** 3.14.3
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\Documents\GitHub\qube-machine-report` (Windows host where this work was authored)
@@ -44,8 +44,9 @@ The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machin
 | v3.14.1 | `3328a8e` | 2026-05-11 | **Release confidence patch** — no new runtime behavior; bumps package metadata for a patch release after the v3.14.0 CI warning-as-error fix-forward and follow-up release-publication docs were verified green on `master`. |
 | v3.14.2 | `a6c3841` | 2026-05-11 | **Crates.io + resilient updater release** — publishes the `tr-300` crate, tracks `Cargo.lock`, adds CI-gated crates.io publishing after default-branch CI, ports self-update to a cargo-first probe-and-retry strategy chain, documents all install paths, and removes unrelated historical implementation files/references. |
 | v3.14.3 | `25305d8` | 2026-05-11 | **Canonical crates.io package name** — recreates the crate as lowercase `tr300`, changes the Rust library import path to `tr300`, points self-update at `cargo install tr300 --force`, and keeps `tr-300-installer.*` release aliases for v3.14.2 updater compatibility via a cargo-dist `allow-dirty = ["ci"]` workflow customization. |
+| v3.14.4 | _pending_ | 2026-05-14 | **Windows install execution-policy preflight** — `tr300 install` now adjusts the Windows PowerShell `CurrentUser` execution policy to `RemoteSigned` when it's `Restricted`/`Undefined`, so the freshly written `$PROFILE` auto-run actually loads on fresh Windows machines. `AllSigned` is intentionally left alone (user warning, no silent downgrade). Verify-after-set catches GPO overrides and surfaces a `LocalMachine`-scope remediation. Non-fatal: the alias write half always succeeds. Drive-by cleanup: moved `mod powershell_fallback_tests` to the end of `src/collectors/platform/windows.rs` to satisfy `clippy::items_after_test_module` under local Windows clippy. |
 
-**Tag status (as of 2026-05-11):**
+**Tag status (as of 2026-05-14):**
 - `v3.10.0` (`58812cc`): tagged + pushed; release.yml run failed (different failure mode — historic record only).
 - `v3.11.0` (`3a252df`): NOT tagged.
 - `v3.11.1` (`22f2002`): NOT tagged.

@@ -169,6 +169,49 @@ unchanged outside `tr300 update`.
   v3.14.2 GitHub Release is non-draft, non-prerelease, and published with
   20 cargo-dist assets.
 
+### v3.14.4 — 2026-05-14
+
+Windows `tr300 install` execution-policy preflight. Verified on the same Windows
+11 25H2 (build 26200.8457) host the user reported the original failure on,
+under a non-admin session.
+
+- **Reproduce the broken state** — `powershell -NoProfile -Command "Get-ExecutionPolicy -List"`
+  returned `Undefined` at every scope (the resolved effective policy is
+  `Restricted` on Windows Client when all scopes are Undefined). This matches
+  the exact fresh-machine state the user reported.
+- **Auto-fix path** — `./target/release/tr300.exe install` printed
+  `Set PowerShell CurrentUser execution policy: Undefined -> RemoteSigned`,
+  followed by the existing "Modified PowerShell profile:" /
+  "Installation complete!" output. `Get-ExecutionPolicy -Scope CurrentUser`
+  returned `RemoteSigned` after the install.
+- **Fresh shell loads the profile** — `powershell -Command "exit 0"` (full
+  profile load, no `-NoProfile`) printed the TR-300 fast-mode auto-run table
+  with no `UnauthorizedAccess` / PSSecurityException. The exact failure mode
+  the user reported is fixed end-to-end.
+- **Idempotency** — re-running `tr300 install` with the policy already at
+  `RemoteSigned` produced no policy-change message and no duplicated
+  `# TR-300` markers in `$PROFILE`.
+- **AllSigned not-downgraded** — set `CurrentUser` to `AllSigned`, ran
+  `tr300 install`, observed the warning text ("PowerShell CurrentUser
+  execution policy is 'AllSigned' — TR-300 will not change this." plus the
+  remediation options) and confirmed `Get-ExecutionPolicy -Scope CurrentUser`
+  was *still* `AllSigned` afterwards. The alias-write half still succeeded
+  ("Installation complete!" printed); the auto-run won't fire under
+  `AllSigned` without signing, as documented.
+- **Local gates** — `cargo fmt -- --check`,
+  `cargo clippy --all-targets --workspace -- -D warnings`, and
+  `cargo test --workspace` (47 lib + 18 integration + 1 doc) passed on this
+  Windows host after the change. The clippy pass required moving the
+  pre-existing `powershell_fallback_tests` module to the end of
+  `src/collectors/platform/windows.rs` to satisfy
+  `clippy::items_after_test_module`; the previous structure had the test
+  module mid-file with ~270 lines of non-test items after it, and that lint
+  had never tripped CI because clippy runs Linux-only and the file is
+  `#[cfg(target_os = "windows")]`-gated.
+- **GPO-locked path** — not verified on this non-domain machine. The
+  fallback warning text is exercised at the unit level via the AllSigned
+  path (same `TrySetResult::StillBlocked` rendering).
+
 ### v3.14.3 — 2026-05-11
 
 Canonical crates.io package rename from the deleted `tr-300` package name to

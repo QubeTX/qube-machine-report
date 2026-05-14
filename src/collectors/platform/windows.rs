@@ -1255,49 +1255,6 @@ fn normalize_powershell_battery_status(battery: &str) -> String {
         .replace("(9)", "(Charging Critical)")
 }
 
-#[cfg(test)]
-mod powershell_fallback_tests {
-    use super::*;
-
-    #[test]
-    fn parses_batched_powershell_fallback_json() {
-        let json = r#"{
-            "edition": "Microsoft Windows 11 Pro",
-            "computer": "Microsoft Corporation|Virtual Machine|True",
-            "gpus": ["Intel Arc Graphics", "NVIDIA RTX"],
-            "battery": "87% (2)"
-        }"#;
-
-        let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
-        assert_eq!(
-            parsed.windows_edition.as_deref(),
-            Some("Microsoft Windows 11 Pro")
-        );
-        assert_eq!(parsed.virtualization.as_deref(), Some("Hyper-V"));
-        assert_eq!(
-            parsed.gpus,
-            vec!["Intel Arc Graphics".to_string(), "NVIDIA RTX".to_string()]
-        );
-        assert_eq!(parsed.battery.as_deref(), Some("87% (AC Power)"));
-    }
-
-    #[test]
-    fn parses_single_gpu_string_from_batched_fallback() {
-        let json = r#"{
-            "edition": "",
-            "computer": "QEMU|Standard PC|True",
-            "gpus": "Virtio GPU",
-            "battery": null
-        }"#;
-
-        let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
-        assert_eq!(parsed.windows_edition, None);
-        assert_eq!(parsed.virtualization.as_deref(), Some("QEMU"));
-        assert_eq!(parsed.gpus, vec!["Virtio GPU".to_string()]);
-        assert_eq!(parsed.battery, None);
-    }
-}
-
 // --- C.8: GPU software-adapter filter (v3.13.0+) ---
 //
 // The Win32_VideoController WMI path historically returned
@@ -1564,5 +1521,48 @@ pub fn last_cold_boot_seconds() -> Option<u64> {
         None
     } else {
         Some(elapsed as u64)
+    }
+}
+
+#[cfg(test)]
+mod powershell_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn parses_batched_powershell_fallback_json() {
+        let json = r#"{
+            "edition": "Microsoft Windows 11 Pro",
+            "computer": "Microsoft Corporation|Virtual Machine|True",
+            "gpus": ["Intel Arc Graphics", "NVIDIA RTX"],
+            "battery": "87% (2)"
+        }"#;
+
+        let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
+        assert_eq!(
+            parsed.windows_edition.as_deref(),
+            Some("Microsoft Windows 11 Pro")
+        );
+        assert_eq!(parsed.virtualization.as_deref(), Some("Hyper-V"));
+        assert_eq!(
+            parsed.gpus,
+            vec!["Intel Arc Graphics".to_string(), "NVIDIA RTX".to_string()]
+        );
+        assert_eq!(parsed.battery.as_deref(), Some("87% (AC Power)"));
+    }
+
+    #[test]
+    fn parses_single_gpu_string_from_batched_fallback() {
+        let json = r#"{
+            "edition": "",
+            "computer": "QEMU|Standard PC|True",
+            "gpus": "Virtio GPU",
+            "battery": null
+        }"#;
+
+        let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
+        assert_eq!(parsed.windows_edition, None);
+        assert_eq!(parsed.virtualization.as_deref(), Some("QEMU"));
+        assert_eq!(parsed.gpus, vec!["Virtio GPU".to_string()]);
+        assert_eq!(parsed.battery, None);
     }
 }

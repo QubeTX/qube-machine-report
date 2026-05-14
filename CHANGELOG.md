@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.4] - 2026-05-14
+
+### Fixed
+- **2026-05-14 — Windows `tr300 install` execution-policy preflight.** Fresh
+  Windows machines default `ExecutionPolicy` to `Restricted`, which blocks
+  every `.ps1` file including `$PROFILE` itself. The auto-run block written
+  by `tr300 install` therefore never fired on first-run machines — opening a
+  new PowerShell session produced `File ...Microsoft.PowerShell_profile.ps1
+  cannot be loaded because running scripts is disabled on this system.
+  ... FullyQualifiedErrorId : UnauthorizedAccess`. `tr300 install` now runs
+  an execution-policy preflight on Windows: it inspects `Get-ExecutionPolicy
+  -Scope CurrentUser`, and when the policy is `Restricted` or `Undefined` it
+  runs `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+  -Force` (HKCU only, no admin required) so the freshly written profile
+  loads on the next shell. `RemoteSigned` is the minimum policy that allows
+  the local profile to run; it does not weaken protection against downloaded
+  unsigned scripts. If the user has deliberately set `AllSigned`, the
+  installer prints a one-time notice explaining the auto-run won't fire and
+  refuses to silently downgrade. If a higher-precedence Group Policy
+  overrides the user-scope change, the installer surfaces a fallback
+  warning with the `LocalMachine`-scope remediation. None of these branches
+  abort the alias write; manual `tr300` invocations were never affected.
+
 ### Changed
 - **2026-05-11 — documentation consistency pass.** Rechecked README,
   CHANGELOG, CODEX_PROJECT, AGENTS, CLAUDE, TESTING, MASTER_PLAN,

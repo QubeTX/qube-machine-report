@@ -8,7 +8,7 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v3.14.3](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.3) (2026-05-11), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is [`tr300`](https://crates.io/crates/tr300).
+Latest release: [v3.14.4](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.4) (2026-05-14), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is [`tr300`](https://crates.io/crates/tr300).
 
 ## Features
 
@@ -69,7 +69,7 @@ workflows that need an exact Git tag:
 
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.3
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.4
 ```
 
 ### From Source
@@ -258,9 +258,22 @@ This means you can safely run `tr300 install` multiple times without duplicating
 
 **On Unix/macOS:** Modifies `~/.bashrc` and/or `~/.zshrc`
 
-**On Windows:** Modifies PowerShell profile
+**On Windows:** Modifies the Windows PowerShell `CurrentUserCurrentHost`
+profile (`$PROFILE`). Fresh Windows machines default `ExecutionPolicy` to
+`Restricted`, which blocks every `.ps1` including the profile itself, so
+`tr300 install` runs a preflight that adjusts the `CurrentUser` scope to
+`RemoteSigned` when needed. `RemoteSigned` is the minimum policy that lets
+the local profile load — it still requires downloaded `.ps1` files to be
+Authenticode-signed. The change is HKCU-only, affects only your user
+account, and does not require admin. If you have deliberately set
+`AllSigned`, `tr300 install` will not silently downgrade it; it prints a
+notice explaining the auto-run will not fire and leaves the policy alone.
+See [Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies).
 
 To remove these additions, run `tr300 uninstall` or `tr300 --uninstall`.
+The uninstall does not roll back your execution policy — other PowerShell
+tooling typically relies on `RemoteSigned`, so restoring it would surprise
+users.
 
 ## Building from Source
 

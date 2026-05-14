@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "tr300"
-version = "3.14.3"
+version = "3.14.4"
 dependencies = [
  "assert_cmd",
  "chrono",
