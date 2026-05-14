@@ -106,6 +106,10 @@ jobs:
     name: Auto-run speed (${{ matrix.name }})
     needs: build
     runs-on: ${{ matrix.os }}
+    # TEMPORARY: same macOS ARM flake as the `test` + `build` jobs. The
+    # speed job runs its own `cargo build --release --bin tr300` and hits
+    # the same 0-second cargo abort on macOS. Revert with the other two.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
