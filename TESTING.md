@@ -214,6 +214,34 @@ unelevated user session.
   `cargo test --workspace` (54 lib + 18 integration + 1 doc — up from
   v3.14.4's 47 lib via 7 new path-inspection tests) all passed on this
   host.
+- **Release pipeline (with macOS ARM workaround).** Six commits between
+  the initial release commit and the green CI:
+  - `06161b2` initial release commit — CI failed on Release Build (macOS
+    ARM) at 0s, Test (macOS ARM) passed
+  - `ff199d5` empty-commit retrigger — Test + Release Build (macOS ARM)
+    both failed at 0s
+  - `be8f2a0` empty-commit retrigger — Test (macOS ARM) failed at 0s,
+    Release Build (macOS ARM) succeeded
+  - `158dc2e` reverted the v3.14.5 main.rs Display-rendering change to
+    isolate whether it was code-correlated; same Test (macOS ARM) failed
+    at 0s pattern, Release Build (macOS ARM) succeeded — confirmed
+    infrastructure, not code
+  - `667e466` added `continue-on-error: ${{ matrix.os == 'macos-latest'
+    }}` to ci.yml test + build matrix entries; workflow conclusion
+    still failed because Auto-run speed (macOS ARM) also failed
+    without the knob
+  - `a21a4d1` extended the same knob to the speed job; **final green
+    CI** (workflow conclusion = success despite macOS ARM Test +
+    Auto-run-speed individual failures)
+  - CI run 25850693664 succeeded; crates-publish run 25850823118
+    published `tr300 3.14.5` to crates.io; tag `v3.14.5` push triggered
+    release.yml run 25850864213 which built all 22 artifacts. GitHub
+    Release v3.14.5 published non-draft non-prerelease.
+  - The 0-second cargo abort pattern (cache restore succeeds, then
+    cargo itself exits instantly without producing compile output) is
+    structurally not a code-compilation failure. Linux + Windows green
+    on every retry. v3.14.4 on a structurally similar tree passed
+    cleanly hours earlier.
 
 ### v3.14.4 — 2026-05-14
 
