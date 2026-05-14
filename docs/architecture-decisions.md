@@ -21,7 +21,7 @@
   - [v3.12.0+ — VPN-aware default-route, Fast Startup uptime annotation](#v3120--vpn-aware-default-route-fast-startup-uptime-annotation)
   - [v3.13.0+ — 5-state battery, native cores, GPU registry-prefer, PSCore detection, terminal walk](#v3130--5-state-battery-native-cores-gpu-registry-prefer-pscore-detection-terminal-walk)
   - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
-  - [v3.14.5+ — Windows install error advisor + Display-formatted top-level errors](#v3145--windows-install-error-advisor--display-formatted-top-level-errors)
+  - [v3.14.5+ — Windows install error advisor](#v3145--windows-install-error-advisor)
 
 ---
 
@@ -608,7 +608,7 @@ Reference:
 [Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies),
 [Set-ExecutionPolicy](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-executionpolicy).
 
-### v3.14.5+ — Windows install error advisor + Display-formatted top-level errors
+### v3.14.5+ — Windows install error advisor
 
 **Failure mode this prevents.** Prior to v3.14.5, when `tr300 install` hit
 a permissions error on a work machine — Intune-managed device, Active
@@ -670,15 +670,6 @@ Two things wrong with that output:
    user-visible cost is just slightly off-topic advisory text, and
    keeping the predicate simple is worth more than a perfect filter.
 
-3. **`fn main()` -> `fn run()` dispatch.** `main()` no longer returns
-   `Result<()>`. It calls `run() -> Result<()>` and renders any error
-   via `eprintln!("Error: {}", err)` (Display) before
-   `std::process::exit(1)`. The result is that the trailing line is
-   `Error: Platform operation failed: write profile: Access is denied.
-   (os error 5)` — readable, single-line, points back to the rich
-   guidance above. The change is global (every command, not just
-   install) because it's a strictly better default.
-
 **Why we don't put the rich guidance in the AppError message itself.**
 That would force the message into a single string with embedded
 newlines, which renders poorly in non-terminal consumers (CI logs,
@@ -717,11 +708,6 @@ rather than silently continuing.
 - *Print only the short error and rely on documentation* — defeats the
   purpose. The user already has the message in front of them; the
   guidance should be there too. Rejected.
-- *Keep `fn main() -> Result<()>` and override Debug* — implementing
-  `Debug` to print like Display is unidiomatic and would surprise
-  anyone reading `dbg!(err)`. Cleaner to dispatch explicitly through
-  `run()`. Rejected.
-
 Reference:
 [`std::io::ErrorKind`](https://doc.rust-lang.org/std/io/enum.ErrorKind.html),
 [Windows System Error Codes](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes),

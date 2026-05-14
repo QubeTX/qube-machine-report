@@ -278,15 +278,14 @@ users.
 If `tr300 install` (or `uninstall`) hits a permissions error on Windows —
 common on work machines managed by Intune, Group Policy, AppLocker, or
 WDAC, and on personal machines where Documents is redirected to OneDrive
-— the tool now prints a multi-paragraph explanation of what likely caused
-the failure (OneDrive offline / online-only files, an MDM lockdown,
-antivirus blocking the profile edit, a sharing violation, a disk-full
-condition, or a MAX_PATH overflow) along with concrete next steps:
-which path to ask IT to allowlist, where to add an antivirus exclusion,
-or how to `takeown` ownership. Manual `tr300` invocations from the
-prompt always continue to work in this case; only the auto-run on new
-shells is affected, and you can re-run `tr300 install` once the
-underlying restriction is addressed.
+— the tool prints a multi-paragraph explanation of what likely caused the
+failure (OneDrive offline / online-only files, an MDM lockdown, antivirus
+blocking the profile edit, a sharing violation, a disk-full condition, or
+a MAX_PATH overflow) along with concrete next steps: which path to ask IT
+to allowlist, where to add an antivirus exclusion, or how to `takeown`
+ownership. Manual `tr300` invocations from the prompt always continue to
+work in this case; only the auto-run on new shells is affected, and you
+can re-run `tr300 install` once the underlying restriction is addressed.
 
 ## Building from Source
 

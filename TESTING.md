@@ -209,12 +209,6 @@ unelevated user session.
 - **Happy path didn't regress.** `tr300 install` with the file writable
   produced the same "Modified PowerShell profile:" / "Installation
   complete!" output as v3.14.4, exit code 0.
-- **Display-vs-Debug at main level.** Trailing error line now reads
-  `Error: Platform operation failed: write profile: Access is denied.
-  (os error 5)` instead of v3.14.4's `Error: Platform { message: "..."
-  }` Debug print. The change is `fn main()` -> `fn run()` dispatch in
-  `src/main.rs`; affects every command that returns an error, not just
-  install.
 - **Local gates.** `cargo fmt -- --check`,
   `cargo clippy --all-targets --workspace -- -D warnings`,
   `cargo test --workspace` (54 lib + 18 integration + 1 doc — up from

@@ -122,7 +122,6 @@ Custom error types in `src/error.rs` using `thiserror`:
 - **Always close with "Manual `tr300` still works from the prompt".** Install failures don't break the binary's basic functionality; the user needs to know what they CAN still do while they sort out the underlying restriction.
 - **Don't move the rich output to stdout.** Stdout is for the normal install messages; rich error guidance belongs on stderr so it interleaves correctly with the trailing `Error: ...` line and so callers that capture stdout (e.g. CI scripts) still see the explanation.
 
-**Top-level error rendering (v3.14.5+).** `main()` is now a void function; it dispatches into `run() -> Result<()>` and renders errors via `{}` (Display, from `thiserror`'s `#[error("...")]` attributes) before `std::process::exit(1)`. Don't switch `main()` back to `fn main() -> Result<()>` — that prints errors with Debug, which renders `Platform { message: "..." }` and obscures the actual message. The exit-code contract is `0` on success, `1` on any other returned error.
 
 ### Windows accuracy patterns (v3.11.0+)
 
