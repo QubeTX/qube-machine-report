@@ -211,6 +211,23 @@ under a non-admin session.
 - **GPO-locked path** — not verified on this non-domain machine. The
   fallback warning text is exercised at the unit level via the AllSigned
   path (same `TrySetResult::StillBlocked` rendering).
+- **Release pipeline verified end-to-end.** CI run 25848439537 succeeded
+  on commit `ac3fd34` across all 13 jobs (fmt, clippy, audit, dist-plan,
+  tests on three platforms, release builds on three platforms, auto-run
+  speed gates on three platforms). The previous commit `35fb65a` (a
+  docs-only commit) had failed on macOS ARM in a flaky way; my commit's
+  green macOS ARM result confirmed it was transient runner noise, not a
+  code regression. Crates.io publish run 25848562250 then published
+  `tr300 3.14.4` to crates.io from that same SHA. Tag `v3.14.4` push
+  triggered release.yml run 25848716551 which built six target binaries
+  (Linux x64 gnu/musl, Linux ARM64 gnu, macOS Intel, macOS ARM, Windows
+  x64) plus the MSI installer and the shell/PowerShell installer
+  scripts. GitHub Release published non-draft, non-prerelease with 22
+  assets including the legacy `tr-300-installer.*` aliases for
+  v3.14.2-and-earlier updater compatibility. `tr300 update --json` from
+  the local v3.14.4 binary reported `latest_version=3.14.4` /
+  `update_available=false`, confirming the release is discoverable via
+  the GitHub API.
 
 ### v3.14.3 — 2026-05-11
 
