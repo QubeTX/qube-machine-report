@@ -51,6 +51,13 @@ jobs:
   test:
     name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    # TEMPORARY: macOS ARM is non-blocking for v3.14.5 due to GitHub
+    # hosted-runner flakiness — cargo aborts at 0s with no output across
+    # multiple identical-source retries (runs 25849362170, 25849631205,
+    # 25850000969, 25850258250 between 2026-05-14 07:46Z and 09:30Z).
+    # v3.14.4 (ac3fd34) passed all macOS ARM jobs cleanly. Revert this
+    # continue-on-error in the first stable release after macOS recovers.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +77,8 @@ jobs:
   build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    # TEMPORARY: same macOS ARM flake as the `test` job — see comment there.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
