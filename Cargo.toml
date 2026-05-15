@@ -82,7 +82,9 @@ cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
 # release.yml intentionally keeps a tiny post-dist alias step for v3.14.2 updater compatibility.
-allow-dirty = ["ci"]
+# wix/main.wxs is customized with the InstallSourceMarker Component (v3.15.0+)
+# so tr300 update can dispatch to the matching installer for in-place upgrades.
+allow-dirty = ["ci", "msi"]
 # The installers to generate for each app
 installers = ["shell", "powershell", "msi"]
 # Target platforms to build apps for (Rust target-triple syntax)

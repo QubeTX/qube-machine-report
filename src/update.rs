@@ -58,6 +58,14 @@ const MANUAL_INSTALL_URL: &str = "https://github.com/QubeTX/qube-machine-report#
 /// different product would create coexistence problems (two ARP entries,
 /// PATH ordering decides which wins). For cargo install / shell installer
 /// users, the legacy probe-and-retry chain runs as before.
+// The four MSI/EXE variants are only ever constructed by
+// build_strategy_list() inside its #[cfg(windows)] block, so on non-Windows
+// targets the dead_code lint flags them as never-constructed. The variants
+// still need to exist on every platform so the label()/json_id()/json_method()
+// match arms stay exhaustive and the try_strategy() dispatch arms compile.
+// cfg_attr keeps Windows clippy strict (so missing wiring on Windows still
+// trips the lint) while silencing it on Linux/macOS.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpdateStrategy {
     Cargo,
