@@ -87,7 +87,9 @@ tests/
 
 wix/
   main.wxs                    # Global MSI packaging template (perMachine, system PATH)
-  corporate.wxs               # Corporate MSI packaging template (perUser, no admin) — v3.15.0+
+
+wix-corporate/
+  corporate.wxs               # Corporate MSI packaging template (perUser, no admin) — v3.15.0+, in separate dir so cargo-wix's wix/ scan doesn't bundle both into one MSI
 
 inno/
   global.iss                  # Inno Setup script for Global EXE installer (perMachine) — v3.15.0+
@@ -525,7 +527,7 @@ cargo-dist publishes via `release.yml`:
 - Global MSI installer for Windows (`tr300-x86_64-pc-windows-msvc.msi`)
 
 `windows-installers.yml` (v3.15.0+) publishes three additional Windows assets after `release.yml` finishes:
-- Corporate MSI (`tr300-x86_64-pc-windows-msvc-corporate.msi`) — perUser scope, no admin, installs to `%LocalAppData%\Programs\tr300\bin\` (built from `wix/corporate.wxs`)
+- Corporate MSI (`tr300-x86_64-pc-windows-msvc-corporate.msi`) — perUser scope, no admin, installs to `%LocalAppData%\Programs\tr300\bin\` (built from `wix-corporate/corporate.wxs`)
 - Global EXE installer (`tr300-x86_64-pc-windows-msvc-setup.exe`) — Inno Setup, perMachine, same install path as Global MSI (built from `inno/global.iss`)
 - Corporate EXE installer (`tr300-x86_64-pc-windows-msvc-corporate-setup.exe`) — Inno Setup, perUser, same install path as Corporate MSI (built from `inno/corporate.iss`)
 
@@ -559,7 +561,7 @@ release.
 - Upgrade/path GUIDs are defined in `Cargo.toml` metadata (`5CD540A8-…` UpgradeCode, `0F93D599-…` Path component)
 - v3.15.0+ writes `HKCU\Software\TR300\InstallSource=msi-global` via the `InstallSourceMarker` Component (GUID `537B3C60-…`) so `tr300 update` can dispatch to the matching installer
 
-### Corporate MSI specifics (`wix/corporate.wxs` — Corporate Edition, v3.15.0+)
+### Corporate MSI specifics (`wix-corporate/corporate.wxs` — Corporate Edition, v3.15.0+)
 
 - Product name: `tr300 (Corporate Edition)`
 - Manufacturer: `Emmett S`

@@ -77,19 +77,50 @@ jobs:
         shell: pwsh
         run: cargo build --release --locked
 
-      - name: Install cargo-wix
-        shell: pwsh
-        run: cargo install cargo-wix --locked
-
-      - name: Build Corporate MSI
+      - name: Build Corporate MSI via bare candle + light
         shell: pwsh
         run: |
-          # cargo-wix takes the .wxs as a positional input. --output sets the
-          # final .msi path. --nocapture lets WiX's candle/light errors stream
-          # through so failures are debuggable from CI logs.
-          # Wrap WiX MSI emit (target/wix/tr300-corporate-<ver>-x86_64.msi) into
-          # our canonical artifact name.
-          cargo wix wix\corporate.wxs --output "target\wix\tr300-x86_64-pc-windows-msvc-corporate.msi" --nocapture
+          # The Corporate MSI is built with WiX 3 candle/light directly (NOT
+          # through cargo-wix). cargo-wix compiles every .wxs file in `wix/`
+          # and links them into ONE MSI; putting corporate.wxs alongside
+          # main.wxs hits LGHT0089/0091/0092 "Multiple entry sections" +
+          # "Duplicate symbol" errors at link time. corporate.wxs lives in
+          # wix-corporate/ (a separate directory) precisely so cargo-wix's
+          # default scan of wix/ produces only the Global MSI cleanly.
+          #
+          # WiX 3.x is preinstalled on windows-2022 runners — the install
+          # registers `$env:WIX` pointing at the install root. Standard paths:
+          #   - $env:WIX\bin\candle.exe (compiler)
+          #   - $env:WIX\bin\light.exe (linker)
+          #
+          # -sice:ICE38 / ICE64 / ICE91 suppress per-user MSI convention
+          # violations from light. These ICEs require Components in user-
+          # profile directories to have HKCU RegistryValue KeyPaths (not File
+          # KeyPaths) and Directories to have RemoveFile/RemoveFolder
+          # entries. For our single-binary install they're cosmetic — install
+          # and uninstall both work correctly; the only consequence is an
+          # empty `%LocalAppData%\Programs\tr300\bin\` folder left after
+          # uninstall. Acceptable trade-off vs ~40 LOC of WiX boilerplate.
+          $candle = "$env:WIX\bin\candle.exe"
+          $light  = "$env:WIX\bin\light.exe"
+          if (-not (Test-Path $candle)) { throw "candle.exe not found at $candle" }
+          if (-not (Test-Path $light))  { throw "light.exe not found at $light" }
+
+          New-Item -ItemType Directory -Force -Path target\wix | Out-Null
+
+          & $candle -arch x64 `
+            -dVersion=${{ steps.version.outputs.version }} `
+            -dCargoTargetBinDir=target\release `
+            -out target\wix\corporate.wixobj `
+            wix-corporate\corporate.wxs
+          if ($LASTEXITCODE -ne 0) { throw "candle failed with exit $LASTEXITCODE" }
+
+          & $light -sice:ICE38 -sice:ICE64 -sice:ICE91 `
+            -ext WixUIExtension `
+            -out target\wix\tr300-x86_64-pc-windows-msvc-corporate.msi `
+            target\wix\corporate.wixobj
+          if ($LASTEXITCODE -ne 0) { throw "light failed with exit $LASTEXITCODE" }
+
           if (-not (Test-Path "target\wix\tr300-x86_64-pc-windows-msvc-corporate.msi")) {
             throw "Corporate MSI build failed — output file missing"
           }

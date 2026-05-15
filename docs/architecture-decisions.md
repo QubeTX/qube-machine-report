@@ -23,6 +23,7 @@
   - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
   - [v3.14.5+ — Windows install error advisor](#v3145--windows-install-error-advisor)
   - [Windows distribution model (v3.15.0+)](#windows-distribution-model-v3150)
+  - [v3.15.1 addendum — Why corporate.wxs lives in `wix-corporate/`, not `wix/`](#v3151-addendum--why-corporatewxs-lives-in-wix-corporate-not-wix)
 
 ---
 
@@ -792,3 +793,28 @@ References:
 - [cargo-dist MSI installer book](https://opensource.axo.dev/cargo-dist/book/installers/msi.html)
 - [Azure Trusted Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/)
 - [Microsoft Learn — Submit packages to WinGet](https://learn.microsoft.com/en-us/windows/package-manager/package/)
+
+### v3.15.1 addendum — Why corporate.wxs lives in `wix-corporate/`, not `wix/`
+
+v3.15.0's `release.yml` run 25901237669 failed at `build-local-artifacts(x86_64-pc-windows-msvc)` with WiX candle exit code 6. v3.15.0 published to crates.io (it was past the crates-publish stage by then per /release § 10's "tag only after both ci.yml and crates-publish are green") but had no GitHub Release artifacts. v3.15.1 is the fix-forward patch release. Two root causes:
+
+**Root cause 1: `<Property Id='ALLUSERS' Value=''/>` in v3.15.0 `wix/corporate.wxs`.** I'd added this Property because folklore and old WiX 3 examples claim that explicit `ALLUSERS=""` + `MSIINSTALLPERUSER=1` are needed to force a per-user install. WiX 3.11 candle rejects `Value=""` with `CNDL0006: The Property/@Value attribute's value cannot be an empty string` and emits a follow-up `CNDL1006` warning explaining the Property would be ignored anyway. The actual WiX 3 rule: `InstallScope='perUser'` on the Package element is sufficient by itself. The MSI installer treats unset `ALLUSERS` as per-user, which is exactly what we want; declaring it with an empty value is both syntactically rejected by candle AND, even if it parsed, semantically equivalent to not declaring it at all. The v3.15.0 → v3.15.1 fix was to delete both that line and the redundant `MSIINSTALLPERUSER=1` Property.
+
+**Root cause 2: cargo-wix's "compile every `wix/*.wxs` into ONE MSI" default.** Once root cause 1 was fixed, light.exe surfaced `LGHT0089` ("Multiple entry sections '*' and '*'") and a cascade of `LGHT0091/0092` ("Duplicate symbol") errors at the link stage — for `Property:Manufacturer`, `Property:ProductCode`, `Property:ProductLanguage`, `Property:ProductName`, `Property:ProductVersion`, `Property:UpgradeCode`, `Property:DiskPrompt`, `Media:1`, `Directory:APPLICATIONFOLDER`, `Component:binary0`, `Component:Path`, `Component:InstallSourceMarker`. cargo-wix scans `wix/*.wxs` non-recursively and feeds ALL matching files to candle → produces one wixobj per .wxs → light.exe links them ALL into a single output. Two complete Product definitions in the same directory cannot coexist this way; they conflict at every shared symbol.
+
+The fix has two parts: (a) move `corporate.wxs` to a NEW directory `wix-corporate/` so cargo-wix's default scan of `wix/` produces only the Global MSI cleanly. (b) Build the Corporate MSI separately by calling bare `candle.exe` + `light.exe` from `windows-installers.yml`, never through cargo-wix. cargo-wix CLI has `--include <path>` to ADD files but no equivalent "use ONLY this file" flag, so cargo-wix is the wrong tool for compiling one wxs from outside `wix/`.
+
+The bare WiX invocation needs `-sice:ICE38 -sice:ICE64 -sice:ICE91` flags on `light.exe`. Per-user MSIs in WiX 3 want:
+- ICE38: every Component installing to a user-profile directory should have an HKCU RegistryValue as its KeyPath (not a File KeyPath).
+- ICE64: every Directory in the user profile needs a Component with a `RemoveFolder` element so the directory is cleaned up on uninstall.
+- ICE91: WiX warns that per-user files in `[Bin]` won't replicate to other users' profiles even if perMachine was somehow desired (cosmetic).
+
+Making `wix-corporate/corporate.wxs` ICE-clean is a real option, requiring ~5 additional `<Component>` elements per intermediate Directory (each with `<RemoveFolder>` + an `<RegistryValue Root='HKCU'>` KeyPath dummy), changing the existing `Path` and `binary0` Components to add HKCU RegistryValue KeyPaths instead of relying on Environment/File KeyPaths, plus matching `<ComponentRef>` entries in the Feature tree — roughly 40 lines of new WiX boilerplate. Rejected for v3.15.1: the practical impact of suppressing the three ICEs is one empty `%LocalAppData%\Programs\tr300\bin\` folder left in the user profile after uninstall. Install and uninstall both work correctly; PATH modification works; the binary is fully functional. The empty folder is a cosmetic leftover that's acceptable for a CLI tool.
+
+**Verification path used to diagnose this.** Local repro with portable WiX 3.11 binaries from [github.com/wixtoolset/wix3/releases](https://github.com/wixtoolset/wix3/releases/tag/wix3112rtm) (downloaded as `wix311-binaries.zip`, extracted to `/tmp/wix3/`). With cargo-wix installed via `cargo install cargo-wix`, running `cargo wix --no-build --nocapture` against v3.15.0's source surfaced both error classes in sequence — first the CNDL0006 from candle, then (after the Property fix) the LGHT0089/0091 cascade from light.exe trying to link both wixobjs together. cargo-dist's CI invocation suppresses these details by default (it captures candle/light stderr); local reproduction with `--nocapture` was essential.
+
+**Rejected alternative for root cause 2: in-tree wxs file rename.** I considered renaming `wix/corporate.wxs` to `wix/corporate.wxs.bak` in the windows-installers.yml workflow before calling cargo-wix, then restoring. Worked but ugly — the file would be physically renamed at CI runtime, which complicates local builds and confuses git. The directory move (`wix-corporate/`) is structural and explicit.
+
+**Rejected alternative for root cause 1: keep the ALLUSERS Property with a non-empty Value.** WiX docs allow `Value=" "` (single space) as a workaround for the empty-string rule. Tried in an earlier draft; it passes candle but generates a meaningless ALLUSERS Property that doesn't actually affect install scope. The clean answer is to delete the Property entirely.
+
+**Side effect: `Cargo.toml` `include` list gained `/wix-corporate/**`** so the published crate ships with the Corporate WiX source. This is for completeness — the practical Corporate MSI build happens in CI from the Git repo, not from a downloaded crate.

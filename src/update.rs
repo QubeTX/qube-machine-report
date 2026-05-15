@@ -861,16 +861,20 @@ fn read_install_source_marker() -> Option<InstallOrigin> {
 /// Determine how this binary was installed on Windows.
 ///
 /// Strategy:
-/// 1. Read the `HKCU\Software\TR300\InstallSource` marker. Authoritative.
+/// 1. Read the `HKCU\Software\TR300\InstallSource` marker. Authoritative
+///    when present. All four first-class installers (Global MSI, Corporate
+///    MSI, Global EXE, Corporate EXE) write this marker on install.
 /// 2. If no marker, fall back to path-based detection on the running
-///    binary's location. Handles old installs from before the marker
-///    existed, and the cargo install / PowerShell installer path that
-///    doesn't write a marker.
+///    binary's location. Handles the cargo install / PowerShell installer
+///    path (which doesn't write a marker), and any pre-marker legacy
+///    installs.
 ///
 /// The path fallback maps Program Files → `MsiGlobal` and
-/// LocalAppData\Programs → `MsiCorporate` (assuming MSI, since pre-3.15.0
-/// builds didn't have the EXE installers). New installs always set the
-/// marker, so this fallback only triggers for legacy installs.
+/// LocalAppData\Programs → `MsiCorporate` (it can't distinguish MSI vs EXE
+/// when the marker is missing because both installer formats target the
+/// same paths within each edition — that's by design, see README "pick
+/// one format per edition"). When the marker IS present, the EXE vs MSI
+/// distinction is preserved.
 #[cfg(windows)]
 fn detect_install_origin() -> InstallOrigin {
     if let Some(origin) = read_install_source_marker() {

@@ -24,9 +24,12 @@
   `tr300-x86_64-pc-windows-msvc-corporate.msi`.
 
   Differences vs main.wxs (intentional — do not converge):
-    - InstallScope="perUser" + ALLUSERS="" + MSIINSTALLPERUSER=1
-        Installs without UAC on machines where the user has no admin
-        rights but still has write access to %LocalAppData%.
+    - InstallScope="perUser" on the Package element. Sufficient on WiX 3.11+
+        to install without UAC on machines where the user has no admin rights
+        but still has write access to %LocalAppData%. Earlier drafts also set
+        ALLUSERS="" + MSIINSTALLPERUSER=1 as Property elements, but WiX 3.11
+        candle rejects ALLUSERS Value="" with CNDL0006 ("empty string"). Per
+        WiX docs, InstallScope="perUser" is equivalent to ALLUSERS unset.
     - UpgradeCode is a DIFFERENT GUID from the Global edition.
         Same UpgradeCode across editions would confuse Windows Installer
         and break upgrades in both directions. A user can have both
@@ -95,12 +98,20 @@
             SummaryCodepage='1252'
             />
 
-        <!-- perUser scope: ALLUSERS empty + MSIINSTALLPERUSER=1 force the
-             Windows Installer engine to install without elevation. Without
-             these, WiX 3 can default to a hybrid where the engine still asks
-             for UAC on some Windows builds. -->
-        <Property Id='ALLUSERS' Value=''/>
-        <Property Id='MSIINSTALLPERUSER' Value='1'/>
+        <!-- perUser scope: InstallScope='perUser' on the Package element above
+             is sufficient on WiX 3.11+ to make this a per-user install with
+             no UAC. We do NOT declare ALLUSERS or MSIINSTALLPERUSER Properties
+             explicitly:
+             - `<Property Id='ALLUSERS' Value=''/>` was rejected by WiX 3.11
+               candle with CNDL0006 ("Property/@Value attribute's value cannot
+               be an empty string") and CNDL1006 (Property would be ignored).
+               This was the root cause of the v3.15.0 release.yml failure on
+               build-local-artifacts(x86_64-pc-windows-msvc) at run 25901237669.
+             - `<Property Id='MSIINSTALLPERUSER' Value='1'/>` is redundant when
+               InstallScope='perUser' is set; cargo-wix's MSI compile path
+               doesn't need it.
+             The WiX 3 docs say InstallScope='perUser' is "equivalent to setting
+             ALLUSERS='' or NOT setting ALLUSERS at all". Sufficient. -->
 
         <MajorUpgrade
             Schedule='afterInstallInitialize'

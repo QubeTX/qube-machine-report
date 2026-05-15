@@ -169,6 +169,42 @@ unchanged outside `tr300 update`.
   v3.14.2 GitHub Release is non-draft, non-prerelease, and published with
   20 cargo-dist assets.
 
+### v3.15.1 — 2026-05-15
+
+Patch — fix-forward of v3.15.0 release.yml WiX build failure. No runtime
+behavior changes from v3.15.0.
+
+**Local gates verified (Windows 11 25H2 build 26200.8457):**
+- `cargo fmt --all -- --check` — clean
+- `cargo clippy --all-targets --workspace -- -D warnings` — clean
+- `cargo test --workspace --all-targets` — 79 passed (61 lib + 18 integration)
+- `cargo package --locked --list` — 38 files (+1 from v3.15.0's 37 = `wix-corporate/corporate.wxs`)
+- `cargo publish --dry-run --locked` — clean
+- `cargo build --release --locked` — clean
+- `./target/release/tr300 --version` → `tr300 3.15.1`
+
+**WiX MSI builds verified locally with portable WiX 3.11.2.4516** —
+downloaded `wix311-binaries.zip` from
+[github.com/wixtoolset/wix3/releases/tag/wix3112rtm](https://github.com/wixtoolset/wix3/releases/tag/wix3112rtm),
+extracted to a portable directory (no admin install):
+
+- **Global MSI** via cargo-wix: `cargo wix --no-build --nocapture` →
+  produces `target/wix/tr300-3.15.1-x86_64.msi` (1.9 MB), exit 0.
+- **Corporate MSI** via bare WiX:
+  `candle.exe -arch x64 -dVersion=3.15.1 -dCargoTargetBinDir=target/release ... wix-corporate/corporate.wxs`
+  then `light.exe -sice:ICE38 -sice:ICE64 -sice:ICE91 -ext WixUIExtension ...`
+  → produces `tr300-x86_64-pc-windows-msvc-corporate.msi` (1.9 MB),
+  both exit codes 0.
+
+**Path-classification unit tests** (from v3.15.0, unchanged): 4 tests
+covering `classify_install_path()` for Program Files / LocalAppData /
+.cargo\\bin / random paths all pass.
+
+**Pending verification (post-release, real Windows hardware):**
+Same matrix as v3.15.0 (the 15-row install/upgrade/`tr300 update` grid
+below). Only becomes testable after v3.15.1 release.yml +
+windows-installers.yml run green and produce real installer artifacts.
+
 ### v3.15.0 — 2026-05-14
 
 Four-installer Windows distribution model — adds Corporate MSI plus Global and

@@ -8,7 +8,7 @@ Current Codex migration status: project Claude plugin settings from `.claude/set
 
 Current implementation status: v3.15.0 ships the four-installer Windows
 distribution model — Global MSI (perMachine, existing), Corporate MSI
-(perUser, new from `wix/corporate.wxs`), Global EXE installer (Inno Setup,
+(perUser, new from `wix-corporate/corporate.wxs`), Global EXE installer (Inno Setup,
 perMachine, new from `inno/global.iss`), and Corporate EXE installer (Inno
 Setup, perUser, new from `inno/corporate.iss`). All four write
 `HKCU\Software\TR300\InstallSource` registry markers so `tr300 update`
@@ -147,7 +147,8 @@ already-installed binaries.
 ├── tests
 │   └── integration.rs
 ├── wix
-│   ├── main.wxs
+│   └── main.wxs
+├── wix-corporate
 │   └── corporate.wxs
 └── inno
     ├── global.iss

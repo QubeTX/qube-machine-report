@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-05-15
+
+### Fixed
+- **2026-05-15 — Patch release: v3.15.0 release.yml WiX build failure.**
+  v3.15.0 was published to crates.io (master CI run 25901108698 +
+  crates-publish run 25901198519) but `release.yml` run 25901237669 failed
+  at `build-local-artifacts(x86_64-pc-windows-msvc)` with WiX candle exit
+  code 6. No GitHub Release artifacts (no Global MSI, no installer scripts)
+  were published for v3.15.0, and `windows-installers.yml` never fired
+  because it triggers on `release: published`. Two distinct root causes
+  were diagnosed by reproducing the failure locally with portable
+  [WiX 3.11 binaries](https://github.com/wixtoolset/wix3/releases/tag/wix3112rtm):
+
+  1. `wix/corporate.wxs` declared `<Property Id='ALLUSERS' Value=''/>`
+     which WiX 3.11 candle rejects with `CNDL0006` ("Property/@Value
+     attribute's value cannot be an empty string"). Fixed by removing
+     both that Property and the redundant `MSIINSTALLPERUSER=1` Property
+     — `InstallScope='perUser'` on the Package element is sufficient on
+     WiX 3.11+ to declare a per-user MSI per the WiX 3 schema docs.
+
+  2. cargo-wix's default behavior compiles ALL `.wxs` files in `wix/` and
+     links them into a SINGLE MSI. Putting `corporate.wxs` alongside
+     `main.wxs` hits link-stage errors LGHT0089 (Multiple entry sections),
+     LGHT0091/0092 (Duplicate Property/Component/Media/Directory
+     symbols). Even with cargo-dist's `allow-dirty = ["msi"]` config
+     preserving the customized templates, cargo-wix still bundles both
+     into one MSI. Fixed by moving the Corporate template to a NEW
+     directory `wix-corporate/corporate.wxs` so cargo-wix's default scan
+     of `wix/` produces only the Global MSI cleanly. The Corporate MSI is
+     built separately by `.github/workflows/windows-installers.yml` using
+     bare WiX `candle.exe` + `light.exe` directly (NOT through cargo-wix)
+     with `-sice:ICE38 -sice:ICE64 -sice:ICE91` flags suppressing
+     per-user-MSI convention violations (cosmetic for our single-binary
+     install; install/uninstall both work; only consequence is empty
+     `%LocalAppData%\Programs\tr300\bin\` after uninstall).
+
+  Local verification on Windows 11 with WiX 3.11.2.4516 portable
+  binaries: Global MSI builds via `cargo wix --no-build --nocapture` →
+  1.9 MB output. Corporate MSI builds via bare `candle.exe -arch x64 ...`
+  + `light.exe -sice:ICE38 -sice:ICE64 -sice:ICE91 ...` → 1.9 MB output.
+  Both `light.exe` exit codes 0.
+
+### Internal
+- **2026-05-15 — v3.15.0 → v3.15.1 fix-forward follows the same pattern
+  as v3.13.0 → v3.13.1** documented in MASTER_PLAN.md: a tagged release
+  fails downstream of ci.yml/crates-publish; the tag stays in git as a
+  historic record of the failure (immutable per /release § 13.2); a
+  fresh patch release carries the fix. v3.15.0 crate is still on
+  crates.io but has no GitHub Release artifacts; users on `cargo install
+  tr300` get v3.15.1 automatically. Users tracking GitHub Releases see
+  v3.15.1 as the first published release of the four-installer model.
+- **2026-05-15 — `InstallSourceMarker` Components in both `wix/main.wxs`
+  and `wix-corporate/corporate.wxs` are unchanged** between v3.15.0 and
+  v3.15.1. An interim diagnosis attempt speculated they were the cause
+  (ICE57 misattribution) and removed them; that was wrong and was
+  reverted before this commit. Net change to those Components from
+  v3.15.0 to v3.15.1: zero. Both MSIs still write
+  `HKCU\Software\TR300\InstallSource`.
+- **2026-05-15 — `Cargo.toml` `include` list** picks up the new
+  `wix-corporate/**` directory so the published crate ships with the
+  Corporate WiX source. cargo-dist's `allow-dirty = ["ci", "msi"]`
+  flag, added in `8e98db4`, stays in place — still required for the
+  customized `wix/main.wxs` Component additions.
+- **2026-05-15 — Non-Windows `dead_code` lint suppression** on the
+  `UpdateStrategy` enum (`cfg_attr(not(windows), allow(dead_code))`,
+  added in commit `8e98db4`) stays. It's still required because the
+  four MSI/EXE strategy variants are only constructed in a
+  `cfg(windows)` block.
+
 ## [3.15.0] - 2026-05-14
 
 ### Added
