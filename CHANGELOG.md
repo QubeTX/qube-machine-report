@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.15.1] - 2026-05-15
 
+> **Release status:** crates.io ✓ (`tr300 3.15.1` published 2026-05-15
+> 05:35:19 UTC, run 25902206318). GitHub Release ✓ (published
+> 2026-05-15 05:41:10 UTC by release.yml run 25902253637 — all 10
+> jobs green, including the Windows MSI build that failed for
+> v3.15.0). **Caveat:** the initial v3.15.1 GitHub Release published
+> with only the 22 cargo-dist assets; `windows-installers.yml` did
+> NOT fire automatically (see "Trigger-mechanism gap" below). The
+> three additional Corporate MSI + Global EXE + Corporate EXE
+> artifacts were attached retroactively via `workflow_dispatch` after
+> the `windows-installers.yml` trigger was fixed (commit pending
+> after this entry; details in Internal section).
+
 ### Fixed
 - **2026-05-15 — Patch release: v3.15.0 release.yml WiX build failure.**
   v3.15.0 was published to crates.io (master CI run 25901108698 +
@@ -75,8 +87,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   added in commit `8e98db4`) stays. It's still required because the
   four MSI/EXE strategy variants are only constructed in a
   `cfg(windows)` block.
+- **2026-05-15 — `windows-installers.yml` trigger-mechanism gap.** The
+  v3.15.1 GitHub Release published successfully (release.yml run
+  25902253637, 22 cargo-dist assets) but `windows-installers.yml` did
+  NOT fire, so the three additional installer assets (Corporate MSI +
+  Global EXE + Corporate EXE + sidecars = 6 files) didn't get
+  attached. Root cause: the workflow's `on: release: types: [published]`
+  trigger doesn't fire when the release was created via `gh release
+  create` using the default `GITHUB_TOKEN`. GitHub
+  [intentionally suppresses this](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow)
+  ("events triggered by the GITHUB_TOKEN, with the exception of
+  workflow_dispatch and repository_dispatch, will not create a new
+  workflow run") as loop-prevention. cargo-dist's release.yml uses
+  GITHUB_TOKEN. **Fix:** change the trigger to `workflow_run` on the
+  Release workflow's completion (the same pattern `crates-publish.yml`
+  already uses to chain off `CI`). Also add a `workflow_dispatch`
+  trigger with a `tag` input so the workflow can be manually fired
+  for past releases that missed the automatic firing — this is what
+  attached the three v3.15.1 installer assets retroactively after
+  the trigger fix was committed. Future releases (v3.15.2+) will
+  fire `windows-installers.yml` automatically off the workflow_run
+  event without needing manual intervention.
 
 ## [3.15.0] - 2026-05-14
+
+> **Release status:** `tr300` 3.15.0 IS on crates.io (crates-publish run
+> 25901198519 from commit `8e98db4`) and is installable via
+> `cargo install tr300`. The matching GitHub Release was NEVER created
+> because `release.yml` run 25901237669 failed at
+> `build-local-artifacts(x86_64-pc-windows-msvc)` with WiX candle exit
+> code 6 (root cause analysis under [3.15.1] below). No `.msi`, no
+> `.exe` installer, no zipped binaries were published for v3.15.0.
+> The `v3.15.0` git tag remains as an immutable record of the failed
+> release attempt. Use **v3.15.1** for the full four-installer
+> distribution; this entry documents what was DESIGNED for v3.15.0,
+> all of which shipped via v3.15.1.
+>
+> v3.15.0 reached the tag via two commits:
+> - `92456a9` — initial squash-merge of the four-installer feature branch
+> - `8e98db4` — CI fix-forward addressing two distinct issues caught by
+>   the first `master` CI run on `92456a9`: (a) the non-Windows
+>   `dead_code` lint on the four new `UpdateStrategy` variants
+>   (Linux/macOS see them as never-constructed because the only
+>   construction site is inside `cfg(windows)`); fixed by
+>   `cfg_attr(not(windows), allow(dead_code))` on the enum. (b)
+>   cargo-dist's `dist plan` job rejecting `wix/main.wxs` as "out of
+>   date" because the customized `InstallSourceMarker` Component
+>   diverged from the canonical cargo-dist template; fixed by
+>   extending `[workspace.metadata.dist] allow-dirty` from `["ci"]` to
+>   `["ci", "msi"]`. Both fixes were preserved in v3.15.1.
 
 ### Added
 - **2026-05-14 — Corporate Edition MSI installer (perUser, no admin).** New
