@@ -200,10 +200,48 @@ extracted to a portable directory (no admin install):
 covering `classify_install_path()` for Program Files / LocalAppData /
 .cargo\\bin / random paths all pass.
 
-**Pending verification (post-release, real Windows hardware):**
+**Post-release CI verification (all five workflow runs green):**
+- **master CI run 25902114185** on commit `b37e783` — fmt + clippy +
+  tests + builds + speed gates green across Linux + macOS ARM + Windows
+  (macOS ARM test flake non-blocking via existing `continue-on-error`
+  knob from v3.14.5).
+- **crates-publish run 25902206318** — published `tr300` 3.15.1 to
+  crates.io at 2026-05-15 05:35:19 UTC from the CI-tested SHA.
+- **release.yml run 25902253637** on tag `v3.15.1` — all 10 jobs green
+  (plan + 6 build-local-artifacts + build-global-artifacts + host +
+  announce); GitHub Release published 05:41:10 UTC with the initial 22
+  cargo-dist assets (the Windows MSI build that failed for v3.15.0
+  succeeded cleanly this time).
+- **windows-installers.yml run 25902607841** — FAILED on the first
+  workflow_dispatch retry with `candle.exe CNDL0103` because PowerShell
+  parsed `-dVersion=3.15.1` as two tokens at the dots. Fixed in
+  commit `5883627` by quoting all `-D` / `/D` define args.
+- **windows-installers.yml run 25902740025** — SUCCESS on the second
+  workflow_dispatch retry. Built and uploaded the 6 additional assets
+  (Corporate MSI + Global EXE + Corporate EXE + their `.sha256`
+  sidecars).
+
+**Final v3.15.1 GitHub Release: 28 assets** (verified via
+`gh release view v3.15.1`). All four first-class Windows installers
+present (Global MSI, Corporate MSI, Global EXE setup, Corporate EXE
+setup) plus 6 platform binary archives plus the cargo-dist
+installer scripts plus legacy `tr-300-installer.*` aliases plus
+source tarball plus metadata.
+
+**Three fix-forward CI commits on master after the v3.15.1 release
+commit `b37e783`:**
+- `7715b93` — `windows-installers.yml` trigger swap (release.published
+  → workflow_run + workflow_dispatch). Driven by v3.15.1 hitting the
+  GITHUB_TOKEN loop-prevention rule that suppresses release.published
+  downstream events.
+- `5883627` — PowerShell `-D`/`/D` argument quoting fix. Driven by run
+  25902607841 catching candle on `.15.1`.
+- (Final docs commit recording all of the above)
+
+**Pending verification (real Windows hardware):**
 Same matrix as v3.15.0 (the 15-row install/upgrade/`tr300 update` grid
-below). Only becomes testable after v3.15.1 release.yml +
-windows-installers.yml run green and produce real installer artifacts.
+below). Now testable with actual installer downloads from the v3.15.1
+GitHub Release.
 
 ### v3.15.0 — 2026-05-14
 

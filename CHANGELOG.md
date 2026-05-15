@@ -9,17 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.15.1] - 2026-05-15
 
-> **Release status:** crates.io ✓ (`tr300 3.15.1` published 2026-05-15
-> 05:35:19 UTC, run 25902206318). GitHub Release ✓ (published
-> 2026-05-15 05:41:10 UTC by release.yml run 25902253637 — all 10
-> jobs green, including the Windows MSI build that failed for
-> v3.15.0). **Caveat:** the initial v3.15.1 GitHub Release published
-> with only the 22 cargo-dist assets; `windows-installers.yml` did
-> NOT fire automatically (see "Trigger-mechanism gap" below). The
-> three additional Corporate MSI + Global EXE + Corporate EXE
-> artifacts were attached retroactively via `workflow_dispatch` after
-> the `windows-installers.yml` trigger was fixed (commit pending
-> after this entry; details in Internal section).
+> **Release status: COMPLETE.** All five workflow runs green:
+> - master CI run 25902114185 (commit `b37e783`)
+> - crates-publish run 25902206318 (`tr300 3.15.1` to crates.io @ 05:35:19 UTC)
+> - release.yml run 25902253637 (GitHub Release published @ 05:41:10 UTC)
+> - workflow_dispatch run 25902740025 of `windows-installers.yml`
+>   (commit `5883627` after CI-infra fix-forwards `7715b93` + `5883627`)
+>
+> **Final GitHub Release v3.15.1: 28 assets** — verified via
+> `gh release view v3.15.1`. Contains all four first-class Windows
+> installers (Global MSI, Corporate MSI, Global EXE setup, Corporate
+> EXE setup), 6 platform binary archives, cargo-dist installer
+> scripts (canonical + legacy `tr-300-*` aliases), source tarball,
+> and dist-manifest.
+>
+> Two CI-infra fix-forwards on master after the release commit
+> were needed to attach the 3 additional installer assets:
+> - `7715b93` switched `windows-installers.yml` trigger from
+>   `release: published` to `workflow_run` (the former event doesn't
+>   fire from GITHUB_TOKEN-authenticated `gh release create`).
+> - `5883627` quoted PowerShell `-D` define args (the bareword
+>   tokenizer split `-dVersion=3.15.1` at the dots).
+> Future v3.15.2+ releases will fire `windows-installers.yml`
+> automatically — no `workflow_dispatch` retry needed.
 
 ### Fixed
 - **2026-05-15 — Patch release: v3.15.0 release.yml WiX build failure.**
@@ -108,6 +120,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the trigger fix was committed. Future releases (v3.15.2+) will
   fire `windows-installers.yml` automatically off the workflow_run
   event without needing manual intervention.
+- **2026-05-15 — PowerShell `-D` argument quoting in
+  `windows-installers.yml`.** The first `workflow_dispatch` run of the
+  fixed-trigger workflow (run 25902607841) failed with
+  `candle.exe : error CNDL0103 : The system cannot find the file
+  '.15.1' with type 'Source'`. Root cause: PowerShell's bareword
+  tokenizer treats `-dVersion=3.15.1` as two tokens
+  (`-dVersion=3` + `.15.1`) because the dots break argument
+  boundaries — candle then sees `.15.1` as a positional source
+  filename. Fix (commit `5883627`): quote each `-D` / `/D` preprocessor
+  define as a single string literal so PowerShell passes the assignment
+  as one arg. Three sites updated: candle's `-dVersion=...` and
+  `-dCargoTargetBinDir=...`, iscc's `/DMyAppVersion=...` for both
+  global.iss and corporate.iss. Run 25902740025 is the retry on this
+  fix — that's the run that produces the final 6 assets.
 
 ## [3.15.0] - 2026-05-14
 
