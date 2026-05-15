@@ -145,9 +145,15 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path target\wix | Out-Null
 
+          # Quote -d... args. Without quotes, PowerShell parses
+          # `-dVersion=3.15.1` as `-dVersion=3` followed by `.15.1` (the
+          # dots in the version string break tokenization), so candle
+          # ends up seeing `.15.1` as a source filename and errors with
+          # CNDL0103. Quoting forces the whole assignment to be one
+          # string literal.
           & $candle -arch x64 `
-            -dVersion=${{ steps.tag.outputs.version }} `
-            -dCargoTargetBinDir=target\release `
+            "-dVersion=${{ steps.tag.outputs.version }}" `
+            "-dCargoTargetBinDir=target\release" `
             -out target\wix\corporate.wixobj `
             wix-corporate\corporate.wxs
           if ($LASTEXITCODE -ne 0) { throw "candle failed with exit $LASTEXITCODE" }
@@ -180,7 +186,9 @@ jobs:
         run: |
           # /DMyAppVersion overrides the #define in inno/global.iss so the
           # version embedded in the EXE matches the release tag.
-          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=${{ steps.tag.outputs.version }} inno\global.iss
+          # Quote /D... preprocessor define to survive PowerShell's
+          # dot-aware tokenizer (same reason candle args are quoted above).
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" "/DMyAppVersion=${{ steps.tag.outputs.version }}" inno\global.iss
           if (-not (Test-Path "inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe")) {
             throw "Global EXE installer build failed — output missing"
           }
@@ -189,7 +197,7 @@ jobs:
       - name: Build Corporate EXE installer
         shell: pwsh
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=${{ steps.tag.outputs.version }} inno\corporate.iss
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" "/DMyAppVersion=${{ steps.tag.outputs.version }}" inno\corporate.iss
           if (-not (Test-Path "inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe")) {
             throw "Corporate EXE installer build failed — output missing"
           }
