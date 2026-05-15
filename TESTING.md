@@ -169,6 +169,74 @@ unchanged outside `tr300 update`.
   v3.14.2 GitHub Release is non-draft, non-prerelease, and published with
   20 cargo-dist assets.
 
+### v3.15.0 — 2026-05-14
+
+Four-installer Windows distribution model — adds Corporate MSI plus Global and
+Corporate EXE installers (Inno Setup) to every release, with `tr300 update`
+now MSI/EXE-aware via a `HKCU\Software\TR300\InstallSource` registry marker.
+No runtime collector or renderer changes; the binary's behavior is identical
+to v3.14.5 outside the update flow.
+
+**Local gates verified:**
+- `cargo check --all-targets` — clean (added `winreg = "0.52"` dependency).
+- `cargo clippy --all-targets --workspace -- -D warnings` — clean.
+- `cargo test --workspace --all-targets` — 61 library tests + 18 integration
+  tests + 0 doc tests = 79 passed. New tests in `src/update.rs`:
+  `install_origin_classify_program_files_is_msi_global`,
+  `install_origin_classify_localappdata_is_msi_corporate`,
+  `install_origin_classify_cargo_bin_is_cargo_or_installer`,
+  `install_origin_classify_random_path_is_unknown`,
+  `install_origin_json_ids_are_kebab_case`,
+  `new_strategies_have_stable_json_ids`,
+  `new_strategies_have_distinct_labels`, plus extended assertions in
+  `json_method_maps_to_legacy_taxonomy` covering the four new variants.
+- `cargo fmt --all -- --check` — clean.
+
+**Manual install/upgrade matrix (Windows 11 25H2 build 26200.8457):**
+The 4-installer × {fresh install, in-place upgrade, `tr300 update`} grid.
+Rows marked "Pending" need a published v3.15.0 release to test against (the
+update flow needs a `latest` to compare to). The local-build cases verify the
+installer formats can be produced and run end-to-end on this host before
+release.
+
+| # | Scenario | Expected | Status |
+|---|---|---|---|
+| 1 | MSI Global fresh install (admin) | UAC → `C:\Program Files\tr300\bin\`. ARP shows "tr300 3.15.0". Registry marker = `msi-global`. | Pending hardware test |
+| 2 | MSI Corporate fresh install (non-admin) | No UAC → `%LocalAppData%\Programs\tr300\bin\`. ARP shows "tr300 (Corporate Edition) 3.15.0". Marker = `msi-corporate`. | Pending hardware test |
+| 3 | EXE Global fresh install (admin) | UAC → `C:\Program Files\tr300\bin\`. ARP shows "tr300 3.15.0" (Inno Setup product). Marker = `exe-global`. | Pending hardware test |
+| 4 | EXE Corporate fresh install (non-admin) | No UAC → `%LocalAppData%\Programs\tr300\bin\`. ARP shows "tr300 (Corporate Edition) 3.15.0". Marker = `exe-corporate`. | Pending hardware test |
+| 5–8 | In-place upgrade (3.15.0 → 3.15.1) of each | WiX `MajorUpgrade` (MSI) / Inno Setup AppId match (EXE) silently uninstalls old + installs new. | Pending v3.15.1 |
+| 9–12 | `tr300 update` from each install | Reads registry → matching strategy → downloads installer → runs it. | Pending v3.15.1 |
+| 13 | `tr300 update` on `cargo install` install (regression) | Path-based fallback returns CargoOrInstaller; legacy chain runs. Unchanged behavior. | ✓ unit-verified (`install_origin_classify_cargo_bin_is_cargo_or_installer` test) |
+| 14 | Coexistence (install MSI + EXE of same edition) | Two ARP entries, last-installed marker wins. Documented in README as "pick one". | Pending hardware test |
+| 15 | CI green | ci.yml passes on the release commit pre-tag. After tag push: release.yml uploads 22 cargo-dist assets; windows-installers.yml uploads 6 more (Corp MSI + Global EXE + Corp EXE + their .sha256). Total 28 release assets. | Pending tag push |
+
+**Path-classification unit test coverage** (`src/update.rs::classify_install_path`):
+
+```rust
+classify("C:\\Program Files\\tr300\\bin\\tr300.exe")              → MsiGlobal
+classify("c:\\PROGRAM FILES\\tr300\\BIN\\tr300.exe")              → MsiGlobal (case-insensitive)
+classify("C:\\Users\\alice\\AppData\\Local\\Programs\\tr300\\bin\\tr300.exe") → MsiCorporate
+classify("C:\\Users\\alice\\.cargo\\bin\\tr300.exe")              → CargoOrInstaller
+classify("D:\\portable\\tr300\\tr300.exe")                         → Unknown
+classify("C:\\Users\\alice\\Downloads\\tr300.exe")                 → Unknown
+```
+
+**Pending verification (post-release, real Windows hardware):**
+- All four installers actually produce valid Windows Installer / Inno Setup
+  artifacts in the CI build. Local verification deferred to the first CI run
+  on the feature branch.
+- UAC prompt behavior matches scope on real hardware (Global → prompts,
+  Corporate → does not).
+- SmartScreen "Windows protected your PC" on a fresh download of each EXE
+  installer (unsigned binary). User clicks "More info → Run anyway" path
+  documented in README.
+- `gh release upload --clobber` re-run idempotency in the windows-installers.yml
+  workflow (verified by simulating a failed-mid-flight upload).
+- WiX MajorUpgrade across the v3.14.x perMachine MSI → v3.15.0 perMachine MSI
+  upgrade. The UpgradeCode `5CD540A8-AD16-4B0F-8CE4-51FF641DE181` is unchanged
+  from v3.13.1+, so MajorUpgrade should silently replace.
+
 ### v3.14.5 — 2026-05-14
 
 Windows install error advisor + Display-formatted main()-level errors.

@@ -22,6 +22,7 @@
   - [v3.13.0+ — 5-state battery, native cores, GPU registry-prefer, PSCore detection, terminal walk](#v3130--5-state-battery-native-cores-gpu-registry-prefer-pscore-detection-terminal-walk)
   - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
   - [v3.14.5+ — Windows install error advisor](#v3145--windows-install-error-advisor)
+  - [Windows distribution model (v3.15.0+)](#windows-distribution-model-v3150)
 
 ---
 
@@ -713,3 +714,81 @@ Reference:
 [Windows System Error Codes](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes),
 [OneDrive Known Folder Move](https://learn.microsoft.com/en-us/onedrive/redirect-known-folders),
 [Long Paths in Windows](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation).
+
+### Windows distribution model (v3.15.0+)
+
+**Decision: ship four Windows installer artifacts at every tagged release.** Two MSIs (Global perMachine + Corporate perUser) and two Inno Setup EXE installers (Global perMachine + Corporate perUser). The MSI Global has been shipping since v3.13.1; this release adds the other three.
+
+```
+tr300-x86_64-pc-windows-msvc.msi                   (Global MSI,  perMachine, UAC)
+tr300-x86_64-pc-windows-msvc-corporate.msi         (Corp.  MSI,  perUser,    no UAC)
+tr300-x86_64-pc-windows-msvc-setup.exe             (Global EXE,  perMachine, UAC)
+tr300-x86_64-pc-windows-msvc-corporate-setup.exe   (Corp.  EXE,  perUser,    no UAC)
+```
+
+**Problem this solves.** Before v3.15.0, Windows install required either `cargo install tr300` (which the project's homepage commands wrap with rustup + MSVC Build Tools — a ~5 GB install chain blocked by every managed-device policy I've checked) or the cargo-dist PowerShell installer `irm | iex` (broken under PowerShell `ExecutionPolicy=Restricted` and frequently blocked by AppLocker / WDAC). The only MSI we shipped was perMachine, which requires admin — exactly the cohort of users (managed corp machines) who most need a friction-free install. Result: users couldn't install on the machines that the tool was most useful on.
+
+**Why two MSIs + two EXEs, not a single dual-purpose installer.**
+
+There IS a "single-package authoring" pattern in WiX that produces a dual-purpose MSI which installs perUser by default and perMachine when run elevated (`ALLUSERS=2` + `MSIINSTALLPERUSER=1`). I rejected this approach for two reasons:
+
+1. **[WiX issue #7137](https://github.com/wixtoolset/issues/issues/7137) documents the pattern is fragile in WiX v4/v5** — the upgrade-detection logic doesn't reliably find an existing install of the same product when the scope differs. Real users have reported v1.0.0 perMachine + v1.0.1 perUser ending up with both installed. The two-separate-MSIs-with-different-UpgradeCodes pattern is the industry workaround.
+2. **Different UpgradeCodes are SEMANTICALLY correct.** A perMachine install (everyone on the box sees the binary) and a perUser install (only my account sees it) are different products from the operating system's perspective. Pretending they're one product creates upgrade ambiguity, ARP entry confusion, and uninstall edge cases.
+
+Same reasoning for two EXE installers vs one with a runtime mode switch (`tr300-setup.exe --mode user` vs `--mode admin`). The runtime-switch pattern doesn't actually exist in Inno Setup — `PrivilegesRequired` is a compile-time directive. You'd need two separate `.iss` files anyway; might as well make them obviously separate.
+
+**Why MSI + EXE for the same edition.** End users have well-established preferences. Some prefer `setup.exe` (familiar pattern from decades of Windows desktop apps); others trust `.msi` more (managed IT environments). The marginal cost of building both formats from the same prebuilt `tr300.exe` is small (~80 LOC of Inno Setup script per edition, ~30 LOC of GitHub Actions YAML). The marginal benefit is real: every user gets their preferred format and the install completes.
+
+**Why install both formats to the same path within each edition.** Two alternatives considered:
+
+1. **Same path, document "pick one"** (chosen). MSI Global and EXE Global both install to `C:\Program Files\tr300\bin\`. The first installer to run wins; the second sees the binary already exists and either overwrites or merges. README documents that users should pick ONE format per edition. If they install both anyway, the result is two Add/Remove Programs entries, one binary file, and PATH ordering decides which `tr300` (logically both refer to the same file) runs. Confusing but not broken.
+2. **Distinct paths** (`C:\Program Files\tr300\bin\` for MSI, `C:\Program Files\tr300 (Setup)\bin\` for EXE). Rejected because the suffix is ugly, PATH ordering still picks a winner, and the duplicate-install scenario is rare enough that it's not worth uglifying the common case.
+
+The Industry Standard Solution to the duplicate-install problem is **don't let users install both** — installers detect their counterpart and refuse. WiX can do this with custom actions; Inno Setup can do this with `[Code]` checks. I considered it and rejected for v3.15.0 because the user-visible problem is small (annoying ARP duplication) and the engineering cost is high (cross-installer detection logic in both WiX and Inno Setup). May revisit in a future release if real users hit this.
+
+**The registry marker (`HKCU\Software\TR300\InstallSource`).** All four installers write a literal string to this registry value on install: `msi-global`, `msi-corporate`, `exe-global`, or `exe-corporate`. `src/update.rs::detect_install_origin()` reads it to choose which installer to fetch and re-run for in-place upgrades.
+
+Why HKCU and not HKLM:
+- `tr300 update` always runs as the user, who reads HKCU naturally.
+- Writing to HKLM from a perMachine MSI works but requires elevation-aware Component authoring (`Component KeyPath` semantics get awkward with HKLM writes from a perUser-or-perMachine wrapper).
+- The rare "admin installed perMachine MSI on behalf of end user X, user X now runs `tr300 update`" case is covered by the path-based fallback in `classify_install_path()` — `\Program Files\tr300\` in the running binary's path implies MSI Global even without a marker.
+
+The path-based fallback also handles **pre-v3.15.0 installs** that don't have the marker. Those users get a sensible default: Program Files → MSI Global, LocalAppData → MSI Corporate. New installs always set the marker.
+
+**Why no SHA256 verification on downloaded installers.** The existing cargo-dist PowerShell installer also doesn't verify SHA256 — it trusts HTTPS to github.com. Adding SHA256 verification to `try_msi_install()` / `try_exe_install()` would require fetching the `.sha256` sidecar, parsing it, computing the hash, comparing — about 60 LOC for marginal additional security (the actual threat model would require an attacker to compromise GitHub's TLS certificates AND the GitHub Actions runner that built the binary). Tracked as future work; not blocking v3.15.0.
+
+**Why `.github/workflows/windows-installers.yml` triggers on `release: published`, not `push: tags`.** The release.yml workflow (cargo-dist) needs to create the GitHub Release before `gh release upload` from windows-installers.yml can attach assets to it. `release: types: [published]` fires after `release.yml` finishes, which is the correct sequencing. The alternative — `push: tags` with a `needs:` dependency — doesn't work across separate workflow files in GitHub Actions.
+
+**Why Inno Setup, not NSIS or WiX Burn.**
+
+- **WiX Burn** would let us produce a bundle.exe that wraps the existing MSI. Considered. Rejected because WiX 3 Burn is finicky (Bundle.wxs syntax is non-trivial, the build pipeline through `candle.exe` + `light.exe` differs from the MSI flow), and the `cargo-wix` CLI doesn't directly support Burn bundles. We'd need to drop down to raw WiX 3 tooling. Inno Setup is one `.iss` file per edition and a single `iscc` command.
+- **NSIS** is also viable but its scripting language is less ergonomic than Inno's Pascal-like syntax, and the resulting installers are slightly larger.
+- **Inno Setup** (chosen) is widely used in the Rust CLI ecosystem (gh CLI, deno, bun, uv all use it on Windows). Free, mature, well-documented. The `.iss` files are human-readable and self-contained. The CI install is one `choco install innosetup` line.
+
+**Why two separate Inno Setup .iss files instead of one parameterized.** Inno Setup supports `#define` and `#if` for compile-time conditionals, so a single file with `#define GLOBAL_OR_CORPORATE` would work. Rejected because: (1) the two files differ in enough ways (PrivilegesRequired, DefaultDirName, PATH registry root, AppId, OutputBaseFilename, Code block contents) that the conditional branches would dominate the file; (2) two files is more obvious to readers; (3) the AppIds are forever-distinct, so the files can't truly share an identity anyway. Duplicate-ish code is fine when the products are genuinely separate.
+
+**Why `install-path = "CARGO_HOME"` is still set in `[workspace.metadata.dist]`.** That setting controls where the cargo-dist PowerShell installer (`tr300-installer.ps1`) places the binary on Windows — `%USERPROFILE%\.cargo\bin\tr300.exe`. The new MSI / EXE installers don't use cargo-dist's installer logic at all; they have their own install paths defined in `wix/*.wxs` and `inno/*.iss`. Leaving the cargo-dist setting alone means the PowerShell installer keeps working for users who prefer it (or for users on platforms without an installer story, like ARM Windows once we add that target).
+
+**SmartScreen / unsigned-binary honest accounting.** All four installers are unsigned. First-time download on Win11 24H2+ triggers "Windows protected your PC" — user clicks **More info → Run anyway**. README documents this; we don't pretend it doesn't happen.
+
+Real options for fixing this (not done in v3.15.0):
+1. **Azure Trusted Signing** (~$10/mo) — Microsoft's EV-equivalent service that gives instant SmartScreen reputation. Requires verified org identity (we'd need to register QubeTX). Likely the right answer long-term.
+2. **OV code-signing cert** (~$80–200/yr) — still requires accumulated download reputation to clear SmartScreen, but reduces "Unknown publisher" friction.
+3. **Document the manual override** (chosen for now) — what BleachBit, Teleport, ScreenToGif, and many other open-source Windows tools do.
+
+**Rejected alternatives.**
+- *Use a single perUser MSI that auto-detects "in admin? install perMachine. Otherwise perUser."* — see WiX #7137 above. Too unreliable.
+- *Drop the perMachine MSI entirely and ship only perUser* — would break IT-managed deployment via Intune / SCCM. Real users need perMachine for managed rollouts.
+- *Ship only one EXE format with a runtime `--user / --machine` switch* — not supported by Inno Setup's `PrivilegesRequired` directive. Would require building two binaries anyway.
+- *Include code signing in this release* — too much scope. Tracked as future work.
+- *Submit to WinGet / Scoop in this release* — high-value follow-up, but adds external dependencies (PR review processes). Defer to v3.16.0.
+
+References:
+- [WiX Toolset Issue #7137 — dual-purpose perUser MSI](https://github.com/wixtoolset/issues/issues/7137)
+- [Microsoft Learn — WDAC vs AppLocker overview](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/windows-defender-application-control/wdac-and-applocker-overview)
+- [Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
+- [Inno Setup documentation](https://jrsoftware.org/ishelp/)
+- [cargo-wix project README](https://github.com/volks73/cargo-wix)
+- [cargo-dist MSI installer book](https://opensource.axo.dev/cargo-dist/book/installers/msi.html)
+- [Azure Trusted Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/)
+- [Microsoft Learn — Submit packages to WinGet](https://learn.microsoft.com/en-us/windows/package-manager/package/)

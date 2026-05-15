@@ -8,7 +8,7 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v3.14.5](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.14.5) (2026-05-14), with cargo-dist artifacts for macOS, Linux, and Windows plus shell, PowerShell, MSI, and crates.io installation paths. The canonical crates.io package is [`tr300`](https://crates.io/crates/tr300).
+Latest release: [v3.15.0](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.15.0) (2026-05-14). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
 
 ## Features
 
@@ -34,51 +34,119 @@ Latest release: [v3.14.5](https://github.com/QubeTX/qube-machine-report/releases
 
 ## Installation
 
-### Cargo
+TR-300 ships **prebuilt binaries** — no Rust toolchain required to install or
+run. Pick the installer that matches your operating system and (on Windows)
+whether you have admin rights on the machine.
 
-Available on crates.io as [`tr300`](https://crates.io/crates/tr300). Requires
-Rust **1.95.0 or later**:
+### Windows — Global Edition (recommended for personal machines)
 
-```bash
-cargo install tr300
-```
+Installs to `C:\Program Files\tr300\bin\tr300.exe` and adds it to **system PATH**
+so every terminal on the machine can find it. **Requires admin (UAC prompt).**
 
-### Shell (macOS/Linux)
+Two equivalent download options — **pick one**, not both. Both install to the
+same location; installing both creates duplicate Add/Remove Programs entries.
+
+| Format | Direct download | When to pick |
+|---|---|---|
+| MSI | [tr300-x86_64-pc-windows-msvc.msi](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc.msi) | IT-managed deployment (Intune, SCCM, Group Policy) and most personal installs. The default. |
+| EXE | [tr300-x86_64-pc-windows-msvc-setup.exe](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-setup.exe) | If you prefer a familiar `setup.exe`. Same outcome as the MSI. |
+
+After install, open a new terminal and run `tr300`. The binary is unsigned, so
+SmartScreen will show **"Windows protected your PC"** the first time —
+click **More info → Run anyway**. (Code signing is on the roadmap;
+see [Releases](https://github.com/QubeTX/qube-machine-report/releases) for
+status.)
+
+### Windows — Corporate Edition (recommended for locked-down work machines)
+
+Installs to `%LocalAppData%\Programs\tr300\bin\tr300.exe` and adds it to your
+**user PATH** only — no admin, no UAC, no system-wide changes. Use this on
+machines managed by Intune / Active Directory / Group Policy when you don't
+have admin rights but still need to install software.
+
+| Format | Direct download | When to pick |
+|---|---|---|
+| MSI | [tr300-x86_64-pc-windows-msvc-corporate.msi](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-corporate.msi) | IT can push this via Intune assignment; works under AppLocker / managed-installer policy when allowlisted. |
+| EXE | [tr300-x86_64-pc-windows-msvc-corporate-setup.exe](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-corporate-setup.exe) | Familiar `setup.exe` for end users on restricted machines. |
+
+Same "pick ONE format" rule as the Global Edition. If WDAC / AppLocker blocks
+both, your only options are the bare-EXE path below or asking IT to allowlist
+one of these installers.
+
+### Choosing between Global and Corporate Edition
+
+| You're on… | Pick |
+|---|---|
+| Your own laptop / desktop, you have admin | **Global** |
+| A work machine where you have admin | **Global** |
+| A work machine where you don't have admin but can install apps to your user profile | **Corporate** |
+| A locked-down machine that blocks `C:\Program Files` writes | **Corporate** |
+| A server, ARM Windows, or anything else | Use the bare EXE / shell installer below |
+
+If you accidentally install both editions, they coexist (different
+Add/Remove Programs entries) but PATH ordering picks which one wins. Uninstall
+one before installing the other for a clean state.
+
+### macOS / Linux
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh | sh
 ```
 
-### PowerShell (Windows)
+Installs to `~/.cargo/bin/tr300` and modifies your shell's PATH. **Does not
+require Rust** — downloads the prebuilt binary from the GitHub Release.
+
+### Alternative install methods
+
+<details>
+<summary>Windows PowerShell one-liner (downloads the prebuilt binary, no Rust)</summary>
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1 | iex"
 ```
 
-### Windows Installer (.msi)
+Installs to `%USERPROFILE%\.cargo\bin\tr300.exe` (the directory is created
+automatically — Rust is not required). Modifies user PATH only. Fails if
+PowerShell `ExecutionPolicy` is `Restricted` and not overridden; the MSI /
+EXE installers above don't have that limitation.
+</details>
 
-Download the latest MSI installer from the [Releases page](https://github.com/QubeTX/qube-machine-report/releases).
+<details>
+<summary>Windows — bare EXE (no installer, no PATH modification)</summary>
 
-### Cargo from Git
+Download [tr300-x86_64-pc-windows-msvc.zip](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc.zip),
+extract `tr300.exe`, place it anywhere you can write to (your Desktop, a
+USB stick, `C:\bin`, etc.). Run by typing the full path or by adding the
+containing directory to your PATH manually. Useful for portable use, USB
+sticks, and scenarios where any installer is blocked.
+</details>
 
-Requires Rust **1.95.0 or later** (run `rustup update stable` if needed —
-older toolchains will fail with `rustc … is not supported by … tr300`):
+<details>
+<summary>Build from source — for developers / contributors</summary>
 
-Use the crates.io or release installers above for normal installs. For development
-workflows that need an exact Git tag:
+Requires Rust **1.95.0 or later** (`rustup update stable` if needed).
+Most users should NOT use these paths — they download and compile the
+source instead of using the prebuilt binary, which is slower and requires
+the Rust toolchain.
 
+**From crates.io:**
 ```bash
-rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.14.5
+cargo install tr300
 ```
 
-### From Source
+**From a specific Git tag:**
+```bash
+rustup update stable
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.15.0
+```
 
+**Local clone for development:**
 ```bash
 git clone https://github.com/QubeTX/qube-machine-report.git
 cd qube-machine-report
 cargo build --release
 ```
+</details>
 
 ## Usage
 
@@ -188,22 +256,47 @@ tr300 update
 tr300 --update
 ```
 
-The updater runs a probe-and-retry chain so one missing or failing tool does not
-block the update:
+`tr300 update` detects how this binary was installed and downloads the matching
+installer for an **in-place upgrade** — no manual download required.
 
-1. Checks the latest release on GitHub. If the installed version is current, it
-   exits 0 without changing anything.
+**On Windows (v3.15.0+):**
+
+| Installed via… | `tr300 update` does | UAC? |
+|---|---|---|
+| Global MSI | Downloads the new Global MSI, runs `msiexec /i` | Yes |
+| Corporate MSI | Downloads the new Corporate MSI, runs `msiexec /i` | No |
+| Global EXE | Downloads the new Global EXE installer, runs `/SILENT` | Yes |
+| Corporate EXE | Downloads the new Corporate EXE installer, runs `/SILENT` | No |
+| `cargo install` / PowerShell installer | Falls through to the legacy chain (cargo first, then `irm \| iex` PowerShell installer) | No |
+
+Detection uses a `HKCU\Software\TR300\InstallSource` registry marker that the
+four first-class installers write at install time. If the marker is missing
+(legacy install from before v3.15.0), the updater falls back to inspecting the
+running binary's path: `C:\Program Files\tr300\` → MSI Global, `%LocalAppData%
+\Programs\tr300\` → MSI Corporate, `~\.cargo\bin\` → legacy chain.
+
+**On macOS / Linux:**
+
+1. Checks the latest release on GitHub. If you're already current, exits 0
+   without changing anything.
 2. Tries `cargo install tr300 --force` first when `cargo --version` succeeds.
-   If `rustup` is present, it first runs `rustup update stable` best-effort so
+   If `rustup` is present, it runs `rustup update stable` best-effort first so
    cargo installs against the current MSRV.
-3. Falls through to the cargo-dist installer for the platform if cargo is absent
-   or fails: `curl | sh` then `wget | sh` on macOS/Linux, `powershell` then
-   `pwsh` on Windows.
-4. Reports every skipped or failed strategy in both terminal and `--json` output.
+3. Falls through to the cargo-dist shell installer: `curl | sh` then `wget | sh`.
 
-In `--json` mode, successful updates include the legacy `"method"` field plus a
-precise `"strategy"` value. Failed updates include an `"attempts"` array with each
-strategy result and diagnostic message.
+**Manual fallback (any platform):** if `tr300 update` fails, you can always
+re-download the installer for your platform from the
+[Releases page](https://github.com/QubeTX/qube-machine-report/releases) and
+re-run it — WiX `MajorUpgrade` (MSI) and Inno Setup's AppId-based upgrade
+detection (EXE) handle in-place upgrades cleanly.
+
+In `--json` mode, every response includes a top-level `install_origin` field
+on Windows (`msi-global` / `msi-corporate` / `exe-global` / `exe-corporate` /
+`cargo-or-installer` / `unknown`). Successful updates include the legacy
+`"method"` field plus a precise `"strategy"` value (`msi_global`,
+`msi_corporate`, `exe_global`, `exe_corporate`, or the legacy installer IDs).
+Failed updates include an `"attempts"` array with each strategy result and
+diagnostic message.
 
 ## Release Automation
 
