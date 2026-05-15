@@ -9,14 +9,14 @@ Companion docs:
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 
-Last verified against source: 2026-05-11
+Last verified against source: 2026-05-14
 
 ## Project Snapshot
 
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current version: `3.14.3` (`Cargo.toml`)
+- Current version: `3.15.0` (`Cargo.toml`)
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -40,6 +40,7 @@ Keep both surfaces working when refactoring.
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
   crates-publish.yml          # publishes new crates.io versions after successful default-branch CI
   release.yml                 # cargo-dist generated release workflow
+  windows-installers.yml      # hand-authored; builds Corporate MSI + both Inno Setup EXEs after release.yml (v3.15.0+)
 
 docs/
   architecture-decisions.md   # long-form rationale for MSRV policy, Windows accuracy patterns, etc.
@@ -85,7 +86,12 @@ tests/
   integration.rs
 
 wix/
-  main.wxs                    # MSI packaging template
+  main.wxs                    # Global MSI packaging template (perMachine, system PATH)
+  corporate.wxs               # Corporate MSI packaging template (perUser, no admin) — v3.15.0+
+
+inno/
+  global.iss                  # Inno Setup script for Global EXE installer (perMachine) — v3.15.0+
+  corporate.iss               # Inno Setup script for Corporate EXE installer (perUser) — v3.15.0+
 
 build.rs                      # generates man/tr300.1 via clap_mangen
 Cargo.lock                    # tracked for locked local checks and crates.io publishing
@@ -453,18 +459,18 @@ Behavior:
 - sends `User-Agent: tr300/<current version>`
 - strips leading `v` from release tags
 - compares semver-like numeric components
-- builds an ordered probe-and-retry strategy list:
-  - `cargo install tr300 --force` first when `cargo --version` succeeds
-  - macOS/Linux fallback: cargo-dist shell installer through `curl`, then `wget`
-  - Windows fallback: cargo-dist PowerShell installer through `powershell`, then `pwsh`
+- builds the strategy list by detecting install origin:
+  - **Windows (v3.15.0+):** `detect_install_origin()` reads `HKCU\Software\TR300\InstallSource` written by all four first-class installers (Global MSI, Corporate MSI, Global EXE, Corporate EXE). Returns one matching strategy — no cross-fallback between installer types. MSI strategies run `msiexec /i /passive /norestart`; EXE strategies run `setup.exe /SILENT /SUPPRESSMSGBOXES /NORESTART`. Path-based fallback (`\Program Files\tr300\` → MsiGlobal, `\AppData\Local\Programs\tr300\` → MsiCorporate, `\.cargo\bin\` → CargoOrInstaller, else → Unknown) handles legacy installs without the marker.
+  - **Other origins (`CargoOrInstaller` / `Unknown` on Windows, or non-Windows):** legacy probe-and-retry chain — `cargo install tr300 --force` first when `cargo --version` succeeds, macOS/Linux fallback to cargo-dist shell installer through `curl` then `wget`, Windows fallback to cargo-dist PowerShell installer through `powershell` then `pwsh`.
 - runs `rustup update stable` best-effort before the cargo strategy when rustup is available
-- records skipped/failed strategy attempts and falls through until one strategy succeeds
+- records skipped/failed strategy attempts and falls through until one strategy succeeds (only on the legacy chain — MSI/EXE strategies don't cross-fall-back)
 
 JSON mode:
 - `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json`
   print a single JSON object
 - fields include `action`, `success`, `message`, `current_version`, `latest_version`, and `update_available` when available
-- successful updates include legacy `"method"` plus precise `"strategy"`
+- **Windows (v3.15.0+):** every response also includes a top-level `install_origin` field (`msi-global`, `msi-corporate`, `exe-global`, `exe-corporate`, `cargo-or-installer`, or `unknown`).
+- successful updates include legacy `"method"` plus precise `"strategy"` (the v3.15.0+ values are `msi_global`, `msi_corporate`, `exe_global`, `exe_corporate`; the legacy values are `cargo`, `installer_curl`, `installer_wget`, `installer_powershell`, `installer_pwsh`).
 - failed updates include an `"attempts"` array with per-strategy diagnostics
 
 Exit codes:
@@ -510,12 +516,20 @@ Triggers:
 
 ### Installer outputs
 
+cargo-dist publishes via `release.yml`:
 - Shell installer (`tr300-installer.sh`) for macOS/Linux
 - PowerShell installer (`tr300-installer.ps1`) for Windows
 - Legacy shell/PowerShell aliases (`tr-300-installer.sh`,
   `tr-300-installer.ps1`) are copied into GitHub Releases for v3.14.2 updater
   compatibility after the crate name was canonicalized to `tr300`
-- MSI installer for Windows
+- Global MSI installer for Windows (`tr300-x86_64-pc-windows-msvc.msi`)
+
+`windows-installers.yml` (v3.15.0+) publishes three additional Windows assets after `release.yml` finishes:
+- Corporate MSI (`tr300-x86_64-pc-windows-msvc-corporate.msi`) — perUser scope, no admin, installs to `%LocalAppData%\Programs\tr300\bin\` (built from `wix/corporate.wxs`)
+- Global EXE installer (`tr300-x86_64-pc-windows-msvc-setup.exe`) — Inno Setup, perMachine, same install path as Global MSI (built from `inno/global.iss`)
+- Corporate EXE installer (`tr300-x86_64-pc-windows-msvc-corporate-setup.exe`) — Inno Setup, perUser, same install path as Corporate MSI (built from `inno/corporate.iss`)
+
+Total Windows installer surface area per release: 4 first-class installers + 2 legacy installer scripts. Total release asset count: 28 (was 22 pre-v3.15.0).
 
 ### crates.io publishing (`.github/workflows/crates-publish.yml`)
 
@@ -535,14 +549,35 @@ release verification and the GitHub publish workflow use `--locked`. Do not
 re-ignore or remove it unless the publish workflow is changed in the same
 release.
 
-### MSI specifics (`wix/main.wxs`)
+### MSI specifics (`wix/main.wxs` — Global Edition)
 
 - Product name: `tr300`
 - Manufacturer: `Emmett S`
-- Install scope: `perMachine`
+- Install scope: `perMachine` (requires admin/UAC)
 - Default folder under Program Files (`tr300` with `bin/tr300.exe`)
-- Optional PATH feature included in MSI feature tree
-- Upgrade/path GUIDs are defined in `Cargo.toml` metadata
+- Optional PATH feature included in MSI feature tree (system PATH)
+- Upgrade/path GUIDs are defined in `Cargo.toml` metadata (`5CD540A8-…` UpgradeCode, `0F93D599-…` Path component)
+- v3.15.0+ writes `HKCU\Software\TR300\InstallSource=msi-global` via the `InstallSourceMarker` Component (GUID `537B3C60-…`) so `tr300 update` can dispatch to the matching installer
+
+### Corporate MSI specifics (`wix/corporate.wxs` — Corporate Edition, v3.15.0+)
+
+- Product name: `tr300 (Corporate Edition)`
+- Manufacturer: `Emmett S`
+- Install scope: `perUser` (no admin, no UAC) — via `InstallScope='perUser'` + `ALLUSERS=''` + `MSIINSTALLPERUSER=1`
+- Default folder: `%LocalAppData%\Programs\tr300\bin\` (via `LocalAppDataFolder > Programs > tr300 > bin`)
+- PATH modification: user PATH only (`Environment ... System='no'`)
+- UpgradeCode `93F465CB-…` (DIFFERENT from Global MSI — never collide), Path component `13D45AEB-…`, InstallSourceMarker `405304C3-…`
+- Writes `HKCU\Software\TR300\InstallSource=msi-corporate`
+
+### Inno Setup EXE installers (`inno/global.iss` + `inno/corporate.iss`, v3.15.0+)
+
+Built by `windows-installers.yml` using `iscc.exe` (installed via `choco install innosetup` on the CI runner). Inputs: the prebuilt `target/release/tr300.exe` and the corresponding `.iss` script. Outputs: `tr300-x86_64-pc-windows-msvc-setup.exe` (Global) and `tr300-x86_64-pc-windows-msvc-corporate-setup.exe` (Corporate).
+
+- Global: `AppId={{AB14223F-…}`, `PrivilegesRequired=admin`, installs to `{commonpf}\tr300` = `%ProgramFiles%\tr300`, writes system PATH via HKLM, marker = `exe-global`.
+- Corporate: `AppId={{76A253EB-…}`, `PrivilegesRequired=lowest`, installs to `{userpf}\tr300` = `%LocalAppData%\Programs\tr300`, writes user PATH via HKCU, marker = `exe-corporate`.
+- Both use the canonical `[Code]` block with `EnvAddPath()` / `EnvRemovePath()` for duplicate-safe PATH modification with clean uninstall.
+- Both support `/SILENT /SUPPRESSMSGBOXES /NORESTART` (used by `tr300 update`).
+- All four installer GUIDs (Global+Corp MSI UpgradeCodes, Global+Corp EXE AppIds) plus the two MSI Component GUIDs are permanent — never regenerate. Renaming breaks user upgrade paths.
 
 ### Release checklist
 

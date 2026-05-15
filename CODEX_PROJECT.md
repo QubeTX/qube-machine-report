@@ -6,11 +6,18 @@ TR-300 is a standalone Rust CLI machine-report tool. The repo currently exposes 
 
 Current Codex migration status: project Claude plugin settings from `.claude/settings.json` have been mirrored into `.codex/config.toml` for the `codex@openai-codex` plugin and `openai-codex` marketplace.
 
-Current implementation status: v3.14.3 is published as the canonical
-lowercase crates.io package `tr300`, uses the Rust library import path
-`tr300`, and keeps the ND-style probe-and-retry updater pointed at
-`cargo install tr300 --force` before installer fallbacks. The deleted v3.14.2
-`tr-300` crate name is treated only as a legacy compatibility concern for
+Current implementation status: v3.15.0 ships the four-installer Windows
+distribution model — Global MSI (perMachine, existing), Corporate MSI
+(perUser, new from `wix/corporate.wxs`), Global EXE installer (Inno Setup,
+perMachine, new from `inno/global.iss`), and Corporate EXE installer (Inno
+Setup, perUser, new from `inno/corporate.iss`). All four write
+`HKCU\Software\TR300\InstallSource` registry markers so `tr300 update`
+dispatches to the matching installer for in-place upgrades on Windows. The
+legacy probe-and-retry updater chain (cargo, then `irm | iex` PS installer)
+still handles the `cargo install` / shell-installer path on Windows and the
+full macOS/Linux flow. The crate is published as canonical lowercase `tr300`
+on crates.io with library import path `tr300`; the deleted v3.14.2 `tr-300`
+crate name is treated only as a legacy compatibility concern for
 already-installed binaries.
 
 ## Project Status
@@ -18,7 +25,7 @@ already-installed binaries.
 - Cargo package: `tr300`
 - Binary: `tr300`
 - Library import path: `tr300`
-- Current version: `3.14.3`
+- Current version: `3.15.0`
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
 - Primary guide: `AGENTS.md`
 - Companion docs: `CLAUDE.md`, `MASTER_PLAN.md`, `TESTING.md`, `docs/architecture-decisions.md`
@@ -43,21 +50,30 @@ already-installed binaries.
 - `tr300 update`, `tr300 install`, and `tr300 uninstall` are parser-level
   aliases for the legacy action flags. `report update` works through the same
   installed alias path.
-- `tr300 update` uses a cargo-first probe-and-retry chain, then falls back to
-  platform cargo-dist installers (`curl`/`wget` on Unix, `powershell`/`pwsh` on
-  Windows) with per-attempt diagnostics.
-- Release publishing uses two GitHub Actions stages: `Crates.io Publish` runs
-  after successful default-branch `CI` on the exact tested SHA and publishes
-  `tr300` with `CARGO_REGISTRY_TOKEN` after checking crates.io with a
-  descriptive data-access `User-Agent`; `Release` runs after the explicit
-  `vX.Y.Z` tag and publishes cargo-dist binary archives/installers. Release
-  assets use canonical `tr300-installer.*` names plus legacy
-  `tr-300-installer.*` aliases for v3.14.2 updater compatibility. The
-  cargo-dist config uses `allow-dirty = ["ci"]` for that checked-in workflow
-  customization.
-- v3.14.3 release status: commit `25305d8`; CI run 25648618096 passed;
-  crates-publish run 25648707510 published `tr300` 3.14.3; release.yml run
-  25648740343 published the GitHub Release with 22 assets.
+- `tr300 update` on Windows (v3.15.0+) reads `HKCU\Software\TR300\InstallSource`
+  and dispatches to the matching installer (Global MSI / Corporate MSI /
+  Global EXE / Corporate EXE) for in-place upgrade. MSI strategies run
+  `msiexec /i /passive /norestart`; EXE strategies run
+  `setup.exe /SILENT /SUPPRESSMSGBOXES /NORESTART`. Path-based fallback
+  (`\Program Files\tr300\` → MsiGlobal, `\AppData\Local\Programs\tr300\` →
+  MsiCorporate, `\.cargo\bin\` → CargoOrInstaller) handles legacy installs
+  without the marker. macOS/Linux + Windows-cargo-installed users still use
+  the legacy cargo-first probe-and-retry chain.
+- Release publishing uses three GitHub Actions stages: `Crates.io Publish`
+  runs after successful default-branch `CI` on the exact tested SHA and
+  publishes `tr300` with `CARGO_REGISTRY_TOKEN` after checking crates.io with
+  a descriptive data-access `User-Agent`; `Release` runs after the explicit
+  `vX.Y.Z` tag and publishes cargo-dist binary archives/installers (Global
+  MSI + shell/PS installer scripts + legacy aliases for v3.14.2
+  compatibility); `Windows Installers` (`windows-installers.yml`,
+  hand-authored, triggers on `release: types: [published]`) builds and
+  uploads the Corporate MSI + Global EXE installer + Corporate EXE installer.
+  Total release asset count: 28 (v3.15.0+) or 22 (pre-v3.15.0). The
+  cargo-dist config uses `allow-dirty = ["ci"]` for the checked-in workflow
+  customization in `release.yml`.
+- v3.14.5 release status: commit `a21a4d1`; CI run 25850693664 succeeded;
+  crates-publish run 25850823118 published `tr300` 3.14.5; release.yml run
+  25850864213 published the GitHub Release with 22 assets.
 - `Cargo.lock` is tracked so local `cargo publish --dry-run --locked` and the
   GitHub crates.io publish workflow use the same resolved dependency set.
 - `src/collectors/command.rs` is the shared timeout wrapper for optional
@@ -78,7 +94,8 @@ already-installed binaries.
 │   └── workflows
 │       ├── ci.yml
 │       ├── crates-publish.yml
-│       └── release.yml
+│       ├── release.yml
+│       └── windows-installers.yml
 ├── .gitignore
 ├── AGENTS.md
 ├── CHANGELOG.md
@@ -129,6 +146,10 @@ already-installed binaries.
 │   └── update.rs
 ├── tests
 │   └── integration.rs
-└── wix
-    └── main.wxs
+├── wix
+│   ├── main.wxs
+│   └── corporate.wxs
+└── inno
+    ├── global.iss
+    └── corporate.iss
 ```

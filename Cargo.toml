@@ -1,6 +1,6 @@
 [package]
 name = "tr300"
-version = "3.14.5"
+version = "3.15.0"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -54,6 +54,11 @@ clap_mangen = "0.2"
 wmi = "0.14"
 serde = { version = "1", features = ["derive"] }
 winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "winuser", "winnls", "iphlpapi", "ws2def", "ws2ipdef", "winerror", "inaddr", "in6addr", "ifdef", "winbase", "errhandlingapi", "winnt", "tlhelp32", "processthreadsapi", "handleapi"] }
+# Used by src/update.rs::read_install_source_marker() to read the
+# HKCU\Software\TR300\InstallSource value written by the four first-class
+# Windows installers (v3.15.0+). Raw winapi for one registry read would be
+# ~30 lines of unsafe; winreg keeps it to ~5 lines of safe Rust.
+winreg = "0.52"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

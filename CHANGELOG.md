@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-05-14
+
+### Added
+- **2026-05-14 — Corporate Edition MSI installer (perUser, no admin).** New
+  `tr300-x86_64-pc-windows-msvc-corporate.msi` release artifact built from
+  `wix/corporate.wxs`. Installs to `%LocalAppData%\Programs\tr300\bin\`,
+  modifies user PATH only, no UAC prompt. Targets users on locked-down work
+  machines who can't install software to `C:\Program Files`. Different WiX
+  `UpgradeCode` from the Global MSI (`93F465CB-7F66-4930-A773-FDA017E8FD64`)
+  so both editions can coexist as distinct Add/Remove Programs entries
+  (though README documents picking only one).
+- **2026-05-14 — Global EXE installer (Inno Setup, perMachine, requires admin).**
+  New `tr300-x86_64-pc-windows-msvc-setup.exe` release artifact built from
+  `inno/global.iss`. Installs to the same `C:\Program Files\tr300\bin\` path
+  as the Global MSI; same outcome, different format for users who prefer a
+  familiar `setup.exe`. AppId `AB14223F-2693-4EC2-824F-BF53CC32D061`.
+- **2026-05-14 — Corporate EXE installer (Inno Setup, perUser, no admin).**
+  New `tr300-x86_64-pc-windows-msvc-corporate-setup.exe` release artifact
+  built from `inno/corporate.iss`. Installs to `%LocalAppData%\Programs\tr300\bin\`,
+  no UAC prompt, modifies user PATH only. AppId
+  `76A253EB-3A17-4730-9C54-5BE755A9BC4C`. With this, every release now ships
+  four Windows installer formats: 2 MSIs × 2 EXE installers, each in Global
+  (perMachine) and Corporate (perUser) editions.
+- **2026-05-14 — Hand-authored `.github/workflows/windows-installers.yml`.**
+  Triggers on `release: types: [published]` (fires after `release.yml`
+  finishes creating the GitHub Release) and uploads 6 additional assets
+  (the Corporate MSI + both EXE installers + their `.sha256` sidecars).
+  Total release asset count: 28 (was 22). Does NOT touch the auto-generated
+  `release.yml`. Installs Inno Setup via `choco install innosetup` and
+  cargo-wix via `cargo install`.
+- **2026-05-14 — Install-source registry marker (`HKCU\Software\TR300\
+  InstallSource`).** All four first-class installers write a literal string
+  value (`msi-global`, `msi-corporate`, `exe-global`, `exe-corporate`) on
+  install. `tr300 update` reads this to choose the matching installer to
+  download and re-run for in-place upgrades. Six new GUIDs total — all
+  permanent (renaming any of them breaks user upgrade paths).
+
+### Changed
+- **2026-05-14 — `tr300 update` is now MSI/EXE-aware on Windows.**
+  `src/update.rs::detect_install_origin()` reads the registry marker (or
+  falls back to path-based detection for legacy installs) and dispatches to
+  one of four new `UpdateStrategy` variants (`MsiGlobal`, `MsiCorporate`,
+  `ExeGlobal`, `ExeCorporate`). MSI strategies run `msiexec /i /passive
+  /norestart`; EXE strategies run `setup.exe /SILENT /SUPPRESSMSGBOXES
+  /NORESTART`. No cross-fallback between installer types — re-running a
+  different product would create coexistence problems. The legacy probe-
+  and-retry chain (`cargo install` → PowerShell installer) still runs for
+  the `CargoOrInstaller` / `Unknown` install origins, so users on the
+  legacy install paths see unchanged behavior. macOS / Linux flow unchanged.
+- **2026-05-14 — JSON output schema additions.** Every `tr300 update --json`
+  response now includes a top-level `install_origin` field on Windows
+  (`msi-global`, `msi-corporate`, `exe-global`, `exe-corporate`,
+  `cargo-or-installer`, or `unknown`). New strategy IDs in successful-
+  update responses and the `attempts` array: `msi_global`, `msi_corporate`,
+  `exe_global`, `exe_corporate`. Additive only — existing fields unchanged,
+  no `schema_version` bump.
+- **2026-05-14 — README Installation section rewrite.** Leads with the four
+  direct-download installer links (Global MSI / Global EXE / Corporate MSI
+  / Corporate EXE) grouped by edition. Demotes `cargo install tr300` to a
+  collapsed "Build from source" section labeled "for developers." Adds an
+  explicit "Choosing between Global and Corporate Edition" decision table.
+  SmartScreen "More info → Run anyway" instructions inline.
+- **2026-05-14 — README Self-Update section rewrite.** Documents the new
+  MSI/EXE-aware update flow on Windows with a per-install-origin table.
+  The legacy chain still works for `cargo install` / PowerShell-installer
+  users and is documented as such.
+- **2026-05-14 — `wix/main.wxs` adds the `InstallSourceMarker` Component.**
+  Writes `HKCU\Software\TR300\InstallSource = "msi-global"` on install.
+  Component GUID `537B3C60-6E17-4EFF-8D56-E0CA97F447B5`. Backward-compatible
+  for existing v3.14.x perMachine MSI installs — the marker just won't be
+  set; the path-based fallback in `detect_install_origin()` returns
+  `MsiGlobal` for binaries in `C:\Program Files\tr300\` even without it.
+
+### Internal
+- **2026-05-14 — Added `winreg = "0.52"` to `[target.'cfg(windows)'.
+  dependencies]`** in `Cargo.toml`. Used by `read_install_source_marker()`
+  for the registry read. Raw winapi for one registry read would be ~30 LOC
+  of unsafe; winreg keeps it to ~5 LOC of safe Rust. The crate is tiny
+  (a few hundred LOC wrapping winapi). Negligible binary-size impact.
+- **2026-05-14 — Long-form rationale captured in `docs/architecture-
+  decisions.md` § "Windows distribution model (v3.15.0+)".** Documents
+  why four installers instead of one dual-purpose, why same install paths,
+  why HKCU for the registry marker, why Inno Setup over WiX Burn / NSIS,
+  why no SHA256 verification, and the rejected single-package-MSI pattern
+  per [WiX issue #7137](https://github.com/wixtoolset/issues/issues/7137).
+
 ## [3.14.5] - 2026-05-14
 
 ### Changed
