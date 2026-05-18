@@ -1,7 +1,12 @@
 //! CPU information collector
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::collectors::command::{run_stdout, CommandTimeout};
+use crate::collectors::command::CommandTimeout;
+// run_stdout is only used by the macOS `get_socket_count` path; the
+// Linux path was migrated to `run_stdout_c_locale` (v3.15.2 audit
+// finding F19) and Windows uses platform-native APIs.
+#[cfg(target_os = "macos")]
+use crate::collectors::command::run_stdout;
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::thread;

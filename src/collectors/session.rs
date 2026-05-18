@@ -1,7 +1,13 @@
 //! User session information collector
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::collectors::command::{run_output, CommandTimeout};
+use crate::collectors::command::CommandTimeout;
+// run_output is only used by the macOS `last` fallback; the Linux
+// `lastlog` / `lastlog2` / `last` calls were migrated to
+// `run_output_with_env` (v3.15.2 audit finding F19) to force
+// `LC_ALL=C` so localized labels don't break the parsers.
+#[cfg(target_os = "macos")]
+use crate::collectors::command::run_output;
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
