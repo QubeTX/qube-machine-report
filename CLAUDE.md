@@ -105,6 +105,14 @@ Custom error types in `src/error.rs` using `thiserror`:
 - **Unix/macOS** — `src/install/unix.rs` modifies `~/.bashrc` and/or `~/.zshrc`
 - **Windows** — `src/install/windows.rs` modifies PowerShell `$PROFILE`
 
+**Shell-profile write safety (v3.15.2+).** All four call sites that mutate an rc file route through helpers in `src/install/mod.rs`:
+
+- `install::atomic_write(path, content)` — write-temp-then-rename, never `std::fs::write` directly. The temp file (`.<filename>.tr300-tmp`) lives in the target's parent directory so the `fs::rename` is on the same volume and atomic (POSIX rename is atomic; Windows `MoveFileEx` is atomic on NTFS within a volume). Either the new content is fully in place or the old content remains — never partial. Required because rc files are user-edited and have no canonical copy elsewhere; a Ctrl-C / power loss / AV quarantine mid-write previously truncated `~/.bashrc` with no recovery path.
+- `install::backup_once(path)` — copies the rc file to `<path>.tr300-backup` if no backup exists yet. Idempotent — second install run preserves the original (pre-TR-300) backup, never overwrites it with a TR-300-modified version. Best-effort; failure is non-fatal because `atomic_write` is the load-bearing protection.
+- `install::check_marker_balance(content, MARKER_START, MARKER_END)` — refuses the write up-front when the user hand-edited the `# End TR-300` line out of their rc file. Without this, the existing `remove_delimited_block` parser would silently drop every line from `# TR-300 Machine Report` to EOF on the next install. The check counts lines containing each marker; an imbalance fails with an actionable error. Call this **before** any state mutation, immediately after `read_to_string`.
+
+Don't replace these with `std::fs::write` for "simplicity." The non-atomicity is the bug.
+
 `--uninstall` is interactive (`src/install/prompt.rs`): the user picks `ProfileOnly`, `Complete` (also deletes the binary), or `Cancel`. The `Complete` path uses `find_binary_location()` + `confirm_complete_uninstall()` to show the path before deleting. Don't bypass the prompt unless the user has explicitly opted into a non-interactive variant.
 
 **Windows execution-policy preflight (v3.14.4+).** `install()` runs `run_execution_policy_preflight()` **before** writing `$PROFILE`. Edit-time rules:
@@ -122,6 +130,19 @@ Custom error types in `src/error.rs` using `thiserror`:
 - **Always close with "Manual `tr300` still works from the prompt".** Install failures don't break the binary's basic functionality; the user needs to know what they CAN still do while they sort out the underlying restriction.
 - **Don't move the rich output to stdout.** Stdout is for the normal install messages; rich error guidance belongs on stderr so it interleaves correctly with the trailing `Error: ...` line and so callers that capture stdout (e.g. CI scripts) still see the explanation.
 
+
+### Supported Windows minimum
+
+**TR-300 requires Windows 10 1511 (build 10586) or later.** The
+`IsWow64Process2` call in `get_architecture` is statically linked
+against `kernel32.dll`; on Windows 7 / Server 2008 R2 the entry
+point doesn't exist and `tr300.exe` fails to load with
+`STATUS_ENTRYPOINT_NOT_FOUND`. The Rust toolchain's own minimum
+already drops Windows 7 (since rustc 1.78), so the practical bound
+is moot — but document it here so a future maintainer doesn't try
+to backport tr300 to a Win7-bound build without first switching
+the call to `LoadLibraryW + GetProcAddress` with an
+`IsWow64Process` fallback. (audit finding F21, v3.15.8+)
 
 ### Windows accuracy patterns (v3.11.0+)
 
@@ -171,6 +192,15 @@ Do not restore executable-path detection as the **primary** discriminator. The r
 `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json` emit a single JSON object with `current_version`, `latest_version`, `update_available`, `success`, and (on Windows) a top-level `install_origin` field. Values: `msi-global`, `msi-corporate`, `exe-global`, `exe-corporate`, `cargo-or-installer`, `unknown`. Successful updates include legacy `"method"` (`cargo` / `installer`) plus precise `"strategy"` (`msi_global`, `msi_corporate`, `exe_global`, `exe_corporate`, or the legacy IDs); failures include an `"attempts"` array. Exit codes: `0` success, `2` failure.
 
 **Auto-rustup on the cargo strategy (v3.11.1+).** Before `cargo install tr300 --force`, `try_strategy(UpdateStrategy::Cargo)` calls `rustup_update_stable_best_effort()`: probe `rustup --version` with stdout/stderr → `Stdio::null()`; if found, run `rustup update stable` and print `Updating Rust toolchain (rustup update stable)…`. **Any failure is non-fatal** — `let _ =` the result, fall through to the cargo install. Installer strategies never touch Rust because they download prebuilt binaries. Don't replace this best-effort pattern with hard-failing or with `rustc --version` probing + conditional rustup — the rationale (failure-mode prevented, distro-managed toolchain compatibility, simplicity) is in the decisions doc.
+
+**SHA256 verification + post-install version check (v3.15.4+).** The Windows MSI / EXE update paths now have two load-bearing safety checks:
+
+- `verify_checksum(installer_path, installer_url)` runs after `download_to_file` and before invoking msiexec / the Inno EXE. It fetches `{installer_url}.sha256` in a separate request (cargo-dist publishes the sidecar in `<lowercase-64-char-hex>  *<filename>` format — the parallel implementation in `.github/workflows/windows-installers.yml:213-220` writes the same form), parses via `parse_sha256_sidecar` (tolerant of the asterisk being present or absent, case-insensitive), computes SHA-256 of the downloaded file via `sha2::Sha256`, and refuses to launch the installer on mismatch. This defends against TLS-interception proxies with a trusted root CA (corporate IT), captive portals, and CDN tampering. Don't skip the verify — TLS-to-github.com alone is insufficient against the corporate proxy threat model.
+- `verify_post_install(latest)` runs after the installer reports exit code 0. It re-execs `env::current_exe() --version`, parses the version, compares against the expected `latest` (both stripped of prerelease/build-metadata suffix via `strip_prerelease_metadata`). A mismatch produces `StrategyError::Runtime` rather than a false-positive success. The most common cause of mismatch is Windows Installer's Restart Manager scheduling a delete-on-reboot rather than replacing the locked tr300.exe in-place — for that case, msiexec returns exit code `MSI_EXIT_REBOOT_REQUIRED = 3010` and we surface a dedicated "Reboot, then verify with `tr300 --version`" error message *before* the post-install verify runs.
+
+**Don't relax these to "trust the installer's exit code."** The whole point of the v3.15.4 work is that exit-code-0-from-msiexec is NOT a guarantee that the running binary's on-disk image was actually replaced.
+
+**`is_newer` handles prereleases per semver (v3.15.4+).** The hand-rolled comparator strips any `-…` / `+…` suffix via `strip_prerelease_metadata` before the numeric-vec compare, then handles the same-triple case: a stable release is treated as newer than its own prerelease (`3.15.2 > 3.15.2-rc.1`), a prerelease of a higher triple is newer than a lower stable (`3.15.2-rc.1 > 3.15.1`), two prereleases of the same triple compare equal (theoretical case — GitHub's `/releases/latest` filters prereleases out). Don't replace with a naive `Vec<u64>` comparison or pull in the `semver` crate without a stronger reason than this — the current heuristic catches the common failure modes that bit pre-v3.15.4 users and has 7 unit tests pinning the contract.
 
 — Full reasoning, the rustup-managed-vs-distro-managed split, the rejected `rustc --version` probe alternative, the failure-mode this prevents: see [`docs/architecture-decisions.md` § "Self-update auto-rustup (v3.11.1+)"](./docs/architecture-decisions.md#self-update-auto-rustup-v3111).
 
@@ -327,7 +357,7 @@ After plan approval, create:
 
 Every PR completes this block before commit:
 
-- `F.1` — `CHANGELOG.md` new `## [X.Y.Z] — YYYY-MM-DD` section at the top, Keep-a-Changelog voice, **reference task IDs in parens** for traceability.
+- `F.1` — `CHANGELOG.md` new `## [X.Y.Z] — YYYY-MM-DD` section at the top, Keep-a-Changelog voice, **reference task IDs in parens** for traceability. **Then mirror the same section into `HUMAN_CHANGELOG.md` rewritten in plain English** — same version header and date, but with the technical noise stripped (no run IDs, SHAs, error codes, function or API names, registry paths, GUIDs, line counts, memory deltas, task IDs, or crate identifiers). See `## HUMAN_CHANGELOG.md (companion changelog)` below for the full strip/keep rules. **Never update one without the other.**
 - `F.2` — `README.md` updates: flag table, sample output, new subsections.
 - `F.3` — `CLAUDE.md` architectural notes for any new pattern (cite man pages / Apple docs / Microsoft Learn URLs inline).
 - `F.4` — `Cargo.toml` `version =` bump (minor for new fields/flags; patch for pure accuracy fixes).
@@ -401,8 +431,10 @@ Uses **cargo-dist** (v0.31.0) for fully automated cross-platform releases.
 
 1. Bump `version` in `Cargo.toml`
 2. Update the full documentation set for any user-visible release, install,
-   update, or deployment behavior change: `CHANGELOG.md`, `README.md`,
-   `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`,
+   update, or deployment behavior change: `CHANGELOG.md`,
+   **`HUMAN_CHANGELOG.md`** (plain-English mirror — see
+   `## HUMAN_CHANGELOG.md (companion changelog)` below for strip/keep rules),
+   `README.md`, `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`,
    `TESTING.md`, and `docs/architecture-decisions.md` when rationale or
    release workflow changes. Update `/Users/realemmetts/.codex/AGENTS.md`
    when repo deployment workflow changes.
@@ -425,3 +457,57 @@ dist init    # Regenerates .github/workflows/release.yml
 ```
 
 Note: The binary is `dist`, not `cargo dist` — it installs as a standalone command.
+
+## HUMAN_CHANGELOG.md (companion changelog)
+
+`HUMAN_CHANGELOG.md` at the repo root is a plain-English mirror of
+`CHANGELOG.md`. Every version block in `CHANGELOG.md` has a corresponding
+block in `HUMAN_CHANGELOG.md` with the same `## [X.Y.Z] - YYYY-MM-DD`
+header and the same `### Added` / `### Changed` / `### Fixed` / `### Internal`
+groupings, but with the technical noise stripped so a non-technical
+reader can answer "what shipped and why should I care?" in 30 seconds.
+`CHANGELOG.md` stays as-is — it's the authoritative source for agents
+and contributors.
+
+**Edit-time rules:**
+
+- **Lockstep with `CHANGELOG.md`.** When you add a release entry to
+  `CHANGELOG.md`, add the same release entry to `HUMAN_CHANGELOG.md`
+  in the same commit. When you amend a `CHANGELOG.md` entry
+  post-release (e.g. recording publication status), update the
+  human mirror too. Never let one drift ahead of the other.
+
+- **Strip these from the human version:** CI run IDs, commit SHAs,
+  error codes (WiX `CNDL…` / `LGHT…`, Clippy lint names,
+  `RUSTSEC-…`), function or method names (`detect_install_origin()`
+  etc.), Win32 / WMI / POSIX API names (`GetBestInterfaceEx`,
+  `WTSQuerySessionInformation`, `geteuid`), registry paths, file
+  paths under `src/` / `wix/` / `.github/`, GUIDs, dependency crate
+  identifiers used as identifiers (`winreg = "0.52"`), memory or
+  LOC measurements (`~30 LOC`, `45 KB → 31.5 KB`, `~80 ms WMI cost`),
+  per-task IDs (`(C.10)`, `(E.5)`, `(F.1)`), MSRV / toolchain
+  version strings.
+
+- **Keep these in the human version:** the `## [X.Y.Z] - YYYY-MM-DD`
+  header, platform names (Windows / macOS / Linux), edition names
+  (Global / Corporate), installer types (MSI, EXE, shell installer,
+  PowerShell installer, `cargo install`), command names and flags
+  users actually type (`tr300 update`, `--fast`, `--ascii`,
+  `--no-elevation-hint`), user-visible feature names, what the
+  user-facing benefit is (faster, more accurate, VPN-aware, more
+  reliable on locked-down machines), security and crash-fix
+  implications, release-publication failure narratives compressed
+  to a single sentence.
+
+- **One short paragraph per change is the target length.** If a
+  `CHANGELOG.md` entry needs ten lines of API reasoning, the human
+  mirror needs one or two sentences. The technical detail stays in
+  `CHANGELOG.md` for agents and contributors.
+
+- **Voice: declarative, user-facing.** "CPU socket detection on
+  Windows is now faster." not "Replaced the WMI count path with a
+  native API."
+
+- **Version numbers in headers stay.** The strip rule on "numbers"
+  applies to noise inside entries (run IDs, line counts, GUIDs) —
+  not to release identifiers users search for.

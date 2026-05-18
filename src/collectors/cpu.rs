@@ -176,8 +176,15 @@ fn get_load_averages(
 /// Get number of CPU sockets
 #[cfg(target_os = "linux")]
 fn get_socket_count() -> usize {
-    // Try lscpu first
-    if let Some(stdout) = run_stdout("lscpu", std::iter::empty::<&str>(), CommandTimeout::Normal) {
+    // Force LC_ALL=C so `lscpu` emits English labels — non-English
+    // locales rename `Socket(s):` to e.g. `Sockel:` (German),
+    // silently breaking the substring match. (audit finding F19,
+    // v3.15.8+)
+    if let Some(stdout) = crate::collectors::command::run_stdout_c_locale(
+        "lscpu",
+        std::iter::empty::<&str>(),
+        CommandTimeout::Normal,
+    ) {
         for line in stdout.lines() {
             if line.starts_with("Socket(s):") {
                 if let Some(num) = line.split(':').nth(1) {

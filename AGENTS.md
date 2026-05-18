@@ -98,7 +98,8 @@ inno/
 build.rs                      # generates man/tr300.1 via clap_mangen
 Cargo.lock                    # tracked for locked local checks and crates.io publishing
 Cargo.toml                    # package metadata, dependencies, cargo-dist config
-CHANGELOG.md                  # release history
+CHANGELOG.md                  # release history (technical)
+HUMAN_CHANGELOG.md            # release history (plain-English mirror — see CLAUDE.md companion-changelog rules)
 README.md                     # user-facing docs
 ```
 
@@ -585,11 +586,15 @@ Built by `windows-installers.yml` using `iscc.exe` (installed via `choco install
 
 1. Update version in `Cargo.toml`.
 2. Update the full documentation set for any user-visible release, install,
-   update, or deployment behavior change: `CHANGELOG.md`, `README.md`,
-   `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`,
-   `TESTING.md`, and `docs/architecture-decisions.md` when rationale or
-   release workflow changes. Update the global Codex guide at
-   `/Users/realemmetts/.codex/AGENTS.md` when repo deployment workflow changes.
+   update, or deployment behavior change: `CHANGELOG.md`,
+   **`HUMAN_CHANGELOG.md`** (plain-English mirror — see
+   `CLAUDE.md` § "HUMAN_CHANGELOG.md (companion changelog)" for the
+   strip/keep rules; always update both files in the same commit),
+   `README.md`, `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`,
+   `MASTER_PLAN.md`, `TESTING.md`, and `docs/architecture-decisions.md`
+   when rationale or release workflow changes. Update the global Codex
+   guide at `/Users/realemmetts/.codex/AGENTS.md` when repo deployment
+   workflow changes.
 3. Run checks:
    - `cargo fmt --all -- --check`
    - `cargo clippy --all-targets --workspace -- -D warnings`

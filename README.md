@@ -275,6 +275,20 @@ four first-class installers write at install time. If the marker is missing
 running binary's path: `C:\Program Files\tr300\` → MSI Global, `%LocalAppData%
 \Programs\tr300\` → MSI Corporate, `~\.cargo\bin\` → legacy chain.
 
+**Security (v3.15.2+):** every downloaded MSI / EXE installer is checked against
+its published `.sha256` sidecar before launching. A network MITM (corporate
+TLS-inspection proxy with trusted root CA, hostile public WiFi, captive
+portal) that swaps the installer bytes is now caught and refused with a
+clear error.
+
+**Post-install verification (v3.15.2+):** after the installer reports success,
+`tr300 update` re-execs the on-disk binary's `--version` and confirms the
+upgrade actually took effect. If Windows Installer's Restart Manager
+scheduled a delete-on-reboot (msiexec exit code 3010) rather than replacing
+the locked binary in-place, the JSON `attempts[].message` contains an
+actionable "Reboot, then verify with `tr300 --version`" rather than a
+false-positive success.
+
 **On macOS / Linux:**
 
 1. Checks the latest release on GitHub. If you're already current, exits 0
@@ -349,24 +363,69 @@ Running `tr300 install` or `tr300 --install` will:
 
 This means you can safely run `tr300 install` multiple times without duplicating profile blocks.
 
-**On Unix/macOS:** Modifies `~/.bashrc` and/or `~/.zshrc`
+**Safety (v3.15.2+):** every modification to your rc files / `$PROFILE`
+is written via a temp-then-atomic-rename. A Ctrl-C, power loss, or
+antivirus quarantine mid-write can no longer leave your profile
+truncated. The first install also writes a one-time `.tr300-backup`
+copy of your original profile so you have a recovery option. If the
+TR-300 marker block in your profile has been hand-edited into an
+unbalanced state (e.g. `# End TR-300` line accidentally removed),
+`tr300 install` refuses up-front with an actionable error rather
+than silently dropping the rest of your profile.
 
-**On Windows:** Modifies the Windows PowerShell `CurrentUserCurrentHost`
-profile (`$PROFILE`). Fresh Windows machines default `ExecutionPolicy` to
-`Restricted`, which blocks every `.ps1` including the profile itself, so
-`tr300 install` runs a preflight that adjusts the `CurrentUser` scope to
-`RemoteSigned` when needed. `RemoteSigned` is the minimum policy that lets
-the local profile load — it still requires downloaded `.ps1` files to be
-Authenticode-signed. The change is HKCU-only, affects only your user
-account, and does not require admin. If you have deliberately set
-`AllSigned`, `tr300 install` will not silently downgrade it; it prints a
-notice explaining the auto-run will not fire and leaves the policy alone.
+**Auto-run guards (v3.15.2+):** the injected snippet now guards
+the `tr300 --fast` call with `command -v tr300` (POSIX) /
+`Get-Command tr300 -ErrorAction SilentlyContinue` (Windows), so a
+missing binary no longer prints an error at every new shell start.
+A `TR300_AUTORUN_RAN` sentinel prevents recursion in nested shells
+(vim `:term`, `bash -i -c …`, Windows Terminal nested tabs). On
+Windows, the snippet uses `[Environment]::UserInteractive` instead
+of the older `$Host.Name -eq 'ConsoleHost'` check, so scripted
+`pwsh -Command "..."` invocations from CI / VS Code / scheduled
+tasks no longer dump the table into log streams.
+
+**On Unix/macOS:** Modifies `~/.bashrc` and/or `~/.zshrc`. On a
+fresh-account macOS machine where neither file exists, `tr300
+install` creates `.zshrc` (macOS has defaulted to zsh since 10.15,
+Catalina, 2019). `sudo tr300 install` is refused — TR-300 modifies
+your personal shell profile, and running as root either targets
+root's profile (no benefit to your shell) or leaves root-owned
+files in your home that break subsequent non-sudo installs.
+
+**On Windows:** Modifies the PowerShell `$PROFILE`. When both
+Windows PowerShell 5.1 (`powershell`) and PowerShell 7 (`pwsh`)
+are installed, `tr300 install` writes to BOTH profile paths
+(`Documents\WindowsPowerShell\…` and `Documents\PowerShell\…`)
+since the two shell flavors don't cross-source each other.
+Pre-v3.15.2, pwsh-only users got a silent no-op install because
+the snippet went to a profile their actual shell never read.
+
+Fresh Windows machines default `ExecutionPolicy` to `Restricted`,
+which blocks every `.ps1` including the profile itself, so
+`tr300 install` runs a preflight that adjusts the `CurrentUser`
+scope to `RemoteSigned` when needed. `RemoteSigned` is the minimum
+policy that lets the local profile load — it still requires
+downloaded `.ps1` files to be Authenticode-signed. The change is
+HKCU-only, affects only your user account, and does not require
+admin. If you have deliberately set `AllSigned`, `tr300 install`
+will not silently downgrade it; it prints a notice explaining the
+auto-run will not fire and leaves the policy alone.
 See [Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies).
 
 To remove these additions, run `tr300 uninstall` or `tr300 --uninstall`.
 The uninstall does not roll back your execution policy — other PowerShell
 tooling typically relies on `RemoteSigned`, so restoring it would surprise
 users.
+
+**`uninstall` → Complete** on Windows handles the self-EXE delete case
+(v3.15.2+). When you run `tr300 uninstall` from a Windows install
+location (e.g. `%LocalAppData%\Programs\tr300\bin\tr300.exe`) and
+choose "Complete", the OS would normally refuse to delete the
+running binary. TR-300 detects this and schedules a detached
+background job that waits 2 seconds for our process to exit, then
+removes the binary and its empty parent folder. You'll see
+"Scheduled deferred cleanup of: …" and your shell returns to a
+prompt; the file is gone within a couple seconds.
 
 If `tr300 install` (or `uninstall`) hits a permissions error on Windows —
 common on work machines managed by Intune, Group Policy, AppLocker, or

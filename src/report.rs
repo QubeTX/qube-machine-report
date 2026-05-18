@@ -343,25 +343,24 @@ fn generate_json(info: &SystemInfo) -> String {
     )
 }
 
-/// Escape special characters for JSON
+/// Escape special characters for JSON.
+///
+/// Delegates to `serde_json::to_string` and strips the wrapping
+/// quotes that `to_string` always adds, matching the inline-template
+/// shape callers expect (`"name": "{}"` with the value pre-escaped).
+///
+/// Pre-v3.15.7 this was hand-rolled with chained `.replace()` calls
+/// plus a `chars()` pass that formatted `is_control()` chars as
+/// `\u00xx` (5 chars). The chained replace was correct for the
+/// listed cases but easy to break with a future addition; using
+/// `serde_json` for the actual escape eliminates a class of
+/// hand-roll maintenance risk and aligns with the spec for the
+/// full Unicode range. (audit finding F15)
 fn escape_json(s: &str) -> String {
-    let result = s
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t");
-    // Escape remaining control characters (0x00-0x1F)
-    result
-        .chars()
-        .map(|c| {
-            if c.is_control() {
-                format!("\\u{:04x}", c as u32)
-            } else {
-                c.to_string()
-            }
-        })
-        .collect()
+    match serde_json::to_string(s) {
+        Ok(quoted) if quoted.len() >= 2 => quoted[1..quoted.len() - 1].to_string(),
+        _ => String::new(),
+    }
 }
 
 /// Escape markdown table cell delimiters and line breaks.
@@ -682,5 +681,50 @@ mod tests {
         assert!(markdown.contains("| Machine Model | Model \\| One |"));
         assert!(markdown.contains("| Motherboard | Board \\| Vendor |"));
         assert!(markdown.contains("| RAM Slots | 2x16GB \\| DDR5 |"));
+    }
+
+    #[test]
+    fn escape_json_handles_backslash_and_quote() {
+        // The two characters JSON requires escaped inside a string.
+        // Verify the round-trip is spec-compliant by parsing the
+        // result wrapped in literal quotes.
+        let escaped = super::escape_json(r#"path\with"quote"#);
+        let wrapped = format!("\"{}\"", escaped);
+        let parsed: String = serde_json::from_str(&wrapped).unwrap();
+        assert_eq!(parsed, r#"path\with"quote"#);
+    }
+
+    #[test]
+    fn escape_json_handles_control_chars() {
+        let input = "before\nmid\tafter\u{0001}end";
+        let escaped = super::escape_json(input);
+        let wrapped = format!("\"{}\"", escaped);
+        let parsed: String = serde_json::from_str(&wrapped).unwrap();
+        assert_eq!(parsed, input, "round-trip must preserve control chars");
+    }
+
+    #[test]
+    fn escape_json_handles_supplementary_plane_emoji() {
+        // Regional indicators (flag building blocks) live above
+        // U+FFFF. Pre-v3.15.7 the hand-rolled escape would emit
+        // `἟a` for a control char in this range — non-spec.
+        // (Such codepoints aren't actually control chars, but the
+        // serde_json delegation makes the spec-correctness explicit.)
+        let input = "🇺🇸 Daisy's Mac";
+        let escaped = super::escape_json(input);
+        let wrapped = format!("\"{}\"", escaped);
+        let parsed: String = serde_json::from_str(&wrapped).unwrap();
+        assert_eq!(parsed, input);
+    }
+
+    #[test]
+    fn escape_json_handles_empty_string() {
+        assert_eq!(super::escape_json(""), "");
+    }
+
+    #[test]
+    fn escape_json_handles_plain_ascii() {
+        // No special chars — output should match input.
+        assert_eq!(super::escape_json("plain ascii"), "plain ascii");
     }
 }

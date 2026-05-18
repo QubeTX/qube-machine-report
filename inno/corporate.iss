@@ -115,7 +115,23 @@ begin
   P := Pos(';' + Uppercase(Path) + ';', ';' + Uppercase(Paths) + ';');
   if P = 0 then exit;
 
-  Delete(Paths, P - 1, Length(Path) + 1);
+  if P = 1 then
+    // First-entry case (audit finding F9, v3.15.6+). Pre-v3.15.6 the
+    // line below used Delete(Paths, P - 1, ...) = Delete(Paths, 0, ...)
+    // which is undefined behavior in Pascal Script (treated as no-op
+    // in Inno Setup's runtime), stranding the entry in PATH after
+    // uninstall. Most likely on fresh corporate workstations where
+    // HKCU\Environment\Path is empty before install, so TR-300's bin
+    // lands at index 1. With this branch:
+    //   Paths = "X;Y"  → "Y"    (eats "X;")
+    //   Paths = "X;"   → ""     (eats "X;")
+    //   Paths = "X"    → ""     (eats "X", count clamps to remaining)
+    Delete(Paths, 1, Length(Path) + 1)
+  else
+    // Middle/end entry: consume the leading `;` plus the path.
+    //   Paths = "A;X;B" → "A;B" (eats ";X")
+    //   Paths = "A;X"   → "A"   (eats ";X")
+    Delete(Paths, P - 1, Length(Path) + 1);
 
   RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Paths);
 end;

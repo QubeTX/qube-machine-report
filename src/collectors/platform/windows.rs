@@ -3,6 +3,42 @@
 //! Uses WMI crate for direct queries (replaces PowerShell subprocess spawns).
 
 use super::{CollectMode, PlatformInfo};
+
+// ── WMI hard-timeout wrapper (v3.15.7+) ─────────────────────────────
+//
+// Pre-v3.15.7 the WMI-touching collectors (BitLocker status, battery
+// fallback, socket count fallback, network adapter info, cold-boot
+// uptime) had no Rust-side timeout. A deadlocked WMI provider
+// (post-Windows-update misconfig, GPO lockdown, antivirus interference
+// with the `Win32_EncryptableVolume` security namespace) could block
+// `wmi.query()` for tens of seconds, stalling the full-mode report.
+// The bounded-subprocess helper in `src/collectors/command.rs` only
+// protects `Command::output()` calls — WMI bypasses it entirely.
+//
+// `with_timeout` runs a closure on a worker thread, joins via an
+// `mpsc::channel` with `recv_timeout`, and returns `None` if the
+// closure didn't finish within `budget`. The thread itself isn't
+// killed on timeout (Rust intentionally doesn't kill threads) — it
+// becomes orphan background work that Windows reaps when our process
+// exits. WMI `COMLibrary::new()` is per-thread, so initialising it
+// inside the closure is the correct pattern.
+
+/// Hard timeout for any single WMI query. Healthy calls take 50–200 ms;
+/// 5 s is long enough to cover slow systems and short enough that a
+/// genuinely-hung provider doesn't dominate startup.
+const WMI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn with_timeout<F, T>(budget: std::time::Duration, f: F) -> Option<T>
+where
+    F: FnOnce() -> Option<T> + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(budget).ok().flatten()
+}
 use crate::collectors::command::{run_output, run_stdout, CommandTimeout};
 use serde::Deserialize;
 use std::env;
@@ -165,7 +201,14 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
 /// This namespace is readable by non-admin users on most Win11 Device
 /// Encryption laptops; older Win10 / domain-joined configurations may require
 /// admin and will return `None` (the elevation footer hint covers that case).
+///
+/// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) so a hung
+/// security-namespace WMI provider can't stall the full-mode report.
 fn get_bitlocker_status() -> Option<String> {
+    with_timeout(WMI_TIMEOUT, bitlocker_status_inner)
+}
+
+fn bitlocker_status_inner() -> Option<String> {
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -591,9 +634,17 @@ pub fn get_socket_count_native() -> Option<usize> {
     }
 }
 
-/// Get socket count via WMI, with PowerShell fallback (used from cpu.rs)
+/// Get socket count via WMI, with PowerShell fallback (used from cpu.rs).
+///
+/// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) — returns the
+/// conservative default of `1` on WMI timeout so the report renders
+/// rather than hanging.
 #[allow(dead_code)] // Kept for one release as a fallback under C.13/C.14 transition.
 pub fn get_socket_count_wmi() -> usize {
+    with_timeout(WMI_TIMEOUT, || Some(socket_count_wmi_inner())).unwrap_or(1)
+}
+
+fn socket_count_wmi_inner() -> usize {
     // Try WMI first
     let count = COMLibrary::new()
         .ok()
@@ -632,7 +683,15 @@ pub fn get_socket_count_wmi() -> usize {
 /// kernel route lookup or the WMI filter returns nothing — preserves the
 /// pre-v3.12.0 behavior on hosts where IP Helper service is disabled or no
 /// default route exists.
+///
+/// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) — returns
+/// `(None, vec![])` on WMI timeout so the report renders rather
+/// than hanging.
 pub fn get_network_info_wmi() -> (Option<String>, Vec<String>) {
+    with_timeout(WMI_TIMEOUT, || Some(network_info_wmi_inner())).unwrap_or((None, Vec::new()))
+}
+
+fn network_info_wmi_inner() -> (Option<String>, Vec<String>) {
     // Try WMI first
     let result = COMLibrary::new()
         .ok()
@@ -1501,7 +1560,15 @@ pub fn detect_fast_startup() -> bool {
 /// Uses `wmi::WMIDateTime` which the `wmi` crate's serde deserializer parses
 /// from the CIM datetime format (`yyyymmddHHMMSS.mmmmmmsUUU`) into a
 /// `chrono::DateTime<chrono::FixedOffset>`.
+///
+/// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) so a hung WMI
+/// provider can't stall the cold-boot lookup. The ~80 ms typical cost
+/// dwarfs the wrapper overhead.
 pub fn last_cold_boot_seconds() -> Option<u64> {
+    with_timeout(WMI_TIMEOUT, last_cold_boot_seconds_inner)
+}
+
+fn last_cold_boot_seconds_inner() -> Option<u64> {
     #[derive(Deserialize)]
     #[serde(rename = "Win32_OperatingSystem")]
     #[serde(rename_all = "PascalCase")]

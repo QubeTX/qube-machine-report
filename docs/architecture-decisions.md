@@ -24,6 +24,13 @@
   - [v3.14.5+ — Windows install error advisor](#v3145--windows-install-error-advisor)
   - [Windows distribution model (v3.15.0+)](#windows-distribution-model-v3150)
   - [v3.15.1 addendum — Why corporate.wxs lives in `wix-corporate/`, not `wix/`](#v3151-addendum--why-corporatewxs-lives-in-wix-corporate-not-wix)
+- [Install / update safety primitives (v3.15.2+)](#install--update-safety-primitives-v3152)
+  - [Atomic rc-file writes](#atomic-rc-file-writes)
+  - [Marker-balance pre-check](#marker-balance-pre-check)
+  - [SHA256 verification of downloaded installers](#sha256-verification-of-downloaded-installers)
+  - [Post-install version verification](#post-install-version-verification)
+  - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
+  - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
 
 ---
 
@@ -818,3 +825,257 @@ Making `wix-corporate/corporate.wxs` ICE-clean is a real option, requiring ~5 ad
 **Rejected alternative for root cause 1: keep the ALLUSERS Property with a non-empty Value.** WiX docs allow `Value=" "` (single space) as a workaround for the empty-string rule. Tried in an earlier draft; it passes candle but generates a meaningless ALLUSERS Property that doesn't actually affect install scope. The clean answer is to delete the Property entirely.
 
 **Side effect: `Cargo.toml` `include` list gained `/wix-corporate/**`** so the published crate ships with the Corporate WiX source. This is for completeness — the practical Corporate MSI build happens in CI from the Git repo, not from a downloaded crate.
+
+---
+
+## Install / update safety primitives (v3.15.2+)
+
+The v3.15.2 audit + remediation cycle surfaced six related-but-distinct
+"silent failure" classes across the install / update / runtime paths.
+Each shipped as a focused primitive rather than a one-off fix, with the
+explicit intent that future Claude agents see the pattern and reuse it.
+
+### Atomic rc-file writes
+
+**Problem.** `std::fs::write(path, content)` opens the target with
+`O_TRUNC` / `CREATE_ALWAYS` (POSIX / Windows respectively) and then
+writes. If the process dies between truncate and write completion — `Ctrl-C`
+during the install, a power loss, an antivirus quarantining the file
+mid-write, OneDrive deciding to rename the file during the open — the
+target file is left **truncated or partial**. For files the user has
+invested real time in (`~/.bashrc`, `~/.zshrc`, PowerShell `$PROFILE`),
+that loss is silent and irrecoverable.
+
+**Fix.** `src/install/mod.rs::atomic_write(path, content)`:
+1. Write to a sibling temp file (`.<filename>.tr300-tmp`) in the same
+   parent directory.
+2. `sync_all()` to flush to disk.
+3. `std::fs::rename(temp, target)` — atomic on POSIX, atomic on NTFS
+   within a volume.
+
+The temp file in the same parent dir is load-bearing: NTFS guarantees
+atomicity for `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` only when both
+endpoints are on the same volume, and POSIX `rename(2)` has the same
+constraint. Using `std::env::temp_dir()` for the temp would have placed
+it on a different filesystem in the common case and silently degraded
+to non-atomic copy-then-delete.
+
+On any failure path, the temp file is cleaned up with a best-effort
+`fs::remove_file` so we don't leak orphan `.<filename>.tr300-tmp` files.
+
+**Rejected alternative: `tempfile` crate.** The `tempfile::NamedTempFile`
+API does roughly the same dance but with a heavier API surface and an
+additional dependency. For three call sites + a couple test fixtures,
+the hand-rolled ~40 LOC helper wins on transparency and zero added
+deps.
+
+**Rejected alternative: write to `$TEMP` first, then copy.** Works but
+isn't atomic — the copy-then-delete sequence has the same partial-write
+hazard we were trying to avoid, just in a different file. Same-parent
+temp is the only path that gets actual atomicity.
+
+**Companion: `backup_once(path)`.** First install also copies the
+pre-TR-300 contents to `<path>.tr300-backup` if no backup exists yet.
+Idempotent: subsequent installs preserve the ORIGINAL backup. We never
+overwrite a backup with a TR-300-modified version — that would silently
+destroy the user's last good copy.
+
+### Marker-balance pre-check
+
+**Problem.** The `remove_delimited_block` parser (now in
+`src/install/shared.rs`) opens a block on any line containing
+`# TR-300 Machine Report` and closes it on any line containing
+`# End TR-300`. If a user hand-edited `# End TR-300` out of their rc
+file — a real and plausible failure mode when tidying shell config —
+the parser silently sets `in_block = true` on the start marker, never
+sees the close, and drops every subsequent line through EOF.
+
+The user's `~/.bashrc`, gone, on the next `tr300 install`.
+
+**Fix.** `check_marker_balance(content, start, end)` counts lines
+containing each marker. If `count(start) != count(end)`, refuse the
+write up-front with an actionable error explaining how to repair the
+block by hand. All four call sites (`update_shell_profile`,
+`remove_from_profile`, Windows `install_into_profile`, Windows
+`uninstall`) call this before any state mutation.
+
+**Why count instead of "in_block at EOF" check.** Counting also catches
+the inverse case (an orphan `# End TR-300` line on its own — less common
+but possible). And it's an O(n) single-pass over the file we already
+have in memory; no performance concern.
+
+### SHA256 verification of downloaded installers
+
+**Problem.** Pre-v3.15.2 the Windows update path (`src/update.rs`)
+trusted only TLS to `github.com` and immediately handed the downloaded
+MSI / EXE bytes to `msiexec /i` or ran the Inno EXE directly. The
+implicit comment was "we trust the cert chain" — but TR-300's target
+audience is corporate users on machines with TLS-interception proxies
+(Bluecoat, Zscaler, McAfee Web Gateway, etc.) installing a trusted
+root certificate in the user store. Those proxies see plaintext
+HTTPS traffic and can rewrite installer bytes in flight.
+
+The worst case is the Global EXE: Inno Setup binaries declare
+`PrivilegesRequired=admin` at launch, so one UAC click on a tampered
+installer gives the attacker SYSTEM-equivalent code execution on
+every machine that auto-updates.
+
+**Fix.** After `download_to_file`, fetch `{installer_url}.sha256` in a
+SEPARATE request, parse the cargo-dist `<lowercase-64-char-hex>  *<filename>`
+format (also tolerant of the asterisk being absent — some sha256sum
+invocations emit text mode), compute SHA-256 of the downloaded file
+via `sha2::Sha256`, and refuse to launch on mismatch.
+
+**Why this is meaningful uplift even though both requests go through
+the same MITM.** The proxy has to tamper with BOTH the installer AND
+the sidecar in a way that yields a matching hash. SHA-256 is
+preimage-resistant — you can't compute new bytes that hash to a
+specific target value. The attacker would have to either:
+1. Use a hash collision (currently believed-hard for SHA-256 — no
+   published collision attack), or
+2. Rewrite both files in a way that doesn't trigger TLS cert
+   validation on the second connection (rustls won't downgrade or
+   ignore cert errors silently), or
+3. Forge the trusted root and serve their own cert (already in scope
+   if they're MITM-ing, but now they have to do it consistently for
+   two requests instead of one — much higher likelihood of triggering
+   the user's other security tooling).
+
+This isn't code-signing protection (we don't verify a signature; we
+verify a hash that an attacker who controls the proxy in steady state
+could in principle replace alongside the binary). But it raises the
+attack cost meaningfully, and it matches the security posture of
+cargo-dist's own shell installer (`curl ... | sh`), which the
+PowerShell installer one-liner already inherits via cargo-dist.
+
+**Rejected alternative: code signing.** Would be stronger, but
+acquiring an EV cert and threading signing through release.yml +
+windows-installers.yml is a multi-month project. SHA256 sidecar
+verification is the 90% solution that ships in days.
+
+### Post-install version verification
+
+**Problem.** `msiexec /i ... /passive /norestart` exits 0 in several
+scenarios where the install didn't materially complete:
+- MajorUpgrade matching the *same* version (re-running v3.15.2 install
+  with v3.15.2 already installed): exits 0, no file changed.
+- Restart Manager scheduled deferred file replace (exit 3010 —
+  REBOOT_REQUIRED, file isn't actually swapped until next reboot).
+- `/passive` mode: msiexec may exit 0 immediately when another `msiexec`
+  is running and the new install is queued.
+
+JSON consumers reading `tr300 update --json` would see
+`"success": true, "strategy": "msi_global"` — false positive, fleet
+automation thinks the rollout is done when the on-disk binary is still
+old.
+
+**Fix.** After `msiexec` / Inno EXE returns success, re-exec
+`env::current_exe() --version` via a fresh `Command`, parse the
+version, compare against the expected `latest`. Mismatch → return
+`StrategyError::Runtime` with a clear message. msiexec exit code 3010
+is intercepted BEFORE the version check and surfaces as a dedicated
+"Reboot, then verify with `tr300 --version`" message — operators can
+distinguish "needs reboot" from "actually failed" from the JSON
+`attempts[].message` field.
+
+**Why not re-exec `cargo install --list` or similar.** The cargo path
+doesn't apply (these are MSI/EXE strategies, not cargo). And the
+on-disk binary's `--version` output is the source of truth: it's
+literally the bytes that will run next time the user invokes `tr300`,
+so confirming THAT version equals expected is the only verification
+that actually matters.
+
+### WMI hard-timeout pattern
+
+**Problem.** Windows WMI queries (`wmi::WMIConnection::query()`) have
+no Rust-side timeout. The bounded-subprocess helper in
+`src/collectors/command.rs` only protects `Command::output()` calls.
+WMI bypasses it entirely. A deadlocked WMI provider — post-Windows-
+update misconfig, Group Policy lockdown of the security namespace,
+antivirus interfering with `Win32_EncryptableVolume` queries, broken
+`Winmgmt` service — could block the report for tens of seconds with
+no indication of why.
+
+**Fix.** `src/collectors/platform/windows.rs::with_timeout(budget, f)`:
+
+```rust
+fn with_timeout<F, T>(budget: Duration, f: F) -> Option<T>
+where
+    F: FnOnce() -> Option<T> + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || { let _ = tx.send(f()); });
+    rx.recv_timeout(budget).ok().flatten()
+}
+```
+
+The 5-second `WMI_TIMEOUT` constant is the budget. All four WMI-touching
+collectors (`get_bitlocker_status`, `get_socket_count_wmi`,
+`get_network_info_wmi`, `last_cold_boot_seconds`) wrap their inner
+logic in this. The 5th (`get_battery_wmi(&WMIConnection)`) takes a
+non-`'static` reference so can't be wrapped this way — but
+`get_battery_native()` via `GetSystemPowerStatus` covers the same
+ground in ~1 ms and runs first.
+
+**The detached-thread tradeoff.** Rust intentionally doesn't kill
+threads. When `with_timeout` returns `None`, the worker thread is
+still blocked on its WMI call and continues running in the background.
+There's no resource leak in practice: when our process exits,
+Windows tears down all threads. The COMLibrary created inside the
+worker thread's closure has the same lifetime as the thread, so it
+goes too. The cost is a tiny amount of orphan background work per
+timeout-firing WMI call — bounded, paid for by the OS, not our
+problem.
+
+**Rejected alternative: tokio + spawn_blocking + timeout.** Async
+runtime drag for a single sync wait operation. Not worth pulling in
+the entire tokio crate.
+
+**Rejected alternative: a global watchdog thread that kills the
+process after N seconds.** Too coarse — would terminate the entire
+report even when only one collector is hung, and there's no way to
+return the data that WAS collected before the timeout.
+
+### Windows self-EXE delete via detached cleanup
+
+**Problem.** `tr300 uninstall` -> Complete called `fs::remove_file`
+on `find_binary_location()`, which prefers `env::current_exe()`. When
+the user ran `tr300 uninstall` from `%LocalAppData%\Programs\tr300\
+bin\tr300.exe`, that path IS the running EXE. Windows refuses
+`DeleteFile` on a running EXE image with raw OS error 5 because the
+loader holds an open file handle. The user was left with profile
+cleaned, binary still on disk, and a confusing `RemoveBinary` error.
+
+**Fix.** `is_running_binary(target)` canonicalizes both `target` and
+`env::current_exe()` via `fs::canonicalize` (handles 8.3 short names,
+junctions, drive-letter case) and compares for equality. When the
+running binary IS the target, `schedule_self_cleanup` spawns a
+detached `cmd.exe` job:
+
+```
+cmd /c timeout /t 2 /nobreak > nul & del "<binary>" & rd /q "<parent>"
+```
+
+With `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` creation flags so
+the child has no console window and doesn't inherit our process
+group. The 2-second wait gives our parent process time to exit and
+release the file handle; `del` then succeeds.
+
+**Why not `MoveFileEx(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)`.**
+Works but requires the user to reboot before the binary is actually
+gone, and `MOVEFILE_DELAY_UNTIL_REBOOT` requires admin on Windows 11
+(MS hardened this in 22H2 to prevent ransomware abuse). The detached
+cleanup gives sub-3-second cleanup without elevation.
+
+**Why `cmd.exe` rather than PowerShell.** `cmd.exe` is always
+present on Windows; PowerShell 5.1 is usually but not always
+(Server Core, stripped images). `cmd` has no startup overhead;
+`pwsh -Command` has measurable JIT warmup. For a 2-line cleanup
+script, cmd wins.
+
+**Parent-dir cleanup heuristic.** Only `rd /q` the parent if it
+contains "tr300" in the name (case-insensitive) — matches the
+synchronous-path heuristic, prevents wiping unrelated dirs in
+unusual portable-install scenarios.
+

@@ -7,6 +7,255 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.2] - 2026-05-18
+
+> **Cross-platform audit + remediation release.** A three-agent
+> read-only audit (`Explore` agents, Opus 4.7 1M context) of the
+> install / update / runtime paths across macOS, Linux, and Windows
+> surfaced 22 real findings — 3 critical (data-loss / security), 4
+> high (reliable UX break), 9 medium (reliability / polish), 6
+> low / informational. This release ships fixes for 19 of them
+> across the install, update, collector, and Inno-Setup paths;
+> the remaining 3 (CI hardening, COMLibrary caching, alias-
+> collision warning) are filed for future PRs.
+
+### Security
+- **`tr300 update` verifies SHA256 of downloaded MSI / EXE
+  installers before launching them.** Previously the update flow
+  trusted only TLS to `github.com` and immediately handed the
+  downloaded bytes to `msiexec /i` or ran the Inno Setup EXE.
+  Corporate TLS-interception proxies with a trusted root CA,
+  hostile public WiFi, captive portals, and CDN tampering could
+  substitute a trojaned installer — worst case the Global EXE,
+  which requests `PrivilegesRequired=admin` at launch, so one
+  UAC click gave the attacker SYSTEM-equivalent code execution.
+  The update flow now fetches `{url}.sha256` in a separate
+  request, parses the cargo-dist `<lowercase-hex>  *<filename>`
+  format (`.github/workflows/windows-installers.yml:213-220`
+  writes the same form), computes SHA-256 via the `sha2` crate,
+  and refuses to launch on mismatch with a clear error. (audit
+  finding F3)
+
+### Fixed
+- **Atomic rc-file writes prevent data loss on partial-write
+  failures.** `update_shell_profile` / `remove_from_profile` and
+  the Windows `install` / `uninstall` flows previously used
+  `std::fs::write`, which opens the target with `O_TRUNC` /
+  `CREATE_ALWAYS` and then writes — a Ctrl-C, power loss, or AV
+  quarantine between those two steps would leave the user's
+  `~/.bashrc` / `~/.zshrc` / `$PROFILE` truncated or empty. All
+  four sites now route through `install::atomic_write` (writes
+  to a sibling `.<filename>.tr300-tmp`, fsyncs, atomic rename via
+  `std::fs::rename` — atomic on POSIX, atomic on NTFS within a
+  volume which the helper enforces). End result: the rc file is
+  either fully replaced or completely untouched, never partial.
+  First install also writes a one-time `<path>.tr300-backup`
+  copy of the original profile via `install::backup_once`
+  (idempotent — subsequent installs preserve the pre-TR-300
+  backup). (audit finding F1)
+- **Marker-block sanity check refuses to mutate a mutilated
+  profile.** The `remove_delimited_block` parser opens a block
+  on any line containing `# TR-300 Machine Report` and closes it
+  on any line containing `# End TR-300`. If a user hand-edited
+  the `# End TR-300` line out of their rc file (plausible when
+  tidying shell config), the next `tr300 install` would have
+  silently dropped every line from `# TR-300 Machine Report` to
+  EOF. All four call sites now run a marker-balance check first
+  and refuse the write on imbalance with an actionable error.
+  (audit finding F2)
+- **Auto-run snippet no longer spams every new shell when
+  `tr300` is missing.** The injected snippet previously invoked
+  `tr300 --fast` unconditionally — once the binary was moved,
+  deleted, or `cargo uninstall`'d, every new interactive shell
+  printed `bash: tr300: command not found` / PowerShell `The
+  term 'tr300' is not recognized…` until the user found the
+  snippet. The snippet now guards with `command -v tr300`
+  (POSIX) / `Get-Command tr300 -ErrorAction SilentlyContinue`
+  (Windows). Reinstalls overwrite the old unguarded block via
+  the existing marker-based cleanup. (audit finding F4)
+- **Recursion sentinel breaks nested-shell render loops.** A
+  `TR300_AUTORUN_RAN` env var is set on first auto-run; nested
+  shells (`bash -i -c …`, vim's `:term`, `pwsh -Command …`,
+  Windows Terminal's nested PowerShell tab) inherit it and the
+  guard short-circuits. Prior to this release nested invocations
+  re-rendered the table once per level into CI logs and editor
+  terminals. (audit finding F4)
+- **Windows snippet now uses `[Environment]::UserInteractive`
+  instead of `$Host.Name -eq 'ConsoleHost'`.** The prior check
+  passed for `pwsh -Command "..."` invocations from CI / VS Code
+  / scheduled tasks (all of which report `ConsoleHost` as their
+  host name), causing the table to render into non-interactive
+  log streams. `UserInteractive` is the documented check for a
+  real user session. (audit finding F4)
+- **`tr300 install` writes to BOTH Windows PowerShell 5.1 AND
+  PowerShell 7 (`pwsh`) profiles when both shells are present.**
+  The two shell flavors have different `$PROFILE` paths
+  (`Documents\WindowsPowerShell\…` vs `Documents\PowerShell\…`)
+  and don't cross-source each other. PowerShell 7-only users
+  previously got a silent no-op install — the snippet went to a
+  profile their actual shell never read. `get_powershell_profiles()`
+  probes both launchers, deduplicates, and `install()` /
+  `uninstall()` iterate over all discovered profiles. (audit
+  finding F5)
+- **`is_utf8_locale()` honors POSIX precedence symmetrically.**
+  Pre-fix the function had an asymmetric skip: `LC_ALL=C` /
+  `LC_ALL=POSIX` fell through to the next category, while
+  `LC_ALL=de_DE.ISO-8859-1` short-circuited to `false`. The new
+  implementation reads POSIX's precedence rules straight: any
+  non-empty value in `LC_ALL` / `LC_CTYPE` / `LANG` wins
+  outright. Users who set `LC_ALL=C, LANG=en_US.UTF-8` now
+  correctly get ASCII output (they explicitly asked for the C
+  locale). (audit finding F6)
+- **`is_newer()` semver parser handles prereleases correctly.**
+  The hand-rolled comparator used `filter_map(|s|
+  s.parse::<u64>().ok())` which silently dropped non-numeric
+  segments. `"3.15.2-rc.1".split('.')` produced
+  `["3","15","2-rc","1"]`, the `2-rc` segment failed to parse
+  and was dropped, the trailing `1` survived — leaving
+  `[3, 15, 1]`, byte-identical to `"3.15.1"`. Users on
+  manually-installed prereleases were stuck. A new
+  `strip_prerelease_metadata` helper truncates at the first
+  non-`[0-9.]` character, and the comparator now treats a
+  stable release as newer than a prerelease of the same triple
+  (semver §11). Build metadata (`+nightly.42`) is correctly
+  ignored per semver §10. (audit finding F7)
+- **`try_msi_install` / `try_exe_install` no longer claim
+  success when the installer exited 0 but the on-disk binary
+  didn't actually change.** After the installer returns, the
+  update flow re-execs `env::current_exe() --version` and
+  compares against the expected `latest`. msiexec exit code
+  `3010` (REBOOT_REQUIRED) now produces a dedicated "Reboot,
+  then verify with `tr300 --version`" message. (audit finding
+  F8)
+- **Inno Setup `EnvRemovePath` no longer strands the first PATH
+  entry on uninstall.** Both `inno/global.iss` (HKLM) and
+  `inno/corporate.iss` (HKCU) used `Delete(Paths, P - 1, ...)`
+  to consume the leading `;` separator. When the target was the
+  FIRST entry in PATH, `P` was 1 and `P - 1 = 0` —
+  `Delete(s, 0, n)` is undefined behavior in Inno Setup's
+  Pascal Script (treated as no-op), leaving the entry stranded.
+  Both `.iss` files now branch on `P == 1` and delete from
+  position 1 directly. (audit finding F9)
+- **`enable_utf8_console()` on Windows restores the prior
+  console code page on normal exit.** Pre-fix the function
+  called `SetConsoleOutputCP(65001)` and never put it back —
+  the change survived `tr300` exit, leaving every subsequent
+  program in the same console seeing UTF-8 output, which
+  occasionally broke legacy CP-437 batch scripts. The function
+  now captures the prior CP via `GetConsoleOutputCP()` and
+  returns a `ConsoleCpGuard` whose `Drop` impl restores it.
+  Update / install / uninstall paths that call
+  `std::process::exit` deliberately skip Drop (one-shot output,
+  no meaningful restoration story). The gate now also runs
+  when either stdout OR stderr is a terminal. (audit finding
+  F10)
+- **`tr300 install` on Unix refuses to run as root.**
+  `dirs::home_dir()` consults `$HOME` first, but sudoers configs
+  frequently reset `$HOME` to `/root` non-deterministically —
+  `sudo tr300 install` could end up modifying `/root/.bashrc`
+  or writing root-owned files into the user's home (subsequent
+  non-sudo invocations fail with `EACCES`). `install()` now
+  checks `libc::geteuid() == 0` and refuses with an actionable
+  message pointing at `cargo install tr300` and the MSI/EXE
+  installers. (audit finding F11)
+- **`tr300 install` on macOS prefers `.zshrc` when neither rc
+  file exists.** macOS has defaulted to zsh since 10.15
+  (Catalina, 2019); pre-fix the install would create `.bashrc`
+  on a fresh-account machine, leaving the auto-run silently
+  dormant. `cfg(target_os = "macos")` branches now write
+  `.zshrc` instead. Linux defaults remain `.bashrc`. (audit
+  finding F12)
+- **`tr300 uninstall` -> Complete on Windows handles the
+  self-EXE delete case.** Pre-fix `uninstall_complete` called
+  `fs::remove_file` synchronously on the currently-running
+  binary, which Windows refuses with raw OS error 5 — the user
+  was left with profile cleaned but binary still on disk.
+  `is_running_binary()` now canonicalizes both paths and
+  detects when the target IS the running EXE; in that case
+  `schedule_self_cleanup` spawns a detached `cmd.exe` job
+  (`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) that waits 2
+  seconds, then `del`s the binary and `rd /q`s the empty
+  parent dir. (audit finding F13)
+- **WMI queries in the Windows collector now have a hard
+  5-second Rust-side timeout.** Pre-fix the WMI-touching
+  collectors (`get_bitlocker_status`, `get_socket_count_wmi`,
+  `get_network_info_wmi`, `last_cold_boot_seconds`) had no
+  escape hatch — a deadlocked WMI provider (post-Windows-update
+  misconfig, GPO lockdown, antivirus interfering with the
+  `Win32_EncryptableVolume` security namespace, broken
+  `Winmgmt`) could block `wmi.query()` for tens of seconds. A
+  new module-level `with_timeout` (thread +
+  `mpsc::channel.recv_timeout`) caps each WMI call at
+  `WMI_TIMEOUT = 5s` and returns a conservative fallback on
+  timeout. (audit finding F14)
+- **`escape_json()` now delegates to `serde_json::to_string`.**
+  The hand-rolled implementation was correct for the documented
+  cases but easy to break with future maintenance. The
+  delegated version is spec-compliant by construction across
+  the full Unicode range. (audit finding F15)
+- **`aggregate_disk_usage` no longer over-matches
+  junction-mounted paths on Windows.** Tightened
+  `d.mount_point.starts_with("C:")` to an exact case-insensitive
+  comparison against `C:\` and `C:` so a directory-mount at
+  `C:\mnt\D` doesn't wrongly match as if it were the C: root.
+  (audit finding F18)
+- **Linux locale-sensitive subprocesses run with `LC_ALL=C`.**
+  `lscpu`'s `Socket(s):` label and `lastlog`'s `Never logged in`
+  literal are localized — German users saw `Sockel:` and `Nie
+  eingeloggt`, silently breaking the parsers. New
+  `run_stdout_c_locale` and `run_output_with_env` helpers force
+  the C locale; the `lscpu` socket-count call and
+  `lastlog`/`lastlog2`/`last` invocations are switched over.
+  (audit finding F19)
+
+### Changed
+- **New build-time dependency: `sha2 = "0.10"` (Windows-only).**
+  Added under `[target.'cfg(windows)'.dependencies]` so
+  non-Windows builds are unchanged. Pulls in `digest`,
+  `block-buffer`, `crypto-common`, `cpufeatures` (~150 KB
+  compiled). `sha2` is a RustCrypto member and the de-facto
+  standard SHA-2 implementation in the Rust ecosystem.
+- **Shared marker constants and block-removal parser extracted
+  to `src/install/shared.rs`.** The `MARKER_START` /
+  `MARKER_END` constants and the `remove_delimited_block`
+  function were previously duplicated byte-for-byte across
+  `unix.rs` and `windows.rs`. Both modules now reference
+  `super::shared::{...}` so a future rename touches one file.
+  Snippet contents in each platform module are pinned by unit
+  tests (`shell_additions_contains_shared_markers`,
+  `powershell_additions_contains_shared_markers`). (audit
+  finding F16)
+
+### Documentation
+- CLAUDE.md now documents the **Windows 10 1511+ minimum**. The
+  statically-linked `IsWow64Process2` call in `get_architecture`
+  doesn't exist on older Windows; Rust's own minimum already
+  drops Windows 7 (since rustc 1.78) so the bound is moot in
+  practice. Documenting prevents an accidental Win7 backport
+  attempt later. (audit finding F21)
+
+### Tests
+- **26 new unit tests** across `install`, `update`, and `report`:
+  atomic-write success/failure, backup-once-only semantics,
+  marker-balance check (well-formed / two-block /
+  missing-end / missing-start), snippet content pinning
+  (Unix + Windows), `strip_prerelease_metadata`,
+  `is_newer` (prerelease ordering, build-metadata,
+  equal-prereleases), `parse_sha256_sidecar` (cargo-dist
+  format + variants), `compute_sha256` (RFC empty-input test
+  vector), and `escape_json` round-trips (backslash + quote
+  pairs, control chars, supplementary-plane Unicode, empty,
+  plain ASCII). Total lib test count 72 → 98.
+
+### Deferred to future releases
+- The `windows-installers.yml` pre-flight asset-list check
+  (audit finding F20) — small CI hardening, not user-facing.
+- `OnceLock<COMLibrary>` caching for graphical-host library
+  consumers (audit finding F22) — invasive refactor of
+  `src/collectors/platform/windows.rs`.
+- Pre-existing alias collision warning on install (audit
+  finding F17) — marginal value, cosmetic only.
+
 ## [3.15.1] - 2026-05-15
 
 > **Release status: COMPLETE.** All five workflow runs green:

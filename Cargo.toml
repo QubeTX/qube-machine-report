@@ -1,6 +1,6 @@
 [package]
 name = "tr300"
-version = "3.15.1"
+version = "3.15.2"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -60,6 +60,12 @@ winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "w
 # Windows installers (v3.15.0+). Raw winapi for one registry read would be
 # ~30 lines of unsafe; winreg keeps it to ~5 lines of safe Rust.
 winreg = "0.52"
+# Used by src/update.rs to verify the SHA256 of MSI / EXE installers
+# downloaded by `tr300 update` against the .sha256 sidecar the
+# release workflow publishes (v3.15.4+). Defends against an in-flight
+# MITM swap of the installer payload — TLS alone is not sufficient
+# against corporate-proxy interception with a trusted root.
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

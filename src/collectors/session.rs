@@ -171,8 +171,21 @@ fn get_last_login(username: &str) -> (String, Option<String>) {
 
 #[cfg(target_os = "linux")]
 fn get_last_login_linux(username: &str) -> (String, Option<String>) {
+    use crate::collectors::command::run_output_with_env;
+
+    // Force LC_ALL=C on these `lastlog*` / `last` calls so the "Never
+    // logged in" string match and the column-position parsers don't
+    // misfire on non-English locales (where the label becomes e.g.
+    // "Nie eingeloggt" in German). (audit finding F19, v3.15.8+)
+    let c_locale = || [("LC_ALL", "C")];
+
     // Try lastlog2 first (newer systems)
-    if let Some(output) = run_output("lastlog2", ["--user", username], CommandTimeout::Normal) {
+    if let Some(output) = run_output_with_env(
+        "lastlog2",
+        ["--user", username],
+        c_locale(),
+        CommandTimeout::Normal,
+    ) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
@@ -188,7 +201,12 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
     }
 
     // Try lastlog (older systems)
-    if let Some(output) = run_output("lastlog", ["-u", username], CommandTimeout::Normal) {
+    if let Some(output) = run_output_with_env(
+        "lastlog",
+        ["-u", username],
+        c_locale(),
+        CommandTimeout::Normal,
+    ) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
@@ -207,8 +225,14 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
         }
     }
 
-    // Try last command
-    if let Some(output) = run_output("last", ["-F", "-1", "-w", username], CommandTimeout::Normal) {
+    // Try last command (also LC_ALL=C — `last`'s output is localized
+    // on some distros and our parser keys off positional columns).
+    if let Some(output) = run_output_with_env(
+        "last",
+        ["-F", "-1", "-w", username],
+        c_locale(),
+        CommandTimeout::Normal,
+    ) {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().next() {

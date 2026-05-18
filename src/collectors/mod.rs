@@ -290,7 +290,14 @@ fn format_duration_seconds(secs: u64) -> String {
 fn aggregate_disk_usage(disks: &[disk::DiskInfo]) -> (u64, u64) {
     // Try to find the root or C: drive
     for d in disks {
-        if d.mount_point == "/" || d.mount_point == "C:\\" || d.mount_point.starts_with("C:") {
+        // v3.15.8: tightened the C: match from `starts_with("C:")` to an
+        // exact case-insensitive comparison so a junction-mounted
+        // directory at e.g. `C:\mnt\D` doesn't wrongly match as if it
+        // were the C: root. (audit finding F18)
+        if d.mount_point == "/"
+            || d.mount_point.eq_ignore_ascii_case("c:\\")
+            || d.mount_point.eq_ignore_ascii_case("c:")
+        {
             return (d.used_bytes, d.total_bytes);
         }
     }

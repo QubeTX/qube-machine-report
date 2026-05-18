@@ -7,18 +7,41 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-/// Marker comments for shell profile modifications
-const MARKER_START: &str = "# TR-300 Machine Report";
-const MARKER_END: &str = "# End TR-300";
+use super::shared::{MARKER_END, MARKER_START};
 
-/// Shell profile content to add
+/// Shell profile content to add.
+///
+/// The auto-run block has three load-bearing guards inside the
+/// interactive-shell check:
+/// - `command -v tr300` — silently skip when the binary is no longer
+///   on PATH (post-uninstall, cargo-uninstall, manual rm). Without
+///   this, every new shell would print `bash: tr300: command not
+///   found` until the user found and removed this block.
+/// - `[ -z "${TR300_AUTORUN_RAN-}" ]` + `export TR300_AUTORUN_RAN=1`
+///   — recursion sentinel. Nested interactive shells (`bash -i -c`,
+///   vim `:term`, a Makefile's nested shell) inherit the env var and
+///   the guard short-circuits so the table doesn't render multiple
+///   times per top-level session.
+/// - The whole `case "$-" in *i*)` wrapper restricts firing to
+///   interactive shells (POSIX way to detect this).
+///
+/// The literal marker lines `# TR-300 Machine Report` and `# End
+/// TR-300` MUST appear at the boundaries — they're matched by
+/// `super::shared::remove_delimited_block` and the
+/// `super::check_marker_balance` pre-write sanity check. The test
+/// `shell_additions_contains_shared_markers` below pins this contract.
 const SHELL_ADDITIONS: &str = r#"# TR-300 Machine Report
 alias report='tr300'
 
-# Auto-run on interactive shell
+# Auto-run on interactive shell; guards prevent spam-on-every-prompt
+# when the binary is missing, and recursion in nested shells.
 case "$-" in *i*)
-    tr300 --fast
-    ;; esac
+    if command -v tr300 >/dev/null 2>&1 && [ -z "${TR300_AUTORUN_RAN-}" ]; then
+        export TR300_AUTORUN_RAN=1
+        tr300 --fast
+    fi
+    ;;
+esac
 # End TR-300"#;
 
 /// Get the installation path for Unix systems
@@ -36,6 +59,8 @@ pub fn install_path() -> PathBuf {
 
 /// Install tr300 to shell profiles
 pub fn install() -> Result<()> {
+    refuse_root_install()?;
+
     let home =
         dirs::home_dir().ok_or_else(|| AppError::platform("Could not determine home directory"))?;
 
@@ -53,12 +78,21 @@ pub fn install() -> Result<()> {
         modified_files.push(zshrc.display().to_string());
     }
 
-    // If neither exists, try to create .bashrc (common default)
-    if modified_files.is_empty() && !bashrc.exists() {
-        fs::write(&bashrc, SHELL_ADDITIONS).map_err(|e| {
-            AppError::platform(format!("Failed to create {}: {}", bashrc.display(), e))
+    // If neither rc file exists, create the default for this platform.
+    // macOS has defaulted to zsh since 10.15 (Catalina, 2019) — creating
+    // `.bashrc` there would silently never fire because the user's
+    // actual zsh shell wouldn't source it. Linux defaults remain
+    // `.bashrc`.
+    if modified_files.is_empty() && !bashrc.exists() && !zshrc.exists() {
+        let default_rc = if cfg!(target_os = "macos") {
+            &zshrc
+        } else {
+            &bashrc
+        };
+        super::atomic_write(default_rc, SHELL_ADDITIONS).map_err(|e| {
+            AppError::platform(format!("Failed to create {}: {}", default_rc.display(), e))
         })?;
-        modified_files.push(bashrc.display().to_string());
+        modified_files.push(default_rc.display().to_string());
     }
 
     if modified_files.is_empty() {
@@ -70,6 +104,31 @@ pub fn install() -> Result<()> {
         println!("  - {}", file);
     }
 
+    Ok(())
+}
+
+/// Refuse to run `tr300 install` as root.
+///
+/// `dirs::home_dir()` consults `$HOME` first, but sudoers configs
+/// frequently reset `$HOME` to `/root` non-deterministically. So
+/// `sudo tr300 install` ended up either:
+/// - writing the alias into `/root/.bashrc` (the actual user never
+///   benefits — auto-run never fires for them), or
+/// - writing it into the real user's `~/.bashrc` BUT as root-owned,
+///   causing `EACCES` the next time the user (non-root) tries to
+///   re-run `tr300 install` for an upgrade.
+///
+/// Refusing up-front with an actionable message avoids both. Users who
+/// want to install TR-300 system-wide should use the MSI/EXE installer
+/// (on Windows) or `cargo install tr300` (cross-platform) — the
+/// shell-profile flow is by design per-user.
+fn refuse_root_install() -> Result<()> {
+    let euid = unsafe { libc::geteuid() };
+    if euid == 0 {
+        return Err(AppError::platform(
+            "Don't run `tr300 install` with sudo / as root — TR-300 modifies your personal shell profile (~/.bashrc / ~/.zshrc). Running as root would either write the auto-run into root's profile (no benefit to your shell) or leave root-owned files in your home directory (the next non-sudo `tr300 install` would fail with permission denied). Re-run as your normal user without sudo.",
+        ));
+    }
     Ok(())
 }
 
@@ -109,6 +168,14 @@ fn update_shell_profile(path: &PathBuf) -> Result<bool> {
     let content = fs::read_to_string(path)
         .map_err(|e| AppError::platform(format!("Failed to read {}: {}", path.display(), e)))?;
 
+    // Refuse to mutate a mutilated marker block; otherwise
+    // `remove_delimited_block` would silently drop everything from
+    // `MARKER_START` to EOF.
+    super::check_marker_balance(&content, MARKER_START, MARKER_END).map_err(AppError::platform)?;
+
+    // One-time backup of the original rc file before any modification.
+    let _ = super::backup_once(path);
+
     let cleaned_content = remove_tr300_block(&content);
 
     // Append TR-300 config to cleaned content
@@ -118,7 +185,7 @@ fn update_shell_profile(path: &PathBuf) -> Result<bool> {
         format!("{}\n\n{}\n", cleaned_content.trim_end(), SHELL_ADDITIONS)
     };
 
-    fs::write(path, &new_content)
+    super::atomic_write(path, &new_content)
         .map_err(|e| AppError::platform(format!("Failed to write {}: {}", path.display(), e)))?;
 
     Ok(true)
@@ -126,10 +193,8 @@ fn update_shell_profile(path: &PathBuf) -> Result<bool> {
 
 /// Remove existing TR-300 blocks from content
 fn remove_tr300_block(content: &str) -> String {
-    let mut lines: Vec<&str> = content.lines().collect();
-
-    // Remove TR-300 blocks (between MARKER_START and MARKER_END)
-    lines = remove_delimited_block(&lines, MARKER_START, MARKER_END);
+    let lines: Vec<&str> = content.lines().collect();
+    let lines = super::shared::remove_delimited_block(&lines, MARKER_START, MARKER_END);
 
     // Clean up multiple consecutive blank lines
     let mut result = Vec::new();
@@ -155,28 +220,6 @@ fn remove_tr300_block(content: &str) -> String {
     }
 }
 
-/// Remove a block delimited by start and end markers
-fn remove_delimited_block<'a>(lines: &[&'a str], start: &str, end: &str) -> Vec<&'a str> {
-    let mut result = Vec::new();
-    let mut in_block = false;
-
-    for line in lines {
-        if line.contains(start) {
-            in_block = true;
-            continue;
-        }
-        if line.contains(end) {
-            in_block = false;
-            continue;
-        }
-        if !in_block {
-            result.push(*line);
-        }
-    }
-
-    result
-}
-
 /// Remove TR-300 additions from a shell profile
 fn remove_from_profile(path: &PathBuf) -> Result<bool> {
     let content = fs::read_to_string(path)
@@ -187,23 +230,13 @@ fn remove_from_profile(path: &PathBuf) -> Result<bool> {
         return Ok(false);
     }
 
-    // Remove the TR-300 block
-    let mut new_lines = Vec::new();
-    let mut in_tr300_block = false;
+    // Refuse to mutate a mutilated marker block — same hazard as on
+    // install. Without this, an uninstall on a hand-edited rc file
+    // would drop everything from `MARKER_START` to EOF.
+    super::check_marker_balance(&content, MARKER_START, MARKER_END).map_err(AppError::platform)?;
 
-    for line in content.lines() {
-        if line.contains(MARKER_START) {
-            in_tr300_block = true;
-            continue;
-        }
-        if line.contains(MARKER_END) {
-            in_tr300_block = false;
-            continue;
-        }
-        if !in_tr300_block {
-            new_lines.push(line);
-        }
-    }
+    let lines: Vec<&str> = content.lines().collect();
+    let mut new_lines = super::shared::remove_delimited_block(&lines, MARKER_START, MARKER_END);
 
     // Clean up extra blank lines at the end
     while new_lines.last().map(|s| s.is_empty()).unwrap_or(false) {
@@ -212,7 +245,7 @@ fn remove_from_profile(path: &PathBuf) -> Result<bool> {
 
     let new_content = new_lines.join("\n") + "\n";
 
-    fs::write(path, new_content)
+    super::atomic_write(path, &new_content)
         .map_err(|e| AppError::platform(format!("Failed to write {}: {}", path.display(), e)))?;
 
     Ok(true)
@@ -265,4 +298,48 @@ pub fn uninstall_complete() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MARKER_END, MARKER_START, SHELL_ADDITIONS};
+    use crate::install::shared::{ALIAS_NAME, AUTORUN_SENTINEL_VAR, BINARY_NAME};
+
+    #[test]
+    fn shell_additions_contains_shared_markers() {
+        // Pins the contract that the literal snippet uses the same
+        // marker text as `super::shared` exposes. A drift here
+        // breaks both the install-time block parser and the
+        // uninstall-time cleanup path.
+        assert!(SHELL_ADDITIONS.contains(MARKER_START));
+        assert!(SHELL_ADDITIONS.contains(MARKER_END));
+        assert!(SHELL_ADDITIONS.contains(ALIAS_NAME));
+        assert!(SHELL_ADDITIONS.contains(BINARY_NAME));
+    }
+
+    #[test]
+    fn shell_additions_has_path_guard() {
+        // F4 hardening: must not invoke `tr300` unconditionally.
+        // `command -v` is the POSIX-standard "is this on PATH?"
+        // primitive. Without it, every new shell prints a "command
+        // not found" error after the binary is uninstalled.
+        assert!(SHELL_ADDITIONS.contains("command -v tr300"));
+    }
+
+    #[test]
+    fn shell_additions_has_recursion_sentinel() {
+        // F4 hardening: must set + check `TR300_AUTORUN_RAN` to
+        // break recursion into nested shells (vim :term, bash -i,
+        // make).
+        assert!(SHELL_ADDITIONS.contains(AUTORUN_SENTINEL_VAR));
+        assert!(SHELL_ADDITIONS.contains("export TR300_AUTORUN_RAN=1"));
+    }
+
+    #[test]
+    fn shell_additions_gates_on_interactive_shell() {
+        // `case "$-" in *i*)` is the POSIX-standard check for the
+        // shell's interactive flag. Required to keep the table from
+        // rendering in non-interactive script invocations.
+        assert!(SHELL_ADDITIONS.contains(r#"case "$-" in *i*"#));
+    }
 }

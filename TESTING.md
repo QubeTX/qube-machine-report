@@ -2,6 +2,22 @@
 
 This file tracks the manual verification matrix that must pass before each tagged release, plus the automated gates that protect the auto-run UX.
 
+## Per-version verification log
+
+### v3.15.2 — 2026-05-18
+
+- Cross-platform audit + remediation release. 19 of 22 audit findings fixed (F1–F19+F21); 3 deferred (F17, F20, F22).
+- Full local gate green on Windows host: `cargo fmt -- --check`, `cargo clippy --all-targets --workspace -- -D warnings`, `cargo test --workspace --all-targets`, `cargo build --release`.
+- 98 lib + 18 integration tests pass (up from 72 lib in v3.15.1). 26 new tests cover atomic-write semantics, marker-balance check, install-snippet content pinning (Unix + Windows), `strip_prerelease_metadata` / `is_newer` (prerelease + build-metadata handling), `parse_sha256_sidecar` (cargo-dist format variants), `compute_sha256` (RFC empty-input vector), and `escape_json` round-trips.
+- `tr300 --version` reports `3.15.2`. `tr300 --fast --json | head -5` produces valid JSON header.
+- New dependency: `sha2 = "0.10"` (Windows-only). Confirmed non-Windows builds compile cleanly.
+- **Manual verification required on release-candidate machines** (split by platform):
+  - **Linux**: `sudo ./target/release/tr300 install` should refuse with the new actionable error (F11). `LC_MESSAGES=de_DE.UTF-8 ./target/release/tr300 --fast` should still report the right socket count (F19). On a fresh-account host, `tr300` should still report "Never logged in" regardless of `LC_MESSAGES`.
+  - **macOS**: on a fresh user account with neither `.bashrc` nor `.zshrc`, `tr300 install` creates `.zshrc` (F12). Atomic-write durability under Ctrl-C between truncate-and-write (F1).
+  - **Windows**: marker-block rejection on hand-mutilated `.bashrc` (F2). OneDrive-redirected `$PROFILE` install on Windows 11. After install, `rm $(which tr300)` then open a new PowerShell — no error spam (F4). Nested `pwsh -Command "Get-Module"` inside an installed shell — confirm no table render (F4). Dual-shell install with both `powershell` and `pwsh` — confirm both profile paths modified (F5). `chcp 437` → `tr300` → another CP-437 tool — confirm CP restored (F10). Junction-mounted `C:\mnt\D` — confirm disk row reports C: usage (F18). Self-EXE uninstall from `%LocalAppData%\Programs\tr300\bin\tr300.exe` → Complete — confirm deferred cleanup (F13). Hung WMI test via `net stop winmgmt` — full-mode report should finish in ≤5s per WMI site (F14). Tampered-MSI test: edit one byte of a real v3.15.2 MSI, run `tr300 update` against a mock manifest — confirm refusal with SHA256 mismatch (F3). Reboot-required test: hold an open file handle to `tr300.exe` during `tr300 update`, observe msiexec 3010, confirm clear "reboot, then verify" message (F8). Prerelease ordering: install a `v3.15.x-rc.1` prerelease, publish stable, run `tr300 update` — confirm stable detected as newer (F7). First-PATH-entry Inno uninstall: install Corporate EXE on fresh user with empty HKCU\Environment\Path — confirm `tr300\bin` at index 1 → uninstall → PATH empty, no orphan (F9).
+
+
+
 ## Automated gates (run by CI on every PR)
 
 `.github/workflows/ci.yml` runs these on every push and pull request:

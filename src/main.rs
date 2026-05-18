@@ -35,11 +35,13 @@ fn main() -> Result<()> {
         config = config.with_title(title);
     }
 
-    // Enable UTF-8 output on Windows
+    // Enable UTF-8 output on Windows. Bound for the lifetime of main()
+    // so the prior console codepage is restored on normal exit — see
+    // ConsoleCpGuard's Drop impl. (The update / install / uninstall
+    // paths that call `std::process::exit` skip Drop on purpose; their
+    // output is one-shot and CP restoration isn't a UX concern there.)
     #[cfg(windows)]
-    {
-        enable_utf8_console();
-    }
+    let _cp_guard = enable_utf8_console();
 
     // Handle action commands (early exit)
     if cli.update || action == Some(Action::Update) {
@@ -147,7 +149,22 @@ fn run_uninstall() -> Result<()> {
     }
 }
 
-/// Check if the current locale supports UTF-8
+/// Check whether the current locale supports UTF-8.
+///
+/// Implements strict POSIX precedence: `LC_ALL` wins outright when set
+/// and non-empty; otherwise `LC_CTYPE` (the category that governs
+/// character classification, the relevant one for terminal rendering);
+/// otherwise `LANG`. Empty-string values for the higher-precedence
+/// variables mean "fall through to the next category" per the POSIX
+/// locale spec (see `locale(7)`).
+///
+/// Pre-v3.15.5 the function had an asymmetric skip: `LC_ALL=C` /
+/// `LC_ALL=POSIX` fell through to `LANG` (correct), but
+/// `LC_ALL=de_DE.ISO-8859-1` short-circuited to `false` (correct per
+/// POSIX precedence — LC_ALL trumps — but the asymmetry was a smell).
+/// The strict reading is now consistent: any non-empty value in the
+/// higher-precedence variable is authoritative, including `C` and
+/// `POSIX` (which both correctly return `false` for "not UTF-8").
 fn is_utf8_locale() -> bool {
     // On Windows, we handle UTF-8 via SetConsoleOutputCP
     #[cfg(windows)]
@@ -159,26 +176,75 @@ fn is_utf8_locale() -> bool {
     {
         for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
             if let Ok(val) = std::env::var(var) {
-                if !val.is_empty() && val != "C" && val != "POSIX" {
-                    let upper = val.to_uppercase();
-                    return upper.contains("UTF-8") || upper.contains("UTF8");
+                if val.is_empty() {
+                    // POSIX: empty value falls through to the next
+                    // category in precedence order.
+                    continue;
                 }
+                let upper = val.to_uppercase();
+                return upper.contains("UTF-8") || upper.contains("UTF8");
             }
         }
         false
     }
 }
 
-/// Enable UTF-8 console output on Windows
+/// RAII guard that restores the prior Windows console output code page
+/// when dropped.
+///
+/// Before v3.15.5, `enable_utf8_console` set `CP_UTF8` (65001) for the
+/// current console window and never restored it — the change survived
+/// the `tr300` process exit and affected every subsequent program
+/// running in the same `cmd.exe` / Windows Terminal tab, occasionally
+/// breaking legacy CP-437-dependent batch scripts. Wrapping the change
+/// in a guard whose `Drop` puts the prior CP back makes the side effect
+/// scoped to TR-300's lifetime in main().
+///
+/// Note: `std::process::exit` does NOT run Drop, by design. The
+/// update / install / uninstall paths call `exit` and skip restoration
+/// — fine, those flows produce one-shot output and the user expects
+/// the codepage they see during the run.
 #[cfg(windows)]
-fn enable_utf8_console() {
-    use std::io::IsTerminal;
+struct ConsoleCpGuard {
+    prev: u32,
+}
 
-    // Only set console mode if we're actually in a terminal
-    if std::io::stdout().is_terminal() {
+#[cfg(windows)]
+impl Drop for ConsoleCpGuard {
+    fn drop(&mut self) {
         unsafe {
-            // Set console output code page to UTF-8
-            winapi::um::wincon::SetConsoleOutputCP(65001);
+            winapi::um::wincon::SetConsoleOutputCP(self.prev);
         }
     }
+}
+
+/// Switch the Windows console to UTF-8 output for the lifetime of the
+/// returned guard.
+///
+/// Returns `None` (no guard, no change) when neither stdout nor stderr
+/// is a terminal (a fully-piped invocation) or when the console is
+/// already in UTF-8 mode. Returns `Some(guard)` otherwise; the caller
+/// must keep the guard alive for as long as box-drawing output is
+/// emitted.
+#[cfg(windows)]
+fn enable_utf8_console() -> Option<ConsoleCpGuard> {
+    use std::io::IsTerminal;
+
+    if !std::io::stdout().is_terminal() && !std::io::stderr().is_terminal() {
+        return None;
+    }
+
+    // GetConsoleOutputCP lives in `consoleapi`, not `wincon` — the
+    // pairing with `SetConsoleOutputCP` (in `wincon`) is one of winapi-rs's
+    // mildly inconsistent module placements.
+    let prev = unsafe { winapi::um::consoleapi::GetConsoleOutputCP() };
+    if prev == 65001 {
+        // Already UTF-8 — Windows Terminal's default, or some earlier
+        // tool already switched. Nothing to restore.
+        return None;
+    }
+    unsafe {
+        winapi::um::wincon::SetConsoleOutputCP(65001);
+    }
+    Some(ConsoleCpGuard { prev })
 }

@@ -37,8 +37,34 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    run_output_with_env(program, args, std::iter::empty::<(&str, &str)>(), timeout)
+}
+
+/// Like `run_output` but lets the caller set environment variables on
+/// the child process.
+///
+/// Required for subprocesses whose output is parsed by string match —
+/// `lscpu`, `lastlog`, `last`, and similar tools localize their column
+/// labels per `LC_MESSAGES` / `LC_ALL`. Calling them with `LC_ALL=C`
+/// forces the C locale and the English-language output our parsers
+/// expect, avoiding silent misses on non-English systems. (audit
+/// finding F19, v3.15.8+)
+pub fn run_output_with_env<I, S, E, K, V>(
+    program: &str,
+    args: I,
+    envs: E,
+    timeout: CommandTimeout,
+) -> Option<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+    E: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
     let mut child = Command::new(program)
         .args(args)
+        .envs(envs)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -88,6 +114,27 @@ where
 /// Run a no-argument collector subprocess and return successful stdout.
 pub fn run_stdout_no_args(program: &str, timeout: CommandTimeout) -> Option<String> {
     run_stdout(program, std::iter::empty::<&str>(), timeout)
+}
+
+/// Like `run_stdout`, but forces `LC_ALL=C` on the child process so
+/// label-based parsers don't break under a non-English locale.
+///
+/// Tools like `lscpu` and `lastlog` localize their column labels per
+/// `LC_MESSAGES` (`Socket(s):` becomes `Sockel:` in German, `Never
+/// logged in` becomes `Nie eingeloggt`). When the parser is matching
+/// English strings, an unset `LC_ALL=C` means the parser silently
+/// misses on those systems. (audit finding F19, v3.15.8+)
+pub fn run_stdout_c_locale<I, S>(program: &str, args: I, timeout: CommandTimeout) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = run_output_with_env(program, args, [("LC_ALL", "C")], timeout)?;
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

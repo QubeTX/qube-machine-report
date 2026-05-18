@@ -301,7 +301,7 @@ pub fn run(config: &Config) -> i32 {
     }
     println!();
 
-    match execute_update(&strategies) {
+    match execute_update(&latest, &strategies) {
         Ok(used) => {
             println!();
             println!(
@@ -376,7 +376,7 @@ fn run_json() -> i32 {
     }
 
     let strategies = build_strategy_list();
-    match execute_update(&strategies) {
+    match execute_update(&latest, &strategies) {
         Ok(used) => {
             let mut payload = serde_json::json!({
                 "action": "update",
@@ -469,13 +469,43 @@ fn fetch_latest_version() -> Result<String, String> {
     Ok(tag.strip_prefix('v').unwrap_or(tag).to_string())
 }
 
+/// Strip any prerelease (`-rc.1`) or build-metadata (`+nightly.42`)
+/// suffix from a semver string, returning just the `MAJOR.MINOR.PATCH`
+/// portion.
+///
+/// The hand-rolled `is_newer` was previously silently dropping
+/// non-numeric segments inside `filter_map`, which made
+/// `"3.15.2-rc.1".split('.')` parse to `[3, 15, 1]` (the `2-rc` segment
+/// failed to parse and the trailing `1` survived) — identical to
+/// `"3.15.1"`. Users on a prerelease tag could end up stuck because
+/// `is_newer` thought they were already on the latest. Truncating at
+/// the first non-`[0-9.]` character is the simplest robust fix.
+fn strip_prerelease_metadata(v: &str) -> &str {
+    match v.find(|c: char| !c.is_ascii_digit() && c != '.') {
+        Some(idx) => &v[..idx],
+        None => v,
+    }
+}
+
 /// Compare semver versions. Returns true if `latest` is newer than `current`.
+///
+/// Handles prerelease tags per the semver spec's general intent: a
+/// prerelease of an upcoming version is considered NEWER than the
+/// previous stable patch (`3.15.2-rc.1` > `3.15.1`), and a stable
+/// release IS newer than any prerelease of the same triple
+/// (`3.15.2` > `3.15.2-rc.1`). Two prereleases of the same triple are
+/// treated as equal — we don't promote within a prerelease line because
+/// GitHub's `/releases/latest` endpoint already filters prereleases
+/// out, so the case is theoretical.
 fn is_newer(current: &str, latest: &str) -> bool {
+    let current_stripped = strip_prerelease_metadata(current);
+    let latest_stripped = strip_prerelease_metadata(latest);
+
     let parse =
         |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse::<u64>().ok()).collect() };
 
-    let c = parse(current);
-    let l = parse(latest);
+    let c = parse(current_stripped);
+    let l = parse(latest_stripped);
 
     // Pad shorter vec with zeros
     let len = c.len().max(l.len());
@@ -489,7 +519,15 @@ fn is_newer(current: &str, latest: &str) -> bool {
             return false;
         }
     }
-    false
+
+    // Numeric parts equal. If the current binary is on a prerelease
+    // of the same triple (e.g. `3.15.2-rc.1`) and the latest is the
+    // stable release (`3.15.2`), the stable IS newer per semver
+    // ordering. Inverse case (current stable, latest prerelease)
+    // shouldn't happen via GitHub's `latest` endpoint.
+    let current_has_suffix = current.len() != current_stripped.len();
+    let latest_has_suffix = latest.len() != latest_stripped.len();
+    current_has_suffix && !latest_has_suffix
 }
 
 // ── Strategy ordering ───────────────────────────────────────────────
@@ -568,10 +606,13 @@ fn rustup_update_stable_best_effort() {
     let _ = Command::new("rustup").args(["update", "stable"]).status();
 }
 
-fn execute_update(strategies: &[UpdateStrategy]) -> Result<UpdateStrategy, UpdateFailure> {
+fn execute_update(
+    latest: &str,
+    strategies: &[UpdateStrategy],
+) -> Result<UpdateStrategy, UpdateFailure> {
     let mut attempts = Vec::new();
     for &strategy in strategies {
-        match try_strategy(strategy) {
+        match try_strategy(strategy, latest) {
             Ok(()) => return Ok(strategy),
             Err(StrategyError::Preflight(message)) => {
                 eprintln!("  · skipped {}: {}", strategy.label(), message);
@@ -594,7 +635,7 @@ fn execute_update(strategies: &[UpdateStrategy]) -> Result<UpdateStrategy, Updat
     Err(UpdateFailure { attempts })
 }
 
-fn try_strategy(strategy: UpdateStrategy) -> Result<(), StrategyError> {
+fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyError> {
     match strategy {
         UpdateStrategy::Cargo => {
             rustup_update_stable_best_effort();
@@ -604,10 +645,10 @@ fn try_strategy(strategy: UpdateStrategy) -> Result<(), StrategyError> {
         UpdateStrategy::InstallerWget => try_installer_wget(),
         UpdateStrategy::InstallerPowerShell => try_installer_powershell("powershell"),
         UpdateStrategy::InstallerPwsh => try_installer_powershell("pwsh"),
-        UpdateStrategy::MsiGlobal => try_msi_install(msi_global_url()),
-        UpdateStrategy::MsiCorporate => try_msi_install(msi_corporate_url()),
-        UpdateStrategy::ExeGlobal => try_exe_install(exe_global_url()),
-        UpdateStrategy::ExeCorporate => try_exe_install(exe_corporate_url()),
+        UpdateStrategy::MsiGlobal => try_msi_install(msi_global_url(), latest),
+        UpdateStrategy::MsiCorporate => try_msi_install(msi_corporate_url(), latest),
+        UpdateStrategy::ExeGlobal => try_exe_install(exe_global_url(), latest),
+        UpdateStrategy::ExeCorporate => try_exe_install(exe_corporate_url(), latest),
     }
 }
 
@@ -731,10 +772,18 @@ fn try_installer_powershell(_launcher: &str) -> Result<(), StrategyError> {
 
 // ── Windows MSI / EXE installer strategies (v3.15.0+) ──────────────
 
+/// msiexec exit code returned when the install completed successfully
+/// but a reboot is required to finalize a file replacement (Windows
+/// Installer's Restart Manager couldn't replace a locked file in-place
+/// and scheduled a `MoveFileEx`-style delete-on-reboot instead).
+#[cfg(windows)]
+const MSI_EXIT_REBOOT_REQUIRED: i32 = 3010;
+
 /// Download a file from `url` to `path` over HTTPS. Used by the MSI/EXE
 /// strategies to fetch the matching installer to `%TEMP%` before launching it.
-/// Trusts HTTPS to github.com — no SHA256 verification beyond what TLS gives
-/// us. Symmetric with how the existing `irm | iex` PowerShell strategy works.
+/// TLS validation is enforced by `ureq`; the caller then re-fetches the
+/// `.sha256` sidecar and runs `verify_checksum` for defense against a
+/// corporate-proxy interception or a tampered release asset.
 #[cfg(windows)]
 fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
     let agent = ureq::AgentBuilder::new()
@@ -755,18 +804,145 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Download the matching MSI and re-run it via `msiexec /i /passive /norestart`.
-/// WiX `MajorUpgrade` in `wix/main.wxs` and `wix/corporate.wxs` handles the
-/// uninstall-old-then-install-new step atomically; Windows Installer's Restart
-/// Manager handles the "binary in use" case by replacing the file via rename
-/// (the running tr300 process keeps its open file handle to the OLD inode).
+/// Fetch the cargo-dist `.sha256` sidecar at `<url>.sha256` and return
+/// the file contents.
+///
+/// Format: `<lowercase-64-char-hex>  *<filename>` per cargo-dist's
+/// `dist-manifest.json` generation and the parallel implementation in
+/// `.github/workflows/windows-installers.yml`. Tolerant of trailing
+/// whitespace / missing asterisk via `parse_sha256_sidecar`.
 #[cfg(windows)]
-fn try_msi_install(url: &str) -> Result<(), StrategyError> {
-    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}.msi", VERSION));
+fn fetch_sha256_sidecar(url: &str) -> Result<String, String> {
+    let sidecar_url = format!("{}.sha256", url);
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(30))
+        .build();
+    let resp = agent
+        .get(&sidecar_url)
+        .set("User-Agent", &format!("tr300/{}", VERSION))
+        .call()
+        .map_err(|e| format!("Sidecar request failed ({}): {}", sidecar_url, e))?;
+    resp.into_string()
+        .map_err(|e| format!("Failed to read sidecar body: {}", e))
+}
+
+/// Extract the 64-char hex from a `.sha256` sidecar line. Returns
+/// `None` when the first whitespace-separated token is not exactly
+/// 64 hex characters.
+#[cfg(windows)]
+fn parse_sha256_sidecar(content: &str) -> Option<String> {
+    content
+        .split_whitespace()
+        .next()
+        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(|s| s.to_lowercase())
+}
+
+/// Compute the SHA-256 of `path`, returning the lowercase hex.
+#[cfg(windows)]
+fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|e| format!("Failed to hash: {}", e))?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Fetch the `.sha256` sidecar, compute the SHA-256 of the downloaded
+/// installer, refuse to proceed on mismatch.
+///
+/// Defends against a network MITM that replaces the installer bytes in
+/// flight (corporate TLS-interception proxies with a trusted root CA,
+/// hostile WiFi, captive portals). The sidecar is fetched in a separate
+/// request — an attacker would have to corrupt both the installer and
+/// the sidecar in a way that yields a matching hash, which is
+/// preimage-hard.
+#[cfg(windows)]
+fn verify_checksum(installer_path: &std::path::Path, installer_url: &str) -> Result<(), String> {
+    println!("  Verifying SHA256 checksum...");
+    let sidecar_content = fetch_sha256_sidecar(installer_url)?;
+    let expected = parse_sha256_sidecar(&sidecar_content).ok_or_else(|| {
+        format!(
+            "Malformed .sha256 sidecar from {}.sha256: {:?}",
+            installer_url, sidecar_content
+        )
+    })?;
+    let actual = compute_sha256(installer_path)?;
+    if actual.eq_ignore_ascii_case(&expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "SHA256 mismatch — refusing to run installer.\n         Expected: {}\n         Got:      {}\n         This usually indicates a corrupted download or a network MITM.",
+            expected, actual
+        ))
+    }
+}
+
+/// After the installer reports success, re-exec `<current_exe>
+/// --version` and confirm the on-disk binary has been updated. Catches
+/// the case where the installer exits 0 but the file replacement
+/// didn't actually take effect (Restart Manager edge cases, MSI
+/// re-running the SAME version, etc.).
+///
+/// Compares the post-install version against `expected` (the
+/// `latest` tag from the GitHub releases API). Both are stripped of
+/// any prerelease/build-metadata suffix before comparison so that
+/// `tr300 3.15.4` matches `3.15.4` exactly even if the release tag
+/// has a metadata suffix.
+#[cfg(windows)]
+fn verify_post_install(expected: &str) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe failed: {}", e))?;
+    let output = Command::new(&exe)
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("Failed to spawn `{} --version`: {}", exe.display(), e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "`{} --version` exited with code {}",
+            exe.display(),
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    // Output is "tr300 X.Y.Z\n"; the last whitespace-separated token
+    // is the version.
+    let installed = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let installed_stripped = strip_prerelease_metadata(&installed);
+    let expected_stripped = strip_prerelease_metadata(expected);
+    if installed_stripped == expected_stripped && !installed_stripped.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Installer exited successfully but `{} --version` still reports v{} (expected v{}). The installed binary may be locked by another process — close other tr300 windows / shells and re-run, or reboot to let Windows finish a deferred file replace.",
+            exe.display(), installed, expected
+        ))
+    }
+}
+
+/// Download the matching MSI, verify its SHA256, re-run it via
+/// `msiexec /i /passive /norestart`, then re-exec the binary with
+/// `--version` to confirm the file replacement actually took effect.
+///
+/// WiX `MajorUpgrade` in `wix/main.wxs` and `wix-corporate/corporate.wxs`
+/// handles the uninstall-old-then-install-new step atomically. Windows
+/// Installer's Restart Manager handles the "binary in use" case by
+/// renaming the locked file (the running tr300 process keeps its open
+/// file handle to the OLD inode); if RM falls back to delete-on-reboot,
+/// msiexec returns 3010 and we surface that without claiming success.
+#[cfg(windows)]
+fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
+    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}.msi", latest));
 
     println!("  Downloading MSI installer...");
     download_to_file(url, &temp_path)
         .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
+
+    verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
 
     println!("  Launching Windows Installer...");
     // /passive shows a progress dialog with no user interaction; /norestart
@@ -779,29 +955,46 @@ fn try_msi_install(url: &str) -> Result<(), StrategyError> {
         .status()
         .map_err(|e| StrategyError::Preflight(format!("Failed to spawn msiexec: {}", e)))?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(StrategyError::Runtime(format!(
-            "msiexec exited with code {} (likely user cancel, UAC denied, or install error)",
-            status.code().unwrap_or(-1)
-        )))
+    let code = status.code().unwrap_or(-1);
+    if code == MSI_EXIT_REBOOT_REQUIRED {
+        // Install completed but Restart Manager couldn't finalize a
+        // file replace in-place. Surface this rather than silently
+        // claiming success — `verify_post_install` would fail because
+        // the on-disk binary is still old.
+        return Err(StrategyError::Runtime(format!(
+            "MSI install completed but requires a reboot to finalize (msiexec exit {}). Reboot, then verify with `tr300 --version`.",
+            MSI_EXIT_REBOOT_REQUIRED
+        )));
     }
+    if !status.success() {
+        return Err(StrategyError::Runtime(format!(
+            "msiexec exited with code {} (likely user cancel, UAC denied, or install error)",
+            code
+        )));
+    }
+
+    verify_post_install(latest).map_err(StrategyError::Runtime)?;
+    Ok(())
 }
 
-/// Download the matching Inno Setup EXE installer and re-run it with
-/// `/SILENT /SUPPRESSMSGBOXES /NORESTART`. Inno Setup's AppId-based upgrade
-/// detection silently uninstalls the old version before installing the new
-/// one. For the Global perMachine EXE, `PrivilegesRequired=admin` in
-/// `inno/global.iss` triggers UAC before any UI; the Corporate perUser EXE
-/// (`PrivilegesRequired=lowest`) installs without elevation.
+/// Download the matching Inno Setup EXE installer, verify its SHA256,
+/// re-run it with `/SILENT /SUPPRESSMSGBOXES /NORESTART`, then verify
+/// the post-install version.
+///
+/// Inno Setup's AppId-based upgrade detection silently uninstalls the
+/// old version before installing the new one. For the Global perMachine
+/// EXE, `PrivilegesRequired=admin` in `inno/global.iss` triggers UAC
+/// before any UI; the Corporate perUser EXE (`PrivilegesRequired=lowest`)
+/// installs without elevation.
 #[cfg(windows)]
-fn try_exe_install(url: &str) -> Result<(), StrategyError> {
-    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}-setup.exe", VERSION));
+fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
+    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}-setup.exe", latest));
 
     println!("  Downloading EXE installer...");
     download_to_file(url, &temp_path)
         .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
+
+    verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
 
     println!("  Launching Inno Setup installer...");
     // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
@@ -811,25 +1004,26 @@ fn try_exe_install(url: &str) -> Result<(), StrategyError> {
         .status()
         .map_err(|e| StrategyError::Preflight(format!("Failed to spawn EXE installer: {}", e)))?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(StrategyError::Runtime(format!(
+    if !status.success() {
+        return Err(StrategyError::Runtime(format!(
             "EXE installer exited with code {} (likely user cancel, UAC denied, or install error)",
             status.code().unwrap_or(-1)
-        )))
+        )));
     }
+
+    verify_post_install(latest).map_err(StrategyError::Runtime)?;
+    Ok(())
 }
 
 #[cfg(not(windows))]
-fn try_msi_install(_url: &str) -> Result<(), StrategyError> {
+fn try_msi_install(_url: &str, _latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "MSI installer is Windows-only".into(),
     ))
 }
 
 #[cfg(not(windows))]
-fn try_exe_install(_url: &str) -> Result<(), StrategyError> {
+fn try_exe_install(_url: &str, _latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "EXE installer is Windows-only".into(),
     ))
@@ -1087,5 +1281,135 @@ mod tests {
     fn test_is_newer_major_versions() {
         assert!(is_newer("3.8.0", "4.0.0"));
         assert!(!is_newer("4.0.0", "3.99.99"));
+    }
+
+    #[test]
+    fn strip_prerelease_metadata_handles_prereleases() {
+        // Before v3.15.4 the hand-rolled parser silently dropped the
+        // `-rc.1` segment via filter_map, mapping this to [3, 15, 1].
+        // Stripping the suffix first gives the correct [3, 15, 2].
+        assert_eq!(strip_prerelease_metadata("3.15.2-rc.1"), "3.15.2");
+        assert_eq!(strip_prerelease_metadata("3.15.2-alpha.10"), "3.15.2");
+    }
+
+    #[test]
+    fn strip_prerelease_metadata_handles_build_metadata() {
+        assert_eq!(strip_prerelease_metadata("3.15.2+nightly.42"), "3.15.2");
+        assert_eq!(strip_prerelease_metadata("3.15.2+sha.abc123"), "3.15.2");
+    }
+
+    #[test]
+    fn strip_prerelease_metadata_leaves_clean_version_alone() {
+        assert_eq!(strip_prerelease_metadata("3.15.2"), "3.15.2");
+        assert_eq!(strip_prerelease_metadata("1.0"), "1.0");
+        assert_eq!(strip_prerelease_metadata(""), "");
+    }
+
+    #[test]
+    fn is_newer_treats_prerelease_of_higher_triple_as_newer() {
+        // Stable user on 3.15.1, prerelease of 3.15.2 published. The
+        // pre-v3.15.4 parser said both were [3, 15, 1] (the `2-rc`
+        // segment failed to parse, the trailing `1` survived).
+        // Correct semver intent: 3.15.2-rc.1 is "approaching 3.15.2"
+        // and IS newer than 3.15.1.
+        assert!(is_newer("3.15.1", "3.15.2-rc.1"));
+    }
+
+    #[test]
+    fn is_newer_treats_stable_as_newer_than_prerelease_of_same_triple() {
+        // User on 3.15.2-rc.1 (manually installed prerelease), stable
+        // 3.15.2 lands. Per semver, the stable IS newer than its own
+        // prerelease. Pre-v3.15.4 parser said both were equal,
+        // stranding the user.
+        assert!(is_newer("3.15.2-rc.1", "3.15.2"));
+    }
+
+    #[test]
+    fn is_newer_treats_two_prereleases_of_same_triple_as_equal() {
+        // Theoretical case — GitHub /releases/latest filters prereleases
+        // out so we shouldn't see this in practice. The conservative
+        // "equal → not newer" verdict means tr300 reports "already on
+        // latest" and the user can manually pick.
+        assert!(!is_newer("3.15.2-rc.1", "3.15.2-rc.2"));
+    }
+
+    #[test]
+    fn is_newer_handles_build_metadata_as_equal_when_triples_match() {
+        // Build metadata MUST be ignored per semver §10. Stripping
+        // it before comparison achieves this.
+        assert!(!is_newer("3.15.2", "3.15.2+sha.deadbeef"));
+        assert!(!is_newer("3.15.2+nightly.41", "3.15.2+nightly.42"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_sha256_sidecar_accepts_cargo_dist_format() {
+        // cargo-dist publishes lines like:
+        //   "<hex>  *<filename>"  (two spaces, asterisk-prefixed name)
+        // (per the parallel implementation in
+        // .github/workflows/windows-installers.yml:215-220).
+        let line = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  *tr300-x86_64-pc-windows-msvc.msi";
+        assert_eq!(
+            parse_sha256_sidecar(line).as_deref(),
+            Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_sha256_sidecar_accepts_no_asterisk_variant() {
+        // Some sha256sum invocations omit the asterisk binary-mode
+        // marker — accept either form.
+        let line = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef tr300.msi";
+        assert_eq!(
+            parse_sha256_sidecar(line).as_deref(),
+            Some("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_sha256_sidecar_normalizes_to_lowercase() {
+        let line = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789  *foo.msi";
+        assert_eq!(
+            parse_sha256_sidecar(line).as_deref(),
+            Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_sha256_sidecar_rejects_wrong_length() {
+        // Too short.
+        assert_eq!(parse_sha256_sidecar("abcdef  *foo.msi"), None);
+        // Too long.
+        let too_long = format!("{}0  *foo.msi", "a".repeat(64));
+        assert_eq!(parse_sha256_sidecar(&too_long), None);
+        // Empty.
+        assert_eq!(parse_sha256_sidecar(""), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_sha256_sidecar_rejects_non_hex_chars() {
+        // 64 chars but `g` is not a hex digit.
+        let bad = format!("{}  *foo.msi", "g".repeat(64));
+        assert_eq!(parse_sha256_sidecar(&bad), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn compute_sha256_matches_known_value() {
+        // Empty file → known SHA256 of the empty input.
+        let dir = std::env::temp_dir().join(format!("tr300-update-tests-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("empty.bin");
+        std::fs::write(&path, b"").unwrap();
+        let hash = compute_sha256(&path).unwrap();
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
