@@ -15,6 +15,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > next session) is in [`MASTER_PLAN.md`](./MASTER_PLAN.md). Per-version
 > verification logs are in [`TESTING.md`](./TESTING.md). Agent-facing
 > repository tour and release checklist are in [`AGENTS.md`](./AGENTS.md).
+>
+> **Vendored agent skills.** [`.claude/skills/`](./.claude/skills/) bundles
+> four Anthropic-distributed skills into the repo so every agent gets the
+> same thinking toolkit regardless of plugin config: `brainstorming` (use
+> before any feature work — explores intent before implementation),
+> `critical-thinking` (four frameworks for decisions, design, problem-
+> solving, and contemplating; includes assumption surfacing, steel-manning,
+> bias checks), `architecture` (create or evaluate an ADR with options
+> table + trade-off analysis), `system-design` (requirements →
+> high-level design → deep dive → scale/reliability → trade-offs). See
+> [`.claude/skills/ATTRIBUTION.md`](./.claude/skills/ATTRIBUTION.md) for
+> provenance and the upstream-sync rule. Plus the project's own
+> [`release`](./.claude/skills/release/) skill for cutting TR-300 releases
+> end-to-end.
 
 ## Project Overview
 
