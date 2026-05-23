@@ -122,8 +122,11 @@ jobs:
           #                          MSI would pretend the release is
           #                          complete when it isn't.
           $tag = "${{ steps.tag.outputs.tag }}"
-          Write-Host "Probing release $tag for upstream completion sentinels..."
-          $assets = (gh release view $tag --json assets --jq '.assets[].name') -split "`n"
+          $repo = "${{ github.repository }}"
+          Write-Host "Probing release $tag in $repo for upstream completion sentinels..."
+          # Pass --repo explicitly: this step runs BEFORE actions/checkout,
+          # so `gh` has no local git context to infer the repo from.
+          $assets = (gh release view $tag --repo $repo --json assets --jq '.assets[].name') -split "`n"
           $required = @(
             "dist-manifest.json",
             "tr300-x86_64-pc-windows-msvc.msi"
