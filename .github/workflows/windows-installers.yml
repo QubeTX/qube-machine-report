@@ -97,6 +97,53 @@ jobs:
           Write-Host "Version: $version"
           Write-Host "Event:   ${{ github.event_name }}"
 
+      - name: Verify upstream cargo-dist release is complete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          # Guard against a torn upstream release. cargo-dist's release.yml
+          # uses a host-job gate that tolerates skipped matrix entries, so a
+          # partially-failed release can still report conclusion=success.
+          # Without this pre-flight, windows-installers.yml would build 6
+          # assets and attach them to a release missing the Global MSI /
+          # dist-manifest — leaving a torn release that users can't reliably
+          # update from. (audit finding F20, v3.15.3+)
+          #
+          # We probe two sentinels:
+          #   - dist-manifest.json   cargo-dist's own "all phases done"
+          #                          signal, published as the final asset
+          #                          of a complete run. Single-asset
+          #                          contract decouples us from cargo-dist
+          #                          output-naming details.
+          #   - the Global MSI       the asset our 6 Windows installer
+          #                          add-ons are functionally adjacent to.
+          #                          If it's missing, attaching a Corporate
+          #                          MSI would pretend the release is
+          #                          complete when it isn't.
+          $tag = "${{ steps.tag.outputs.tag }}"
+          Write-Host "Probing release $tag for upstream completion sentinels..."
+          $assets = (gh release view $tag --json assets --jq '.assets[].name') -split "`n"
+          $required = @(
+            "dist-manifest.json",
+            "tr300-x86_64-pc-windows-msvc.msi"
+          )
+          $missing = @()
+          foreach ($r in $required) {
+            if ($assets -notcontains $r) { $missing += $r }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "Upstream cargo-dist release is incomplete. Missing assets:"
+            $missing | ForEach-Object { Write-Host "    $_" }
+            Write-Host ""
+            Write-Host "This usually means a target build was skipped or failed in release.yml."
+            Write-Host "Fix the upstream release (re-run release.yml, or attach the missing assets"
+            Write-Host "manually) before re-firing this workflow via:"
+            Write-Host "    gh workflow run 'Windows Installers' -f tag=$tag"
+            exit 1
+          }
+          Write-Host "Upstream release looks complete (dist-manifest.json + Global MSI present)."
+
       - name: Checkout tag
         uses: actions/checkout@v6
         with:

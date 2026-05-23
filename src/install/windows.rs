@@ -147,6 +147,13 @@ pub fn install() -> Result<()> {
         ));
     }
 
+    // F17 (v3.15.3+): heads-up if the user already has a `report` defined.
+    // Best-effort heuristic — scans each PowerShell profile and PATH for a
+    // pre-existing definition that the install is about to shadow. Read-only,
+    // no PowerShell subprocess, so a noisy $PROFILE can't fire side effects
+    // during `tr300 install`.
+    warn_if_report_already_defined(&profile_paths);
+
     let mut modified = Vec::with_capacity(profile_paths.len());
     for profile_path in &profile_paths {
         install_into_profile(profile_path)?;
@@ -371,6 +378,99 @@ pub fn remove_empty_parent_dir(dir: &PathBuf) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Warn (to stderr) when `report` is already defined in the user's
+/// PowerShell environment so the install doesn't silently shadow it.
+///
+/// Read-only heuristic: scans each `$PROFILE` we'd be writing to for
+/// `Set-Alias`, `function`, or `New-Alias` declarations of `report`,
+/// plus probes PATH for a standalone `report.exe` / `report.cmd` /
+/// `report.bat` that isn't ours. No PowerShell subprocess — so a noisy
+/// `$PROFILE` (which usually loads modules, sets prompts, calls oh-my-
+/// posh, etc.) can't fire side effects during `tr300 install`.
+///
+/// Best-effort by design: misses aliases defined in PowerShell modules
+/// that are auto-loaded but not declared in `$PROFILE` itself, and
+/// misses `Set-Alias` declarations split across multiple lines.
+fn warn_if_report_already_defined(profile_paths: &[PathBuf]) {
+    let mut hits: Vec<String> = Vec::new();
+
+    // $PROFILE scan. Case-insensitive — PowerShell is case-insensitive
+    // for command names. Match common forms users actually type.
+    for profile_path in profile_paths {
+        let Ok(content) = fs::read_to_string(profile_path) else {
+            continue;
+        };
+        for (idx, raw) in content.lines().enumerate() {
+            let line = raw.trim();
+            // Skip TR-300's own block so re-running install doesn't warn
+            // about itself.
+            if line.contains(super::shared::MARKER_START)
+                || line.contains(super::shared::MARKER_END)
+                || (line.to_ascii_lowercase().contains("set-alias")
+                    && line.to_ascii_lowercase().contains("report")
+                    && line.to_ascii_lowercase().contains("tr300"))
+            {
+                continue;
+            }
+            let lower = line.to_ascii_lowercase();
+            let matches_alias = (lower.starts_with("set-alias") || lower.starts_with("new-alias"))
+                && lower.contains("report");
+            let matches_fn = lower.starts_with("function report ")
+                || lower.starts_with("function report{")
+                || lower.starts_with("function report(")
+                || lower == "function report";
+            if matches_alias || matches_fn {
+                hits.push(format!("{}:{}  {}", profile_path.display(), idx + 1, line));
+            }
+        }
+    }
+
+    // PATH scan. Look for a `report.exe` / `.cmd` / `.bat` in the user's
+    // PATH. Skip the executable bundled with TR-300 itself (none today —
+    // tr300 ships only as `tr300.exe`) and skip anything inside an
+    // install path we recognize as ours.
+    if let Ok(path_env) = std::env::var("PATH") {
+        for dir in path_env.split(';') {
+            if dir.is_empty() {
+                continue;
+            }
+            for ext in &["exe", "cmd", "bat", "ps1"] {
+                let candidate = Path::new(dir).join(format!("report.{}", ext));
+                if candidate.exists() && !looks_like_our_install_dir(dir) {
+                    hits.push(format!("{}  (executable on PATH)", candidate.display()));
+                }
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        return;
+    }
+
+    eprintln!();
+    eprintln!("Note: `report` is already defined in your PowerShell environment:");
+    for h in &hits {
+        eprintln!("    {}", h);
+    }
+    eprintln!("TR-300 is about to add `Set-Alias -Name report -Value tr300` to your");
+    eprintln!("PowerShell profile, which will shadow the existing definition for");
+    eprintln!("new sessions. If you want to keep your existing `report`, edit the");
+    eprintln!("TR-300 block out of $PROFILE after install (search for");
+    eprintln!("`# TR-300 Machine Report`).");
+    eprintln!();
+}
+
+/// Heuristic — does this PATH dir look like a TR-300 install location?
+/// Matches the two paths the four first-class Windows installers write
+/// to (Global and Corporate editions), plus the legacy `\.cargo\bin\`
+/// chain. Case-insensitive.
+fn looks_like_our_install_dir(dir: &str) -> bool {
+    let lower = dir.to_ascii_lowercase();
+    lower.contains(r"\program files\tr300\")
+        || lower.contains(r"\appdata\local\programs\tr300\")
+        || lower.contains(r"\.cargo\bin")
 }
 
 /// Coarse classification of a PowerShell execution-policy string.

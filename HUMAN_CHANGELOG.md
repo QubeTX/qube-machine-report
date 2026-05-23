@@ -13,6 +13,46 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.15.3] - 2026-05-23
+
+> Cleanup release that picks up the three issues the May 2026 audit
+> deliberately left for later: a small CI safety check, a polish for
+> an unusual library use case, and a courtesy warning at install
+> time. The big audit is now fully landed.
+
+### Fixed
+- **Embedding TR-300 inside a graphical app is more reliable.** Some
+  desktop apps initialize Windows' COM subsystem in a way that
+  conflicted with how TR-300 was talking to Windows under the hood,
+  silently making the report fall back to a much slower data path.
+  TR-300 now isolates that work onto its own background thread, so
+  the report stays fast regardless of how the host app set things up.
+  Pure command-line users see no change.
+- **The Windows installer add-on workflow refuses to build against
+  an incomplete release.** Previously, if the main release pipeline
+  partially failed, the follow-on workflow would still try to attach
+  the corporate-edition installers and end up with a release missing
+  files. The workflow now checks that the main release actually
+  finished before doing any work, and fails fast with a clear
+  message if not — saving five minutes of wasted build time and
+  preventing a torn release from being published.
+- **`tr300 install` warns you if `report` is already defined.**
+  TR-300 adds a `report` shortcut to your shell so you can type
+  `report` instead of `tr300`. If you already had a `report` alias
+  or script set up, TR-300 used to silently shadow it. Now `tr300
+  install` checks your shell startup files and standard tool
+  locations first, and prints a one-time note showing exactly what
+  it found and where, so you can decide whether to keep your
+  existing `report` or let TR-300's take over. The install still
+  proceeds — you asked for it — but you get the heads-up.
+
+### Internal
+- Bundled a set of Anthropic-distributed agent skills into the
+  repository so any AI agent working on TR-300 picks up the same
+  thinking toolkit (brainstorming, critical thinking, architecture,
+  system design) without depending on the contributor's local setup.
+  No effect on the binary or on users.
+
 ## [3.15.2] - 2026-05-18
 
 > Cross-platform audit + remediation release. An end-to-end read-only

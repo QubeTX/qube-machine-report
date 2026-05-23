@@ -28,6 +28,19 @@ use super::{CollectMode, PlatformInfo};
 /// genuinely-hung provider doesn't dominate startup.
 const WMI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Hard timeout for the batched WMI block in `collect()` (edition +
+/// virtualization + GPU + battery in one closure). Each query is
+/// ~50–200 ms healthy; four batched + connection setup is ~1 s typical
+/// and ~3 s slow-host worst case. 10 s gives headroom for a single laggy
+/// provider without dragging out the report on a real hang. (F22)
+const WMI_BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Result tuple returned by the F22 WMI worker closure: edition,
+/// virtualization, GPU list, battery. Each field carries the raw WMI
+/// answer (or `None` / `Vec::new()` when that specific query was skipped
+/// because a cheaper main-thread probe already succeeded).
+type WmiBatchResult = (Option<String>, Option<String>, Vec<String>, Option<String>);
+
 fn with_timeout<F, T>(budget: std::time::Duration, f: F) -> Option<T>
 where
     F: FnOnce() -> Option<T> + Send + 'static,
@@ -124,52 +137,94 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         };
     }
 
-    // Full mode: try WMI first, fall back to PowerShell if WMI fails
-    let wmi_result = COMLibrary::new()
-        .ok()
-        .and_then(|com| WMIConnection::new(com).ok());
+    // Full mode: try WMI first, fall back to PowerShell if WMI fails.
+    //
+    // The WMI block runs on a fresh worker thread via `with_timeout` (F22).
+    // COMLibrary::new() calls CoInitializeEx(NULL, COINIT_MULTITHREADED)
+    // internally. If `collect()` is invoked from a library consumer
+    // (Tauri/Slint/winit GUI host) whose caller thread already initialized
+    // COM as COINIT_APARTMENTTHREADED, calling COMLibrary::new() on that
+    // same thread would fail with RPC_E_CHANGED_MODE and we'd silently
+    // degrade to the PowerShell fallback. Spawning a fresh thread sidesteps
+    // this entirely — the new thread has no prior COM init, so our
+    // MULTITHREADED init always succeeds regardless of what the caller did.
+    // When the closure returns, COMLibrary's drop calls CoUninitialize and
+    // the worker thread exits cleanly; the caller's COM state on its own
+    // thread is never touched.
+    //
+    // The cheap main-thread probes (registry GPU enumeration, kernel
+    // GetSystemPowerStatus battery query) happen BEFORE spawning the worker
+    // so we can skip the corresponding WMI queries when the faster paths
+    // already succeeded — preserving the pre-F22 happy-path latency.
 
-    let (windows_edition, virtualization, gpus, battery) = if let Some(ref wmi) = wmi_result {
-        let edition = get_windows_edition_wmi(wmi).or_else(get_windows_edition_ps);
-        let virt = detect_virtualization_wmi(wmi).or_else(detect_virtualization_ps);
-        // C.8 (v3.13.0+): the registry path used by `--fast` already
-        // returns only hardware adapters (the {4d36e968-...} Display class
-        // doesn't enumerate Microsoft Basic Render Driver or Hyper-V Video).
-        // Prefer it in full mode too, with WMI / PowerShell as fallbacks
-        // and a name-based filter to strip software adapters that historically
-        // leaked through the WMI path on some configs.
-        let gpu_list = {
-            let mut gpus = get_gpus_fast();
-            if gpus.is_empty() {
-                gpus = get_gpus_wmi(wmi);
-            }
-            if gpus.is_empty() {
-                gpus = get_gpus_ps();
-            }
-            filter_software_gpus(gpus)
-        };
-        // C.10: prefer the native GetSystemPowerStatus call (~1 ms, no COM, no
-        // PowerShell). Falls back through WMI → PowerShell only if the kernel
-        // call somehow returns no data — basically never on real hardware.
-        let bat = get_battery_native()
-            .or_else(|| get_battery_wmi(wmi))
-            .or_else(get_battery_ps);
-        (edition, virt, gpu_list, bat)
-    } else {
-        // WMI connection failed entirely — fall back to PowerShell for everything
-        let fallback = get_batched_powershell_fallback();
-        let gpus = if fallback.gpus.is_empty() {
-            get_gpus_ps()
+    // C.8 (v3.13.0+): the registry path used by `--fast` already returns
+    // only hardware adapters (the {4d36e968-...} Display class doesn't
+    // enumerate Microsoft Basic Render Driver or Hyper-V Video). Prefer it
+    // in full mode too, with WMI / PowerShell as fallbacks. ~1 ms, no COM.
+    let gpus_fast = get_gpus_fast();
+    let need_gpu_wmi = gpus_fast.is_empty();
+
+    // C.10: prefer the native GetSystemPowerStatus call (~1 ms, no COM, no
+    // PowerShell). Falls back through WMI → PowerShell only if the kernel
+    // call somehow returns no data — basically never on real hardware.
+    let battery_native = get_battery_native();
+    let need_battery_wmi = battery_native.is_none();
+
+    let wmi_results: Option<WmiBatchResult> = with_timeout(WMI_BATCH_TIMEOUT, move || {
+        let com = COMLibrary::new().ok()?;
+        let wmi = WMIConnection::new(com).ok()?;
+        Some((
+            get_windows_edition_wmi(&wmi),
+            detect_virtualization_wmi(&wmi),
+            if need_gpu_wmi {
+                get_gpus_wmi(&wmi)
+            } else {
+                Vec::new()
+            },
+            if need_battery_wmi {
+                get_battery_wmi(&wmi)
+            } else {
+                None
+            },
+        ))
+    });
+
+    let (windows_edition, virtualization, gpus, battery) =
+        if let Some((edition_wmi, virt_wmi, gpus_wmi, battery_wmi)) = wmi_results {
+            let edition = edition_wmi.or_else(get_windows_edition_ps);
+            let virt = virt_wmi.or_else(detect_virtualization_ps);
+            let gpu_list = {
+                let mut gpus = gpus_fast;
+                if gpus.is_empty() {
+                    gpus = gpus_wmi;
+                }
+                if gpus.is_empty() {
+                    gpus = get_gpus_ps();
+                }
+                filter_software_gpus(gpus)
+            };
+            let bat = battery_native.or(battery_wmi).or_else(get_battery_ps);
+            (edition, virt, gpu_list, bat)
         } else {
-            fallback.gpus
+            // WMI worker thread failed entirely (COM init error) or timed out —
+            // fall back to PowerShell for everything WMI would have provided.
+            // gpus_fast and battery_native are already-computed main-thread
+            // probes; reuse them when they succeeded rather than re-running.
+            let fallback = get_batched_powershell_fallback();
+            let gpus = if !gpus_fast.is_empty() {
+                gpus_fast
+            } else if fallback.gpus.is_empty() {
+                get_gpus_ps()
+            } else {
+                fallback.gpus
+            };
+            (
+                fallback.windows_edition.or_else(get_windows_edition_ps),
+                fallback.virtualization.or_else(detect_virtualization_ps),
+                gpus,
+                battery_native.or(fallback.battery).or_else(get_battery_ps),
+            )
         };
-        (
-            fallback.windows_edition.or_else(get_windows_edition_ps),
-            fallback.virtualization.or_else(detect_virtualization_ps),
-            gpus,
-            fallback.battery.or_else(get_battery_ps),
-        )
-    };
 
     PlatformInfo {
         windows_edition,

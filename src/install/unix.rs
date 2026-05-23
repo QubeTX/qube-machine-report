@@ -5,7 +5,7 @@
 use crate::error::{AppError, Result};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::shared::{MARKER_END, MARKER_START};
 
@@ -64,6 +64,13 @@ pub fn install() -> Result<()> {
     let home =
         dirs::home_dir().ok_or_else(|| AppError::platform("Could not determine home directory"))?;
 
+    // F17 (v3.15.3+): heads-up if the user already has a `report` defined.
+    // Best-effort heuristic — scans common rc files and PATH for a
+    // pre-existing definition that the install is about to shadow. Read-only,
+    // no subprocess, so it can't trigger rc-file side effects (fastfetch,
+    // tmux auto-attach, etc.).
+    warn_if_report_already_defined(&home);
+
     let mut modified_files = Vec::new();
 
     // Try to update .bashrc
@@ -105,6 +112,105 @@ pub fn install() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Warn (to stderr) when `report` is already defined in the user's shell
+/// environment so the install doesn't silently shadow it.
+///
+/// Read-only heuristic: scans `~/.bashrc`, `~/.bash_profile`, `~/.zshrc`,
+/// `~/.profile`, and `~/.bash_aliases` for `alias report=` /
+/// `report ()` / `function report` declarations, plus probes
+/// `~/.local/bin/report`, `~/bin/report`, `/usr/local/bin/report`, and
+/// `/usr/bin/report` for an existing executable. No subprocess — so an
+/// rc file's side effects (fastfetch, tmux auto-attach, MOTD echoes,
+/// network probes) can't fire during `tr300 install`.
+///
+/// Best-effort by design: misses aliases defined in shell-specific
+/// fragment files, sourced configs, or pre-built shell environment
+/// modules. False negatives are acceptable — the warning is a courtesy,
+/// not a contract. False positives are also acceptable — worst case the
+/// user sees a one-time install-time message about a `report` they were
+/// fine shadowing.
+fn warn_if_report_already_defined(home: &Path) {
+    let mut hits: Vec<String> = Vec::new();
+
+    // rc-file scan. Match definitions of an alias, function, or variable
+    // called `report`. The patterns are conservative — we look for the
+    // word `report` immediately followed by `(` (function) or `=`
+    // (alias / assignment) or whitespace then `()` (POSIX function form).
+    let rc_candidates = [
+        ".bashrc",
+        ".bash_profile",
+        ".bash_aliases",
+        ".zshrc",
+        ".zprofile",
+        ".profile",
+    ];
+    for name in &rc_candidates {
+        let path = home.join(name);
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for (idx, raw) in content.lines().enumerate() {
+            let line = raw.trim();
+            // Skip TR-300's own block so re-running install doesn't warn
+            // about itself.
+            if line.contains(super::shared::MARKER_START)
+                || line.contains(super::shared::MARKER_END)
+                || (line.contains("alias report=") && line.contains("tr300"))
+            {
+                continue;
+            }
+            let matches_alias =
+                line.starts_with("alias report=") || line.starts_with("alias report =");
+            let matches_fn = line.starts_with("function report")
+                || line.starts_with("report()")
+                || line.starts_with("report ()");
+            if matches_alias || matches_fn {
+                hits.push(format!("{}:{}  {}", path.display(), idx + 1, line));
+            }
+        }
+    }
+
+    // Filesystem scan. A file at one of these well-known paths that's
+    // executable would also be shadowed by our alias.
+    let bin_candidates = [
+        home.join(".local").join("bin").join("report"),
+        home.join("bin").join("report"),
+        PathBuf::from("/usr/local/bin/report"),
+        PathBuf::from("/usr/bin/report"),
+    ];
+    for path in &bin_candidates {
+        if path.exists() && !is_our_install(path) {
+            hits.push(format!("{}  (executable on PATH)", path.display()));
+        }
+    }
+
+    if hits.is_empty() {
+        return;
+    }
+
+    eprintln!();
+    eprintln!("Note: `report` is already defined in your environment:");
+    for h in &hits {
+        eprintln!("    {}", h);
+    }
+    eprintln!("TR-300 is about to add `alias report='tr300'` to your shell profile,");
+    eprintln!("which will shadow the existing definition for new interactive shells.");
+    eprintln!("If you want to keep your existing `report`, edit the TR-300 block out");
+    eprintln!("of your shell profile after install (search for `# TR-300 Machine Report`).");
+    eprintln!();
+}
+
+/// Treat our own installed `report` executable (when the user has previously
+/// installed via a build that placed a `report` symlink/binary alongside
+/// tr300) as not-a-conflict. TR-300 has never shipped a `report` binary —
+/// it's always been an alias — so this is mostly defensive. Returns true
+/// only when the file is clearly part of a TR-300 install.
+fn is_our_install(_path: &Path) -> bool {
+    // TR-300 has only ever installed an alias, never a `report` binary.
+    // Any `report` file we find is genuinely the user's, not ours.
+    false
 }
 
 /// Refuse to run `tr300 install` as root.

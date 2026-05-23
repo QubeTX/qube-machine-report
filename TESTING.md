@@ -4,6 +4,20 @@ This file tracks the manual verification matrix that must pass before each tagge
 
 ## Per-version verification log
 
+### v3.15.3 — 2026-05-23
+
+- Deferred-audit-findings follow-up release. Resolves the three v3.15.2 audit findings (F17, F20, F22) that the original audit explicitly deferred. All audit work from the May 2026 cycle is now landed.
+- Full local gate green on Windows host: `cargo fmt -- --check`, `cargo clippy --all-targets --workspace -- -D warnings`, `cargo test --workspace --all-targets`, `cargo package --locked --list`, `cargo publish --dry-run --locked`, `cargo build --release`.
+- 98 lib + 18 integration tests pass (same as v3.15.2). No new test infrastructure required — F17 is verified by integration manual matrix, F20 is verified by the next real release, F22 is verified by manual on-Windows smoke + a one-off COM-mode harness if needed.
+- `tr300 --version` reports `3.15.3`. `tr300 --fast --json | head -5` produces valid JSON header.
+- **CI verification** — TBD post-push (will fill in after `ci.yml` completes on the release commit).
+- **Crates.io verification** — TBD post-push.
+- **Release verification** — TBD post-tag.
+- **Manual verification required on release-candidate machines:**
+  - **Linux**: write `alias report='echo hi'` into a temp `~/.bashrc` (back up real one first), run `./target/release/tr300 install`, confirm the alias-collision stderr note prints with the file:line of the existing alias (F17). Then on a clean account without any pre-existing `report`, confirm install runs silently with no F17 note.
+  - **macOS**: same Unix probe as Linux but in `~/.zshrc` (F17). Confirm the install message style matches the project's existing voice.
+  - **Windows**: drop `Set-Alias -Name report -Value notepad` into `$PROFILE`, run `tr300 install`, confirm the F17 stderr note prints with the profile-file path and line. On a clean profile, confirm no note. Run a manual smoke of `cargo run --release` and confirm Windows Edition / Virtualization / GPUs / Battery rows still populate correctly (F22 — the WMI batch now runs in a worker thread). Manual F20 test: `gh workflow run "Windows Installers" -f tag=v3.15.3` should pass the pre-flight after the v3.15.3 release publishes; a synthetic test with a non-existent tag should fail with the actionable "missing assets" message.
+
 ### v3.15.2 — 2026-05-18
 
 - Cross-platform audit + remediation release. 19 of 22 audit findings fixed (F1–F19+F21); 3 deferred (F17, F20, F22).

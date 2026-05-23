@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.3] - 2026-05-23
+
+> **Deferred-audit-findings follow-up release.** Resolves the three
+> findings that the v3.15.2 cross-platform audit explicitly deferred
+> (F17 alias-collision warning, F20 windows-installers.yml pre-flight,
+> F22 COM init mode conflict for library consumers). All audit work
+> from the May 2026 cycle is now landed.
+
+### Fixed
+- **Library consumers no longer silently degrade to the PowerShell
+  fallback when their thread has initialized COM as
+  `COINIT_APARTMENTTHREADED`.** Prior to this release the main `collect()`
+  body called `COMLibrary::new()` (which internally calls
+  `CoInitializeEx(NULL, COINIT_MULTITHREADED)`) on whatever thread
+  invoked `SystemInfo::collect()`. A Tauri / Slint / winit GUI host
+  that had already initialized COM as `COINIT_APARTMENTTHREADED` for
+  its own UI thread would cause our call to fail with
+  `RPC_E_CHANGED_MODE`, dropping all WMI-sourced fields (Windows
+  edition, virtualization, GPU list, battery) to the PowerShell
+  fallback path — which works but is ~10× slower. The WMI batch now
+  runs inside a `with_timeout(WMI_BATCH_TIMEOUT, ...)` closure on a
+  fresh worker thread (same pattern as the BitLocker, socket-count,
+  network-info, and cold-boot lookups already use). The new thread
+  has no prior COM init, so `MULTITHREADED` always succeeds regardless
+  of the caller's COM state. The cheap main-thread probes
+  (`get_gpus_fast` from the registry, `get_battery_native` via
+  `GetSystemPowerStatus`) still run first so we can skip the
+  corresponding WMI queries when the faster paths already worked —
+  preserving the pre-F22 happy-path latency. (audit finding F22)
+- **`windows-installers.yml` now refuses to build add-on installers
+  for a torn upstream release.** The `workflow_run` trigger fires when
+  cargo-dist's `release.yml` reports `conclusion == success`, but
+  cargo-dist's host-job gate tolerates skipped matrix entries — a
+  partially-failed release can still report success. A new pre-flight
+  step probes the published GitHub Release for two sentinel assets
+  (`dist-manifest.json`, cargo-dist's own "all phases done" signal;
+  and `tr300-x86_64-pc-windows-msvc.msi`, the Global MSI our add-ons
+  ship adjacent to). If either is missing, the workflow fails fast
+  with an actionable message rather than spending ~5 minutes building
+  installers against an incomplete release. (audit finding F20)
+- **`tr300 install` warns when `report` is already defined in the
+  user's shell environment.** A best-effort heuristic (read-only file
+  scan, no subprocess) checks the standard rc files (`~/.bashrc`,
+  `~/.bash_profile`, `~/.bash_aliases`, `~/.zshrc`, `~/.zprofile`,
+  `~/.profile` on Unix; each detected `$PROFILE` on Windows) for
+  `alias report=`, `function report`, `Set-Alias`, `New-Alias`
+  declarations, plus probes standard `bin` directories for an
+  executable named `report`. If anything is found, install prints a
+  one-time stderr note showing the file:line of each conflict so the
+  user knows the install is about to shadow their existing `report`.
+  The install still proceeds — the user opted in, and a warning
+  preserves their agency over how to resolve the conflict. (audit
+  finding F17)
+
+### Internal
+- **`.claude/skills/` vendoring.** Four Anthropic-distributed agent
+  skills (`brainstorming`, `critical-thinking`, `architecture`,
+  `system-design`) are now bundled into the repo so every Claude Code
+  agent working on TR-300 gets the same thinking toolkit regardless
+  of the contributor's local plugin configuration. See
+  `.claude/skills/ATTRIBUTION.md` for provenance and upstream-sync
+  rules. No effect on the binary.
+
 ## [3.15.2] - 2026-05-18
 
 > **Cross-platform audit + remediation release.** A three-agent
