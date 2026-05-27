@@ -25,7 +25,7 @@ Latest release: [v3.15.1](https://github.com/QubeTX/qube-machine-report/releases
 - Smart terminal detection on Windows — env-var pre-checks (`WT_SESSION`, `TERM_PROGRAM`, `CURSOR_TRACE_ID`) then a parent-process walk via Toolhelp32 that recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, and Antigravity even when env vars are absent
 - PowerShell 7+ ("PowerShell Core") detection on Windows — reads `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\SemanticVersion` so `pwsh` users see the actual installed version instead of falling back to Windows PowerShell 5.x
 - JSON output for scripting
-- Auto-save markdown report to Downloads folder on manual runs
+- Auto-save markdown report to Downloads folder on manual non-elevated runs (skips elevated/root sessions); report files are created with unique high-resolution timestamp + PID names and `create_new` semantics to avoid overwrite/symlink clobber behavior
 - Fast mode (`--fast`) for sub-second auto-run startup
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Resilient self-update with cargo-first probing and shell/PowerShell installer fallbacks

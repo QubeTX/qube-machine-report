@@ -2,6 +2,7 @@
 //!
 //! Generates the complete system report using a compact fixed-width layout.
 
+use std::io::Write;
 use std::path::PathBuf;
 
 use crate::collectors::{CollectMode, SystemInfo};
@@ -534,13 +535,21 @@ pub fn save_markdown_report(info: &SystemInfo) -> Option<PathBuf> {
     let dir = downloads_dir();
     let _ = std::fs::create_dir_all(&dir);
 
-    let filename_ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-    let filename = format!("tr300-report-{}.md", filename_ts);
+    let markdown = generate_markdown(info);
+    let filename_ts = chrono::Local::now().format("%Y%m%d-%H%M%S%.f");
+    let filename = format!("tr300-report-{}-{}.md", filename_ts, std::process::id());
     let path = dir.join(filename);
 
-    let markdown = generate_markdown(info);
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(_) => return None,
+    };
 
-    match std::fs::write(&path, markdown) {
+    match file.write_all(markdown.as_bytes()) {
         Ok(()) => Some(path),
         Err(_) => None,
     }

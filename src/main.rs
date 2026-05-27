@@ -73,7 +73,7 @@ fn run_report(config: &Config, mode: CollectMode) -> Result<()> {
     print!("{}", output);
 
     // Auto-save markdown report in full table mode (not --fast, not --json)
-    if mode == CollectMode::Full && config.format == OutputFormat::Table {
+    if mode == CollectMode::Full && config.format == OutputFormat::Table && !info.is_elevated {
         match report::save_markdown_report(&info) {
             Some(path) => eprintln!("Report saved: {}", path.display()),
             None => eprintln!("Warning: Could not save markdown report"),

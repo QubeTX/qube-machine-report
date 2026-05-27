@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Hardened auto-saved markdown report writes to prevent privileged file clobber scenarios: full-table auto-save now skips elevated/root runs, and report files are created with `OpenOptions::create_new(true)` using a unique high-resolution timestamp + PID filename instead of truncating writes to predictable names.
+
 ## [3.15.1] - 2026-05-15
 
 > **Release status: COMPLETE.** All five workflow runs green:
