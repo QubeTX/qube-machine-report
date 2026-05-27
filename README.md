@@ -29,6 +29,7 @@ Latest release: [v3.15.1](https://github.com/QubeTX/qube-machine-report/releases
 - Fast mode (`--fast`) for sub-second auto-run startup
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Resilient self-update with cargo-first probing and shell/PowerShell installer fallbacks
+- Windows MSI/EXE self-update hardening: updater downloads installer payloads to unique one-time temp paths before launch to reduce local temp-path replacement risk
 - Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
 - Self-installation with shell alias and auto-run
 

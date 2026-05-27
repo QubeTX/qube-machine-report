@@ -731,10 +731,29 @@ fn try_installer_powershell(_launcher: &str) -> Result<(), StrategyError> {
 
 // ── Windows MSI / EXE installer strategies (v3.15.0+) ──────────────
 
-/// Download a file from `url` to `path` over HTTPS. Used by the MSI/EXE
-/// strategies to fetch the matching installer to `%TEMP%` before launching it.
-/// Trusts HTTPS to github.com — no SHA256 verification beyond what TLS gives
-/// us. Symmetric with how the existing `irm | iex` PowerShell strategy works.
+/// Create a unique temp path for updater downloads. The random-looking suffix
+/// reduces predictability and avoids clobbering existing files.
+#[cfg(windows)]
+fn unique_update_temp_path(extension: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let pid = std::process::id();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    std::env::temp_dir().join(format!(
+        "tr300-update-{}-{}-{}-{}.{}",
+        VERSION, now_nanos, pid, seq, extension
+    ))
+}
+
+/// Download a file from `url` to a newly-created path over HTTPS.
 #[cfg(windows)]
 fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
     let agent = ureq::AgentBuilder::new()
@@ -747,7 +766,10 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
         .call()
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    let mut file = std::fs::File::create(path)
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
         .map_err(|e| format!("Failed to create temp file {}: {}", path.display(), e))?;
     let mut reader = resp.into_reader();
     std::io::copy(&mut reader, &mut file)
@@ -762,7 +784,7 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
 /// (the running tr300 process keeps its open file handle to the OLD inode).
 #[cfg(windows)]
 fn try_msi_install(url: &str) -> Result<(), StrategyError> {
-    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}.msi", VERSION));
+    let temp_path = unique_update_temp_path("msi");
 
     println!("  Downloading MSI installer...");
     download_to_file(url, &temp_path)
@@ -797,7 +819,7 @@ fn try_msi_install(url: &str) -> Result<(), StrategyError> {
 /// (`PrivilegesRequired=lowest`) installs without elevation.
 #[cfg(windows)]
 fn try_exe_install(url: &str) -> Result<(), StrategyError> {
-    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}-setup.exe", VERSION));
+    let temp_path = unique_update_temp_path("exe");
 
     println!("  Downloading EXE installer...");
     download_to_file(url, &temp_path)

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Windows self-update now downloads MSI/EXE installers to unique, one-time temp file names and creates them with `create_new(true)` before execution. This removes the previous deterministic `%TEMP%` filename pattern and mitigates local replacement races in the MSI/EXE update path.
+
 ## [3.15.1] - 2026-05-15
 
 > **Release status: COMPLETE.** All five workflow runs green:
