@@ -190,7 +190,11 @@ fn get_gpus() -> Vec<String> {
     let mut gpus = Vec::new();
 
     // Try lspci for VGA/3D controllers
-    if let Some(stdout) = run_stdout_no_args("lspci", CommandTimeout::Normal) {
+    if let Some(stdout) = run_stdout_no_args("/usr/bin/lspci", CommandTimeout::Normal)
+        .or_else(|| run_stdout_no_args("/bin/lspci", CommandTimeout::Normal))
+        .or_else(|| run_stdout_no_args("/usr/sbin/lspci", CommandTimeout::Normal))
+        .or_else(|| run_stdout_no_args("/sbin/lspci", CommandTimeout::Normal))
+    {
         for line in stdout.lines() {
             let lower = line.to_lowercase();
             if lower.contains("vga") || lower.contains("3d controller") || lower.contains("display")

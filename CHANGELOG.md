@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Harden fast-mode GPU subprocess invocation paths to avoid PATH-based
+  helper resolution in shell auto-run contexts. Windows fast GPU detection
+  now invokes `C:\Windows\System32\reg.exe` directly; macOS fast GPU paths
+  now use `/usr/sbin/ioreg` and `/usr/sbin/sysctl`; Linux fast GPU probing
+  now tries fixed `lspci` locations (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`)
+  instead of an unqualified `lspci` lookup.
+
 ## [3.15.1] - 2026-05-15
 
 > **Release status: COMPLETE.** All five workflow runs green:

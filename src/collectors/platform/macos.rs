@@ -182,7 +182,11 @@ fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
 
     // Try ioreg for discrete/integrated GPUs
-    if let Some(stdout) = run_stdout("ioreg", ["-rc", "IOGPUDevice"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_stdout(
+        "/usr/sbin/ioreg",
+        ["-rc", "IOGPUDevice"],
+        CommandTimeout::Normal,
+    ) {
         for line in stdout.lines() {
             let trimmed = line.trim();
             if trimmed.contains("\"model\"") {
@@ -202,7 +206,7 @@ fn get_gpus_fast() -> Vec<String> {
     // Fallback for Apple Silicon: use sysctl to detect the chip
     if gpus.is_empty() {
         if let Some(output) = run_stdout(
-            "sysctl",
+            "/usr/sbin/sysctl",
             ["-n", "machdep.cpu.brand_string"],
             CommandTimeout::Normal,
         ) {

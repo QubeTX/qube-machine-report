@@ -254,7 +254,7 @@ fn get_terminal_fast() -> Option<String> {
 fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
     if let Some(output) = run_output(
-        "reg",
+        r"C:\Windows\System32\reg.exe",
         [
             "query",
             r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",

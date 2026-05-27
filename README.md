@@ -27,6 +27,8 @@ Latest release: [v3.15.1](https://github.com/QubeTX/qube-machine-report/releases
 - JSON output for scripting
 - Auto-save markdown report to Downloads folder on manual runs
 - Fast mode (`--fast`) for sub-second auto-run startup
+- Security-hardened fast-mode GPU collection: platform helper commands use
+  trusted absolute system paths instead of PATH-resolved executable names
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Resilient self-update with cargo-first probing and shell/PowerShell installer fallbacks
 - Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
