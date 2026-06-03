@@ -41,6 +41,25 @@ pub use prompt::{confirm_complete_uninstall, prompt_uninstall_option, UninstallO
 /// fsyncs, and atomically renames over the target. The target file ends
 /// up either fully replaced or completely untouched — never partial.
 pub(crate) fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
+    // If the target is a symlink (e.g. `~/.bashrc -> ~/dotfiles/bashrc`),
+    // resolve it to the real file so the temp-then-rename happens in the real
+    // file's directory and the symlink is preserved. Renaming over the symlink
+    // path itself would replace the link with a regular file, orphaning the
+    // user's dotfiles-managed target. A broken/unresolvable symlink falls back
+    // to the literal path. Unix-only: symlinked rc files are a Unix dotfiles
+    // convention, and Windows `canonicalize` returns verbatim `\\?\` paths that
+    // would complicate the sibling-temp construction below.
+    #[cfg(unix)]
+    let resolved: PathBuf = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        }
+        _ => path.to_path_buf(),
+    };
+    #[cfg(not(unix))]
+    let resolved: PathBuf = path.to_path_buf();
+    let path = resolved.as_path();
+
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -279,6 +298,33 @@ mod shared_tests {
         // sibling temp wasn't created.
         let tmp = nonexistent_parent.join(".file.txt.tr300-tmp");
         assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_symlinked_target() {
+        // A dotfiles-managed rc file is commonly a symlink (~/.bashrc ->
+        // ~/dotfiles/bashrc). atomic_write must update the backing file and
+        // leave the symlink intact, not replace it with a regular file.
+        use std::os::unix::fs::symlink;
+        let dir = tempdir_in_target();
+        let real = dir.join("real_bashrc");
+        let link = dir.join(".bashrc");
+        fs::write(&real, b"original\n").unwrap();
+        symlink(&real, &link).unwrap();
+
+        atomic_write(&link, "updated\n").unwrap();
+
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the symlink must be preserved, not replaced by a regular file"
+        );
+        assert_eq!(fs::read_to_string(&real).unwrap(), "updated\n");
+        assert_eq!(fs::read_to_string(&link).unwrap(), "updated\n");
         let _ = fs::remove_dir_all(&dir);
     }
 
