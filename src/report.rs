@@ -221,9 +221,21 @@ fn generate_json(info: &SystemInfo) -> String {
             .map(|s| format!("\"{}\"", escape_json(s)))
             .unwrap_or_else(|| "null".to_string())
     };
+    // Guard against non-finite floats (NaN / ±inf) — `format!("{:.2}", f)`
+    // prints them verbatim, which is NOT valid JSON and would make the whole
+    // document unparseable. Today's collectors are bounded, but this is cheap
+    // insurance against a future source emitting a non-finite value.
     let opt_f64 = |o: Option<f64>| -> String {
-        o.map(|v| format!("{:.2}", v))
+        o.filter(|v| v.is_finite())
+            .map(|v| format!("{:.2}", v))
             .unwrap_or_else(|| "null".to_string())
+    };
+    let f64_or_null = |v: f64| -> String {
+        if v.is_finite() {
+            format!("{:.2}", v)
+        } else {
+            "null".to_string()
+        }
     };
     let opt_usize = |o: Option<usize>| -> String {
         o.map(|v| format!("{}", v))
@@ -264,7 +276,7 @@ fn generate_json(info: &SystemInfo) -> String {
     "core_topology": {},
     "sockets": {},
     "hypervisor": {},
-    "frequency_ghz": {:.2},
+    "frequency_ghz": {},
     "load_1m": {},
     "load_5m": {},
     "load_15m": {},
@@ -273,12 +285,12 @@ fn generate_json(info: &SystemInfo) -> String {
   "disk": {{
     "used_bytes": {},
     "total_bytes": {},
-    "percent": {:.2}
+    "percent": {}
   }},
   "memory": {{
     "used_bytes": {},
     "total_bytes": {},
-    "percent": {:.2},
+    "percent": {},
     "ram_slots": {}
   }},
   "session": {{
@@ -316,7 +328,7 @@ fn generate_json(info: &SystemInfo) -> String {
         opt_str(&info.cpu_core_topology),
         opt_usize(info.sockets),
         opt_str(&info.hypervisor),
-        info.cpu_freq_ghz,
+        f64_or_null(info.cpu_freq_ghz),
         opt_f64(info.load_1m),
         opt_f64(info.load_5m),
         opt_f64(info.load_15m),
@@ -327,10 +339,10 @@ fn generate_json(info: &SystemInfo) -> String {
             .join(", "),
         info.disk_used_bytes,
         info.disk_total_bytes,
-        info.disk_percent,
+        f64_or_null(info.disk_percent),
         info.mem_used_bytes,
         info.mem_total_bytes,
-        info.mem_percent,
+        f64_or_null(info.mem_percent),
         opt_str(&info.ram_slots),
         escape_json(&info.username),
         opt_str(&info.last_login),
@@ -371,14 +383,19 @@ fn escape_markdown_cell(s: &str) -> String {
         .replace('\n', "<br>")
 }
 
-/// Get the user's Downloads directory (cross-platform)
-fn downloads_dir() -> PathBuf {
+/// Get the user's Downloads directory (cross-platform).
+///
+/// Returns `(dir, used_cwd_fallback)`. `used_cwd_fallback` is `true` only when
+/// no Downloads folder was found and the current working directory was used
+/// instead — the caller surfaces this so the report doesn't silently land in
+/// an unexpected place.
+fn downloads_dir() -> (PathBuf, bool) {
     #[cfg(windows)]
     {
         if let Ok(profile) = std::env::var("USERPROFILE") {
             let dir = PathBuf::from(profile).join("Downloads");
             if dir.is_dir() {
-                return dir;
+                return (dir, false);
             }
         }
     }
@@ -388,13 +405,16 @@ fn downloads_dir() -> PathBuf {
         if let Ok(home) = std::env::var("HOME") {
             let dir = PathBuf::from(home).join("Downloads");
             if dir.is_dir() {
-                return dir;
+                return (dir, false);
             }
         }
     }
 
     // Fallback: current working directory
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    (
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        true,
+    )
 }
 
 /// Generate a comprehensive markdown report from system info
@@ -527,22 +547,36 @@ fn generate_markdown(info: &SystemInfo) -> String {
     md
 }
 
-/// Save a markdown report to the Downloads folder.
-/// Returns the file path on success, or None on failure.
-pub fn save_markdown_report(info: &SystemInfo) -> Option<PathBuf> {
-    let dir = downloads_dir();
-    let _ = std::fs::create_dir_all(&dir);
+/// Outcome of a successful markdown report save.
+pub struct MarkdownSaveOutcome {
+    /// Where the report was written.
+    pub path: PathBuf,
+    /// `true` when no Downloads folder was found and the report was written to
+    /// the current working directory instead.
+    pub used_cwd_fallback: bool,
+}
+
+/// Save a markdown report to the Downloads folder (or the current working
+/// directory if no Downloads folder exists).
+///
+/// Returns the concrete `io::Error` on failure so the caller can tell the user
+/// *why* the save failed (permissions, full disk, missing directory) rather
+/// than swallowing it into a generic warning.
+pub fn save_markdown_report(info: &SystemInfo) -> std::io::Result<MarkdownSaveOutcome> {
+    let (dir, used_cwd_fallback) = downloads_dir();
+    std::fs::create_dir_all(&dir)?;
 
     let filename_ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let filename = format!("tr300-report-{}.md", filename_ts);
     let path = dir.join(filename);
 
     let markdown = generate_markdown(info);
+    std::fs::write(&path, markdown)?;
 
-    match std::fs::write(&path, markdown) {
-        Ok(()) => Some(path),
-        Err(_) => None,
-    }
+    Ok(MarkdownSaveOutcome {
+        path,
+        used_cwd_fallback,
+    })
 }
 
 #[cfg(test)]

@@ -119,17 +119,22 @@ fn get_load_averages(
     if let Ok(content) = fs::read_to_string("/proc/loadavg") {
         let parts: Vec<&str> = content.split_whitespace().collect();
         if parts.len() >= 3 {
-            let load1: f64 = parts[0].parse().unwrap_or(0.0);
-            let load5: f64 = parts[1].parse().unwrap_or(0.0);
-            let load15: f64 = parts[2].parse().unwrap_or(0.0);
-
-            // Convert to percentage of cores
-            let max_load = core_count.max(1) as f64;
-            return (
-                Some((load1 / max_load * 100.0).min(100.0)),
-                Some((load5 / max_load * 100.0).min(100.0)),
-                Some((load15 / max_load * 100.0).min(100.0)),
-            );
+            // Parse all three fields. A malformed field means /proc/loadavg
+            // isn't trustworthy, so fall through to the libc getloadavg
+            // fallback rather than reporting a fabricated 0% load (which is
+            // indistinguishable from a genuinely idle machine).
+            if let (Ok(load1), Ok(load5), Ok(load15)) = (
+                parts[0].parse::<f64>(),
+                parts[1].parse::<f64>(),
+                parts[2].parse::<f64>(),
+            ) {
+                let max_load = core_count.max(1) as f64;
+                return (
+                    Some((load1 / max_load * 100.0).min(100.0)),
+                    Some((load5 / max_load * 100.0).min(100.0)),
+                    Some((load15 / max_load * 100.0).min(100.0)),
+                );
+            }
         }
     }
 
@@ -146,7 +151,8 @@ fn get_load_averages(
         }
     }
 
-    (Some(0.0), Some(0.0), Some(0.0))
+    // Both sources failed — report "unavailable" rather than a fake 0% load.
+    (None, None, None)
 }
 
 /// Get load averages on Windows (uses current CPU usage for all)

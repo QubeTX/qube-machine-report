@@ -21,14 +21,18 @@ fn main() {
         + "\n";
     let buffer = normalized.into_bytes();
 
-    // Write to OUT_DIR for packaging
+    // Write to OUT_DIR for packaging (authoritative — OUT_DIR is always writable).
     let man_dir = out_dir.join("man");
     std::fs::create_dir_all(&man_dir).ok();
     std::fs::write(man_dir.join("tr300.1"), &buffer).expect("Failed to write man page");
 
-    // Also write to project root man/ directory for inclusion in releases
-    let project_man =
-        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("man");
-    std::fs::create_dir_all(&project_man).ok();
-    std::fs::write(project_man.join("tr300.1"), buffer).expect("Failed to write man page");
+    // Also mirror into the project-root man/ directory for release packaging.
+    // Best-effort: a read-only source tree (e.g. a locked-down `cargo install`
+    // registry cache, or a sandboxed packaging step) must still build, so a
+    // failure here is non-fatal — the OUT_DIR copy above is authoritative.
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let project_man = std::path::PathBuf::from(manifest_dir).join("man");
+        std::fs::create_dir_all(&project_man).ok();
+        std::fs::write(project_man.join("tr300.1"), buffer).ok();
+    }
 }

@@ -49,8 +49,7 @@ pub fn collect(mode: CollectMode) -> Result<SessionInfo> {
     let (last_login, last_login_ip) = if should_skip_last_login {
         (None, None)
     } else {
-        let (login, ip) = get_last_login(&username);
-        (Some(login), ip)
+        get_last_login(&username)
     };
 
     Ok(SessionInfo {
@@ -151,8 +150,13 @@ fn get_terminal() -> String {
     }
 }
 
-/// Get last login information
-fn get_last_login(username: &str) -> (String, Option<String>) {
+/// Get last login information.
+///
+/// Returns `(None, _)` when login tracking is genuinely unavailable (no
+/// `lastlog`/`last`/WTS data, parse failure, unsupported platform) so the
+/// caller can omit the row / emit JSON `null` — distinct from a real
+/// `Some("Never logged in")` value, which IS a meaningful answer.
+fn get_last_login(username: &str) -> (Option<String>, Option<String>) {
     #[cfg(target_os = "linux")]
     {
         get_last_login_linux(username)
@@ -171,12 +175,12 @@ fn get_last_login(username: &str) -> (String, Option<String>) {
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         let _ = username;
-        ("Login tracking unavailable".to_string(), None)
+        (None, None)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn get_last_login_linux(username: &str) -> (String, Option<String>) {
+fn get_last_login_linux(username: &str) -> (Option<String>, Option<String>) {
     use crate::collectors::command::run_output_with_env;
 
     // Force LC_ALL=C on these `lastlog*` / `last` calls so the "Never
@@ -200,7 +204,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
                 if parts.len() >= 4 {
                     let date_time = parts[1..4].join(" ");
                     let ip = parts.get(4).map(|s| s.to_string());
-                    return (date_time, ip);
+                    return (Some(date_time), ip);
                 }
             }
         }
@@ -217,7 +221,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if let Some(line) = stdout.lines().nth(1) {
                 if line.contains("Never logged in") {
-                    return ("Never logged in".to_string(), None);
+                    return (Some("Never logged in".to_string()), None);
                 }
                 // Parse lastlog output
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -225,7 +229,7 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
                     // Format: Username Port From Latest
                     let from = parts.get(2).map(|s| s.to_string());
                     let date_time = parts[3..].join(" ");
-                    return (date_time, from);
+                    return (Some(date_time), from);
                 }
             }
         }
@@ -254,18 +258,18 @@ fn get_last_login_linux(username: &str) -> (String, Option<String>) {
                             }
                         });
                         let date_time = parts[3..7.min(parts.len())].join(" ");
-                        return (date_time, from);
+                        return (Some(date_time), from);
                     }
                 }
             }
         }
     }
 
-    ("Login tracking unavailable".to_string(), None)
+    (None, None)
 }
 
 #[cfg(target_os = "macos")]
-fn get_last_login_macos(username: &str) -> (String, Option<String>) {
+fn get_last_login_macos(username: &str) -> (Option<String>, Option<String>) {
     // Use last command on macOS
     if let Some(output) = run_output("last", ["-1", username], CommandTimeout::Normal) {
         if output.status.success() {
@@ -285,24 +289,24 @@ fn get_last_login_macos(username: &str) -> (String, Option<String>) {
                             }
                         });
                         let date_time = parts[3..7.min(parts.len())].join(" ");
-                        return (date_time, from);
+                        return (Some(date_time), from);
                     }
                 }
             }
         }
     }
 
-    ("Login tracking unavailable".to_string(), None)
+    (None, None)
 }
 
 #[cfg(target_os = "windows")]
-fn get_last_login_windows(_username: &str) -> (String, Option<String>) {
+fn get_last_login_windows(_username: &str) -> (Option<String>, Option<String>) {
     // Preferred: WTSQuerySessionInformation(WTSLogonTime / WTSConnectTime) for
     // the current session — works without admin and is accurate for RDP /
     // network logons. Reference:
     // https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
     if let Some(when) = wts_query_session_connect_time() {
-        return (when, None);
+        return (Some(when), None);
     }
 
     // Fallback: derive from boot time. For local console sessions Windows
@@ -311,10 +315,10 @@ fn get_last_login_windows(_username: &str) -> (String, Option<String>) {
     // GetTickCount64 returns ms since boot and continues across hibernation
     // resume on Windows 10/11, so it survives Fast Startup correctly.
     if let Some(boot_time_str) = boot_time_local_string() {
-        return (boot_time_str, None);
+        return (Some(boot_time_str), None);
     }
 
-    ("Login tracking unavailable".to_string(), None)
+    (None, None)
 }
 
 #[cfg(target_os = "windows")]
