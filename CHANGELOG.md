@@ -98,6 +98,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected a stale comment claiming PowerShell 7 version selection used string
   comparison; the code correctly compares numeric `(major, minor, patch)`
   tuples (a string compare would rank `7.9.0` above `7.10.0`). (D10)
+- **Added a Unicode table-width regression test** asserting every rendered line
+  is exactly 51 display columns with wide (CJK), zero-width/combining, and emoji
+  values — the existing integration test only covered single-column ASCII. (E1)
+- **Extracted `checksum_verdict` and unit-tested the SHA256 mismatch refusal**,
+  so the load-bearing self-update integrity check (previously only its parsing
+  and hashing halves were tested) now has the refusal-on-mismatch pinned. (E2)
 
 ## [3.15.3] - 2026-05-23
 

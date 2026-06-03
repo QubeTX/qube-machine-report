@@ -81,6 +81,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   where an incompatible dependency could have slipped through testing.
 - Restructured part of the self-update success check so it can be tested on
   every platform, not just Windows.
+- Added automated tests that guard table alignment with international and emoji
+  text, and that confirm the updater refuses a tampered or corrupted download.
 
 ## [3.15.3] - 2026-05-23
 

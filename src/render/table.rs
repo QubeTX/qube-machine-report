@@ -257,3 +257,47 @@ impl TableRenderer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::BoxChars;
+
+    /// Every rendered line must occupy exactly the same number of *display*
+    /// columns, even when the data contains wide (CJK), zero-width/combining,
+    /// or emoji characters — alignment depends on display width, not byte/char
+    /// counts. This is the Unicode counterpart to the ASCII integration test
+    /// (which only exercises 1-column glyphs).
+    #[test]
+    fn rows_keep_fixed_display_width_with_wide_chars() {
+        // Same geometry as the live report (12-char label, 32-char data → 51).
+        let r = TableRenderer::new(12, 32, BoxChars::unicode());
+        let expected = 12 + 32 + 7;
+
+        let lines = [
+            r.render_top_header(),
+            r.render_header_bottom(),
+            r.render_centered("日本語のタイトル"),
+            r.render_top_divider(),
+            // Wide CJK value that overflows the 32-col data column (truncation).
+            r.render_row("OS", "日本語ＷＩＤＥ文字列のテストデータ超過分"),
+            // Combining marks (zero display width) must not shift columns.
+            r.render_row("HOST", "cafe\u{0301}\u{0301} combine\u{0301}d"),
+            // Emoji (width 2 each).
+            r.render_row("GPU", "🦀🦀 Rust 🦀 Graphics 🦀🦀"),
+            // Plain ASCII still works.
+            r.render_row("KERNEL", "6.8.0-generic"),
+            r.render_middle_divider(),
+            r.render_footer(),
+        ];
+
+        for line in &lines {
+            let trimmed = line.trim_end_matches('\n');
+            assert_eq!(
+                UnicodeWidthStr::width(trimmed),
+                expected,
+                "line is not {expected} display columns: {trimmed:?}"
+            );
+        }
+    }
+}

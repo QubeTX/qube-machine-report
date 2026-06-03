@@ -869,7 +869,15 @@ fn verify_checksum(installer_path: &std::path::Path, installer_url: &str) -> Res
         )
     })?;
     let actual = compute_sha256(installer_path)?;
-    if actual.eq_ignore_ascii_case(&expected) {
+    checksum_verdict(&actual, &expected)
+}
+
+/// Compare a computed SHA-256 against the expected sidecar hash, refusing on
+/// mismatch. Separated from the network fetch + file read in `verify_checksum`
+/// so the load-bearing refusal-on-mismatch is unit-testable on any target.
+#[cfg(any(target_os = "windows", test))]
+fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
+    if actual.eq_ignore_ascii_case(expected) {
         Ok(())
     } else {
         Err(format!(
@@ -1345,6 +1353,19 @@ mod tests {
         assert!(!post_install_version_ok("3.15.3", "3.16.0"));
         // Empty installed string (e.g. `--version` output failed to parse).
         assert!(!post_install_version_ok("", "3.16.0"));
+    }
+
+    #[test]
+    fn checksum_verdict_accepts_match_and_refuses_mismatch() {
+        let hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        // Exact match passes.
+        assert!(checksum_verdict(hash, hash).is_ok());
+        // Case-insensitive match passes (sidecars may be upper/lower case).
+        assert!(checksum_verdict(&hash.to_uppercase(), hash).is_ok());
+        // A mismatch is REFUSED — this is the load-bearing MITM/corruption
+        // guard, so it must never silently pass.
+        let err = checksum_verdict("deadbeef", hash).unwrap_err();
+        assert!(err.contains("SHA256 mismatch"), "err: {err}");
     }
 
     #[test]
