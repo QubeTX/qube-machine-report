@@ -62,24 +62,43 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
 
 /// Get macOS version codename
 fn get_macos_codename() -> Option<String> {
-    // Get the OS version from sw_vers
+    // Get the OS version from sw_vers (e.g. "26.0", "15.6", "10.15.7").
     let version = run_stdout("sw_vers", ["-productVersion"], CommandTimeout::Normal)?
         .trim()
         .to_string();
-    let major: u32 = version.split('.').next()?.parse().ok()?;
+    let mut parts = version.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    macos_codename(major, minor)
+}
 
-    // Map major version to codename
-    let codename = match major {
+/// Map a macOS `(major, minor)` version to its marketing codename.
+///
+/// Pure + testable. Apple jumped from 15 (Sequoia, 2024) straight to 26
+/// (Tahoe, 2025) when it switched to year-based version numbers, so there is
+/// no 16–25. Unknown *future* majors return a generic `"macOS <major>"` label
+/// rather than `None` so the OS row still renders something useful until the
+/// codename is added here.
+fn macos_codename(major: u32, minor: u32) -> Option<String> {
+    let name = match major {
+        26 => "Tahoe",
         15 => "Sequoia",
         14 => "Sonoma",
         13 => "Ventura",
         12 => "Monterey",
         11 => "Big Sur",
-        10 => "Catalina", // or earlier
+        // The 10.x era spanned many releases; key off the minor. Older than
+        // High Sierra is long EOL, so fall back to a generic "macOS 10.x".
+        10 => match minor {
+            15 => "Catalina",
+            14 => "Mojave",
+            13 => "High Sierra",
+            _ => return Some(format!("macOS 10.{}", minor)),
+        },
+        n if n > 26 => return Some(format!("macOS {}", n)),
         _ => return None,
     };
-
-    Some(codename.to_string())
+    Some(name.to_string())
 }
 
 /// Detect boot mode (always UEFI on Intel Macs, native on Apple Silicon)
@@ -522,6 +541,20 @@ mod tests {
         assert_eq!(apple_silicon_max_frequency_mhz("Apple M1 Pro"), Some(3200));
         assert_eq!(apple_silicon_max_frequency_mhz("Apple M4 Max"), Some(4400));
         assert_eq!(apple_silicon_max_frequency_mhz("Intel Core i9"), None);
+    }
+
+    #[test]
+    fn macos_codename_maps_current_and_future_versions() {
+        // Current: Tahoe (Apple jumped 15 -> 26 in 2025; no 16-25 exist).
+        assert_eq!(macos_codename(26, 0), Some("Tahoe".to_string()));
+        assert_eq!(macos_codename(15, 6), Some("Sequoia".to_string()));
+        assert_eq!(macos_codename(11, 7), Some("Big Sur".to_string()));
+        // 10.x era keys off the minor.
+        assert_eq!(macos_codename(10, 15), Some("Catalina".to_string()));
+        assert_eq!(macos_codename(10, 14), Some("Mojave".to_string()));
+        assert_eq!(macos_codename(10, 11), Some("macOS 10.11".to_string()));
+        // Unknown future major still renders a useful label, not None.
+        assert_eq!(macos_codename(27, 0), Some("macOS 27".to_string()));
     }
 
     #[test]

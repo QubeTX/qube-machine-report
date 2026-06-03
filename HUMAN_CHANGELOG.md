@@ -41,6 +41,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Linux system-load readings are more honest.** If the system can't read its
   load numbers cleanly, TR-300 now falls back to a second source instead of
   silently showing "0%" (which looked like a totally idle machine).
+- **Macs show their version name again.** TR-300 now recognizes the latest macOS
+  ("Tahoe") and labels future versions sensibly. Before this, recent Macs showed
+  no version name at all because the list hadn't been updated.
+- **ARM-based Linux machines now show their real CPU speed.** On devices like a
+  Raspberry Pi, the processor speed used to read "0.00 GHz"; TR-300 now pulls the
+  true rated speed from the system instead.
 
 ### Internal
 - Tightened the automated test pipeline so it builds against the exact same

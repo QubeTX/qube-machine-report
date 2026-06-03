@@ -73,6 +73,10 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     #[cfg(target_os = "macos")]
     let frequency_mhz_raw = frequency_mhz_raw
         .or_else(|| crate::collectors::platform::macos::apple_silicon_max_frequency_mhz(&brand));
+    // ARM Linux has no CPUID leaf 16h and sysinfo often reports 0 MHz, which
+    // renders "0.00 GHz". Fall back to the kernel's rated max from sysfs.
+    #[cfg(target_os = "linux")]
+    let frequency_mhz_raw = frequency_mhz_raw.or_else(linux_cpufreq_max_mhz);
     let frequency_mhz = frequency_mhz_raw
         .map(|v| v.max(sysinfo_mhz))
         .unwrap_or(sysinfo_mhz);
@@ -318,6 +322,25 @@ fn cpuid_16h_max_mhz() -> Option<u64> {
     None
 }
 
+/// Linux fallback: read the CPU's rated max frequency from sysfs cpufreq.
+///
+/// On many ARM SoCs sysinfo reports 0 MHz and there is no CPUID leaf 16h, so
+/// without this ARM Linux renders "0.00 GHz". `cpuinfo_max_freq` is in kHz.
+#[cfg(target_os = "linux")]
+fn linux_cpufreq_max_mhz() -> Option<u64> {
+    let raw =
+        std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").ok()?;
+    parse_cpufreq_khz_to_mhz(&raw)
+}
+
+/// Parse a sysfs `cpuinfo_max_freq` value (kHz) into MHz. Returns `None` for an
+/// empty/zero/garbage value so the caller falls back to sysinfo.
+#[cfg(target_os = "linux")]
+fn parse_cpufreq_khz_to_mhz(s: &str) -> Option<u64> {
+    let khz: u64 = s.trim().parse().ok()?;
+    (khz > 0).then_some(khz / 1000)
+}
+
 // Windows: query CallNtPowerInformation for accurate per-core max frequency.
 // Returns MaxMhz across all logical processors (power-plan ceiling). Declared
 // as a manual `extern` because winapi-rs's `powrprof` bindings are not stable.
@@ -396,5 +419,19 @@ impl CpuInfo {
                 self.physical_cores, self.logical_cores
             )
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_freq_tests {
+    use super::*;
+
+    #[test]
+    fn cpufreq_khz_to_mhz_converts_and_rejects_bad_input() {
+        assert_eq!(parse_cpufreq_khz_to_mhz("2400000"), Some(2400));
+        assert_eq!(parse_cpufreq_khz_to_mhz("1800000\n"), Some(1800));
+        assert_eq!(parse_cpufreq_khz_to_mhz("0"), None);
+        assert_eq!(parse_cpufreq_khz_to_mhz("garbage"), None);
+        assert_eq!(parse_cpufreq_khz_to_mhz(""), None);
     }
 }
