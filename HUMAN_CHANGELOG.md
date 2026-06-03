@@ -67,6 +67,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Storage-pool (ZFS) health warnings are ranked more sensibly on Linux.** A
   fully stalled pool is now treated as the most serious state, and an unfamiliar
   status is no longer reported as if it were a specific "degraded" warning.
+- **Installing TR-300 respects a symlinked shell config.** If your shell profile
+  (like `~/.bashrc`) is a symlink into a dotfiles folder — a common setup —
+  TR-300 now updates the real file and keeps your symlink intact, instead of
+  replacing it with a plain file.
+- **Updating TR-300 cleans up after itself.** On Windows, the downloaded
+  installer file is now removed automatically once the update finishes, instead
+  of piling up in your temp folder.
 
 ### Internal
 - Tightened the automated test pipeline so it builds against the exact same

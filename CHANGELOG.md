@@ -78,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ZFS health severity ranking is more accurate.** A `SUSPENDED` pool (I/O
   halted) is now ranked as the most severe state, and an unrecognized state no
   longer masquerades as `DEGRADED` when choosing the worst-of pool health. (D8)
+- **`tr300 install` preserves a symlinked shell profile.** When `~/.bashrc` /
+  `~/.zshrc` is a symlink into a dotfiles repo, the atomic write now resolves to
+  and updates the real backing file, keeping the symlink — instead of replacing
+  the link with a regular file. (E3)
+- **Self-update no longer leaves installer files in `%TEMP%`.** On Windows, the
+  downloaded MSI/EXE is removed after the install finishes (success or failure),
+  always *after* the SHA256 and post-install version checks. (G1)
 
 ### Internal
 - **CI build/test/clippy/speed jobs run with `--locked`**, matching the

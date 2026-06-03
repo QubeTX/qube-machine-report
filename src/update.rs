@@ -949,43 +949,52 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
 fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let temp_path = std::env::temp_dir().join(format!("tr300-update-{}.msi", latest));
 
-    println!("  Downloading MSI installer...");
-    download_to_file(url, &temp_path)
-        .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
+    let result = (|| -> Result<(), StrategyError> {
+        println!("  Downloading MSI installer...");
+        download_to_file(url, &temp_path)
+            .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
 
-    verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
+        verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
 
-    println!("  Launching Windows Installer...");
-    // /passive shows a progress dialog with no user interaction; /norestart
-    // suppresses any reboot prompt (we don't need a reboot for a simple file
-    // replace). For the Global perMachine MSI, msiexec triggers UAC before
-    // doing anything; for the Corporate perUser MSI, it installs silently
-    // into LocalAppData with no elevation prompt.
-    let status = Command::new("msiexec")
-        .args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"])
-        .status()
-        .map_err(|e| StrategyError::Preflight(format!("Failed to spawn msiexec: {}", e)))?;
+        println!("  Launching Windows Installer...");
+        // /passive shows a progress dialog with no user interaction; /norestart
+        // suppresses any reboot prompt (we don't need a reboot for a simple file
+        // replace). For the Global perMachine MSI, msiexec triggers UAC before
+        // doing anything; for the Corporate perUser MSI, it installs silently
+        // into LocalAppData with no elevation prompt.
+        let status = Command::new("msiexec")
+            .args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"])
+            .status()
+            .map_err(|e| StrategyError::Preflight(format!("Failed to spawn msiexec: {}", e)))?;
 
-    let code = status.code().unwrap_or(-1);
-    if code == MSI_EXIT_REBOOT_REQUIRED {
-        // Install completed but Restart Manager couldn't finalize a
-        // file replace in-place. Surface this rather than silently
-        // claiming success — `verify_post_install` would fail because
-        // the on-disk binary is still old.
-        return Err(StrategyError::Runtime(format!(
-            "MSI install completed but requires a reboot to finalize (msiexec exit {}). Reboot, then verify with `tr300 --version`.",
-            MSI_EXIT_REBOOT_REQUIRED
-        )));
-    }
-    if !status.success() {
-        return Err(StrategyError::Runtime(format!(
-            "msiexec exited with code {} (likely user cancel, UAC denied, or install error)",
-            code
-        )));
-    }
+        let code = status.code().unwrap_or(-1);
+        if code == MSI_EXIT_REBOOT_REQUIRED {
+            // Install completed but Restart Manager couldn't finalize a
+            // file replace in-place. Surface this rather than silently
+            // claiming success — `verify_post_install` would fail because
+            // the on-disk binary is still old.
+            return Err(StrategyError::Runtime(format!(
+                "MSI install completed but requires a reboot to finalize (msiexec exit {}). Reboot, then verify with `tr300 --version`.",
+                MSI_EXIT_REBOOT_REQUIRED
+            )));
+        }
+        if !status.success() {
+            return Err(StrategyError::Runtime(format!(
+                "msiexec exited with code {} (likely user cancel, UAC denied, or install error)",
+                code
+            )));
+        }
 
-    verify_post_install(latest).map_err(StrategyError::Runtime)?;
-    Ok(())
+        verify_post_install(latest).map_err(StrategyError::Runtime)?;
+        Ok(())
+    })();
+
+    // Best-effort: don't leave the downloaded installer behind in %TEMP%, on
+    // success or failure. The SHA256 + post-install verify above are the
+    // load-bearing checks; this cleanup is pure hygiene and never alters the
+    // result. (msiexec has already exited, so the file is no longer in use.)
+    let _ = std::fs::remove_file(&temp_path);
+    result
 }
 
 /// Download the matching Inno Setup EXE installer, verify its SHA256,
@@ -1001,29 +1010,39 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
 fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let temp_path = std::env::temp_dir().join(format!("tr300-update-{}-setup.exe", latest));
 
-    println!("  Downloading EXE installer...");
-    download_to_file(url, &temp_path)
-        .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
+    let result = (|| -> Result<(), StrategyError> {
+        println!("  Downloading EXE installer...");
+        download_to_file(url, &temp_path)
+            .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
 
-    verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
+        verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
 
-    println!("  Launching Inno Setup installer...");
-    // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
-    // suppresses non-critical message boxes; /NORESTART skips reboot prompts.
-    let status = Command::new(&temp_path)
-        .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
-        .status()
-        .map_err(|e| StrategyError::Preflight(format!("Failed to spawn EXE installer: {}", e)))?;
+        println!("  Launching Inno Setup installer...");
+        // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
+        // suppresses non-critical message boxes; /NORESTART skips reboot prompts.
+        let status = Command::new(&temp_path)
+            .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+            .status()
+            .map_err(|e| {
+                StrategyError::Preflight(format!("Failed to spawn EXE installer: {}", e))
+            })?;
 
-    if !status.success() {
-        return Err(StrategyError::Runtime(format!(
-            "EXE installer exited with code {} (likely user cancel, UAC denied, or install error)",
-            status.code().unwrap_or(-1)
-        )));
-    }
+        if !status.success() {
+            return Err(StrategyError::Runtime(format!(
+                "EXE installer exited with code {} (likely user cancel, UAC denied, or install error)",
+                status.code().unwrap_or(-1)
+            )));
+        }
 
-    verify_post_install(latest).map_err(StrategyError::Runtime)?;
-    Ok(())
+        verify_post_install(latest).map_err(StrategyError::Runtime)?;
+        Ok(())
+    })();
+
+    // Best-effort cleanup of the downloaded installer (success or failure); the
+    // verifies above are the load-bearing checks. The installer process has
+    // already exited by here.
+    let _ = std::fs::remove_file(&temp_path);
+    result
 }
 
 #[cfg(not(windows))]
