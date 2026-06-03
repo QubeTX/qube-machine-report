@@ -106,23 +106,28 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
 
 ### Pending (not yet shipped)
 
-- **DEFERRED / macOS fast-follow — A3: host-vs-process architecture on Apple Silicon (from the v3.16.0 stability pass).**
-  *Pick this up on a Mac — it cannot be hardware-verified on the Windows dev host, which is why it
-  was carved out of v3.16.0.* **File:** `src/collectors/platform/macos.rs:227-239` (`get_architecture`).
-  **Problem:** when the running binary is *not* Rosetta-translated the function returns
-  `std::env::consts::ARCH` — the **build/process** arch — so an `x86_64` build running **natively on
-  Apple Silicon** misreports the host as `x86_64`. The Windows collector (`IsWow64Process2`) already
-  reports the *host* arch; macOS should mirror that. **Fix approach:** consult
-  `sysctl -n hw.optional.arm64` (returns `1` on an Apple-Silicon host, absent/`0` on Intel) via the
-  existing `run_stdout(…, CommandTimeout::Normal)` helper; if the process arch is `x86_64` but
-  `hw.optional.arm64 == 1` **and** `sysctl.proc_translated == 0` (a natively-built x86_64 binary, not
-  Rosetta), annotate the host as Apple Silicon — wording **consistent** with the Windows
-  arch-emulation annotation convention (see the `windows-accuracy` skill; keep the existing Rosetta
-  string at line 236 untouched). **Verify on real hardware:** (a) `sysctl hw.optional.arm64` → `1`
-  on an M-series Mac, absent/error on Intel; (b) `sysctl.proc_translated` → `0` for a native x86_64
-  binary on Apple Silicon so native-x86-on-ARM and Rosetta stay distinct; cite an Apple Developer
-  Forums thread per the dev-workflow research step. Deferral rationale also recorded in
-  `docs/architecture-decisions.md` once the v3.16.0 PRs land.
+- **RESOLVED as a non-issue — A3: macOS host-vs-process architecture (v3.16.0 stability pass).**
+  The audit flagged that `get_architecture()` (`src/collectors/platform/macos.rs:227-239`) might
+  misreport an `x86_64` build running *natively* on Apple Silicon. On code review this is
+  **physically impossible**: Apple Silicon CPUs have no x86 hardware, so *any* `x86_64` process on an
+  M-series Mac runs under Rosetta, which means `sysctl.proc_translated` is **always `1`** there — and
+  the existing code already returns `"x86_64 (Apple Silicon, Rosetta 2)"` for that case. The only way
+  to reach `arch == "x86_64"` with `proc_translated == 0` is on a **real Intel Mac**, where reporting
+  `"x86_64"` is correct. So all three real cases (native ARM → `aarch64`; Rosetta → annotated; Intel
+  → `x86_64`) are already handled correctly, and the proposed `hw.optional.arm64` branch would be
+  dead code. **No change made.** (If anyone wants to *enrich* the Intel-Mac row to read
+  `"x86_64 (Intel)"` for symmetry, that's a cosmetic enhancement, not a bug fix.)
+- **Mac-hands-on item — D4: macOS `pmset` battery parsing (v3.16.0 stability pass).** The audit
+  flagged a "charging vs not-charging misclassification" in `get_battery()`
+  (`src/collectors/platform/macos.rs`). On review the parser **echoes the raw `pmset` status word**
+  rather than classifying into buckets, so `"discharging"`/`"not charging"` already render correctly
+  — the stated bug doesn't occur. Two genuine micro-issues remain but need a Mac to change safely
+  (the code shipped working in v3.14.0 and the exact `pmset -g batt` field layout must be confirmed
+  on-device): (a) the percentage capture (`part.ends_with('%')`) can grab the whole
+  `-InternalBattery-0 (id=…)\t85%` field instead of a clean `85%` token — harden it to match a
+  standalone `^\d+%$` token; (b) the `"finishing charge"` state isn't recognized. Both are LOW
+  severity and were deliberately **not** changed blind from the Windows dev host to avoid regressing
+  verified behavior.
 - ~~**PR #2** — macOS accuracy~~ — substantially shipped in v3.14.0 for the low-risk, verifiable paths on the current Mac: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, machine model row, full-mode battery health, and `vm_stat` fallback.
 - ~~**PR #3** — Linux accuracy~~ — substantially shipped in v3.14.0 with fixture coverage and CI validation: systemd-resolved DNS priority, aarch64 CPU fallback, locale precedence, power_supply battery iteration + health, `ip route get ... src`, terminal env priority + single `ps` fallback, WSL/container/VM detection, ZFS health, and elevated `dmidecode` rows.
 - **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing. Deferred because it needs elevated-shell validation on Windows. C.13 batched-PowerShell fallback is shipped in v3.14.0.

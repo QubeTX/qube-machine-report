@@ -42,6 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   malformed `/proc/loadavg` now falls through to the libc `getloadavg` fallback
   rather than reporting `0.0` (indistinguishable from a genuinely idle machine);
   only a total failure of both sources reports the rows as unavailable. (D7)
+- **macOS shows the correct version codename on current releases.** The codename
+  map now includes macOS 26 "Tahoe" (and any future major renders a generic
+  `macOS <n>` label instead of nothing), and the 10.x era is keyed off the minor
+  version. Previously the map stopped at macOS 15 (Sequoia), so current Macs
+  showed no codename at all. (A1)
+- **ARM Linux now reports CPU frequency instead of `0.00 GHz`.** On ARM SoCs that
+  expose no CPUID leaf 16h and report 0 MHz through sysinfo, the frequency now
+  falls back to the kernel's rated maximum from sysfs cpufreq
+  (`/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq`). (A2)
 
 ### Internal
 - **CI build/test/clippy/speed jobs run with `--locked`**, matching the
