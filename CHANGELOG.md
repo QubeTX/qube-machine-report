@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > architecture fix (A3) is deferred to a macOS-hosted fast-follow; see
 > `MASTER_PLAN.md`.
 
+### Added
+- **Windows now shows the machine `MODEL` row** (e.g. "Alienware m16 R2"),
+  matching the macOS and Linux reports. The manufacturer + model come from the
+  existing WMI batch (previously fetched only for virtualization detection and
+  then discarded), composed with de-duplication and placeholder-OEM filtering.
+  (D2)
+
 ### Changed
 - **`session.last_login` is now JSON `null` (and the LAST LOGIN row is omitted)
   when login tracking is genuinely unavailable**, instead of the literal string
@@ -51,6 +58,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expose no CPUID leaf 16h and report 0 MHz through sysinfo, the frequency now
   falls back to the kernel's rated maximum from sysfs cpufreq
   (`/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq`). (A2)
+- **Windows GPU list no longer leaks software adapters on the fallback path.**
+  "Microsoft Basic Render Driver" / "Hyper-V Video" are now filtered in the rare
+  PowerShell-fallback branch too, matching the primary path. (D1)
+- **Windows boot mode no longer guesses "Legacy BIOS".** When `bcdedit` names no
+  recognizable boot loader, the `BOOT` row is omitted rather than positively (and
+  possibly wrongly) reporting Legacy on a UEFI machine. (D6)
+- **Windows socket count is correct on single-processor machines with older
+  PowerShell.** The CPU-count fallback query is wrapped in `@(...)` so a scalar
+  result still yields 1 instead of an empty, unparseable string. (D9)
 
 ### Internal
 - **CI build/test/clippy/speed jobs run with `--locked`**, matching the
@@ -61,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   independent `post_install_version_ok` helper with a unit test, so the
   self-update success check is verifiable on every target rather than only on
   the Windows runner. (E2)
+- Corrected a stale comment claiming PowerShell 7 version selection used string
+  comparison; the code correctly compares numeric `(major, minor, patch)`
+  tuples (a string compare would rank `7.9.0` above `7.10.0`). (D10)
 
 ## [3.15.3] - 2026-05-23
 

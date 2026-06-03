@@ -16,8 +16,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > A stability and cross-platform cleanup pass. A fresh top-to-bottom review of
 > the whole program turned up a handful of correctness, robustness, and
 > packaging issues across every system TR-300 runs on (Windows, Mac, and Linux,
-> on both Apple/ARM and Intel chips). This is the first batch of fixes; one
-> Mac-only item is being saved for a follow-up that can be tested on a Mac.
+> on both Apple/ARM and Intel chips). The Mac- and Raspberry-Pi-specific fixes
+> get a final check on that hardware once the work is live.
+
+### Added
+- **Windows now shows your computer's model** (like "Alienware m16 R2") in the
+  report — the same model line Macs and Linux machines already displayed.
 
 ### Changed
 - **"Last login" is now left blank when it genuinely can't be determined**,
@@ -47,6 +51,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **ARM-based Linux machines now show their real CPU speed.** On devices like a
   Raspberry Pi, the processor speed used to read "0.00 GHz"; TR-300 now pulls the
   true rated speed from the system instead.
+- **The graphics-card list on Windows stays clean in more situations.** A rarely
+  used fallback could show Windows' built-in placeholder display driver next to
+  your real graphics card; that's now filtered out everywhere.
+- **Windows is more careful about how your PC booted.** If TR-300 can't clearly
+  tell whether a machine started in modern (UEFI) or older (Legacy) mode, it now
+  leaves that line off instead of guessing "Legacy" and possibly being wrong.
+- **Single-processor Windows PCs now count their CPU correctly** in an
+  older-PowerShell fallback path.
 
 ### Internal
 - Tightened the automated test pipeline so it builds against the exact same
