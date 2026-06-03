@@ -67,6 +67,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Windows socket count is correct on single-processor machines with older
   PowerShell.** The CPU-count fallback query is wrapped in `@(...)` so a scalar
   result still yields 1 instead of an empty, unparseable string. (D9)
+- **Linux battery health is computed from matching units.** The health
+  percentage now requires the full-charge and design-capacity readings to come
+  from the same unit family (both µWh `energy_*` or both µAh `charge_*`), so a
+  system exposing only one of each no longer produces a nonsensical figure. (D3)
+- **Linux GPU detection no longer misreads an audio device as a GPU.** The PCI
+  class field is matched (rather than the whole `lspci` line), so a controller
+  whose name merely contains "Display" (e.g. HDMI "Display Audio") is no longer
+  listed as a graphics adapter. (D5)
+- **ZFS health severity ranking is more accurate.** A `SUSPENDED` pool (I/O
+  halted) is now ranked as the most severe state, and an unrecognized state no
+  longer masquerades as `DEGRADED` when choosing the worst-of pool health. (D8)
 
 ### Internal
 - **CI build/test/clippy/speed jobs run with `--locked`**, matching the

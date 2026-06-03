@@ -185,6 +185,30 @@ fn detect_virtualization() -> Option<String> {
     None
 }
 
+/// Extract a GPU name from one `lspci` line.
+///
+/// Matches on the PCI **class** field (left of the first `": "`) — e.g.
+/// `"VGA compatible controller"`, `"3D controller"`, `"Display controller"` —
+/// rather than the whole line, so a non-GPU device whose *name* merely contains
+/// "display" (e.g. an HDMI "Display Audio" controller) isn't misdetected as a
+/// GPU. Splitting on the *first* `": "` is correct for default `lspci` output:
+/// the bus address (`00:02.0`) contains a colon but never a colon-space, so the
+/// first `": "` is always the class/device separator. Pure + testable.
+fn parse_lspci_gpu_line(line: &str) -> Option<String> {
+    let (class_part, device) = line.split_once(": ")?;
+    let class = class_part.to_lowercase();
+    if class.contains("vga")
+        || class.contains("3d controller")
+        || class.contains("display controller")
+    {
+        let name = device.trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
 /// Get GPU names
 fn get_gpus() -> Vec<String> {
     let mut gpus = Vec::new();
@@ -192,16 +216,8 @@ fn get_gpus() -> Vec<String> {
     // Try lspci for VGA/3D controllers
     if let Some(stdout) = run_stdout_no_args("lspci", CommandTimeout::Normal) {
         for line in stdout.lines() {
-            let lower = line.to_lowercase();
-            if lower.contains("vga") || lower.contains("3d controller") || lower.contains("display")
-            {
-                // Format: "00:02.0 VGA compatible controller: Intel Corporation ..."
-                if let Some(pos) = line.find(": ") {
-                    let gpu_name = line[pos + 2..].trim();
-                    if !gpu_name.is_empty() {
-                        gpus.push(gpu_name.to_string());
-                    }
-                }
+            if let Some(name) = parse_lspci_gpu_line(line) {
+                gpus.push(name);
             }
         }
     }
@@ -504,19 +520,45 @@ fn battery_summary_from_path(base: &Path) -> Option<String> {
         .unwrap_or_else(|| "Unknown".to_string());
     let mut summary = format!("{}% ({})", capacity, status);
 
-    if let (Some(full), Some(design)) = (
-        read_u64_from_file(base.join("energy_full"))
-            .or_else(|| read_u64_from_file(base.join("charge_full"))),
-        read_u64_from_file(base.join("energy_full_design"))
-            .or_else(|| read_u64_from_file(base.join("charge_full_design"))),
+    // Health must be computed from a single unit family: energy_* is in µWh,
+    // charge_* is in µAh. Mixing energy_full with charge_full_design (which can
+    // happen if only one of each is exposed) yields a meaningless ratio, so
+    // require both numerator and denominator from the same family.
+    let health_pair = match (
+        read_u64_from_file(base.join("energy_full")),
+        read_u64_from_file(base.join("energy_full_design")),
     ) {
-        if design > 0 && full <= design.saturating_mul(2) {
-            let health = (full as f64 / design as f64 * 100.0).clamp(0.0, 100.0);
-            summary.push_str(&format!("; health {:.0}%", health));
+        (Some(full), Some(design)) => Some((full, design)),
+        _ => match (
+            read_u64_from_file(base.join("charge_full")),
+            read_u64_from_file(base.join("charge_full_design")),
+        ) {
+            (Some(full), Some(design)) => Some((full, design)),
+            _ => None,
+        },
+    };
+    if let Some((full, design)) = health_pair {
+        if let Some(health) = battery_health_percent(full, design) {
+            summary.push_str(&format!("; health {}%", health));
         }
     }
 
     Some(summary)
+}
+
+/// Battery health percentage from a same-unit-family `(full, design)` pair.
+/// Returns `None` for implausible readings (zero design, or a full charge more
+/// than twice the design capacity — a sign of mismatched units or bad data).
+/// Pure + testable.
+fn battery_health_percent(full: u64, design: u64) -> Option<u8> {
+    if design == 0 || full > design.saturating_mul(2) {
+        return None;
+    }
+    Some(
+        (full as f64 / design as f64 * 100.0)
+            .clamp(0.0, 100.0)
+            .round() as u8,
+    )
 }
 
 fn read_u64_from_file(path: impl AsRef<Path>) -> Option<u64> {
@@ -556,8 +598,12 @@ where
 fn zfs_rank(state: &str) -> u8 {
     match state {
         "ONLINE" => 1,
-        "DEGRADED" => 2,
-        "FAULTED" | "OFFLINE" | "UNAVAIL" | "REMOVED" => 3,
+        // Unknown/unparsed state ranks just above ONLINE so it surfaces as
+        // "not clearly healthy" without masquerading as a specific DEGRADED.
+        "DEGRADED" => 3,
+        "FAULTED" | "OFFLINE" | "UNAVAIL" | "REMOVED" => 4,
+        // A SUSPENDED pool has stopped servicing I/O — most severe.
+        "SUSPENDED" => 5,
         _ => 2,
     }
 }
@@ -691,6 +737,58 @@ mod tests {
             aggregate_zfs_health(["ONLINE", "DEGRADED", "ONLINE"]),
             Some("DEGRADED".to_string())
         );
+    }
+
+    #[test]
+    fn zfs_rank_orders_suspended_worst_and_unknown_below_degraded() {
+        // SUSPENDED (I/O stopped) outranks FAULTED.
+        assert!(zfs_rank("SUSPENDED") > zfs_rank("FAULTED"));
+        assert_eq!(
+            aggregate_zfs_health(["ONLINE", "FAULTED", "SUSPENDED"]),
+            Some("SUSPENDED".to_string())
+        );
+        // A real DEGRADED takes precedence over an unparsed/unknown state, so
+        // unknown never masquerades as DEGRADED severity.
+        assert!(zfs_rank("WEIRD_STATE") < zfs_rank("DEGRADED"));
+        assert_eq!(
+            aggregate_zfs_health(["WEIRD_STATE", "DEGRADED"]),
+            Some("DEGRADED".to_string())
+        );
+    }
+
+    #[test]
+    fn lspci_gpu_line_matches_class_not_device_name() {
+        assert_eq!(
+            parse_lspci_gpu_line(
+                "00:02.0 VGA compatible controller: Intel Corporation Iris Xe Graphics (rev 0c)"
+            ),
+            Some("Intel Corporation Iris Xe Graphics (rev 0c)".to_string())
+        );
+        assert_eq!(
+            parse_lspci_gpu_line(
+                "01:00.0 3D controller: NVIDIA Corporation GA107M [GeForce RTX 3050]"
+            ),
+            Some("NVIDIA Corporation GA107M [GeForce RTX 3050]".to_string())
+        );
+        // An audio controller whose *name* contains "Display" is NOT a GPU.
+        assert_eq!(
+            parse_lspci_gpu_line("00:1f.3 Audio device: Intel Corporation Display Audio"),
+            None
+        );
+        assert_eq!(
+            parse_lspci_gpu_line("00:00.0 Host bridge: Intel Corporation Device 4601"),
+            None
+        );
+    }
+
+    #[test]
+    fn battery_health_percent_rejects_implausible_values() {
+        assert_eq!(battery_health_percent(4800, 6000), Some(80));
+        assert_eq!(battery_health_percent(6000, 6000), Some(100));
+        // Zero design capacity → no health.
+        assert_eq!(battery_health_percent(5000, 0), None);
+        // Full more than 2x design → mismatched units / bad data → no health.
+        assert_eq!(battery_health_percent(20000, 6000), None);
     }
 
     #[test]
