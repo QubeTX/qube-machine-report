@@ -74,6 +74,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Updating TR-300 cleans up after itself.** On Windows, the downloaded
   installer file is now removed automatically once the update finishes, instead
   of piling up in your temp folder.
+- **Updating is more reliable and honest.** If the newest version isn't on the
+  package registry yet, TR-300 no longer falsely claims it updated — it
+  double-checks the version afterward and automatically falls back to
+  downloading the official prebuilt release instead. This fixes the case where
+  "update" appeared to work but the version never actually changed.
+- **A clearer message when update checks are temporarily blocked.** If you check
+  for updates many times in a short window, GitHub briefly rate-limits the
+  request; TR-300 now says exactly that and to try again shortly, instead of a
+  vague failure.
 
 ### Internal
 - Tightened the automated test pipeline so it builds against the exact same

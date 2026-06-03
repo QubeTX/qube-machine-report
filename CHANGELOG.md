@@ -85,6 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Self-update no longer leaves installer files in `%TEMP%`.** On Windows, the
   downloaded MSI/EXE is removed after the install finishes (success or failure),
   always *after* the SHA256 and post-install version checks. (G1)
+- **Self-update via `cargo install` now confirms the new version actually
+  landed.** `cargo install tr300 --force` reports success even when crates.io
+  still serves the previous version (publish lag, or a failed publish), which
+  previously made `tr300 update` claim "Updated to vX" while the binary was
+  unchanged — and loop on the next run. The cargo path now re-checks
+  `tr300 --version` and, on a mismatch, falls through to the prebuilt
+  GitHub-release installer (which always carries the latest). Verification was
+  previously only on the Windows MSI/EXE paths. (U1)
+- **Clearer message when GitHub's API rate limit is hit during an update
+  check.** An unauthenticated rate-limit (60 requests/hour per IP) now reports
+  "GitHub API rate limit exceeded … wait for the limit to reset" instead of an
+  opaque "Request failed". (U2)
 
 ### Internal
 - **CI build/test/clippy/speed jobs run with `--locked`**, matching the

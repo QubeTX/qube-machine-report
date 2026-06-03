@@ -444,6 +444,32 @@ fn inject_install_origin(_payload: &mut serde_json::Value) {
 
 // ── Version check ──────────────────────────────────────────────────
 
+/// Turn a `ureq` error from the releases-API request into an actionable
+/// message. The most common intermittent failure is GitHub's unauthenticated
+/// rate limit (60 requests/hour per IP) — worth naming explicitly so a user
+/// who "ran update and it didn't work" knows to just wait.
+fn classify_fetch_error(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, ref resp) => {
+            http_status_message(code, resp.header("x-ratelimit-remaining"))
+        }
+        ureq::Error::Transport(t) => format!("Network error reaching GitHub: {}", t),
+    }
+}
+
+/// User-facing message for an HTTP error from the releases API. Pure +
+/// testable (the live `ureq::Error` matching lives in `classify_fetch_error`).
+fn http_status_message(code: u16, ratelimit_remaining: Option<&str>) -> String {
+    if code == 403 && ratelimit_remaining == Some("0") {
+        "GitHub API rate limit exceeded (unauthenticated requests are capped at 60/hour per IP). Wait for the limit to reset and try again, or update manually.".to_string()
+    } else {
+        format!(
+            "GitHub API returned HTTP {} when checking for updates",
+            code
+        )
+    }
+}
+
 /// Fetch the latest version tag from GitHub releases API.
 fn fetch_latest_version() -> Result<String, String> {
     let agent = ureq::AgentBuilder::new()
@@ -455,7 +481,7 @@ fn fetch_latest_version() -> Result<String, String> {
         .set("User-Agent", &format!("tr300/{}", VERSION))
         .set("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(classify_fetch_error)?;
 
     let body: serde_json::Value = resp
         .into_json()
@@ -639,7 +665,11 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
     match strategy {
         UpdateStrategy::Cargo => {
             rustup_update_stable_best_effort();
-            run_command_status("cargo", &["install", CRATE_NAME, "--force"])
+            run_command_status("cargo", &["install", CRATE_NAME, "--force"])?;
+            // cargo exit 0 doesn't guarantee the running binary changed (crates.io
+            // lag, or a different tr300 earlier on PATH). Verify, and fall through
+            // to the prebuilt installer on mismatch.
+            verify_cargo_post_install(latest)
         }
         UpdateStrategy::InstallerCurl => try_installer_curl(),
         UpdateStrategy::InstallerWget => try_installer_wget(),
@@ -890,14 +920,55 @@ fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
 /// Whether the freshly-installed `--version` string matches the expected
 /// release tag. Both sides are stripped of any prerelease/build-metadata
 /// suffix before comparison, and an empty `installed` never matches (covers
-/// the `--version` parse failing). Pure + platform-independent so it can be
-/// unit-tested on any target — the live re-exec lives in `verify_post_install`,
-/// which is Windows-only.
-#[cfg(any(target_os = "windows", test))]
+/// the `--version` parse failing). Pure + platform-independent.
 fn post_install_version_ok(installed: &str, expected: &str) -> bool {
     let installed_stripped = strip_prerelease_metadata(installed);
     let expected_stripped = strip_prerelease_metadata(expected);
     !installed_stripped.is_empty() && installed_stripped == expected_stripped
+}
+
+/// Re-exec the running binary with `--version` and return the parsed version
+/// (the last whitespace token of `tr300 X.Y.Z`). `None` if the spawn fails, the
+/// process errors, or the output doesn't parse. Cross-platform — used by both
+/// the Windows installer verify and the cargo-path verify.
+fn reexec_installed_version() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let output = Command::new(&exe).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
+}
+
+/// Confirm a `cargo install tr300 --force` update actually landed.
+///
+/// `cargo install` reports success (exit 0) even when crates.io still serves
+/// the OLD version — a publish lag right after a GitHub release, or a failed
+/// `crates-publish` run. Without this check, the updater would print
+/// "Updated to vX" while `tr300 --version` is unchanged, then loop forever.
+/// Re-exec `--version`; on mismatch return a `Runtime` error so
+/// `execute_update` falls through to the prebuilt GitHub-release installer,
+/// which always carries `latest`.
+fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
+    match reexec_installed_version() {
+        Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
+        Some(installed) => Err(StrategyError::Runtime(format!(
+            "cargo install reported success but `tr300 --version` still reports v{installed} (expected v{expected}). crates.io may not have v{expected} yet, or another tr300 is earlier on your PATH — falling through to the prebuilt installer."
+        ))),
+        None => Err(StrategyError::Runtime(
+            "cargo install reported success but `tr300 --version` could not be run to confirm the new version — falling through to the prebuilt installer.".to_string(),
+        )),
+    }
 }
 
 /// After the installer reports success, re-exec `<current_exe>
@@ -913,32 +984,14 @@ fn post_install_version_ok(installed: &str, expected: &str) -> bool {
 /// has a metadata suffix.
 #[cfg(windows)]
 fn verify_post_install(expected: &str) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("current_exe failed: {}", e))?;
-    let output = Command::new(&exe)
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("Failed to spawn `{} --version`: {}", exe.display(), e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`{} --version` exited with code {}",
-            exe.display(),
-            output.status.code().unwrap_or(-1)
-        ));
-    }
-    // Output is "tr300 X.Y.Z\n"; the last whitespace-separated token
-    // is the version.
-    let installed = String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .last()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let installed = reexec_installed_version()
+        .ok_or_else(|| "Failed to run `tr300 --version` to confirm the install".to_string())?;
     if post_install_version_ok(&installed, expected) {
         Ok(())
     } else {
         Err(format!(
-            "Installer exited successfully but `{} --version` still reports v{} (expected v{}). The installed binary may be locked by another process — close other tr300 windows / shells and re-run, or reboot to let Windows finish a deferred file replace.",
-            exe.display(), installed, expected
+            "Installer exited successfully but `tr300 --version` still reports v{} (expected v{}). The installed binary may be locked by another process — close other tr300 windows / shells and re-run, or reboot to let Windows finish a deferred file replace.",
+            installed, expected
         ))
     }
 }
@@ -1366,6 +1419,26 @@ mod tests {
         // guard, so it must never silently pass.
         let err = checksum_verdict("deadbeef", hash).unwrap_err();
         assert!(err.contains("SHA256 mismatch"), "err: {err}");
+    }
+
+    #[test]
+    fn http_status_message_explains_rate_limit() {
+        // 403 with the rate-limit-exhausted header → the explicit message.
+        assert!(http_status_message(403, Some("0")).contains("rate limit"));
+        // 403 without the exhausted header → generic HTTP message.
+        assert!(http_status_message(403, None).contains("HTTP 403"));
+        // Other error codes → generic HTTP message.
+        assert!(http_status_message(500, None).contains("HTTP 500"));
+    }
+
+    #[test]
+    fn post_install_version_ok_drives_cargo_verify_logic() {
+        // The cargo-path verify (verify_cargo_post_install) treats a matching
+        // re-exec version as success and a stale one as fall-through; the
+        // decision is post_install_version_ok, re-pinned here for the cargo
+        // path specifically (crates.io lag → installed stays old).
+        assert!(post_install_version_ok("3.16.0", "3.16.0"));
+        assert!(!post_install_version_ok("3.15.3", "3.16.0"));
     }
 
     #[test]

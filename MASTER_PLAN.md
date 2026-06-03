@@ -128,6 +128,24 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
   standalone `^\d+%$` token; (b) the `"finishing charge"` state isn't recognized. Both are LOW
   severity and were deliberately **not** changed blind from the Windows dev host to avoid regressing
   verified behavior.
+- **Self-update deep-dive (v3.16.0 / PR7).** A focused review of `src/update.rs` across all
+  platforms/deployments (prompted by a report that `tr300 update` "often doesn't work").
+  **Verified working:** every installer asset URL matches a published release asset and every
+  `.sha256` sidecar exists (checked against the v3.15.3 release), so the v3.15.4 SHA256-verify fix
+  *does* function; `is_newer` is robust (7 tests); the Windows MSI/EXE path has SHA256 + post-install
+  verify + 3010-reboot handling; strategy ordering and the JSON contract are correct. **Fixed (U1):**
+  the **cargo update path had no post-install verification** — `cargo install tr300 --force` reports
+  success even when crates.io still serves the OLD version (publish lag / failed publish), so the
+  updater claimed success without changing the binary and looped. The cargo path now re-execs
+  `tr300 --version` and, on mismatch, returns a `Runtime` error so `execute_update` **falls through
+  to the prebuilt GitHub-release installer** (which always carries `latest`). **Fixed (U2):** a clear
+  "GitHub API rate limit exceeded (60/hr)" message replaces the opaque "Request failed" on HTTP 403.
+  **Deliberately NOT verified:** the terminal curl/wget/PowerShell installer strategies — they're
+  last in the chain and install to a default bindir (`~/.cargo/bin` / `~/.local/bin`) that may differ
+  from `current_exe()`, so a post-install check there could false-*fail* with no further fallback;
+  the cargo→installer fall-through is the safe place for the check. **Hardware test (user):** confirm
+  on the Mac + Raspberry Pi that `tr300 update` from an older build either updates cleanly or reports
+  an honest, actionable failure (no more silent "Updated to vX" no-op).
 - ~~**PR #2** — macOS accuracy~~ — substantially shipped in v3.14.0 for the low-risk, verifiable paths on the current Mac: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, machine model row, full-mode battery health, and `vm_stat` fallback.
 - ~~**PR #3** — Linux accuracy~~ — substantially shipped in v3.14.0 with fixture coverage and CI validation: systemd-resolved DNS priority, aarch64 CPU fallback, locale precedence, power_supply battery iteration + health, `ip route get ... src`, terminal env priority + single `ps` fallback, WSL/container/VM detection, ZFS health, and elevated `dmidecode` rows.
 - **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing. Deferred because it needs elevated-shell validation on Windows. C.13 batched-PowerShell fallback is shipped in v3.14.0.
