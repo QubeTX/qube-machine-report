@@ -77,8 +77,12 @@ fn run_report(config: &Config, mode: CollectMode) -> Result<()> {
     // Auto-save markdown report in full table mode (not --fast, not --json)
     if mode == CollectMode::Full && config.format == OutputFormat::Table {
         match report::save_markdown_report(&info) {
-            Some(path) => eprintln!("Report saved: {}", path.display()),
-            None => eprintln!("Warning: Could not save markdown report"),
+            Ok(outcome) if outcome.used_cwd_fallback => eprintln!(
+                "Report saved: {} (Downloads folder not found — saved to the current directory)",
+                outcome.path.display()
+            ),
+            Ok(outcome) => eprintln!("Report saved: {}", outcome.path.display()),
+            Err(e) => eprintln!("Warning: could not save markdown report: {}", e),
         }
     }
 

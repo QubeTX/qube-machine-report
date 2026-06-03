@@ -879,6 +879,19 @@ fn verify_checksum(installer_path: &std::path::Path, installer_url: &str) -> Res
     }
 }
 
+/// Whether the freshly-installed `--version` string matches the expected
+/// release tag. Both sides are stripped of any prerelease/build-metadata
+/// suffix before comparison, and an empty `installed` never matches (covers
+/// the `--version` parse failing). Pure + platform-independent so it can be
+/// unit-tested on any target — the live re-exec lives in `verify_post_install`,
+/// which is Windows-only.
+#[cfg(any(target_os = "windows", test))]
+fn post_install_version_ok(installed: &str, expected: &str) -> bool {
+    let installed_stripped = strip_prerelease_metadata(installed);
+    let expected_stripped = strip_prerelease_metadata(expected);
+    !installed_stripped.is_empty() && installed_stripped == expected_stripped
+}
+
 /// After the installer reports success, re-exec `<current_exe>
 /// --version` and confirm the on-disk binary has been updated. Catches
 /// the case where the installer exits 0 but the file replacement
@@ -912,9 +925,7 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
         .unwrap_or("")
         .trim()
         .to_string();
-    let installed_stripped = strip_prerelease_metadata(&installed);
-    let expected_stripped = strip_prerelease_metadata(expected);
-    if installed_stripped == expected_stripped && !installed_stripped.is_empty() {
+    if post_install_version_ok(&installed, expected) {
         Ok(())
     } else {
         Err(format!(
@@ -1303,6 +1314,18 @@ mod tests {
         assert_eq!(strip_prerelease_metadata("3.15.2"), "3.15.2");
         assert_eq!(strip_prerelease_metadata("1.0"), "1.0");
         assert_eq!(strip_prerelease_metadata(""), "");
+    }
+
+    #[test]
+    fn post_install_version_ok_matches_after_stripping() {
+        // Exact match — the happy path after a successful in-place upgrade.
+        assert!(post_install_version_ok("3.16.0", "3.16.0"));
+        // Installed string carries a build-metadata suffix the release tag lacks.
+        assert!(post_install_version_ok("3.16.0+sha.abc123", "3.16.0"));
+        // Mismatch — installer exited 0 but the file replacement didn't take.
+        assert!(!post_install_version_ok("3.15.3", "3.16.0"));
+        // Empty installed string (e.g. `--version` output failed to parse).
+        assert!(!post_install_version_ok("", "3.16.0"));
     }
 
     #[test]

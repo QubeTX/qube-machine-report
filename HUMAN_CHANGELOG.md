@@ -13,6 +13,42 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+> A stability and cross-platform cleanup pass. A fresh top-to-bottom review of
+> the whole program turned up a handful of correctness, robustness, and
+> packaging issues across every system TR-300 runs on (Windows, Mac, and Linux,
+> on both Apple/ARM and Intel chips). This is the first batch of fixes; one
+> Mac-only item is being saved for a follow-up that can be tested on a Mac.
+
+### Changed
+- **"Last login" is now left blank when it genuinely can't be determined**,
+  instead of printing the words "Login tracking unavailable." Anything reading
+  the data can now tell the difference between "we couldn't find out" and a real
+  answer — and "Never logged in" still shows when that's the true answer.
+- **When TR-300 saves its report file, it now tells you exactly what went wrong
+  if it can't.** Instead of a vague "couldn't save" message, it explains the
+  actual reason (no permission, disk full, folder missing) and lets you know
+  when it had to save to the current folder because no Downloads folder was
+  found.
+
+### Fixed
+- **The machine-readable report is always valid now.** In rare cases a stray
+  numeric value could have produced output that some tools would reject; those
+  values are now safely written as "empty" so the report always reads cleanly.
+- **TR-300 now builds correctly even in locked-down install environments.**
+  On some corporate or sandboxed machines the build could fail because it tried
+  to write a help-page file into a read-only folder; that write is now optional,
+  so installing from source works everywhere.
+- **Linux system-load readings are more honest.** If the system can't read its
+  load numbers cleanly, TR-300 now falls back to a second source instead of
+  silently showing "0%" (which looked like a totally idle machine).
+
+### Internal
+- Tightened the automated test pipeline so it builds against the exact same
+  locked set of dependencies that the published release uses — closing a gap
+  where an incompatible dependency could have slipped through testing.
+- Restructured part of the self-update success check so it can be tested on
+  every platform, not just Windows.
+
 ## [3.15.3] - 2026-05-23
 
 > Cleanup release that picks up the three issues the May 2026 audit

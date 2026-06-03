@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Stability & cross-platform hardening pass.** A fresh three-agent audit of
+> the whole tree (core data flow, platform collectors, install/update/CI)
+> surfaced a set of correctness, robustness, and packaging issues across all
+> six deployment targets (Windows / macOS / Linux × ARM + x86_64). This is the
+> first batch (PR1 — output & build robustness). The macOS host-vs-process
+> architecture fix (A3) is deferred to a macOS-hosted fast-follow; see
+> `MASTER_PLAN.md`.
+
+### Changed
+- **`session.last_login` is now JSON `null` (and the LAST LOGIN row is omitted)
+  when login tracking is genuinely unavailable**, instead of the literal string
+  `"Login tracking unavailable"`. Consumers can now distinguish a real failure
+  from an absent value; `"Never logged in"` remains a genuine reported value.
+  (C2)
+- **Markdown auto-save now reports the concrete failure cause.** A failed save
+  surfaces the underlying OS error (permissions, full disk, missing directory)
+  on stderr instead of a generic "Could not save" warning, and notes when no
+  Downloads folder was found and the report was written to the current
+  directory instead. (C3)
+
+### Fixed
+- **JSON output can never emit invalid `NaN`/`Infinity` tokens.** `frequency_ghz`,
+  `disk.percent`, `memory.percent`, and the load averages now serialize as
+  `null` if a non-finite `f64` ever reaches them, so the document always parses.
+  (C1)
+- **`build.rs` no longer fails the build on a read-only source tree.** The
+  generated man page is written authoritatively to `OUT_DIR`; the mirror copy
+  into the project-root `man/` directory is now best-effort, so `cargo install
+  tr300` from a locked-down registry cache (or any read-only/sandboxed source
+  checkout) builds instead of panicking, and a normal build no longer dirties
+  the working tree. (B1)
+- **Linux load average no longer fabricates `0%` on a parse failure.** A
+  malformed `/proc/loadavg` now falls through to the libc `getloadavg` fallback
+  rather than reporting `0.0` (indistinguishable from a genuinely idle machine);
+  only a total failure of both sources reports the rows as unavailable. (D7)
+
+### Internal
+- **CI build/test/clippy/speed jobs run with `--locked`**, matching the
+  `crates-publish` gate so CI can no longer resolve a newer transitive
+  dependency than `Cargo.lock` pins and let an MSRV-incompatible bump slip
+  through to a tagged release. (F1)
+- Extracted the post-install version comparison into a pure, platform-
+  independent `post_install_version_ok` helper with a unit test, so the
+  self-update success check is verifiable on every target rather than only on
+  the Windows runner. (E2)
+
 ## [3.15.3] - 2026-05-23
 
 > **Deferred-audit-findings follow-up release.** Resolves the three
