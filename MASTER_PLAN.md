@@ -22,7 +22,7 @@ If you just pulled this repo and want to keep building, read these in order:
 4. **`TESTING.md`** — the manual cross-platform verification matrix and per-version verification log.
 5. **`CHANGELOG.md`** — every shipped change with task-ID cross-references in parens.
 
-The auto-memory at `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machine-report/memory/` (only valid on the original Windows host) duplicates the workflow notes. Don't recreate it on other machines — `CLAUDE.md` is authoritative.
+The auto-memory at `~/.claude/projects/C--Users-hey-git-qube-machine-report/memory/` (only valid on the original Windows host) duplicates the workflow notes. Don't recreate it on other machines — `CLAUDE.md` is authoritative.
 
 ---
 
@@ -431,7 +431,7 @@ only the first PR that touched them.
 
 **Auto memory (only valid on the original Windows host; not committed to repo):**
 
-- `~/.claude/projects/C--Users-hey-Documents-GitHub-qube-machine-report/memory/`
+- `~/.claude/projects/C--Users-hey-git-qube-machine-report/memory/`
   - [done] `MEMORY.md` — index
   - [done] `project_tr300_overview.md` — what TR-300 is, current version, deployment, constraints
   - [done] `feedback_tr300_constraints.md` — pager rejected, --fast must stay sub-second, no admin, etc.
@@ -714,7 +714,7 @@ These are large research dumps from the planning phase. Useful as reference but 
 - `~/.claude/plans/take-a-look-around-elegant-stonebraker-agent-a331823be3c6ba4a3.md` — Linux research dump
 - `~/.claude/plans/take-a-look-around-elegant-stonebraker-agent-a93ada108401bdab8.md` — Windows research dump
 
-If you need to reproduce the original research from scratch on a different machine, dispatch parallel `general-purpose` agents (model: `opus`) with WebFetch / WebSearch / Firecrawl / Perplexity access against per-platform briefs. The original briefs are in CLAUDE.md § Development Workflow phase 1 step 3.
+If you need to reproduce the original research from scratch on a different machine, dispatch parallel `general-purpose` agents (model: `opus`) with WebFetch / WebSearch / Firecrawl / Perplexity access against per-platform briefs. The original briefs are in the `tr300-dev-workflow` skill, Phase 1 step 3 (`.claude/skills/tr300-dev-workflow/SKILL.md`).
 
 ## 8. Pickup instructions for a fresh session
 
