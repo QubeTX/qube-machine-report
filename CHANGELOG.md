@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-06-03
+
 > **Stability & cross-platform hardening pass.** A fresh three-agent audit of
-> the whole tree (core data flow, platform collectors, install/update/CI)
-> surfaced a set of correctness, robustness, and packaging issues across all
-> six deployment targets (Windows / macOS / Linux × ARM + x86_64). This is the
-> first batch (PR1 — output & build robustness). The macOS host-vs-process
-> architecture fix (A3) is deferred to a macOS-hosted fast-follow; see
-> `MASTER_PLAN.md`.
+> the whole tree (core data flow, platform collectors, install/update/CI),
+> shipped as seven reviewed, CI-green pull requests, surfaced and fixed a set of
+> correctness, robustness, and packaging issues across all six deployment
+> targets (Windows / macOS / Linux × ARM + x86_64) — plus a focused self-update
+> reliability review. Two audit findings were verified as non-issues after code
+> review (the macOS host-vs-process architecture case is physically
+> unreachable; the macOS battery-wording case was mis-framed); both are recorded
+> in `MASTER_PLAN.md`.
 
 ### Added
 - **Windows now shows the machine `MODEL` row** (e.g. "Alienware m16 R2"),

@@ -4,6 +4,20 @@ This file tracks the manual verification matrix that must pass before each tagge
 
 ## Per-version verification log
 
+### v3.16.0 — 2026-06-03
+
+- **Stability & cross-platform hardening pass**, shipped as seven reviewed, individually-CI-green PRs (PR1 output/build robustness; PR2 macOS Tahoe codename + ARM-Linux CPU frequency; PR3 Windows MODEL row + GPU/boot/socket-count; PR4 Linux battery-units/lspci/ZFS; PR5 symlink-safe install + updater temp cleanup; PR6 Unicode-table-width + checksum tests; PR7 self-update cargo-path verify + rate-limit messaging), merged to master in order. Two audit findings (A3 macOS host-arch, D4 macOS battery wording) were verified non-issues after review and made no code change — see `MASTER_PLAN.md`.
+- Full local gate green on the Windows authoring host: `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --workspace -- -D warnings`, `cargo test --locked --workspace --all-targets`, `cargo build --locked --release`. **104 lib + 18 integration tests pass** (was 98+18 at v3.15.3; +6 lib tests: macOS codename, Linux cpufreq parse, Windows compose_machine_model, Linux battery-health/zfs-rank/lspci, Unicode table width, SHA256 checksum_verdict, http_status_message, post_install_version_ok).
+- Cross-platform compile + tests verified by **per-PR CI** on Linux x64 + macOS ARM + Windows x64 runners; every PR's CI was green before merge.
+- `tr300 --version` reports `3.16.0`. Windows host smoke: `tr300 --json` is valid JSON; `os.machine_model` populates (`"Alienware m16 R2"`); `cpu.gpus` contains only hardware adapters; `session.last_login` is a real value or `null` (never the old sentence). `tr300 --ascii` renders.
+- **CI verification** — master CI run `<filled post-publish>`.
+- **Crates.io verification** — crates-publish run `<filled post-publish>` (publishes `tr300` 3.16.0).
+- **Release verification** — release.yml run `<filled post-publish>`; windows-installers.yml run `<filled post-publish>`; GitHub Release asset count `<filled post-publish>`.
+- **Manual verification required on release-candidate hardware (deferred to the user's machines):**
+  - **macOS (Apple Silicon + Intel)**: confirm the OS row shows the correct codename ("Tahoe" on macOS 26); confirm battery row unchanged (D4 was intentionally not touched). Confirm `tr300 update` from an older build updates cleanly or reports an honest failure (U1 — no silent "Updated to vX" no-op).
+  - **Linux ARM (Raspberry Pi)**: confirm the CPU FREQ row shows a real frequency, not `0.00 GHz` (A2). Confirm a dotfiles-symlinked `~/.bashrc` survives `tr300 install` as a symlink (E3).
+  - **Linux x86_64**: confirm GPU detection doesn't list an HDMI "Display Audio" controller (D5); confirm battery health % is sane (D3).
+
 ### v3.15.3 — 2026-05-23
 
 - Deferred-audit-findings follow-up release. Resolves the three v3.15.2 audit findings (F17, F20, F22) that the original audit explicitly deferred. All audit work from the May 2026 cycle is now landed.

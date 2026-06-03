@@ -5,8 +5,8 @@
 > pending, why each decision was made, and how to keep going without
 > re-litigating.
 
-**Last updated:** 2026-05-23 (v3.15.3 — deferred-audit-findings follow-up)
-**Current version:** 3.15.3
+**Last updated:** 2026-06-03 (v3.16.0 — stability & cross-platform hardening pass)
+**Current version:** 3.16.0
 **Repo:** github.com/QubeTX/qube-machine-report
 **Local source of truth:** `C:\Users\hey\git\qube-machine-report` (Windows host where this work was authored)
 
@@ -146,6 +146,19 @@ After a fresh `git pull` and `cargo build --release`, you'll see (verified on Wi
   the cargo→installer fall-through is the safe place for the check. **Hardware test (user):** confirm
   on the Mac + Raspberry Pi that `tr300 update` from an older build either updates cleanly or reports
   an honest, actionable failure (no more silent "Updated to vX" no-op).
+- **Deferred security hardening (3 Codex PRs closed 2026-06-03).** Three Codex-authored security
+  PRs were closed in favor of the v3.16.0 stability pass because they touched overlapping files, but
+  they raise **distinct hardening angles** the stability pass did not target. Pick up as a dedicated
+  security PR if desired: (1) *temp-installer TOCTOU* (`src/update.rs`) — the MSI/EXE download uses a
+  predictable `%TEMP%\tr300-update-{version}.{msi,exe}` path; an attacker who can pre-create that
+  path (or a symlink at it) could influence what gets launched. Consider an unpredictable temp name
+  / `O_EXCL`-style create. (2) *GPU-helper subprocess path resolution* (collectors) — `lspci` etc.
+  are invoked by bare name, relying on `PATH`; consider absolute paths or PATH-sanitization for the
+  privileged/elevated case. (3) *markdown auto-save clobber* (`src/report.rs`) — the report is
+  written to a predictable `Downloads/tr300-report-<ts>.md` name; a pre-planted symlink there could
+  redirect the write. Consider `O_EXCL`/`O_NOFOLLOW`-style create. (v3.16.0 PR5/G1 added temp-file
+  *cleanup* and PR1/C3 reworked the save *error path*, but neither addressed these TOCTOU/symlink
+  vectors.)
 - ~~**PR #2** — macOS accuracy~~ — substantially shipped in v3.14.0 for the low-risk, verifiable paths on the current Mac: CPU brand/frequency fallback, Rosetta arch label, scutil hostname/IP, AppleLocale precedence, P/E core split, machine model row, full-mode battery health, and `vm_stat` fallback.
 - ~~**PR #3** — Linux accuracy~~ — substantially shipped in v3.14.0 with fixture coverage and CI validation: systemd-resolved DNS priority, aarch64 CPU fallback, locale precedence, power_supply battery iteration + health, `ip route get ... src`, terminal env priority + single `ps` fallback, WSL/container/VM detection, ZFS health, and elevated `dmidecode` rows.
 - **PR #5 leftovers (task #58)** — E.6 admin-only RDP login history via Security Event 4624 XML parsing. Deferred because it needs elevated-shell validation on Windows. C.13 batched-PowerShell fallback is shipped in v3.14.0.

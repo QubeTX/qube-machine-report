@@ -136,7 +136,7 @@ skill didn't trigger. Deep rationale for every rule: [`docs/architecture-decisio
 
 | If you're editing… | Load skill | Load-bearing tripwires (full rules in the skill) |
 |---|---|---|
-| `src/install/**` (alias / rc-file, exec-policy, uninstall) | `windows-install` | `atomic_write` never `std::fs::write`; `check_marker_balance` before any mutation; exec-policy preflight before `$PROFILE`; `fail_install` for fs errors |
+| `src/install/**` (alias / rc-file, exec-policy, uninstall) | `windows-install` | `atomic_write` never `std::fs::write` (and resolves a symlinked rc target so the link survives, E3); `check_marker_balance` before any mutation; exec-policy preflight before `$PROFILE`; `fail_install` for fs errors |
 | `src/collectors/platform/windows.rs` (any Windows field) | `windows-accuracy` | WMI on a fresh worker thread (COM init); PSCore version by `(u64,u64,u64)` tuple, not string sort; Win11 = `CurrentBuild >= 22000`; no `net user` for last-login |
 | `wix/**`, `wix-corporate/**`, `inno/**`, `windows-installers.yml`, `release.yml`, `src/update.rs` | `windows-distribution-and-update` | the four product GUIDs are PERMANENT; registry `InstallSource` marker strings in lockstep (installer / `update.rs` / JSON); keep SHA256 + post-install verify; don't hand-edit auto-generated `release.yml` |
 | `CHANGELOG.md`, `HUMAN_CHANGELOG.md` | `tr300-changelog` | update both in the **same commit** (strip technical noise from the human mirror) |
@@ -165,7 +165,7 @@ These three are the most frequently touched; their full rules are in the matchin
 **`windows-distribution-and-update`** — installers + self-update (`wix/`, `wix-corporate/`, `inno/`, `windows-installers.yml`, `src/update.rs`):
 - Four first-class installers per release (Global / Corporate × MSI / EXE). **The four product GUIDs are PERMANENT** — regenerating breaks in-place upgrades. Corporate MSI source lives at `wix-corporate/` (not `wix/`) and is built by bare `candle`+`light` in `windows-installers.yml`; `release.yml` is cargo-dist-generated (don't hand-edit outside the allow-dirty zone).
 - `HKCU\Software\TR300\InstallSource` marker (`msi-global` / `msi-corporate` / `exe-global` / `exe-corporate`) is the authoritative updater discriminator; `classify_install_path()` is legacy fallback only. Marker strings stay in lockstep across installer template / `src/update.rs` / JSON output.
-- Self-update: `cargo install` first on macOS/Linux (+ best-effort `rustup update stable`); registry-driven MSI/EXE strategies on Windows; **SHA256 sidecar verify + post-install `--version` check are load-bearing** (msiexec exit 0 ≠ binary replaced); `is_newer` is semver-prerelease-aware.
+- Self-update: `cargo install` first on macOS/Linux (+ best-effort `rustup update stable`); registry-driven MSI/EXE strategies on Windows; **SHA256 sidecar verify + post-install `--version` check are load-bearing** (msiexec exit 0 ≠ binary replaced); the **cargo path also verifies the new version landed and falls through to the prebuilt installer on a crates.io lag** (v3.16.0, U1); `is_newer` is semver-prerelease-aware.
 
 ## Output & Runtime Contracts
 

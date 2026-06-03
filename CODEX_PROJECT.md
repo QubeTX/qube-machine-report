@@ -25,7 +25,7 @@ already-installed binaries.
 - Cargo package: `tr300`
 - Binary: `tr300`
 - Library import path: `tr300`
-- Current version: `3.15.0`
+- Current version: `3.16.0`
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
 - Primary guide: `AGENTS.md`
 - Companion docs: `CLAUDE.md`, `MASTER_PLAN.md`, `TESTING.md`, `docs/architecture-decisions.md`

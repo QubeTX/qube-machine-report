@@ -13,11 +13,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-06-03
+
 > A stability and cross-platform cleanup pass. A fresh top-to-bottom review of
 > the whole program turned up a handful of correctness, robustness, and
 > packaging issues across every system TR-300 runs on (Windows, Mac, and Linux,
-> on both Apple/ARM and Intel chips). The Mac- and Raspberry-Pi-specific fixes
-> get a final check on that hardware once the work is live.
+> on both Apple/ARM and Intel chips), plus a focused look at why "update"
+> sometimes didn't work. The Mac- and Raspberry-Pi-specific fixes get a final
+> check on that hardware now that the work is live.
 
 ### Added
 - **Windows now shows your computer's model** (like "Alienware m16 R2") in the
