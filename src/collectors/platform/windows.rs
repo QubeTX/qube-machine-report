@@ -39,7 +39,14 @@ const WMI_BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10
 /// virtualization, GPU list, battery. Each field carries the raw WMI
 /// answer (or `None` / `Vec::new()` when that specific query was skipped
 /// because a cheaper main-thread probe already succeeded).
-type WmiBatchResult = (Option<String>, Option<String>, Vec<String>, Option<String>);
+// (edition, virtualization, gpus, battery, machine_model)
+type WmiBatchResult = (
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+    Option<String>,
+);
 
 fn with_timeout<F, T>(budget: std::time::Duration, f: F) -> Option<T>
 where
@@ -186,11 +193,12 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             } else {
                 None
             },
+            get_machine_model_wmi(&wmi),
         ))
     });
 
-    let (windows_edition, virtualization, gpus, battery) =
-        if let Some((edition_wmi, virt_wmi, gpus_wmi, battery_wmi)) = wmi_results {
+    let (windows_edition, virtualization, gpus, battery, machine_model) =
+        if let Some((edition_wmi, virt_wmi, gpus_wmi, battery_wmi, model_wmi)) = wmi_results {
             let edition = edition_wmi.or_else(get_windows_edition_ps);
             let virt = virt_wmi.or_else(detect_virtualization_ps);
             let gpu_list = {
@@ -204,25 +212,32 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
                 filter_software_gpus(gpus)
             };
             let bat = battery_native.or(battery_wmi).or_else(get_battery_ps);
-            (edition, virt, gpu_list, bat)
+            (edition, virt, gpu_list, bat, model_wmi)
         } else {
             // WMI worker thread failed entirely (COM init error) or timed out —
             // fall back to PowerShell for everything WMI would have provided.
             // gpus_fast and battery_native are already-computed main-thread
             // probes; reuse them when they succeeded rather than re-running.
             let fallback = get_batched_powershell_fallback();
-            let gpus = if !gpus_fast.is_empty() {
+            // D1: filter software adapters here too — the success branch already
+            // does, but get_gpus_ps()/the PS fallback can surface "Microsoft
+            // Basic Render Driver" etc. (gpus_fast is registry-sourced and
+            // already clean, so filtering it again is a harmless no-op.)
+            let gpus = filter_software_gpus(if !gpus_fast.is_empty() {
                 gpus_fast
             } else if fallback.gpus.is_empty() {
                 get_gpus_ps()
             } else {
                 fallback.gpus
-            };
+            });
             (
                 fallback.windows_edition.or_else(get_windows_edition_ps),
                 fallback.virtualization.or_else(detect_virtualization_ps),
                 gpus,
                 battery_native.or(fallback.battery).or_else(get_battery_ps),
+                // machine_model isn't part of the PowerShell fallback batch; the
+                // additive nullable key is simply absent on this rare path.
+                None,
             )
         };
 
@@ -235,7 +250,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         macos_codename: None,
         gpus,
         architecture: get_architecture(),
-        machine_model: None,
+        machine_model,
         cpu_core_topology: None,
         terminal: get_terminal(),
         shell: get_shell(),
@@ -439,6 +454,53 @@ fn detect_virtualization_wmi(wmi: &WMIConnection) -> Option<String> {
     }
 
     None
+}
+
+/// Machine model from `Win32_ComputerSystem` (manufacturer + model), for parity
+/// with the macOS (`hw.model`) and Linux (DMI product name) `MODEL` rows.
+///
+/// A separate query from `detect_virtualization_wmi` so that function's VBS
+/// disambiguation stays untouched. Runs inside the same WMI worker thread.
+fn get_machine_model_wmi(wmi: &WMIConnection) -> Option<String> {
+    let results: Vec<Win32ComputerSystem> = wmi.query().ok()?;
+    let cs = results.into_iter().next()?;
+    compose_machine_model(cs.manufacturer.as_deref(), cs.model.as_deref())
+}
+
+/// Compose a human machine-model string from DMI manufacturer + model.
+///
+/// Trims whitespace, drops empty / known-placeholder OEM values ("To Be Filled
+/// By O.E.M.", "System manufacturer", etc.), and avoids "Dell Inc. Dell XPS"
+/// duplication when the model already begins with the manufacturer. Pure +
+/// testable.
+fn compose_machine_model(manufacturer: Option<&str>, model: Option<&str>) -> Option<String> {
+    fn is_junk(s: &str) -> bool {
+        let l = s.to_ascii_lowercase();
+        s.is_empty()
+            || l.contains("to be filled")
+            || l.contains("system manufacturer")
+            || l.contains("system product")
+            || l == "default string"
+            || l == "none"
+            || l == "o.e.m."
+    }
+    let mfr = manufacturer.map(str::trim).filter(|s| !is_junk(s));
+    let mdl = model.map(str::trim).filter(|s| !is_junk(s));
+    match (mfr, mdl) {
+        (Some(mfr), Some(mdl)) => {
+            if mdl
+                .to_ascii_lowercase()
+                .starts_with(&mfr.to_ascii_lowercase())
+            {
+                Some(mdl.to_string())
+            } else {
+                Some(format!("{} {}", mfr, mdl))
+            }
+        }
+        (None, Some(mdl)) => Some(mdl.to_string()),
+        (Some(mfr), None) => Some(mfr.to_string()),
+        (None, None) => None,
+    }
 }
 
 /// Detect hypervisor brand via CPUID leaf 0x40000000.
@@ -712,13 +774,15 @@ fn socket_count_wmi_inner() -> usize {
         return c;
     }
 
-    // Fallback: PowerShell
+    // Fallback: PowerShell. Wrap in @(...) so a single-processor machine — where
+    // Get-CimInstance returns a scalar with no .Count member on older PowerShell
+    // — still yields 1 rather than an empty string that fails to parse.
     if let Some(stdout) = run_stdout(
         "powershell",
         [
             "-NoProfile",
             "-Command",
-            "(Get-CimInstance Win32_Processor).Count",
+            "@(Get-CimInstance Win32_Processor).Count",
         ],
         CommandTimeout::Slow,
     ) {
@@ -932,7 +996,12 @@ fn detect_boot_mode() -> Option<String> {
         if info.contains("winload.efi") {
             return Some("UEFI".to_string());
         }
-        return Some("Legacy BIOS".to_string());
+        if info.contains("winload.exe") {
+            return Some("Legacy BIOS".to_string());
+        }
+        // bcdedit succeeded but named no recognizable loader (locale/format
+        // variance, or {current} unresolved) — don't positively claim Legacy.
+        return None;
     }
     None
 }
@@ -1077,9 +1146,11 @@ fn get_shell() -> Option<String> {
 
     // C.11 (v3.13.0+): check PowerShell 7+ ("PowerShell Core") first. PSCore
     // installs register under HKLM\SOFTWARE\Microsoft\PowerShellCore\
-    // InstalledVersions\<GUID>\SemanticVersion. We pick the highest version
-    // string found (string compare works for 3-tuple semver). Falls back to
-    // legacy Windows PowerShell 5.x detection below if no PSCore subkey.
+    // InstalledVersions\<GUID>\SemanticVersion. We pick the highest version by
+    // parsing each into a (major, minor, patch) tuple and comparing
+    // numerically — a plain string compare would rank "7.9.0" above "7.10.0".
+    // Falls back to legacy Windows PowerShell 5.x detection below if no PSCore
+    // subkey.
     if let Some(v) = get_powershell_core_version() {
         return Some(format!("PowerShell {}", v));
     }
@@ -1670,6 +1741,31 @@ mod powershell_fallback_tests {
             vec!["Intel Arc Graphics".to_string(), "NVIDIA RTX".to_string()]
         );
         assert_eq!(parsed.battery.as_deref(), Some("87% (AC Power)"));
+    }
+
+    #[test]
+    fn compose_machine_model_dedups_and_filters_junk() {
+        // Manufacturer + model, no duplication.
+        assert_eq!(
+            compose_machine_model(Some("Dell Inc."), Some("XPS 15 9520")),
+            Some("Dell Inc. XPS 15 9520".to_string())
+        );
+        // Model already starts with the manufacturer — don't double it.
+        assert_eq!(
+            compose_machine_model(Some("ASUS"), Some("ASUS ROG Zephyrus")),
+            Some("ASUS ROG Zephyrus".to_string())
+        );
+        // Placeholder OEM junk is dropped entirely.
+        assert_eq!(
+            compose_machine_model(Some("System manufacturer"), Some("To Be Filled By O.E.M.")),
+            None
+        );
+        // Only one side present, and whitespace-only is treated as absent.
+        assert_eq!(
+            compose_machine_model(None, Some("Surface Laptop 5")),
+            Some("Surface Laptop 5".to_string())
+        );
+        assert_eq!(compose_machine_model(Some(""), Some("   ")), None);
     }
 
     #[test]
