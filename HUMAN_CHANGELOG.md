@@ -59,6 +59,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   leaves that line off instead of guessing "Legacy" and possibly being wrong.
 - **Single-processor Windows PCs now count their CPU correctly** in an
   older-PowerShell fallback path.
+- **Laptop battery "health" on Linux is more accurate.** TR-300 now compares
+  like-for-like battery measurements when estimating wear, avoiding a nonsense
+  percentage on machines that report their battery data in mixed formats.
+- **Linux graphics detection is more precise.** An audio chip that happens to
+  have "Display" in its name is no longer mistaken for a graphics card.
+- **Storage-pool (ZFS) health warnings are ranked more sensibly on Linux.** A
+  fully stalled pool is now treated as the most serious state, and an unfamiliar
+  status is no longer reported as if it were a specific "degraded" warning.
 
 ### Internal
 - Tightened the automated test pipeline so it builds against the exact same
