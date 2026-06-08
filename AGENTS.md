@@ -467,6 +467,7 @@ Behavior:
   - **Other origins (`CargoOrInstaller` / `Unknown` on Windows, or non-Windows):** legacy probe-and-retry chain — `cargo install tr300 --force` first when `cargo --version` succeeds, macOS/Linux fallback to cargo-dist shell installer through `curl` then `wget`, Windows fallback to cargo-dist PowerShell installer through `powershell` then `pwsh`.
 - runs `rustup update stable` best-effort before the cargo strategy when rustup is available
 - records skipped/failed strategy attempts and falls through until one strategy succeeds (only on the legacy chain — MSI/EXE strategies don't cross-fall-back)
+- **Cross-method consolidation (`tr300 migrate-cleanup`, v3.17.0+, `src/migrate.rs`):** hidden `#[value(hide=true)]` `Action::MigrateCleanup` + hidden flags. The four installers invoke it (interactive checkboxes + silent self-update, both default ON) to keep one install at a time — removes a shadowing `~\.cargo\bin` copy and/or the other edition. Only deletes `tr300.exe` (allowlist); never cargo/rustup/PATH/`~/Downloads`/the running install; needs-admin → skip, exit 0; advisory (never fails an install). Reuses `detect_install_origin`/`InstallOrigin` (`pub(crate)`). WiX: deferred `Impersonate='yes'` `FileKey` CA (no `WixUtilExtension`). Inno Global EXE omits `--user-profile` (no reliable pre-elevation constant) → process-env fallback. Edition paths/marker strings are in the windows-distribution lockstep.
 
 JSON mode:
 - `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json`

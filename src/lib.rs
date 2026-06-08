@@ -25,6 +25,7 @@ pub mod collectors;
 pub mod config;
 pub mod error;
 pub mod install;
+pub mod migrate;
 pub mod render;
 pub mod report;
 pub mod update;

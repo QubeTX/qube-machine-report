@@ -62,9 +62,18 @@ ChangesEnvironment=yes
 UninstallDisplayName={#MyAppFullName}
 LicenseFile=..\LICENSE
 SetupLogging=yes
+; Cross-method consolidation (v3.17.0+) - see inno/global.iss for rationale.
+AppMutex=TR300_Running
+CloseApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+; Both default-checked (one install at a time). Under /SILENT the default-checked
+; tasks fire automatically, so the silent self-update path runs both cleanups.
+Name: "cleancargo"; Description: "Remove an older Cargo-installed copy of tr300 (recommended - keeps one version on PATH)"; GroupDescription: "Consolidate installs:"
+Name: "cleanotheredition"; Description: "Remove the other edition (Global per-machine) if present (recommended - one edition at a time)"; GroupDescription: "Consolidate installs:"
 
 [Files]
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion
@@ -75,6 +84,18 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignore
 ; must match the `exe-corporate` arm in src/update.rs.
 Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSource"; ValueData: "exe-corporate"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\TR300"; Flags: uninsdeletekeyifempty
+
+[Run]
+; Post-install consolidation. Deletion logic lives in the binary
+; (`tr300 migrate-cleanup`) - it only ever removes tr300.exe, never cargo/rustup,
+; the Cargo bin PATH entry, the running install, or anything else; always exits 0.
+; perUser Corporate EXE runs AS THE USER (no UAC), so the process environment
+; already points at the right Cargo bin and LocalAppData - no user-profile override
+; needed. The "other edition" here is the Global per-machine copy in Program Files;
+; a perUser process can't delete it, so migrate-cleanup reports "needs admin" and
+; exits 0 (graceful skip).
+Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --cargo-copy"; Flags: runhidden waituntilterminated; Tasks: cleancargo; StatusMsg: "Removing older Cargo-installed copy..."
+Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
 
 [Code]
 {

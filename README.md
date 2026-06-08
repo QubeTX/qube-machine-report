@@ -257,7 +257,18 @@ tr300 --update
 ```
 
 `tr300 update` detects how this binary was installed and downloads the matching
-installer for an **in-place upgrade** — no manual download required.
+installer for an **in-place upgrade** — no manual download required. The update
+**preserves your edition and its permissions**: a Corporate (per-user) install
+updates as Corporate (same `%LocalAppData%\Programs\tr300` location, user PATH, no
+admin prompt), and a Global install updates as Global (Program Files, system PATH,
+UAC) — it never silently switches your install style or location.
+
+**Single install at a time (v3.17.0+):** the Windows installers — and silent
+self-updates — consolidate to one version/edition: they remove an older
+`cargo install` copy and/or the *other* edition if present (two checkboxes, both on
+by default; untick to keep). The cleanup only ever removes `tr300` itself — never
+your Rust toolchain, your Downloads, or the running copy — and can never cause an
+install or update to fail.
 
 **On Windows (v3.15.0+):**
 

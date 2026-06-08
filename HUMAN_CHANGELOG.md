@@ -13,6 +13,37 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-06-08
+
+> One copy of TR-300, not several. On Windows you could previously end up with more
+> than one copy installed at once — an older one from the Rust package manager
+> sitting alongside a newer one from an installer, or both the "for everyone on this
+> computer" and the "just for me" editions side by side, with the wrong one quietly
+> winning. From now on the goal is one version, one edition at a time. (This brings
+> TR-300 in line with the same feature already in ND-300.)
+
+### Added
+- The Windows installers now offer two tidy-up options, both on by default: remove
+  an older leftover copy installed through the Rust package manager, and remove the
+  other edition if it's also installed. You can untick either during a normal
+  install. The cleanup is careful by design — it only ever removes TR-300's own
+  program, never your Rust toolchain (or anything else in that folder), never your
+  Downloads, and never the copy you're currently running. If removing the other
+  edition would need administrator rights you don't have, it skips that part and
+  tells you instead of failing. This same tidy-up also runs automatically during a
+  silent background update, so a routine update quietly consolidates you down to a
+  single, current install. It can never cause an install or update to fail — it's
+  strictly a helpful extra.
+- Updating keeps you on the same edition you chose: a "just for me" install updates
+  as a "just for me" install (in the same per-user location, no admin prompt), and a
+  "for everyone" install updates the same way — it never silently switches your
+  install style or where it lives.
+
+### Behind the scenes
+- Reuses TR-300's existing, already-tested "remove an install" machinery rather than
+  new deletion code, and mirrors ND-300's design exactly. macOS and Linux didn't
+  need any of this — an update there simply overwrites the single existing copy.
+
 ## [3.16.0] - 2026-06-03
 
 > A stability and cross-platform cleanup pass. A fresh top-to-bottom review of
