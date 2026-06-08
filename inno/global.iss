@@ -67,9 +67,23 @@ UninstallDisplayName={#MyAppName}
 LicenseFile=..\LICENSE
 ; Allow uninstaller to remove its own metadata.
 SetupLogging=yes
+; Cross-method consolidation (v3.17.0+): close any running tr300 before we replace
+; files so the in-place upgrade isn't blocked. CloseApplications uses Windows'
+; Restart Manager; AppMutex lets Setup detect a running instance. (tr300 is a
+; short-lived CLI tool, so this is almost always a no-op.)
+AppMutex=TR300_Running
+CloseApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+; Cross-method consolidation (v3.17.0+). BOTH default-checked (operator policy:
+; one install at a time). Under /SILENT, default-checked tasks fire automatically,
+; so the silent self-update path runs both cleanups with no /MERGETASKS
+; suppression. The user can untick either in the interactive wizard.
+Name: "cleancargo"; Description: "Remove an older Cargo-installed copy of tr300 (recommended - keeps one version on PATH)"; GroupDescription: "Consolidate installs:"
+Name: "cleanotheredition"; Description: "Remove the other edition (Corporate per-user) if present (recommended - one edition at a time)"; GroupDescription: "Consolidate installs:"
 
 [Files]
 ; Bundles tr300.exe from target/release/. The CI workflow runs cargo build
@@ -82,6 +96,24 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignore
 ; must match the `exe-global` arm in src/update.rs.
 Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSource"; ValueData: "exe-global"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\TR300"; Flags: uninsdeletekeyifempty
+
+[Run]
+; Post-install consolidation. The deletion logic lives in the binary
+; (`tr300 migrate-cleanup`), which only ever removes tr300.exe, never cargo/rustup,
+; never the Cargo bin PATH entry, never the running install, and always exits 0
+; (advisory - never fails the install).
+;
+; perMachine Global EXE runs ELEVATED. Inno has no reliable constant for the
+; pre-elevation (invoking) user's profile, so we do NOT pass a user-profile
+; override here: migrate-cleanup falls back to the process environment (CARGO_HOME,
+; then USERPROFILE / LocalAppData), correct when an admin elevates their own
+; session and fail-safe otherwise (a harmless no-op). The perMachine MSI resolves
+; the right user via an Impersonate='yes' custom action.
+;
+; runhidden + waituntilterminated keeps the wizard clean and ordered; nowait is
+; deliberately NOT used so cleanup finishes before Setup reports done.
+Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --cargo-copy"; Flags: runhidden waituntilterminated; Tasks: cleancargo; StatusMsg: "Removing older Cargo-installed copy..."
+Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
 
 [Code]
 {

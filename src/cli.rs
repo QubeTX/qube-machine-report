@@ -15,6 +15,14 @@ pub enum Action {
     Update,
     Install,
     Uninstall,
+    /// Cross-method install cleanup. HIDDEN — invoked by the Windows installers
+    /// (and the silent self-update path) to consolidate to a single install:
+    /// remove a shadowing older `cargo install` copy and/or the other Windows
+    /// edition. Safe anywhere: never deletes the running install, cargo/rustup,
+    /// the `.cargo\bin` PATH entry, or anything outside the `tr300` allowlist,
+    /// and always exits 0 (cleanup is advisory). Parses as `migrate-cleanup`.
+    #[value(hide = true)]
+    MigrateCleanup,
 }
 
 /// TR-300: Cross-platform system information report
@@ -70,6 +78,35 @@ pub struct Cli {
     /// Suppress the "Run with sudo / Administrator for more details" footer hint
     #[arg(long)]
     pub no_elevation_hint: bool,
+
+    // ── Cross-method consolidation options (used only with the hidden
+    //    `migrate-cleanup` action; all hidden from help). `--json` reuses the
+    //    existing output flag above. Mirrors ND-300's `migrate-cleanup` flags. ──
+    /// Remove a shadowing older `cargo install` copy in `.cargo\bin`.
+    #[arg(long = "cargo-copy", hide = true)]
+    pub cargo_copy: bool,
+
+    /// Remove the OTHER Windows edition (Global perMachine <-> Corporate perUser).
+    #[arg(long = "other-edition", hide = true)]
+    pub other_edition: bool,
+
+    /// Suppress human output (installer invokes this non-interactively).
+    #[arg(long = "quiet", hide = true)]
+    pub quiet: bool,
+
+    /// Detect and report what WOULD be removed without deleting anything.
+    #[arg(long = "dry-run", hide = true)]
+    pub dry_run: bool,
+
+    /// The invoking user's profile dir, so a perMachine installer can resolve
+    /// that user's `.cargo` / `%LocalAppData%` when running as a different user.
+    #[arg(long = "user-profile", value_name = "PATH", hide = true)]
+    pub user_profile: Option<String>,
+
+    /// The invoking user's CARGO_HOME (takes precedence over `--user-profile`
+    /// for locating the cargo-bin directory).
+    #[arg(long = "cargo-home", value_name = "PATH", hide = true)]
+    pub cargo_home: Option<String>,
 }
 
 #[cfg(test)]

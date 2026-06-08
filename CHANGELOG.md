@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-06-08
+
+Cross-method install cleanup — consolidate to a single tr300 install (one version,
+one edition). Mirrors ND-300's `nd300 migrate-cleanup` (same flags, same JSON
+contract, same safety guarantees). Windows-only behavior; macOS/Linux already
+overwrite the single `~/.cargo/bin` copy and are unaffected.
+
+### Added
+- **Hidden `tr300 migrate-cleanup` subcommand** (`src/migrate.rs`; a
+  `#[value(hide = true)]` `Action::MigrateCleanup` variant + hidden option flags in
+  `src/cli.rs`). Detects and removes duplicate installs left by a *different* install
+  method:
+  - The shadowing older `cargo install` / cargo-dist copy in `~\.cargo\bin` (which
+    usually wins on PATH), and the *other* Windows edition (Global perMachine
+    `C:\Program Files\tr300\bin` ↔ Corporate perUser `%LocalAppData%\Programs\tr300\bin`).
+  - **Flags:** `--cargo-copy`, `--other-edition`, `--quiet`, `--dry-run`, `--json`,
+    `--user-profile <path>`, `--cargo-home <path>`. With no target flag, defaults to
+    `--cargo-copy` only.
+  - **Hard safety guarantees (unit-tested):** only ever deletes `tr300.exe` (allowlist);
+    never `cargo.exe`/`rustup.exe`/non-allowlisted files; never touches the `.cargo\bin`
+    PATH entry (it never edits PATH); never touches `~/Downloads`; never deletes the
+    running install (`same_path` guard); never escalates privileges (a target needing
+    admin we lack is reported `needs admin: <path>` and **continues** — exit 0).
+  - **Exit 0 on partial/empty/needs-admin** — consolidation is advisory and must never
+    fail an installer. Only a true internal error is nonzero. Reuses `update.rs`'s
+    `detect_install_origin`/`InstallOrigin` (now `pub(crate)`) to identify the running
+    edition.
+- **Installer consolidation UX on all four Windows installers; both options default ON,
+  so a SILENT install (the self-updater) consolidates too:**
+  - **WiX** (`wix/main.wxs` Global, `wix-corporate/corporate.wxs` Corporate):
+    `CLEANCARGO`/`CLEANOTHEREDITION` properties (default `1`, `Secure='yes'`) + a
+    `ConsolidateDlg` dialog (two pre-checked checkboxes between WelcomeDlg and
+    CustomizeDlg) + two **deferred, `Impersonate='yes'`, `Return='ignore'`** custom
+    actions (`FileKey='exe0'` + `ExeCommand`, so no `WixUtilExtension` is needed)
+    conditioned `NOT Installed AND CLEAN…="1"`. `Impersonate='yes'` makes the perMachine
+    MSI resolve the invoking user's `.cargo`/`%LocalAppData%`.
+  - **Inno** (`inno/global.iss`, `inno/corporate.iss`): two default-checked `[Tasks]`
+    + a `[Run]` postinstall calling `tr300 migrate-cleanup --quiet <flag>` (fires under
+    `/SILENT`), plus `AppMutex` + `CloseApplications`. The Global EXE does **not** pass
+    `--user-profile` (Inno has no reliable pre-elevation user-profile constant);
+    `migrate-cleanup` falls back to the process env (`CARGO_HOME`, then
+    `%USERPROFILE%`/`%LocalAppData%`) — correct for an admin self-elevating, fail-safe
+    otherwise.
+
+### Changed
+- `update.rs`: `InstallOrigin` and `detect_install_origin()` are now `pub(crate)` so the
+  new `migrate` module can reuse the marker/path edition detection.
+
 ## [3.16.0] - 2026-06-03
 
 > **Stability & cross-platform hardening pass.** A fresh three-agent audit of

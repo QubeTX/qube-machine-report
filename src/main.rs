@@ -44,6 +44,23 @@ fn main() -> Result<()> {
     let _cp_guard = enable_utf8_console();
 
     // Handle action commands (early exit)
+    if action == Some(Action::MigrateCleanup) {
+        // Hidden, installer-internal: consolidate to a single install. Advisory —
+        // never fails (exit 0 on partial/empty); only a true internal error is
+        // nonzero. Mirrors `nd300 migrate-cleanup`.
+        let opts = tr300::migrate::MigrateOptions {
+            cargo_copy: cli.cargo_copy,
+            other_edition: cli.other_edition,
+            quiet: cli.quiet,
+            dry_run: cli.dry_run,
+            json: cli.json,
+            user_profile: cli.user_profile.clone(),
+            cargo_home: cli.cargo_home.clone(),
+        };
+        let exit_code = tr300::migrate::run(&config, &opts);
+        std::process::exit(exit_code);
+    }
+
     if cli.update || action == Some(Action::Update) {
         let exit_code = update::run(&config);
         std::process::exit(exit_code);
