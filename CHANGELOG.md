@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **macOS completion checkpoint — 2026-07-14 01:45 CDT.** The manifest stays
+> at v3.17.0 for this default-branch checkpoint. The macOS implementation and
+> local validation are complete; live Windows/Alienware, AMD64 Linux, and
+> Raspberry Pi 4 validation remain explicit prerequisites for the later
+> v4.0.0 release and homepage update.
+
+### Added
+- **`--no-save` report option.** Full table runs can now suppress the automatic
+  Markdown file, which also keeps integration tests and scripted validation out
+  of the user's real Downloads folder. The generated man page and CLI tests
+  cover the option.
+- **More precise additive schema-v1 context.** JSON now includes
+  `collection_mode`; OS build/codename; physical and logical CPU counts;
+  frequency provenance; raw Unix load averages alongside normalized capacity;
+  root mount/filesystem; disk available bytes and value definitions; memory
+  available bytes, swap, and value definitions; display/boot details; and exact
+  uptime seconds. Existing keys and `schema_version: 1` remain intact.
+- **macOS full-mode facts.** One structured `system_profiler -json` snapshot now
+  supplies model, GPU, current logical/native display resolution, battery
+  health/capacity/cycles, actual Normal/Safe/Recovery boot state, and positive
+  virtualization evidence. FileVault status, OS build, current codenames,
+  terminal host, and Apple Silicon performance/efficiency topology are also
+  surfaced when available.
+
+### Changed
+- **The next release is v4.0.0 for Rust-library SemVer honesty.** The CLI,
+  existing JSON keys, and schema version remain compatible, but the public
+  `SystemInfo`, `Config`, and collector records gained fields and a small number
+  of public collector helpers changed signature. Code that constructs those
+  records directly or exhaustively matches them must be updated. Changed public
+  public data records and extensible enums are now `#[non_exhaustive]` so later
+  additive information or action variants do not require another major release.
+- **Report JSON is built as a typed `serde_json::Value`.** `serde_json` now owns
+  escaping, punctuation, optional values, and non-finite-number handling instead
+  of a hand-assembled format string, while preserving schema v1.
+- **Optional subprocesses are bounded end to end.** stdout and stderr are drained
+  concurrently, output is capped at 8 MiB, Unix process groups are terminated on
+  timeout, and Windows probes use a best-effort Job Object so verbose or hung
+  tools cannot deadlock the report.
+- **Disk and memory numbers now name their semantics.** Root-volume selection no
+  longer sums overlapping or unrelated filesystems. Disk used bytes mean
+  allocated blocks while available bytes mean capacity available to the caller.
+  macOS RAM uses Activity Monitor-compatible active + wired + compressed pages,
+  with availability derived as the exact complement.
+- **Updater downloads use private randomized staging directories** with bounded
+  response sizes and cleanup on every exit path. Checksum language now correctly
+  describes corruption/mismatch detection rather than independent authenticity.
+
+### Fixed
+- **macOS no longer reports zero available RAM while showing partial use.** The
+  prior sysinfo compressor accounting could produce contradictory values; used
+  and available now share one explicit definition and sum to total memory.
+- **Rosetta reports the host and process architecture honestly.** Full mode asks
+  the native arm64 `system_profiler` slice for model/display/battery facts and
+  labels the process `arm64 host / x86_64 (Rosetta 2)`. The translated 2.4 GHz
+  compatibility value is omitted instead of being presented as hardware data.
+- **macOS boot, battery, display, terminal, and login values are normalized.** An
+  Apple Silicon CPU is no longer mislabeled as a boot mode; offline displays and
+  duplicate GPUs are removed; raw `pmset` device prefixes are not shown; Codex,
+  Terminal, iTerm2, VS Code, Warp, WezTerm, and Ghostty hosts are recognized; and
+  `last` weekdays cannot be mistaken for remote addresses.
+- **Optional absence no longer becomes a false claim.** Missing virtualization
+  evidence stays unknown rather than `Bare Metal`; Windows no longer fabricates
+  1m/5m/15m load averages from one instantaneous sample; unknown physical cores
+  remain unknown; and sub-minute uptime retains seconds.
+
+### Security
+- Markdown report creation uses `create_new`, collision suffixes, and a
+  symlink-resistant flow so an existing path is never overwritten or followed.
+- Structured macOS parsing deliberately excludes serial numbers, hardware UUIDs,
+  and other unique device identifiers; native and Rosetta privacy assertions
+  verify those keys never enter report JSON.
+- `Cargo.lock` now resolves `crossbeam-epoch` 0.9.20, clearing
+  RUSTSEC-2026-0204; the full `cargo audit` gate passes.
+
+### Internal
+- macOS test/build/speed jobs and RustSec audit are blocking CI gates again; the
+  obsolete macOS `continue-on-error` exceptions have been removed.
+- Local macOS validation passes 115 library tests and 19 integration tests both
+  natively on Apple Silicon and under Rosetta. Release smokes passed on a MacBook
+  Pro M2 running macOS 26.3.1 (build 25D2128): native fast 0.21s, Rosetta fast
+  0.31s, full/fast table and JSON parity, ASCII locale fallback, FileVault and
+  battery parity, updater no-op, and zsh profile round-trip.
+- Windows code passes `cargo xwin clippy --all-targets --workspace -- -D warnings`,
+  but its live collector/installer checks are intentionally deferred to the
+  Alienware. Linux AMD64 and Raspberry Pi 4 checks are likewise still pending;
+  no v4.0.0 tag or deployment claim is made by this checkpoint.
+
 ## [3.17.0] - 2026-06-08
 
 Cross-method install cleanup — consolidate to a single tr300 install (one version,

@@ -8,15 +8,40 @@ Companion docs:
 - [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — long-form rationale for major decisions (MSRV / `rust-toolchain.toml`, auto-rustup self-update, Intel macOS CI coverage policy, Windows accuracy patterns by version). Open this when you're about to undo or revise an existing decision and need the original reasoning + rejected alternatives.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
+- [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — exact Mac checkpoint and Alienware continuation.
 
-Last verified against source: 2026-06-03
+Last verified against source: 2026-07-14
+
+## Task management system
+
+This repo uses the SHAUGHV `tasks-*` system locally. The board source of truth is
+`.tasks/TASKS.md`; milestones live in `.tasks/MILESTONES.md`, and tasks join one with an
+`(ms #id)` tag. Each task's handoff lives at `.tasks/tasks/<id>.md`; keep its `## Status`,
+`## Activity`, and `## Verification` current while work is active.
+
+Use indented checkbox subtasks for small required steps visible in the dashboard, with
+indented description lines when needed. Keep reasoning, implementation sequence, impact,
+acceptance, and resume context in the parent detail file. Large dependent work is a separate
+top-level task linked with `(needs #id)`. A task cannot complete over unchecked subtasks or
+open verification items, and a milestone cannot complete over open child tasks.
+
+Never put secrets in board or memory files; use environment variables, the OS keychain, or
+`.tasks/secure/`, which is gitignored. Resolve the live board from
+`.tasks/.board-server.json` and verify its root rather than assuming a port. Relevant skills:
+`tasks-start`, `tasks-create`, `tasks-management`, `tasks-update`, `tasks-memory`,
+`tasks-boards`, and `tasks-remove`.
 
 ## Project Snapshot
 
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current version: `3.16.0` (`Cargo.toml`)
+- Current published and manifest version: `3.17.0` (`Cargo.toml`); the default
+  branch contains an unreleased Mac-complete hardening checkpoint for planned
+  v4.0.0, with Windows/Linux hardware validation deliberately deferred. The
+  major boundary is required because public Rust records gained fields and
+  collector helpers changed signature; the CLI and additive schema-v1 JSON stay
+  compatible. Changed public records are now `#[non_exhaustive]`.
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -29,6 +54,15 @@ The crate exposes both:
 - a library in `src/lib.rs`, including `generate_report()`, `generate_report_with_config()`, `format_bytes()`, `CollectMode`, `SystemInfo`, `Config`, `AppError`, and `Result`
 
 Keep both surfaces working when refactoring.
+
+For v4 migration notes, distinguish Rust source compatibility from CLI/JSON
+compatibility. Direct external struct literals or exhaustive patterns over
+the crate's public collector/config/CLI/error records and enums must adapt to
+non-exhaustive types; the high-level collection/report APIs and existing JSON
+keys remain available. The exact v4 boundary includes `Action`, `Cli`,
+`CollectMode`, `CommandTimeout`, all public collector information records,
+`Config`, `OutputFormat`, `BoxChars`, `AppError`, `UninstallOption`,
+`MigrateOptions`, and `MarkdownSaveOutcome`.
 
 ## Repository Map
 
@@ -43,6 +77,7 @@ Keep both surfaces working when refactoring.
   windows-installers.yml      # hand-authored; builds Corporate MSI + both Inno Setup EXEs after release.yml (v3.15.0+)
 
 docs/
+  agents/handoff/              # tracked cross-machine continuation records
   architecture-decisions.md   # long-form rationale for MSRV policy, Windows accuracy patterns, etc.
 
 rust-toolchain.toml           # rustup pin (channel = "1.95", rustfmt + clippy components) — see "Toolchain pinning"
@@ -58,6 +93,7 @@ src/
   error.rs                    # AppError + Result alias
   report.rs                   # table/JSON/markdown report generation
   update.rs                   # self-update flow
+  migrate.rs                  # hidden Windows cross-install cleanup action
   render/
     mod.rs
     table.rs                  # fixed-width table renderer
@@ -79,6 +115,7 @@ src/
   install/
     mod.rs
     prompt.rs                 # interactive uninstall menu/confirm
+    shared.rs                 # marker parsing, atomic write, backup helpers
     unix.rs                   # bash/zsh profile edits
     windows.rs                # PowerShell profile edits
 
@@ -110,7 +147,7 @@ README.md                     # user-facing docs
 1. Parse CLI args from `src/cli.rs` with `clap`.
 2. Build `Config` up front so action commands can honor output/color settings.
 3. Apply `--ascii` or automatic ASCII fallback when Unix locale is not UTF-8.
-4. Apply `--json`, `--no-color`, and custom `--title`.
+4. Apply `--json`, `--no-color`, `--no-elevation-hint`, and custom `--title`.
 5. On Windows terminals, set console output code page to UTF-8.
 6. Handle action flags or positional actions with early exit:
    - `--update`
@@ -125,7 +162,9 @@ README.md                     # user-facing docs
 8. Collect system data with `SystemInfo::collect_with_mode(mode)`.
 9. Render output with `report::generate(...)`.
 10. Print to stdout.
-11. In full table mode only, auto-save a markdown report to Downloads and print the path or warning to stderr.
+11. In full table mode only, auto-save a collision-safe Markdown report to the
+    OS Downloads directory unless `--no-save` was supplied, then print the path
+    or warning to stderr.
 
 Important ordering rule:
 - Do not print Unicode box-drawing characters before `is_utf8_locale()` and Windows UTF-8 setup have run.
@@ -147,6 +186,8 @@ Current supported flags:
 - `-t, --title <TITLE>` -> custom title
 - `--no-color` -> disables update-flow ANSI styling
 - `--fast` -> skip slow collectors for quick auto-run startup
+- `--no-save` -> suppress automatic Markdown persistence after a full table run
+- `--no-elevation-hint` -> suppress the optional Linux elevation footer
 
 Current supported positional actions:
 - `update` -> self-update from GitHub releases
@@ -162,9 +203,9 @@ actions such as `tr300 update --install`.
 `SystemInfo::collect_with_mode(mode)` runs collectors in parallel with `std::thread::scope`.
 
 The scoped collector threads are:
-- `os::collect()`
+- `os::collect(mode)`
 - `cpu::collect(mode)`
-- `memory::collect()`
+- `memory::collect_with_mode(mode)`
 - `disk::collect()`
 - `network::collect_network_info(mode)`
 - `session::collect(mode)`
@@ -175,11 +216,13 @@ Thread panic behavior:
 - Platform collector panics fall back to `PlatformInfo::default()`.
 
 After collection it:
-- Aggregates disk usage by preferring root `/` or `C:` volume, then non-removable disk sum, then first-disk fallback.
-- Computes disk and memory percentages.
-- Derives hypervisor string from platform virtualization.
-- Uses `Bare Metal` as the full-mode fallback when no virtualization signal exists.
-- Leaves hypervisor as `None` in fast mode when not cheaply known.
+- Selects one root/system volume (`/` or normalized Windows system drive), then
+  the largest fixed volume, then a removable volume only when no fixed volume
+  exists. It never sums potentially overlapping or unrelated mounts.
+- Computes disk percent from allocated blocks and memory percent from each
+  platform's explicitly named used-memory definition.
+- Preserves virtualization as optional positive evidence. Absence stays `None`;
+  it is not converted to `Bare Metal`.
 - Builds final `SystemInfo` with the collection mode stored in `mode`.
 
 ### Fast mode (`CollectMode::Fast`)
@@ -191,8 +234,10 @@ Install profile auto-run uses `tr300 --fast`; the `report` alias still runs full
 ### Rendering flow (`src/report.rs`)
 
 - `Config::format == OutputFormat::Table`: render fixed-width terminal table.
-- `Config::format == OutputFormat::Json`: render manually formatted JSON.
-- Full table mode auto-save calls `save_markdown_report(info)`.
+- `Config::format == OutputFormat::Json`: build a typed `serde_json::Value` and
+  serialize it once.
+- Full table mode auto-save calls `save_markdown_report(info)` unless the CLI
+  supplied `--no-save`.
 
 Table rendering is fixed width:
 - Label column: 12 chars
@@ -214,15 +259,17 @@ Rendered order:
    - top divider
 2. OS section
    - `OS`
+   - optional `EDITION`, `CODENAME`, `BUILD`
    - `KERNEL`
    - `ARCH`
    - optional `MODEL`
    - optional `BOARD`
    - optional `BIOS`
+   - optional `BOOT MODE`, `DESKTOP`, `SESSION`, `DISPLAY`
 3. Network section
    - `HOSTNAME`
-   - optional `MACHINE IP`
-   - `CLIENT  IP` (`Not connected` if none)
+   - optional `DEFAULT IP`
+   - `SSH CLIENT` (`Not an SSH session` if none)
    - `DNS  IP 1..5` rows
    - `USER`
 4. CPU section
@@ -234,21 +281,25 @@ Rendered order:
      - 2-3 GPUs: `GPU 1`, `GPU 2`, `GPU 3`
      - 4+ GPUs: single `GPUs` row
    - optional `HYPERVISOR`
-   - `CPU FREQ`
-   - `LOAD  1m`, `LOAD  5m`, `LOAD 15m` bars when available
+   - optional `MAX FREQ` or `REPORTED FREQ`
+   - optional `CPU USAGE`
+   - `LOAD/CPU 1m`, `LOAD/CPU 5m`, `LOAD/CPU 15m` bars when available
 5. Disk section
    - `VOLUME`
    - `DISK USAGE` bar
    - `ZFS HEALTH` only when available
 6. Memory section
    - `MEMORY`
+   - `AVAILABLE`
+   - optional `SWAP`
    - optional `RAM SLOTS`
    - `USAGE` bar
 7. Session section
    - optional `LAST LOGIN`
-   - optional extra row with blank label for `last_login_ip`
+   - optional `LOGIN ORIGIN`
    - `UPTIME`
-   - optional rows: `SHELL`, `TERMINAL`, `LOCALE`, `BATTERY`
+   - optional rows: `LOGIN SHELL`, `TERMINAL`, `LOCALE`, `BATTERY`,
+     `BAT HEALTH`, `ENCRYPTION`
 8. Footer
 
 Renderer behavior:
@@ -265,6 +316,7 @@ Bar behavior (`src/render/bar.rs`):
 
 Top-level keys:
 - `schema_version`
+- `collection_mode`
 - `elevated`
 - `elevation_unlocks_more`
 - `system`
@@ -276,13 +328,23 @@ Top-level keys:
 - `session`
 
 Important implementation details:
-- JSON is manually formatted with `format!`, not serde serialization.
-- `escape_json(...)` must escape control characters `0x00..0x1F` as `\u00xx`.
+- JSON is assembled through `serde_json::json!`; do not reintroduce manual
+  punctuation/escaping. The compatibility `escape_json(...)` helper delegates
+  to `serde_json` and is test-only in normal builds.
 - Optional values are emitted as string literals or `null`.
 - `--update --json` is a separate JSON shape implemented in `src/update.rs`.
-- Additive nullable keys currently include `system.motherboard`,
-  `system.bios`, `os.machine_model`, `cpu.core_topology`, and
-  `memory.ram_slots`.
+- Existing `cpu.cores` remains the logical processor count for compatibility;
+  `cpu.logical_processors` and `cpu.physical_cores` make the distinction explicit.
+- Normalized `cpu.load_*` values mean percent of logical CPU capacity. Unix-only
+  `cpu.load_raw_*` values mean runnable-queue average; Windows leaves both sets
+  absent when it cannot establish time-windowed loads.
+- `disk.used_definition`, `disk.available_definition`,
+  `memory.usage_definition`, and `memory.availability_definition` are part of
+  the accuracy contract. Do not change their meaning without an architecture
+  decision and consumer review.
+- Additive nullable/context keys also include OS build/codename/session uptime,
+  boot/display details, default-route/SSH scopes, frequency provenance, root
+  mount/filesystem, available/swap bytes, and exact uptime seconds.
 
 ## Collector Behavior By Module
 
@@ -301,26 +363,38 @@ Architecture defaults to `std::env::consts::ARCH` unless platform collection pro
 - Full mode refreshes CPU info with a short delay for stable usage values.
 - Brand/frequency come from the first CPU entry.
 - Logical cores come from `sys.cpus().len()`.
-- Physical cores come from `physical_core_count`, with logical cores as fallback.
+- Physical cores come from `physical_core_count`; failure remains unknown (`0`)
+  rather than falling back to logical threads.
 - Sockets:
-  - Linux: parse `lscpu`
-  - Windows: PowerShell CIM query
+  - Linux: sysfs physical package IDs, fallback locale-stable `lscpu`
+  - Windows: native logical-processor API, fallback bounded WMI
   - macOS: `sysctl -n hw.packages`
-  - fallback: `1`
+  - otherwise: `None`
 - Load averages:
-  - Unix: `/proc/loadavg` first, then `libc::getloadavg`, converted to percent of cores
-  - Windows: current CPU usage for 1m/5m/15m style fields
+  - Unix: `/proc/loadavg` first, then `libc::getloadavg`; retain raw queue
+    averages and derive percent of logical capacity separately
+  - Windows: `None`; one instantaneous usage sample must not be copied into
+    1m/5m/15m windows
+- Physical topology remains `0`/unknown when the OS cannot establish it; never
+  relabel logical threads or vCPUs as physical cores.
+- On Apple Silicon under Rosetta, CPU frequency is intentionally unavailable
+  because the translated compatibility value is not a host measurement.
 
 ### `memory.rs`
 
-Uses `sysinfo` memory/swap counters. The main report surfaces RAM total/used/percent.
+Uses `sysinfo` memory/swap totals. Non-macOS used memory is
+`total - operating-system-available`. macOS parses `vm_stat` and defines used as
+active + wired + compressed; available is the exact total-minus-used complement.
+The table/JSON/Markdown surfaces available memory and swap as well as the
+definitions.
 
 ### `disk.rs`
 
-Uses `sysinfo::Disks`:
+Uses `sysinfo::Disks` for enumeration, then queries per-mount capacity with
+`statvfs` on Unix or `GetDiskFreeSpaceExW` on Windows:
 - mount point
 - filesystem
-- total/available/used
+- total/free/available/used (used = total - all-free; available is caller view)
 - removable flag
 - name
 
@@ -328,16 +402,16 @@ Skips disks with `total == 0`.
 
 ### `network.rs`
 
-Machine IP:
-- Windows: PowerShell `Get-NetIPAddress`, fallback to `ipconfig`
-- Linux: `hostname -I`, fallback to `ip route get 1`
-- macOS: `ipconfig getifaddr` on common interfaces, then route fallback
+Machine/default-route IP:
+- Windows: WMI/native default-route-aware platform batch, fallback `ipconfig`
+- Linux: `ip route get 1.1.1.1` source, fallback `hostname -I`
+- macOS: `scutil --nwi` primary address/interface, then `ipconfig`/route fallback
 
 Client IP:
 - from `SSH_CLIENT` or `SSH_CONNECTION`
 
 DNS servers:
-- Windows: PowerShell `Get-DnsClientServerAddress`, fallback `ipconfig /all`
+- Windows: default-route-aware platform WMI/native batch, fallback `ipconfig /all`
 - Linux: `/etc/resolv.conf`, fallback `resolvectl status`
 - macOS: `scutil --dns`
 - de-duplicated, max 5
@@ -358,7 +432,8 @@ Collects:
 Last-login strategy:
 - Linux: `lastlog2`, fallback `lastlog`, fallback `last`
 - macOS: `last`
-- Windows: PowerShell `Get-LocalUser`, fallback `net user`
+- Windows: current WTS session data first, then bounded PowerShell fallback;
+  address parsing follows the `WTS_CLIENT_ADDRESS` family/layout contract
 
 ### `collectors/platform/*`
 
@@ -379,13 +454,19 @@ Adds OS-specific enrichments, some not currently rendered:
 
 Platform implementations:
 - `linux.rs`: `/proc`, `lscpu`, `/sys`, `ip`, resolver files, ZFS and elevated `dmidecode` commands where available
-- `macos.rs`: `sysctl`, `scutil`, `pmset`, `ioreg`, `system_profiler` JSON in full mode
+- `macos.rs`: quick `sysctl`/`sw_vers`/environment/`pmset`/`ioreg` probes plus
+  one full-mode `system_profiler` JSON snapshot for hardware, displays, power,
+  and software. Under Rosetta it requests the native arm64 profiler slice, then
+  falls back to translated output. It never surfaces serial/UUID fields.
 - `windows.rs`: Win32 APIs and registry first, WMI/PowerShell fallbacks in full mode only
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should
 return `None`/fallback values silently rather than blocking or failing the
-whole report.
+whole report. The helper drains stdout/stderr concurrently, caps captured
+output under the shared 8 MiB budget, and terminates Unix process groups or a
+best-effort Windows Job Object on timeout. Do not replace it with
+`Command::output()` plus polling.
 
 ## Install/Uninstall System
 
@@ -409,7 +490,7 @@ Complete uninstall requires explicit confirmation and shows the binary path befo
 Profiles touched:
 - `~/.bashrc` when present
 - `~/.zshrc` when present
-- creates `.bashrc` if neither shell profile exists
+- creates `.zshrc` on macOS or `.bashrc` on other Unix when neither exists
 
 Injected block:
 
@@ -417,23 +498,32 @@ Injected block:
 # TR-300 Machine Report
 alias report='tr300'
 
-# Auto-run on interactive shell
+# Auto-run on interactive shell; guards prevent spam-on-every-prompt
+# when the binary is missing, and recursion in nested shells.
 case "$-" in *i*)
-    tr300 --fast
-    ;; esac
+    if command -v tr300 >/dev/null 2>&1 && [ -z "${TR300_AUTORUN_RAN-}" ]; then
+        export TR300_AUTORUN_RAN=1
+        tr300 --fast
+    fi
+    ;;
+esac
 # End TR-300
 ```
 
 Behavior:
-- removes existing TR-300 block first
+- validates marker balance before mutation, takes a one-time backup, removes the
+  existing TR-300 block, and atomically replaces the real target (including a
+  symlinked profile target)
 - uses POSIX-compatible `case "$-"` rather than bash-only `[[ ... ]]`
 - idempotent re-install behavior
+- refuses `sudo`/root profile installation
 
 ### Windows install (`src/install/windows.rs`)
 
-Profile target:
-- PowerShell `$PROFILE` path queried via PowerShell
-- creates profile directory if needed
+Profile targets:
+- queries both Windows PowerShell and PowerShell 7 `$PROFILE` paths and updates
+  each distinct installed shell flavor
+- creates profile directories if needed
 
 Injected block:
 
@@ -441,15 +531,21 @@ Injected block:
 # TR-300 Machine Report
 Set-Alias -Name report -Value tr300
 
-# Auto-run on interactive shell
-if ($Host.Name -eq 'ConsoleHost') {
+# Auto-run on interactive shell; also guard missing binaries and recursion.
+if (
+    (Get-Command tr300 -ErrorAction SilentlyContinue) -and
+    -not $env:TR300_AUTORUN_RAN -and
+    [Environment]::UserInteractive
+) {
+    $env:TR300_AUTORUN_RAN = '1'
     tr300 --fast
 }
 # End TR-300
 ```
 
 Behavior:
-- removes existing TR-300 block first
+- performs the conservative CurrentUser execution-policy preflight, then uses
+  the same marker-balance/backup/atomic-write pipeline as Unix
 - complete uninstall deletes the binary and attempts to remove an empty parent directory when path contains `tr300`
 
 ## Self-Update System
@@ -467,6 +563,11 @@ Behavior:
   - **Other origins (`CargoOrInstaller` / `Unknown` on Windows, or non-Windows):** legacy probe-and-retry chain — `cargo install tr300 --force` first when `cargo --version` succeeds, macOS/Linux fallback to cargo-dist shell installer through `curl` then `wget`, Windows fallback to cargo-dist PowerShell installer through `powershell` then `pwsh`.
 - runs `rustup update stable` best-effort before the cargo strategy when rustup is available
 - records skipped/failed strategy attempts and falls through until one strategy succeeds (only on the legacy chain — MSI/EXE strategies don't cross-fall-back)
+- downloads installer payloads/sidecars with explicit size caps into a private
+  randomized staging directory that is removed on success or failure; checksum
+  comparison detects corruption/mismatch but is not an independent signature
+  because payload and sidecar share transport
+- verifies the installed binary's `--version` before claiming success
 - **Cross-method consolidation (`tr300 migrate-cleanup`, v3.17.0+, `src/migrate.rs`):** hidden `#[value(hide=true)]` `Action::MigrateCleanup` + hidden flags. The four installers invoke it (interactive checkboxes + silent self-update, both default ON) to keep one install at a time — removes a shadowing `~\.cargo\bin` copy and/or the other edition. Only deletes `tr300.exe` (allowlist); never cargo/rustup/PATH/`~/Downloads`/the running install; needs-admin → skip, exit 0; advisory (never fails an install). Reuses `detect_install_origin`/`InstallOrigin` (`pub(crate)`). WiX: deferred `Impersonate='yes'` `FileKey` CA (no `WixUtilExtension`). Inno Global EXE omits `--user-profile` (no reliable pre-elevation constant) → process-env fallback. Edition paths/marker strings are in the windows-distribution lockstep.
 
 JSON mode:
@@ -487,11 +588,41 @@ Exit codes:
 
 Release automation uses cargo-dist and GitHub Actions.
 
+### macOS release freeze for Alienware continuation
+
+The 2026-07-14 Mac path is validated and must be treated as frozen during the
+Alienware Windows/Linux pass. Do **not** change any of the following from
+Windows merely to clean up, generalize, regenerate, or align them:
+
+- `src/collectors/platform/macos.rs`;
+- macOS branches in `src/collectors/{cpu,memory,network,os,session}.rs`,
+  `src/install/unix.rs`, or `src/main.rs`;
+- the `aarch64-apple-darwin` / `x86_64-apple-darwin` targets, archive names,
+  shell-installer names, cargo-dist config, `rust-toolchain.toml`, or macOS
+  package/signing/notarization inputs;
+- `.github/workflows/release.yml` or any repository/organization secrets and
+  external signing/notarization settings.
+
+No explicit Apple notarization configuration is visible in the tracked source,
+so treat the existing external/release setup as opaque and working—do not try to
+recreate or “fix” it on the Alienware. Windows/Linux work should stay inside
+their cfg-gated collectors/installers and tests. Release bookkeeping is allowed:
+the eventual version-only `package.version` update, the matching root `tr300`
+entry in `Cargo.lock`, generated man-page version text, changelog/release-ledger
+edits, and Windows/Linux-only evidence do not alter the frozen Mac runtime.
+
+Anything broader reopens the Mac gate: a dependency or dependency-resolution
+change, shared runtime/renderer/command-helper/schema source edit, `build.rs`, a
+macOS cfg branch, dist/toolchain/release workflow change, or Apple artifact
+change requires stopping before the tag and rerunning native arm64 + Rosetta
+full tests/smokes on a Mac, plus hosted macOS CI. Passing Windows/Linux alone is
+insufficient.
+
 `Cargo.toml` (`[workspace.metadata.dist]`):
 - `cargo-dist-version = "0.31.0"`
 - `ci = "github"`
-- `allow-dirty = ["ci"]` so cargo-dist accepts the checked-in release workflow
-  alias-copy step for v3.14.2 updater compatibility
+- `allow-dirty = ["ci", "msi"]` so cargo-dist accepts the checked-in release
+  workflow alias-copy step and customized WiX MSI source
 - `installers = ["shell", "powershell", "msi"]`
 - targets:
   - `aarch64-apple-darwin`
@@ -585,6 +716,11 @@ Built by `windows-installers.yml` using `iscc.exe` (installed via `choco install
 
 ### Release checklist
 
+The 2026-07-14 Mac checkpoint is intentionally **not** a release: keep the
+manifest at 3.17.0 until Alienware Windows, AMD64 Linux, and Raspberry Pi 4
+evidence is recorded. On the next machine, start from the tracked handoff and
+do not tag or update the homepage early.
+
 1. Update version in `Cargo.toml`.
 2. Update the full documentation set for any user-visible release, install,
    update, or deployment behavior change: `CHANGELOG.md`,
@@ -651,16 +787,18 @@ cargo build
 cargo build --release
 
 # Test
-cargo test
+cargo test --locked --workspace --all-targets
 cargo test --lib
 cargo test --test integration
 cargo test <test_name>
+cargo test --locked --target x86_64-apple-darwin --workspace --all-targets
 
 # Lint/format
 cargo clippy
-cargo clippy -- -D warnings
+cargo clippy --locked --all-targets --workspace -- -D warnings
 cargo fmt
-cargo fmt -- --check
+cargo fmt --all -- --check
+cargo audit
 
 # Run
 cargo run
@@ -669,6 +807,7 @@ cargo run -- --ascii
 cargo run -- --json
 cargo run -- --title "MY TITLE"
 cargo run -- --no-color
+cargo run -- --no-save
 cargo run -- --update
 cargo run -- update
 cargo run -- --update --json
@@ -710,12 +849,14 @@ Build:
 - `clap_mangen = "0.2"`
 
 Platform-specific:
-- Windows: `wmi = "0.14"`, `serde = "1"`, `winapi = "0.3"`
+- Windows: `wmi = "0.14"`, `serde = "1"`, `winapi = "0.3"`,
+  `winreg = "0.52"`, `sha2 = "0.10"`, `tempfile = "3"`
 - Unix: `libc = "0.2"`, `users = "0.11"`
 
 Dev:
 - `assert_cmd = "2"`
 - `predicates = "3"`
+- `tempfile = "3"`
 
 ## Tests
 
@@ -725,9 +866,21 @@ Dev:
 - default output contains main title/subtitle
 - ASCII mode output
 - JSON mode output structure keys
+- structured JSON parses, preserves schema v1, includes additive context, and
+  keeps non-finite values valid
 - custom title injection
 - `--no-color`
+- `--no-save` suppresses the Markdown side-effect message
+- fast mode omits slow conditional rows and elevation footer
+- exact 51-column ASCII table width
 - expected key report fields
+
+The library suite also covers bounded subprocess success/timeout/large-output/
+overflow, save collisions/symlinks, zsh profile round-trip, macOS structured
+parsers/privacy/Rosetta/boot/display/battery/FileVault/terminal/locale,
+disk/root selection, memory parsing, session parsers, updater staging/checksum/
+version semantics, and cross-platform fallback helpers. As of the Mac checkpoint:
+115 library + 19 integration tests pass natively and under Rosetta.
 
 For markdown-only guide edits, Rust tests are not required. For source changes, run at least the affected test scope, and prefer `cargo test` before release work.
 
@@ -736,7 +889,13 @@ For markdown-only guide edits, Rust tests are not required. For source changes, 
 - `Config` fields `show_network`, `show_disks`, `width`, and `compact` exist but are not fully wired into report rendering/section toggling.
 - `use_colors` currently affects update-flow styling, not the normal table renderer.
 - `zfs_health` is populated only on full-mode hosts where `zpool` is available.
-- JSON report output is manual; schema changes require careful escaping and integration test updates.
+- JSON report output is typed through `serde_json`, but schema changes still
+  require compatibility review and integration test updates.
+- Intel macOS has no per-commit hosted runner; local Rosetta covers the x86_64
+  binary and cargo-dist still builds Intel at tag time. Do not claim physical
+  Intel-hardware validation from Rosetta.
+- Windows/Linux platform code in the Mac checkpoint is compile/fixture tested,
+  not live-hardware verified. See the tracked handoff before release work.
 - `--install`, `--uninstall`, `--update`, and their positional equivalents have real user-environment side effects. Treat them carefully in tests and automation.
 - Some historical docs/examples may mention older behaviors; source code is authoritative.
 - PowerShell can be unavailable or restricted on some Windows environments; Windows collectors and installers should retain graceful fallbacks.

@@ -54,7 +54,7 @@ clap_mangen = "0.2"
 [target.'cfg(windows)'.dependencies]
 wmi = "0.14"
 serde = { version = "1", features = ["derive"] }
-winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "winuser", "winnls", "iphlpapi", "ws2def", "ws2ipdef", "winerror", "inaddr", "in6addr", "ifdef", "winbase", "errhandlingapi", "winnt", "tlhelp32", "processthreadsapi", "handleapi"] }
+winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "winuser", "winnls", "iphlpapi", "ws2def", "ws2ipdef", "winerror", "inaddr", "in6addr", "ifdef", "winbase", "errhandlingapi", "winnt", "tlhelp32", "processthreadsapi", "handleapi", "jobapi2"] }
 # Used by src/update.rs::read_install_source_marker() to read the
 # HKCU\Software\TR300\InstallSource value written by the four first-class
 # Windows installers (v3.15.0+). Raw winapi for one registry read would be
@@ -62,10 +62,11 @@ winapi = { version = "0.3", features = ["consoleapi", "wincon", "sysinfoapi", "w
 winreg = "0.52"
 # Used by src/update.rs to verify the SHA256 of MSI / EXE installers
 # downloaded by `tr300 update` against the .sha256 sidecar the
-# release workflow publishes (v3.15.4+). Defends against an in-flight
-# MITM swap of the installer payload — TLS alone is not sufficient
-# against corporate-proxy interception with a trusted root.
+# release workflow publishes (v3.15.4+). Detects transfer corruption and a
+# mismatched payload/sidecar pair; it is not an independent authenticity
+# signature because both files share the same release transport.
 sha2 = "0.10"
+tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -76,6 +77,7 @@ uzers = "0.12"
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
+tempfile = "3"
 
 # The profile that 'cargo dist' will build with
 [profile.dist]

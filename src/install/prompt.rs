@@ -6,6 +6,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 /// Uninstall options available to the user
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UninstallOption {
     /// Remove shell profile modifications only (keep binary)

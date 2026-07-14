@@ -13,6 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > next session) is in [`MASTER_PLAN.md`](./MASTER_PLAN.md). Per-version
 > verification logs are in [`TESTING.md`](./TESTING.md). Agent-facing
 > repository tour and release checklist are in [`AGENTS.md`](./AGENTS.md).
+> The current cross-machine continuation is
+> [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md).
 >
 > **How the edit-time rules are organized (read this).** The deep,
 > subsystem-specific edit-time rules — Windows install, Windows accuracy
@@ -45,6 +47,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
+Published and manifest version: **3.17.0**. The default branch contains an
+unreleased Mac-complete hardening checkpoint for planned v4.0.0. Do not bump,
+tag, deploy, or update the homepage until the tracked handoff's Alienware,
+AMD64 Linux, and Raspberry Pi 4 validation is complete.
+
+v4 is intentional: new public Rust record fields and changed public collector
+helper signatures are source-breaking under SemVer even though the CLI and
+existing schema-v1 JSON keys remain compatible. Changed public record types are
+`#[non_exhaustive]`; preserve that future-proofing and include a Rust migration
+note in the eventual release docs.
+
+## Task management system
+
+This repo uses the SHAUGHV `tasks-*` system locally. `.tasks/TASKS.md` is the board source
+of truth, `.tasks/MILESTONES.md` holds dated epics, and `.tasks/tasks/<id>.md` holds each
+task's self-contained handoff, verification checklist, current status, and activity log.
+Use proper indented checkbox subtasks for small board-visible requirements; use separate
+top-level tasks with `(needs #id)` for work that needs independent status or sequencing.
+
+Do not complete tasks over unchecked subtasks or open verification items, and do not close
+milestones over open child tasks. Never store secrets in board or memory files; use the OS
+keychain, environment variables, or `.tasks/secure/`. Resolve the live board from its own
+`.tasks/.board-server.json` rather than assuming a port. Keep Active task status and activity
+current as work proceeds. Relevant skills: `tasks-start`, `tasks-create`, `tasks-management`,
+`tasks-update`, `tasks-memory`, `tasks-boards`, and `tasks-remove`.
+
+`.tasks/` is intentionally gitignored, so board state does not follow a fresh
+clone. Before a cross-machine push, update the local board **and** write a
+tracked exhaustive handoff under `docs/agents/handoff/`; never leave the next
+machine dependent on local-only task memory.
+
 **Crate name:** `tr300` (lowercase, no hyphen — used by `cargo install tr300` and as the library import path `tr300`)
 **Binary name:** `tr300` (no hyphen — set via `[[bin]] name = "tr300"`)
 **Convenience alias:** `report` (created by `--install`)
@@ -55,16 +88,19 @@ The crate exposes both a binary (`src/main.rs`) and a library (`src/lib.rs` with
 
 ```bash
 cargo build                      # Debug build
-cargo build --release            # Release build
-cargo test                       # Run all tests (unit + integration + doc)
+cargo build --locked --release   # Release build
+cargo test --locked --workspace --all-targets # Run all unit/integration targets
+cargo test --locked --target x86_64-apple-darwin --workspace --all-targets # Rosetta/Intel target on Apple Silicon
 cargo test --lib                 # Library tests only
 cargo test --test integration    # Integration tests (assert_cmd-based, in tests/integration.rs)
 cargo test <test_name>           # Single test by name
-cargo clippy -- -D warnings      # Lint (CI mode, warnings = errors)
-cargo fmt -- --check             # Check formatting
+cargo clippy --locked --all-targets --workspace -- -D warnings # CI lint
+cargo fmt --all -- --check       # Check formatting
+cargo audit                      # Blocking RustSec dependency gate
 cargo run -- --fast              # Quick run (skips slow collectors)
 cargo run -- --json              # JSON output
 cargo run -- --ascii             # ASCII fallback mode
+cargo run -- --no-save           # Full table without Markdown persistence
 cargo run -- update              # Self-update from GitHub releases
 cargo run -- --update            # Self-update from GitHub releases
 cargo run -- install             # Add shell profile alias + auto-run
@@ -87,16 +123,29 @@ cargo run -- uninstall           # Interactive profile/binary cleanup
 - **Fixed-width columns** are 12-char labels, 32-char data, 51 total width including borders.
 - **Thread panics are caught** — collector threads use `.unwrap_or_else()` instead of `.unwrap()` on join handles, returning errors gracefully.
 - **Shared utility** — `format_bytes()` lives in `src/lib.rs`; the per-module methods in `disk.rs`, `memory.rs`, `network.rs` delegate to it.
-- **JSON escaping** handles control characters (0x00-0x1F) via `\u00xx` encoding in `escape_json()` in `report.rs`.
+- **JSON generation is structured** — `report.rs` builds a typed
+  `serde_json::Value` and serializes it once. The compatibility `escape_json()`
+  helper delegates to `serde_json`; do not reintroduce hand-built JSON.
 - **UTF-8 / ASCII auto-fallback** — `main.rs::is_utf8_locale()` checks `LC_ALL`/`LC_CTYPE`/`LANG` on Unix and force-applies `--ascii` if none indicate UTF-8. Windows is treated as UTF-8 because `enable_utf8_console()` calls `SetConsoleOutputCP(65001)` when stdout is a terminal. Don't add code that prints box-drawing chars before this auto-detection runs.
-- **Markdown auto-save** — Manual full-mode runs (no `--fast`, no `--json`) call `report::save_markdown_report()` which writes to the user's Downloads folder and prints the path to stderr. `--fast` (auto-run) deliberately skips this to keep startup quiet and fast.
-- **Collector subprocesses use bounded helpers** — optional platform probes should go through `src/collectors/command.rs` instead of raw `Command::output()`. Use the established fast/normal/slow budgets so missing tools and blocked commands return `None` rather than hanging the report.
+- **Markdown auto-save** — Manual full-mode runs (no `--fast`, no `--json`)
+  call `report::save_markdown_report()` unless `--no-save` is present. The
+  writer uses the OS Downloads directory, `create_new`, collision suffixes,
+  sync/cleanup, and never follows/overwrites an existing symlink/path.
+- **Collector subprocesses use bounded helpers** — optional platform probes
+  go through `src/collectors/command.rs`, which concurrently drains both pipes,
+  caps output at 8 MiB, enforces fast/normal/slow budgets, and terminates the
+  Unix process group or a best-effort Windows Job Object on timeout. Never
+  replace this with raw `Command::output()` plus polling.
 
 ### Platform-Specific Code
 
 Uses `#[cfg(target_os = "...")]` conditional compilation. Platform collectors live in `src/collectors/platform/`:
 - **linux.rs** — `/proc`, `lscpu`, ZFS commands
-- **macos.rs** — `sysctl`, `scutil`, `pmset`, `ioreg`
+- **macos.rs** — quick `sysctl`/`sw_vers`/`scutil`/`pmset`/`ioreg` fallbacks
+  plus one structured full-mode `system_profiler` snapshot. Rosetta requests
+  the native arm64 profiler slice so model/display/battery facts describe the
+  host, while architecture still names the translated process. Unique hardware
+  identifiers are intentionally excluded.
 - **windows.rs** — WMI queries via the `wmi` crate, Win32 API, registry
 
 Windows-specific accuracy rules are extensive — load the **`windows-accuracy`** skill before editing `windows.rs`.
@@ -165,7 +214,14 @@ These three are the most frequently touched; their full rules are in the matchin
 **`windows-distribution-and-update`** — installers + self-update (`wix/`, `wix-corporate/`, `inno/`, `windows-installers.yml`, `src/update.rs`):
 - Four first-class installers per release (Global / Corporate × MSI / EXE). **The four product GUIDs are PERMANENT** — regenerating breaks in-place upgrades. Corporate MSI source lives at `wix-corporate/` (not `wix/`) and is built by bare `candle`+`light` in `windows-installers.yml`; `release.yml` is cargo-dist-generated (don't hand-edit outside the allow-dirty zone).
 - `HKCU\Software\TR300\InstallSource` marker (`msi-global` / `msi-corporate` / `exe-global` / `exe-corporate`) is the authoritative updater discriminator; `classify_install_path()` is legacy fallback only. Marker strings stay in lockstep across installer template / `src/update.rs` / JSON output.
-- Self-update: `cargo install` first on macOS/Linux (+ best-effort `rustup update stable`); registry-driven MSI/EXE strategies on Windows; **SHA256 sidecar verify + post-install `--version` check are load-bearing** (msiexec exit 0 ≠ binary replaced); the **cargo path also verifies the new version landed and falls through to the prebuilt installer on a crates.io lag** (v3.16.0, U1); `is_newer` is semver-prerelease-aware.
+- Self-update: `cargo install` first on macOS/Linux (+ best-effort `rustup
+  update stable`); registry-driven MSI/EXE strategies on Windows; bounded
+  downloads land in a private randomized staging directory with RAII cleanup;
+  **SHA256 sidecar verify + post-install `--version` check are load-bearing**
+  (msiexec exit 0 does not prove binary replacement), while the checksum is
+  described as corruption/mismatch detection rather than an independent
+  signature; the cargo path falls through to the prebuilt installer on a
+  crates.io lag (v3.16.0, U1); `is_newer` is semver-prerelease-aware.
 - **Cross-method consolidation (`tr300 migrate-cleanup`, v3.17.0+):** hidden subcommand (`src/migrate.rs`; `#[value(hide=true)]` `Action::MigrateCleanup` + hidden flags in `cli.rs`) invoked by all four installers — interactive checkboxes AND silent self-update, **both default ON** — to keep ONE install at a time: removes a shadowing `~\.cargo\bin` copy and/or the *other* edition. Only ever deletes `tr300.exe` (allowlist); never cargo/rustup, the `.cargo\bin` PATH entry, `~/Downloads`, or the running install; needs-admin → skip + exit 0; advisory (never fails an install). Reuses `detect_install_origin`/`InstallOrigin` (now `pub(crate)`). **Edition paths + marker strings are in the SAME lockstep** as the installers / `update.rs`. WiX uses a deferred `Impersonate='yes'` `FileKey` CA (no `WixUtilExtension`); the Inno Global EXE does NOT pass `--user-profile` (no reliable Inno pre-elevation constant) and relies on the process-env fallback. Update preserves edition/scope: Corporate→Corporate (perUser), Global→Global (perMachine).
 
 ## Output & Runtime Contracts
@@ -175,22 +231,50 @@ These three are the most frequently touched; their full rules are in the matchin
 TR-300 detects whether the current process is elevated (Unix `geteuid() == 0` / Windows `IsUserAnAdmin()` from shell32 — declared as a manual `extern` since `winapi-rs` doesn't bind it) and surfaces this via `SystemInfo.is_elevated`, plus a dim footer hint below the table on platforms where elevation unlocks more data.
 
 - `tr300::is_elevated()` (in `src/lib.rs`) — runtime detection.
-- `tr300::platform_has_elevated_data()` — compile-time per-target constant: `true` on Linux + Windows, `false` on macOS. macOS gets no footer because sudo doesn't aesthetically unlock anything (`powermetrics` for live CPU freq is the main candidate, and the chip-name → frequency lookup table on Apple Silicon already gives a reasonable answer non-elevated).
+- `tr300::platform_has_elevated_data()` — compile-time per-target constant:
+  `true` only on Linux. Windows/macOS do not make a blanket promise because a
+  missing BitLocker/FileVault result does not prove elevation would fix the
+  optional probe.
 - `report::should_render_elevation_footer(is_elevated, mode, no_elevation_hint)` — the gate. Returns `true` only when the user is unelevated, on a platform with elevated data, in `Full` mode (never in `Fast` — the auto-run prompt must stay free), and hasn't passed `--no-elevation-hint`.
-- `report::render_elevation_footer(use_colors)` — emits the line with ANSI dim (`\x1b[2m...\x1b[0m`) when colors are enabled, plain text otherwise. Returns an empty string on macOS even if the gate is bypassed.
-- The hint strings are hardcoded per platform in `render_elevation_footer`. Linux: `Run with sudo for motherboard, BIOS, and RAM slot details`. Windows: `Run as Administrator for BitLocker status`.
+- `report::render_elevation_footer(use_colors)` — emits the Linux line with
+  ANSI dim (`\x1b[2m...\x1b[0m`) when colors are enabled, plain text otherwise.
+  The current user-facing hint is `Run with sudo for SMBIOS RAM module details`.
 
 When adding a new elevated-only collector (e.g. `dmidecode` on Linux), gate it on `info.is_elevated` and let the footer hint cover the unelevated case rather than rendering a stub or warning row inside the table.
 
 ### JSON Schema Versioning (v3.10.0+)
 
-Top-level `schema_version` (currently `1`) on every JSON output. Defined as `report::SCHEMA_VERSION`. Bump only on **breaking** schema changes — renames, type changes, or removals. Additive new keys do **not** require a bump. Current additive nullable keys include `os.machine_model`, `cpu.core_topology`, `memory.ram_slots`, and `system.{motherboard,bios}`; absence means the platform collector could not populate the value cheaply/reliably.
+Top-level `schema_version` (currently `1`) and `collection_mode` are on every
+report JSON output. Defined as `report::SCHEMA_VERSION`. Bump only on
+**breaking** schema changes—renames, type changes, or removals. Additive keys do
+not require a bump. Current additive context includes OS build/codename/session
+uptime; boot/display; default-route/SSH scopes; explicit physical/logical CPU
+counts; frequency provenance; raw and normalized load units; root mount/
+filesystem; disk available/value definitions; memory available/swap/value
+definitions; and exact uptime. Optional absence means the collector could not
+establish the value reliably within its budget.
+
+`cpu.cores` remains the logical processor count for compatibility.
+`cpu.load_*` is normalized percent of logical capacity; Unix-only
+`cpu.load_raw_*` is the runnable-queue average. `disk.used_bytes` means allocated
+bytes while `disk.available_bytes` is caller-available capacity. Memory JSON
+must preserve the collector's `usage_definition` and `availability_definition`.
 
 Top-level `elevated: bool` and `elevation_unlocks_more: bool` are also emitted on every JSON output. The latter is `true` only when the platform has elevated-only data AND the user isn't currently elevated — i.e. `true` indicates "re-running with sudo/Administrator would give you more". On macOS this is always `false`.
 
-### Disk volume semantics — do not "fix"
+### Disk and memory semantics — do not "simplify"
 
-sysinfo's reporting on BTRFS subvolumes (reports the pool, not the subvolume) and APFS containers (reports container free space, not per-volume) is **correct**, even though the numbers can look surprising. Don't change `aggregate_disk_usage()` to subtract overlapping space — you'll regress against what the OS itself reports in Disk Utility / `df`. ZFS pool sizes are similar.
+Choose one system/root volume: `/`, the normalized Windows system drive, then
+one largest fixed volume, then a removable fallback only when no fixed volume
+exists. Never sum mounts—APFS/BTRFS/ZFS/bind/container mounts may overlap, and
+Windows drives can be independent resources.
+
+Disk used = total minus all-free blocks; available = capacity available to the
+current caller. Those values need not sum to total because of reservations and
+quotas. On macOS, memory used = active + wired + compressed from `vm_stat`, and
+available is its exact total-minus-used complement. Other OSes use OS available
+memory and derive used as total-minus-available. Full rationale and rejected
+alternatives are in `docs/architecture-decisions.md`.
 
 ## MSRV policy
 
@@ -224,19 +308,62 @@ The canonical cadence for any non-trivial change. **Full detail — each phase's
 
 Three GitHub Actions workflows guard release quality (full job-by-job detail + local-repro commands: the [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md) skill):
 
-- **`ci.yml`** — every push to master + every PR: `fmt`, `clippy --all-targets -D warnings`, `test` (Linux + macOS ARM + Windows), `build` smoke (+`--version`/`--fast --json`), `speed` (5-run median of `tr300 --fast` < 1500 ms), `audit` (advisory-only), `dist-plan`.
+- **`ci.yml`** — every push to master + every PR: `fmt`, locked
+  `clippy --all-targets -D warnings`, locked `test` (Linux + macOS ARM +
+  Windows), locked `build` smoke (+`--version`/`--fast --json`), `speed`
+  (5-run median of `tr300 --fast` < 1500 ms), blocking `audit`, and
+  `dist-plan`. macOS test/build/speed are hard gates; do not restore the old
+  v3.14.5 `continue-on-error` workaround.
 - **`release.yml`** — cargo-dist v0.31.0, tag-triggered (`vX.Y.Z`); 6 targets + shell/PowerShell/MSI installers + legacy `tr-300-installer.*` aliases. Auto-generated — don't hand-edit outside the allow-dirty zone.
 - **`crates-publish.yml`** — after `CI` succeeds on master; checks out the exact tested SHA, re-runs gates `--locked`, publishes to crates.io with `CARGO_REGISTRY_TOKEN`.
 
-Reproduce locally: `cargo fmt -- --check && cargo clippy --all-targets --workspace -- -D warnings && cargo test --workspace --all-targets && cargo build --release --workspace`.
+Reproduce locally: `cargo fmt --all -- --check && cargo clippy --locked
+--all-targets --workspace -- -D warnings && cargo test --locked --workspace
+--all-targets && cargo build --locked --release --workspace && cargo audit`.
 
 ### Intel macOS coverage policy
 
-**Contract: CI never blocks on Intel; releases still produce the artifact.** `ci.yml` has **no `macos-13` entry** (tested matrix = Linux x64 glibc + macOS ARM + Windows x64); `[workspace.metadata.dist].targets` in `Cargo.toml` **still includes `x86_64-apple-darwin`** so `release.yml` builds it on a `macos-13` runner at tag time. **Don't re-add `macos-13` to `ci.yml`** (runner capacity has structurally retired) and **don't drop the Intel dist target** (users on 2019/2020 Intel hardware deserve a working binary). Full reasoning + the concrete queue-time history: [`docs/architecture-decisions.md` § "Intel macOS coverage policy (v3.11.2+)"](./docs/architecture-decisions.md#intel-macos-coverage-policy-v3112) and the `tr300-dev-workflow` skill.
+**Contract: per-commit CI never waits for a physical Intel runner; releases
+still produce the artifact.** `ci.yml` has no `macos-13` entry (tested matrix =
+Linux x64 glibc + macOS ARM + Windows x64); the Mac checkpoint additionally
+builds and runs the x86_64 target locally under Rosetta. Rosetta is strong
+translated-binary coverage but is not a claim about physical Intel hardware.
+`[workspace.metadata.dist].targets` still includes `x86_64-apple-darwin`, so
+tagged releases build it on Intel. Do not re-add the structurally capacity-
+constrained runner to every commit and do not drop the Intel dist target.
+
+### macOS release freeze on the Alienware
+
+The tracked 2026-07-14 Mac checkpoint is a freeze boundary. During Windows/
+Linux validation, do not edit `platform/macos.rs`, any macOS `#[cfg]` branch,
+the two Apple target triples, artifact/installer names, cargo-dist release
+configuration, `rust-toolchain.toml`, or signing/notarization inputs. Do not
+regenerate `release.yml`, rotate secrets, or attempt to synthesize Apple
+notarization from Windows. The tracked repo exposes no explicit notarization
+configuration; preserve the existing external/release path as opaque.
+
+Prefer Windows/Linux cfg-local fixes. If a finding genuinely requires a shared
+module, dependency/Cargo.lock, schema, renderer, command helper, or workflow
+change, the Mac completion claim is invalidated until native arm64 and Rosetta
+tests/full-fast smokes are rerun on a Mac and hosted macOS CI is green. Do not
+tag v4.0.0 from the Alienware on Windows/Linux-only evidence after such a
+change.
+
+Allowed release bookkeeping does not reopen the runtime gate: a version-only
+`package.version` bump, the corresponding root `tr300` version in `Cargo.lock`,
+generated man-page version text, release-note/test-ledger edits, and cfg-local
+Windows/Linux evidence. Do not use that narrow exception to change dependencies,
+features, dist metadata, `build.rs`, or shared/macOS source.
 
 ## Release Process
 
 Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → doc-set update → master push → wait for `ci.yml` green → wait for `crates-publish.yml` → tag push → watch `release.yml` → fix-forward loop — is the [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md) § "Release checklist" as the canonical 10-file doc list. Load-bearing invariants:
+
+**Current checkpoint:** keep `Cargo.toml` at 3.17.0 for the Mac handoff push.
+The next Alienware session must finish Windows/Linux hardware evidence before
+bumping to 4.0.0. Because 3.17.0 already exists on crates.io, the checkpoint's
+default-branch publish workflow should skip rather than publish. No tag and no
+homepage update belong to this checkpoint.
 
 - Bump `Cargo.toml` `version`; update the doc set in lockstep (incl. `HUMAN_CHANGELOG.md` — see the `tr300-changelog` skill).
 - Commit `release: vX.Y.Z - <summary>`; push and wait for `ci.yml` green on that exact commit.
@@ -244,7 +371,11 @@ Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → d
 - **Tag only after `ci.yml` is green AND `crates-publish.yml` has resolved.** Create `git tag vX.Y.Z` and push the single tag explicitly (`git push origin vX.Y.Z`) — **never** `git push --tags`.
 - The tag push triggers `release.yml` (6 targets + installers, incl. canonical `tr300-installer.*` and legacy `tr-300-installer.*` aliases).
 
-`Cargo.lock` is intentionally tracked; both local verification and the publish workflow use `cargo publish --locked`. After changing `[workspace.metadata.dist]` in `Cargo.toml`, regenerate with `dist init` (the binary is `dist`, not `cargo dist`) and preserve the legacy installer-alias step.
+`Cargo.lock` is intentionally tracked; both local verification and the publish
+workflow use `cargo publish --locked`. `allow-dirty = ["ci", "msi"]` is
+intentional for the checked-in release customization and WiX source. After
+changing `[workspace.metadata.dist]`, regenerate with `dist init` (the binary is
+`dist`, not `cargo dist`) and preserve the legacy installer-alias step.
 
 ## HUMAN_CHANGELOG.md (companion changelog)
 

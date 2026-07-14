@@ -66,6 +66,7 @@ pub mod ascii_chars {
 }
 
 /// Application configuration
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Whether to use Unicode box-drawing characters (false = ASCII)
@@ -92,6 +93,7 @@ pub struct Config {
 }
 
 /// Output format options
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     Table,
@@ -241,6 +243,7 @@ impl Config {
 }
 
 /// Box-drawing character set
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct BoxChars {
     pub top_left: char,

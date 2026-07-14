@@ -10,7 +10,9 @@ use predicates::prelude::*;
 use serde_json::Value;
 
 fn tr300() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_tr300"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tr300"));
+    command.arg("--no-save");
+    command
 }
 
 #[test]
@@ -29,6 +31,14 @@ fn test_version_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("tr300"));
+}
+
+#[test]
+fn test_no_save_suppresses_markdown_side_effect_message() {
+    tr300()
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Report saved:").not());
 }
 
 #[test]
@@ -72,8 +82,16 @@ fn test_json_output_parses() {
         .clone();
     let value: Value = serde_json::from_slice(&output).expect("--json output should parse");
     assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["collection_mode"], "full");
     assert!(value["os"].is_object());
     assert!(value["system"].is_object());
+    assert_eq!(
+        value["network"]["machine_ip_scope"].is_null(),
+        value["network"]["machine_ip"].is_null()
+    );
+    assert_eq!(value["cpu"]["load_unit"], "percent_of_logical_cpu_capacity");
+    assert_eq!(value["disk"]["used_definition"], "allocated_bytes");
+    assert!(value["memory"]["available_bytes"].is_u64());
 }
 
 #[test]
@@ -98,13 +116,13 @@ fn test_output_contains_expected_fields() {
         .stdout(predicate::str::contains("OS"))
         .stdout(predicate::str::contains("KERNEL"))
         .stdout(predicate::str::contains("HOSTNAME"))
-        .stdout(predicate::str::contains("MACHINE IP"))
+        .stdout(predicate::str::contains("SSH CLIENT"))
         .stdout(predicate::str::contains("PROCESSOR"))
         .stdout(predicate::str::contains("CORES"))
-        .stdout(predicate::str::contains("CPU FREQ"))
         .stdout(predicate::str::contains("VOLUME"))
         .stdout(predicate::str::contains("DISK USAGE"))
         .stdout(predicate::str::contains("MEMORY"))
+        .stdout(predicate::str::contains("AVAILABLE"))
         .stdout(predicate::str::contains("UPTIME"));
 }
 
@@ -158,9 +176,7 @@ fn test_fast_mode_omits_slow_conditional_rows() {
         .assert()
         .success()
         .stdout(predicate::str::contains("ZFS HEALTH").not())
-        .stdout(predicate::str::contains("RAM SLOTS").not())
-        .stdout(predicate::str::contains("BOARD").not())
-        .stdout(predicate::str::contains("BIOS").not());
+        .stdout(predicate::str::contains("RAM SLOTS").not());
 }
 
 #[test]
@@ -211,9 +227,8 @@ fn test_json_includes_encryption_key() {
 
 #[test]
 fn test_json_includes_session_uptime_seconds_key() {
-    // `os.session_uptime_seconds` is always present (nullable). On Windows
-    // hosts with Fast Startup enabled and a divergent session, it's a number.
-    // On all other configs it's null. The presence of the key is the contract.
+    // `os.session_uptime_seconds` remains present and nullable for schema-v1
+    // compatibility. No platform currently fabricates a second uptime value.
     tr300()
         .arg("--json")
         .assert()

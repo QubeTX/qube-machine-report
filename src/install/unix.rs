@@ -408,7 +408,9 @@ pub fn uninstall_complete() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MARKER_END, MARKER_START, SHELL_ADDITIONS};
+    use super::{
+        remove_from_profile, update_shell_profile, MARKER_END, MARKER_START, SHELL_ADDITIONS,
+    };
     use crate::install::shared::{ALIAS_NAME, AUTORUN_SENTINEL_VAR, BINARY_NAME};
 
     #[test]
@@ -447,5 +449,29 @@ mod tests {
         // shell's interactive flag. Required to keep the table from
         // rendering in non-interactive script invocations.
         assert!(SHELL_ADDITIONS.contains(r#"case "$-" in *i*"#));
+    }
+
+    #[test]
+    fn zsh_profile_round_trip_is_idempotent_and_preserves_original_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join(".zshrc");
+        std::fs::write(&profile, "export KEEP_ME=yes\n").unwrap();
+
+        assert!(update_shell_profile(&profile).unwrap());
+        assert!(update_shell_profile(&profile).unwrap());
+        let installed = std::fs::read_to_string(&profile).unwrap();
+        assert_eq!(installed.matches(MARKER_START).count(), 1);
+        assert_eq!(installed.matches(MARKER_END).count(), 1);
+        assert!(installed.contains("export KEEP_ME=yes"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".zshrc.tr300-backup")).unwrap(),
+            "export KEEP_ME=yes\n"
+        );
+
+        assert!(remove_from_profile(&profile).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&profile).unwrap(),
+            "export KEEP_ME=yes\n"
+        );
     }
 }

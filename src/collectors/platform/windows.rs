@@ -39,11 +39,15 @@ const WMI_BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10
 /// virtualization, GPU list, battery. Each field carries the raw WMI
 /// answer (or `None` / `Vec::new()` when that specific query was skipped
 /// because a cheaper main-thread probe already succeeded).
-// (edition, virtualization, gpus, battery, machine_model)
+// (edition, virtualization, gpus, battery, machine_model, motherboard, bios,
+// ram_slots)
 type WmiBatchResult = (
     Option<String>,
     Option<String>,
     Vec<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
     Option<String>,
     Option<String>,
 );
@@ -59,7 +63,7 @@ where
     });
     rx.recv_timeout(budget).ok().flatten()
 }
-use crate::collectors::command::{run_output, run_stdout, CommandTimeout};
+use crate::collectors::command::{run_stdout, CommandTimeout};
 use serde::Deserialize;
 use std::env;
 use wmi::{COMLibrary, WMIConnection};
@@ -116,11 +120,46 @@ struct Win32Processor {
     socket_designation: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename = "Win32_BaseBoard")]
+#[serde(rename_all = "PascalCase")]
+struct Win32BaseBoard {
+    manufacturer: Option<String>,
+    product: Option<String>,
+    version: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename = "Win32_BIOS")]
+#[serde(rename_all = "PascalCase")]
+struct Win32Bios {
+    manufacturer: Option<String>,
+    #[serde(rename = "SMBIOSBIOSVersion")]
+    smbios_bios_version: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename = "Win32_PhysicalMemoryArray")]
+#[serde(rename_all = "PascalCase")]
+struct Win32PhysicalMemoryArray {
+    memory_devices: Option<u32>,
+    #[serde(rename = "Use")]
+    use_code: Option<u16>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename = "Win32_PhysicalMemory")]
+#[serde(rename_all = "PascalCase")]
+struct Win32PhysicalMemory {
+    capacity: Option<u64>,
+}
+
 /// Collect Windows-specific information
 pub fn collect(mode: CollectMode) -> PlatformInfo {
     // In fast mode, skip all slow calls — return only env-var-based fields
     if mode == CollectMode::Fast {
         return PlatformInfo {
+            os_build: None,
             architecture: get_architecture(),
             desktop_environment: Some("Windows Shell".to_string()),
             display_server: Some("DWM".to_string()),
@@ -141,6 +180,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             ram_slots: None,
             locale: None,
             encryption: None,
+            elevation_unlocks_more: false,
         };
     }
 
@@ -194,54 +234,86 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
                 None
             },
             get_machine_model_wmi(&wmi),
+            get_motherboard_wmi(&wmi),
+            get_bios_wmi(&wmi),
+            get_ram_slots_wmi(&wmi),
         ))
     });
 
-    let (windows_edition, virtualization, gpus, battery, machine_model) =
-        if let Some((edition_wmi, virt_wmi, gpus_wmi, battery_wmi, model_wmi)) = wmi_results {
-            let edition = edition_wmi.or_else(get_windows_edition_ps);
-            let virt = virt_wmi.or_else(detect_virtualization_ps);
-            let gpu_list = {
-                let mut gpus = gpus_fast;
-                if gpus.is_empty() {
-                    gpus = gpus_wmi;
-                }
-                if gpus.is_empty() {
-                    gpus = get_gpus_ps();
-                }
-                filter_software_gpus(gpus)
-            };
-            let bat = battery_native.or(battery_wmi).or_else(get_battery_ps);
-            (edition, virt, gpu_list, bat, model_wmi)
-        } else {
-            // WMI worker thread failed entirely (COM init error) or timed out —
-            // fall back to PowerShell for everything WMI would have provided.
-            // gpus_fast and battery_native are already-computed main-thread
-            // probes; reuse them when they succeeded rather than re-running.
-            let fallback = get_batched_powershell_fallback();
-            // D1: filter software adapters here too — the success branch already
-            // does, but get_gpus_ps()/the PS fallback can surface "Microsoft
-            // Basic Render Driver" etc. (gpus_fast is registry-sourced and
-            // already clean, so filtering it again is a harmless no-op.)
-            let gpus = filter_software_gpus(if !gpus_fast.is_empty() {
-                gpus_fast
-            } else if fallback.gpus.is_empty() {
-                get_gpus_ps()
-            } else {
-                fallback.gpus
-            });
-            (
-                fallback.windows_edition.or_else(get_windows_edition_ps),
-                fallback.virtualization.or_else(detect_virtualization_ps),
-                gpus,
-                battery_native.or(fallback.battery).or_else(get_battery_ps),
-                // machine_model isn't part of the PowerShell fallback batch; the
-                // additive nullable key is simply absent on this rare path.
-                None,
-            )
+    let (
+        windows_edition,
+        virtualization,
+        gpus,
+        battery,
+        machine_model,
+        motherboard,
+        bios,
+        ram_slots,
+    ) = if let Some((
+        edition_wmi,
+        virt_wmi,
+        gpus_wmi,
+        battery_wmi,
+        model_wmi,
+        motherboard_wmi,
+        bios_wmi,
+        ram_slots_wmi,
+    )) = wmi_results
+    {
+        let edition = edition_wmi.or_else(get_windows_edition_ps);
+        let virt = virt_wmi.or_else(detect_virtualization_ps);
+        let gpu_list = {
+            let mut gpus = gpus_fast;
+            if gpus.is_empty() {
+                gpus = gpus_wmi;
+            }
+            if gpus.is_empty() {
+                gpus = get_gpus_ps();
+            }
+            filter_software_gpus(gpus)
         };
+        let bat = battery_native.or(battery_wmi).or_else(get_battery_ps);
+        (
+            edition,
+            virt,
+            gpu_list,
+            bat,
+            model_wmi,
+            motherboard_wmi,
+            bios_wmi,
+            ram_slots_wmi,
+        )
+    } else {
+        // WMI worker thread failed entirely (COM init error) or timed out —
+        // fall back to PowerShell for everything WMI would have provided.
+        // gpus_fast and battery_native are already-computed main-thread
+        // probes; reuse them when they succeeded rather than re-running.
+        let fallback = get_batched_powershell_fallback();
+        // D1: filter software adapters here too — the success branch already
+        // does, but get_gpus_ps()/the PS fallback can surface "Microsoft
+        // Basic Render Driver" etc. (gpus_fast is registry-sourced and
+        // already clean, so filtering it again is a harmless no-op.)
+        let gpus = filter_software_gpus(if !gpus_fast.is_empty() {
+            gpus_fast
+        } else if fallback.gpus.is_empty() {
+            get_gpus_ps()
+        } else {
+            fallback.gpus
+        });
+        (
+            fallback.windows_edition.or_else(get_windows_edition_ps),
+            fallback.virtualization.or_else(detect_virtualization_ps),
+            gpus,
+            battery_native.or(fallback.battery).or_else(get_battery_ps),
+            fallback.machine_model,
+            fallback.motherboard,
+            fallback.bios,
+            fallback.ram_slots,
+        )
+    };
 
     PlatformInfo {
+        os_build: None,
         windows_edition,
         boot_mode: detect_boot_mode(),
         virtualization,
@@ -257,20 +329,24 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         display_resolution: get_display_resolution(),
         battery,
         zfs_health: None,
-        motherboard: None,
-        bios: None,
-        ram_slots: None,
+        motherboard,
+        bios,
+        ram_slots,
         locale: get_locale(),
         encryption: get_bitlocker_status(),
+        elevation_unlocks_more: false,
     }
 }
 
-/// Query BitLocker status for the system drive (`C:`) via the
+/// Query BitLocker status for the drive named by `SystemDrive` (falling back
+/// to `C:` only when the environment value is unavailable) via the
 /// `root\CIMV2\Security\MicrosoftVolumeEncryption` namespace.
 ///
 /// This namespace is readable by non-admin users on most Win11 Device
 /// Encryption laptops; older Win10 / domain-joined configurations may require
-/// admin and will return `None` (the elevation footer hint covers that case).
+/// admin and will return `None`. Absence is intentionally not rendered as an
+/// encryption claim because permission and feature availability are
+/// indistinguishable here.
 ///
 /// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) so a hung
 /// security-namespace WMI provider can't stall the full-mode report.
@@ -287,15 +363,8 @@ fn bitlocker_status_inner() -> Option<String> {
     struct EncryptableVolume {
         drive_letter: Option<String>,
         protection_status: Option<u32>,
-        // Note: queried as a separate property because not all driver versions
-        // expose ConversionStatus, and some return it as i32 vs u32.
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename = "Win32_EncryptableVolume")]
-    #[serde(rename_all = "PascalCase")]
-    struct EncryptableVolumeMethod {
-        drive_letter: Option<String>,
+        conversion_status: Option<u32>,
+        encryption_percentage: Option<u32>,
         encryption_method: Option<u32>,
     }
 
@@ -305,36 +374,67 @@ fn bitlocker_status_inner() -> Option<String> {
             .ok()?;
 
     let volumes: Vec<EncryptableVolume> = wmi.query().ok()?;
-    let methods: Vec<EncryptableVolumeMethod> = wmi.query().ok().unwrap_or_default();
 
     // Find the system drive — typically C:.
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
-    let target = volumes
-        .iter()
-        .find(|v| v.drive_letter.as_deref() == Some(system_drive.as_str()))?;
+    let target = volumes.iter().find(|volume| {
+        volume
+            .drive_letter
+            .as_deref()
+            .is_some_and(|drive| drive.eq_ignore_ascii_case(&system_drive))
+    })?;
 
     let protection = target.protection_status?;
-    let method_for_drive = methods
-        .iter()
-        .find(|m| m.drive_letter.as_deref() == Some(system_drive.as_str()))
-        .and_then(|m| m.encryption_method);
-
-    Some(format_bitlocker_status(protection, method_for_drive))
+    Some(format_bitlocker_status(
+        target.conversion_status,
+        target.encryption_percentage,
+        protection,
+        target.encryption_method,
+    ))
 }
 
-/// Format BitLocker status. ProtectionStatus: 0=Off, 1=On, 2=Unknown.
+/// Format BitLocker conversion and protection as separate dimensions.
+/// `ProtectionStatus=0` can mean protectors are suspended on an otherwise
+/// fully encrypted volume, so it must never be rendered as "encryption off".
 /// EncryptionMethod values per Microsoft Learn:
 /// https://learn.microsoft.com/en-us/windows/win32/secprov/getencryptionmethod-win32-encryptablevolume
-fn format_bitlocker_status(protection_status: u32, method: Option<u32>) -> String {
-    match protection_status {
-        0 => "BitLocker Off".to_string(),
-        1 => {
-            let method_name = method
-                .map(bitlocker_method_name)
-                .unwrap_or_else(|| "Unknown".to_string());
-            format!("BitLocker On ({})", method_name)
-        }
-        _ => "BitLocker (status unknown)".to_string(),
+fn format_bitlocker_status(
+    conversion_status: Option<u32>,
+    encryption_percentage: Option<u32>,
+    protection_status: u32,
+    method: Option<u32>,
+) -> String {
+    let protection = match protection_status {
+        1 => "protection on",
+        0 => "protection suspended",
+        _ => "protection unknown",
+    };
+    let method = method
+        .filter(|method| *method != 0)
+        .map(bitlocker_method_name)
+        .map(|method| format!(" ({})", method))
+        .unwrap_or_default();
+    let percent = encryption_percentage.unwrap_or(0).min(100);
+    match conversion_status {
+        Some(0) => "BitLocker: decrypted".to_string(),
+        Some(1) => format!("BitLocker: encrypted; {}{}", protection, method),
+        Some(2) => format!(
+            "BitLocker: encrypting {}%; {}{}",
+            percent, protection, method
+        ),
+        Some(3) => format!(
+            "BitLocker: decrypting {}%; {}{}",
+            percent, protection, method
+        ),
+        Some(4) => format!(
+            "BitLocker: encryption paused at {}%; {}",
+            percent, protection
+        ),
+        Some(5) => format!(
+            "BitLocker: decryption paused at {}%; {}",
+            percent, protection
+        ),
+        _ => format!("BitLocker: conversion unknown; {}{}", protection, method),
     }
 }
 
@@ -354,19 +454,19 @@ fn bitlocker_method_name(method: u32) -> String {
 
 /// Get terminal name using only env vars (no subprocess)
 fn get_terminal_fast() -> Option<String> {
-    if env::var("WT_SESSION").is_ok() {
+    if env::var("WT_SESSION").is_ok_and(|value| !value.trim().is_empty()) {
         return Some("Windows Terminal".to_string());
     }
-    if env::var("TERM_PROGRAM").ok().as_deref() == Some("vscode") {
+    if env::var("TERM_PROGRAM").is_ok_and(|value| value.trim() == "vscode") {
         return Some("VS Code".to_string());
     }
-    Some("Console".to_string())
+    None
 }
 
 /// Get GPU names from registry (fast, no WMI/PowerShell needed, ~5-10ms)
 fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
-    if let Some(output) = run_output(
+    if let Some(stdout) = run_stdout(
         "reg",
         [
             "query",
@@ -377,7 +477,6 @@ fn get_gpus_fast() -> Vec<String> {
         ],
         CommandTimeout::Normal,
     ) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.contains("DriverDesc") {
                 // Format: "    DriverDesc    REG_SZ    NVIDIA GeForce RTX 4090"
@@ -434,16 +533,12 @@ fn detect_virtualization_wmi(wmi: &WMIConnection) -> Option<String> {
         return Some("Hyper-V".to_string());
     }
 
-    // CPUID brand is set but DMI looks physical → host is running with
-    // VBS/HVCI on a real laptop/desktop. Surface that nuance.
+    // CPUID brand is set but DMI does not establish a VM. This commonly means
+    // VBS/HVCI on a physical Windows host, but a vendor-customized or nested
+    // VM can expose the same evidence. Report only the observed hypervisor
+    // layer rather than claiming bare metal.
     match cpuid_brand.as_deref() {
-        Some("Hyper-V") => {
-            // Heuristic: real Hyper-V VMs always have Microsoft Corporation as
-            // manufacturer. If we got here and manufacturer is something else
-            // (Dell, HP, Lenovo, ASUS, MSI, Razer, Apple, Framework, etc.),
-            // the hypervisor is the VBS layer — user is on bare metal.
-            return Some("Bare Metal (Hyper-V/VBS)".to_string());
-        }
+        Some("Hyper-V") => return Some("Hyper-V/VBS".to_string()),
         Some(other) => return Some(other.to_string()),
         None => {}
     }
@@ -465,6 +560,64 @@ fn get_machine_model_wmi(wmi: &WMIConnection) -> Option<String> {
     let results: Vec<Win32ComputerSystem> = wmi.query().ok()?;
     let cs = results.into_iter().next()?;
     compose_machine_model(cs.manufacturer.as_deref(), cs.model.as_deref())
+}
+
+fn get_motherboard_wmi(wmi: &WMIConnection) -> Option<String> {
+    let boards: Vec<Win32BaseBoard> = wmi.query().ok()?;
+    let board = boards.into_iter().next()?;
+    join_wmi_parts([
+        board.manufacturer.as_deref(),
+        board.product.as_deref(),
+        board.version.as_deref(),
+    ])
+}
+
+fn get_bios_wmi(wmi: &WMIConnection) -> Option<String> {
+    let bioses: Vec<Win32Bios> = wmi.query().ok()?;
+    let bios = bioses.into_iter().next()?;
+    join_wmi_parts([
+        bios.manufacturer.as_deref(),
+        bios.smbios_bios_version.as_deref(),
+    ])
+}
+
+fn get_ram_slots_wmi(wmi: &WMIConnection) -> Option<String> {
+    let arrays: Vec<Win32PhysicalMemoryArray> = wmi.query().ok()?;
+    let total: u32 = arrays
+        .into_iter()
+        .filter(|array| array.use_code == Some(3) || array.use_code.is_none())
+        .filter_map(|array| array.memory_devices)
+        .sum();
+    let modules: Vec<Win32PhysicalMemory> = wmi.query().ok()?;
+    let populated = modules
+        .into_iter()
+        .filter(|module| module.capacity.unwrap_or(0) > 0)
+        .count();
+    match (populated, total) {
+        (0, 0) => None,
+        (populated, 0) => Some(format!("{} populated", populated)),
+        (populated, total) => Some(format!("{}/{} populated", populated, total)),
+    }
+}
+
+fn join_wmi_parts<const N: usize>(parts: [Option<&str>; N]) -> Option<String> {
+    let mut values: Vec<String> = Vec::new();
+    for value in parts.into_iter().flatten().map(str::trim) {
+        let lower = value.to_ascii_lowercase();
+        let junk = value.is_empty()
+            || lower.contains("to be filled")
+            || lower.contains("system manufacturer")
+            || lower.contains("system product")
+            || matches!(lower.as_str(), "default string" | "none" | "not specified");
+        if !junk
+            && !values
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(value))
+        {
+            values.push(value.to_string());
+        }
+    }
+    (!values.is_empty()).then(|| values.join(" "))
 }
 
 /// Compose a human machine-model string from DMI manufacturer + model.
@@ -570,16 +723,21 @@ fn get_battery_wmi(wmi: &WMIConnection) -> Option<String> {
     let results: Vec<Win32Battery> = wmi.query().ok()?;
     let bat = results.into_iter().next()?;
     let charge = bat.estimated_charge_remaining?;
+    if charge > 100 {
+        return None;
+    }
     let status_code = bat.battery_status.unwrap_or(0);
     let status = match status_code {
         1 => "Discharging",
-        2 => "AC Power",
-        3 | 6 => "Charging",
+        2 => "Plugged in",
+        3 => "Fully charged",
+        6 => "Charging",
         4 => "Low",
         5 => "Critical",
         7 => "Charging High",
         8 => "Charging Low",
         9 => "Charging Critical",
+        11 => "Partially charged",
         _ => "Unknown",
     };
     Some(format!("{}% ({})", charge, status))
@@ -592,11 +750,6 @@ fn get_battery_wmi(wmi: &WMIConnection) -> Option<String> {
 ///
 /// Returns `(name, version, kernel)` on success.
 pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
-    let mut display_version: Option<String> = None;
-    let mut current_build: Option<String> = None;
-    let mut ubr: Option<u32> = None;
-    let mut product_name: Option<String> = None;
-
     let stdout = run_stdout(
         "reg",
         [
@@ -605,6 +758,15 @@ pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
         ],
         CommandTimeout::Normal,
     )?;
+    parse_os_info_registry(&stdout)
+}
+
+fn parse_os_info_registry(stdout: &str) -> Option<(String, String, String)> {
+    let mut display_version: Option<String> = None;
+    let mut current_build: Option<String> = None;
+    let mut ubr: Option<u32> = None;
+    let mut product_name: Option<String> = None;
+    let mut installation_type: Option<String> = None;
 
     for line in stdout.lines() {
         // Format: "    <Name>    <Type>    <Value>" — split on whitespace and
@@ -623,16 +785,43 @@ pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
             "DisplayVersion" => display_version = Some(value),
             "CurrentBuild" => current_build = Some(value),
             "UBR" => {
-                ubr = u32::from_str_radix(value.trim_start_matches("0x"), 16).ok();
+                ubr = if value.starts_with("0x") {
+                    u32::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+                } else {
+                    value.parse().ok()
+                };
             }
             "ProductName" => product_name = Some(value),
+            "InstallationType" => installation_type = Some(value),
             _ => {}
         }
     }
 
     let build_num: u32 = current_build.as_deref()?.parse().ok()?;
 
-    // Detect Windows 11 by build number (>= 22000), per Microsoft's own gate.
+    let server = product_name
+        .as_deref()
+        .is_some_and(|value| value.to_ascii_lowercase().contains("server"))
+        || installation_type
+            .as_deref()
+            .is_some_and(|value| value.to_ascii_lowercase().contains("server"));
+
+    if server {
+        let version = product_name
+            .as_deref()
+            .unwrap_or("Windows Server")
+            .trim_start_matches("Microsoft ")
+            .trim_start_matches("Windows Server ")
+            .to_string();
+        let kernel = match ubr {
+            Some(ubr) => format!("10.0.{}.{}", build_num, ubr),
+            None => format!("10.0.{}", build_num),
+        };
+        return Some(("Windows Server".to_string(), version, kernel));
+    }
+
+    // Detect Windows 11 client by build number (>= 22000); the registry's
+    // client ProductName remains frozen at Windows 10 on some releases.
     let name = "Windows".to_string();
     let release = if build_num >= 22000 {
         "11"
@@ -659,8 +848,8 @@ pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
 
     // Kernel string: full build with UBR (e.g. "26200.0" or "26100.4317").
     let kernel = match ubr {
-        Some(u) => format!("{}.{}", build_num, u),
-        None => build_num.to_string(),
+        Some(u) => format!("10.0.{}.{}", build_num, u),
+        None => format!("10.0.{}", build_num),
     };
 
     Some((name, version, kernel))
@@ -754,24 +943,23 @@ pub fn get_socket_count_native() -> Option<usize> {
 /// Get socket count via WMI, with PowerShell fallback (used from cpu.rs).
 ///
 /// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) — returns the
-/// conservative default of `1` on WMI timeout so the report renders
-/// rather than hanging.
+/// `None` on timeout/failure so the report does not fabricate one socket.
 #[allow(dead_code)] // Kept for one release as a fallback under C.13/C.14 transition.
-pub fn get_socket_count_wmi() -> usize {
-    with_timeout(WMI_TIMEOUT, || Some(socket_count_wmi_inner())).unwrap_or(1)
+pub fn get_socket_count_wmi() -> Option<usize> {
+    with_timeout(WMI_TIMEOUT, socket_count_wmi_inner)
 }
 
-fn socket_count_wmi_inner() -> usize {
+fn socket_count_wmi_inner() -> Option<usize> {
     // Try WMI first
     let count = COMLibrary::new()
         .ok()
         .and_then(|com| WMIConnection::new(com).ok())
         .and_then(|wmi| {
             let results: Vec<Win32Processor> = wmi.query().ok()?;
-            Some(results.len().max(1))
+            (!results.is_empty()).then_some(results.len())
         });
     if let Some(c) = count {
-        return c;
+        return Some(c);
     }
 
     // Fallback: PowerShell. Wrap in @(...) so a single-processor machine — where
@@ -787,10 +975,10 @@ fn socket_count_wmi_inner() -> usize {
         CommandTimeout::Slow,
     ) {
         if let Ok(c) = stdout.trim().parse::<usize>() {
-            return c.max(1);
+            return (c > 0).then_some(c);
         }
     }
-    1
+    None
 }
 
 /// Get network info via WMI, with PowerShell fallback (used from network.rs).
@@ -828,42 +1016,32 @@ fn network_info_wmi_inner() -> (Option<String>, Vec<String>) {
         // traffic right now (correct on multi-homed/VPN configs).
         let best_index = get_best_route_interface_index();
 
-        // Order adapters: best-route adapter first (if known), then the rest in
-        // their WMI-natural order. This makes the existing first-match loop
-        // produce VPN-correct output without changing its shape.
-        let mut ordered: Vec<&Win32NetworkAdapterConfig> = Vec::with_capacity(results.len());
-        if let Some(idx) = best_index {
-            ordered.extend(results.iter().filter(|a| a.interface_index == Some(idx)));
-            ordered.extend(results.iter().filter(|a| a.interface_index != Some(idx)));
-        } else {
-            ordered.extend(results.iter());
-        }
-
-        let mut machine_ip: Option<String> = None;
-        let mut dns_servers: Vec<String> = Vec::new();
-
-        for adapter in &ordered {
-            if machine_ip.is_none() {
-                if let Some(ref ips) = adapter.ip_address {
-                    for ip in ips {
-                        if ip.contains('.') && ip != "127.0.0.1" {
-                            machine_ip = Some(ip.clone());
-                            break;
-                        }
-                    }
+        // Report the address and DNS configuration from one coherent adapter:
+        // the kernel-selected default-route interface when known, otherwise
+        // the first adapter with a non-loopback address. Mixing DNS from every
+        // IP-enabled adapter produced contradictory VPN/Ethernet/Wi-Fi output.
+        let primary = select_primary_network_adapter(&results, best_index);
+        let machine_ip = primary.and_then(|adapter| {
+            adapter.ip_address.as_ref().and_then(|addresses| {
+                addresses
+                    .iter()
+                    .filter(|ip| is_usable_machine_ip(ip))
+                    .find(|ip| ip.contains('.'))
+                    .or_else(|| addresses.iter().find(|ip| is_usable_machine_ip(ip)))
+                    .cloned()
+            })
+        });
+        let dns_servers = primary
+            .and_then(|adapter| adapter.dns_server_search_order.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|dns| dns.parse::<std::net::IpAddr>().is_ok())
+            .fold(Vec::new(), |mut servers, dns| {
+                if servers.len() < 5 && !servers.contains(&dns) {
+                    servers.push(dns);
                 }
-            }
-            if let Some(ref dns_list) = adapter.dns_server_search_order {
-                for dns in dns_list {
-                    if !dns.is_empty() && !dns_servers.contains(dns) {
-                        dns_servers.push(dns.clone());
-                        if dns_servers.len() >= 5 {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+                servers
+            });
 
         if machine_ip.is_some() || !dns_servers.is_empty() {
             return (machine_ip, dns_servers);
@@ -910,6 +1088,39 @@ fn network_info_wmi_inner() -> (Option<String>, Vec<String>) {
     }
 
     (machine_ip, dns_servers)
+}
+
+fn select_primary_network_adapter(
+    adapters: &[Win32NetworkAdapterConfig],
+    best_index: Option<u32>,
+) -> Option<&Win32NetworkAdapterConfig> {
+    let has_usable_address = |adapter: &&Win32NetworkAdapterConfig| {
+        adapter
+            .ip_address
+            .as_ref()
+            .is_some_and(|addresses| addresses.iter().any(|ip| is_usable_machine_ip(ip)))
+    };
+
+    best_index
+        .and_then(|index| {
+            adapters.iter().find(|adapter| {
+                adapter.interface_index == Some(index) && has_usable_address(adapter)
+            })
+        })
+        .or_else(|| adapters.iter().find(has_usable_address))
+}
+
+fn is_usable_machine_ip(value: &str) -> bool {
+    let parse_value = value.split('%').next().unwrap_or(value);
+    let Ok(ip) = parse_value.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    !ip.is_unspecified()
+        && !ip.is_loopback()
+        && !ip.is_multicast()
+        && !matches!(ip, std::net::IpAddr::V4(v4) if v4.is_link_local())
+        && !matches!(ip, std::net::IpAddr::V4(v4) if v4.is_broadcast())
+        && !matches!(ip, std::net::IpAddr::V6(v6) if v6.is_unicast_link_local())
 }
 
 // --- Non-WMI collectors ---
@@ -974,8 +1185,22 @@ fn get_architecture() -> Option<String> {
     Some(host.to_string())
 }
 
-/// Detect boot mode via environment variable (no PowerShell needed)
+/// Detect firmware boot mode through the native API, with conservative
+/// fallbacks for unusual restricted environments.
 fn detect_boot_mode() -> Option<String> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFirmwareType(firmware_type: *mut u32) -> i32;
+    }
+    let mut firmware_type = 0u32;
+    // SAFETY: GetFirmwareType writes one `u32` to a valid stack pointer.
+    if unsafe { GetFirmwareType(&mut firmware_type) } != 0 {
+        match firmware_type {
+            1 => return Some("Legacy BIOS".to_string()),
+            2 => return Some("UEFI".to_string()),
+            _ => {}
+        }
+    }
     // Check firmware_type env var (set by Windows on UEFI systems)
     if let Ok(firmware) = env::var("firmware_type") {
         let upper = firmware.to_uppercase();
@@ -1009,13 +1234,15 @@ fn detect_boot_mode() -> Option<String> {
 /// Get terminal emulator name
 fn get_terminal() -> Option<String> {
     // Check env vars first (instant)
-    if env::var("WT_SESSION").is_ok() {
+    if env::var("WT_SESSION").is_ok_and(|value| !value.trim().is_empty()) {
         return Some("Windows Terminal".to_string());
     }
-    if env::var("TERM_PROGRAM").ok().as_deref() == Some("vscode") {
+    if env::var("TERM_PROGRAM").is_ok_and(|value| value.trim() == "vscode") {
         return Some("VS Code".to_string());
     }
-    if env::var("CURSOR_TRACE_ID").is_ok() || env::var("CURSOR_AGENT").is_ok() {
+    if env::var("CURSOR_TRACE_ID").is_ok_and(|value| !value.trim().is_empty())
+        || env::var("CURSOR_AGENT").is_ok_and(|value| !value.trim().is_empty())
+    {
         return Some("Cursor".to_string());
     }
 
@@ -1029,12 +1256,18 @@ fn get_terminal() -> Option<String> {
         return Some(name);
     }
 
-    Some("Console".to_string())
+    None
 }
 
 /// Walk the parent-process chain (cap 10 levels) looking for a known
 /// terminal-host executable name. Returns `None` if no match.
 fn detect_terminal_via_parent_walk() -> Option<String> {
+    process_ancestry()
+        .into_iter()
+        .find_map(|name| match_terminal_name(&name).map(str::to_string))
+}
+
+fn process_ancestry() -> Vec<String> {
     use std::collections::HashMap;
     use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
     use winapi::um::processthreadsapi::GetCurrentProcessId;
@@ -1047,7 +1280,7 @@ fn detect_terminal_via_parent_walk() -> Option<String> {
     // failure or a valid HANDLE on success; we check before walking.
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
-        return None;
+        return Vec::new();
     }
 
     let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
@@ -1077,21 +1310,20 @@ fn detect_terminal_via_parent_walk() -> Option<String> {
 
     // Walk parent chain from current PID (cap 10 levels — defensive against
     // corrupted PID tables that could form cycles).
+    let mut ancestry = Vec::new();
     let mut current_pid = unsafe { GetCurrentProcessId() };
     for _ in 0..10 {
         let (parent_pid, name) = match pid_to_parent_name.get(&current_pid) {
             Some(v) => v.clone(),
             None => break,
         };
-        if let Some(label) = match_terminal_name(&name) {
-            return Some(label.to_string());
-        }
+        ancestry.push(name);
         if parent_pid == 0 || parent_pid == current_pid {
             break;
         }
         current_pid = parent_pid;
     }
-    None
+    ancestry
 }
 
 /// Match a process exe name (basename, with .exe) to a terminal label.
@@ -1125,57 +1357,34 @@ fn match_terminal_name(exe: &str) -> Option<&'static str> {
 
 /// Get shell name and version
 fn get_shell() -> Option<String> {
-    // Check SHELL env var first (for Git Bash, etc.)
+    // SHELL is authoritative for Unix-like Windows environments.
     if let Ok(shell) = env::var("SHELL") {
-        if shell.contains("bash") {
-            if let Some(version) = run_stdout("bash", ["--version"], CommandTimeout::Normal) {
-                if let Some(line) = version.lines().next() {
-                    if let Some(ver_start) = line.find("version ") {
-                        let ver_part = &line[ver_start + 8..];
-                        if let Some(ver_end) =
-                            ver_part.find(|c: char| !c.is_ascii_digit() && c != '.')
-                        {
-                            return Some(format!("bash {}", &ver_part[..ver_end]));
-                        }
-                    }
-                }
-            }
-            return Some("bash".to_string());
-        }
-    }
-
-    // C.11 (v3.13.0+): check PowerShell 7+ ("PowerShell Core") first. PSCore
-    // installs register under HKLM\SOFTWARE\Microsoft\PowerShellCore\
-    // InstalledVersions\<GUID>\SemanticVersion. We pick the highest version by
-    // parsing each into a (major, minor, patch) tuple and comparing
-    // numerically — a plain string compare would rank "7.9.0" above "7.10.0".
-    // Falls back to legacy Windows PowerShell 5.x detection below if no PSCore
-    // subkey.
-    if let Some(v) = get_powershell_core_version() {
-        return Some(format!("PowerShell {}", v));
-    }
-
-    // Check PowerShell version via registry (no subprocess)
-    if let Some(stdout) = run_stdout(
-        "reg",
-        [
-            "query",
-            r"HKLM\SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine",
-            "/v",
-            "PowerShellVersion",
-        ],
-        CommandTimeout::Normal,
-    ) {
-        for line in stdout.lines() {
-            if line.contains("PowerShellVersion") {
-                if let Some(version) = line.split_whitespace().last() {
-                    return Some(format!("PowerShell {}", version));
-                }
+        if let Some(name) = std::path::Path::new(&shell).file_name() {
+            let name = name.to_string_lossy().trim_end_matches(".exe").to_string();
+            if !name.is_empty() {
+                return Some(name);
             }
         }
     }
 
-    Some("PowerShell".to_string())
+    // Parent-process evidence describes the invoking shell. Installed-version
+    // registry probes do not, so never report an arbitrary installed shell.
+    process_ancestry()
+        .into_iter()
+        .find_map(|name| match name.to_ascii_lowercase().as_str() {
+            "pwsh.exe" => Some(
+                get_powershell_core_version()
+                    .map(|version| format!("PowerShell {}", version))
+                    .unwrap_or_else(|| "PowerShell".to_string()),
+            ),
+            "powershell.exe" => Some("Windows PowerShell".to_string()),
+            "cmd.exe" => Some("Command Prompt".to_string()),
+            "bash.exe" => Some("bash".to_string()),
+            "zsh.exe" => Some("zsh".to_string()),
+            "fish.exe" => Some("fish".to_string()),
+            "nu.exe" => Some("Nushell".to_string()),
+            _ => None,
+        })
 }
 
 /// Recursive `reg query` of `HKLM\SOFTWARE\Microsoft\PowerShellCore\
@@ -1240,7 +1449,7 @@ fn get_display_resolution() -> Option<String> {
         let cx = winapi::um::winuser::GetSystemMetrics(winapi::um::winuser::SM_CXSCREEN);
         let cy = winapi::um::winuser::GetSystemMetrics(winapi::um::winuser::SM_CYSCREEN);
         if cx > 0 && cy > 0 {
-            Some(format!("{}x{}", cx, cy))
+            Some(format!("{}x{} (primary logical)", cx, cy))
         } else {
             None
         }
@@ -1270,6 +1479,10 @@ struct WindowsPowerShellFallback {
     virtualization: Option<String>,
     gpus: Vec<String>,
     battery: Option<String>,
+    machine_model: Option<String>,
+    motherboard: Option<String>,
+    bios: Option<String>,
+    ram_slots: Option<String>,
 }
 
 fn get_batched_powershell_fallback() -> WindowsPowerShellFallback {
@@ -1278,6 +1491,11 @@ $os = Get-CimInstance Win32_OperatingSystem
 $cs = Get-CimInstance Win32_ComputerSystem
 $gpu = @(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name })
 $b = Get-CimInstance Win32_Battery
+$board = Get-CimInstance Win32_BaseBoard | Select-Object -First 1
+$firmware = Get-CimInstance Win32_BIOS | Select-Object -First 1
+$arrays = @(Get-CimInstance Win32_PhysicalMemoryArray | Where-Object { $_.Use -eq 3 -or $null -eq $_.Use })
+$modules = @(Get-CimInstance Win32_PhysicalMemory | Where-Object { $_.Capacity -gt 0 })
+$slotTotal = [int](($arrays | Measure-Object -Property MemoryDevices -Sum).Sum)
 $battery = $null
 if ($b) { $battery = "$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))" }
 [pscustomobject]@{
@@ -1285,6 +1503,9 @@ if ($b) { $battery = "$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))" }
   computer = "$($cs.Manufacturer)|$($cs.Model)|$($cs.HypervisorPresent)"
   gpus = $gpu
   battery = $battery
+  motherboard = "$($board.Manufacturer)|$($board.Product)|$($board.Version)"
+  bios = "$($firmware.Manufacturer)|$($firmware.SMBIOSBIOSVersion)"
+  ram_slots = "$($modules.Count)|$slotTotal"
 } | ConvertTo-Json -Compress
 "#;
 
@@ -1305,9 +1526,9 @@ fn parse_batched_powershell_fallback(json: &str) -> Option<WindowsPowerShellFall
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let virtualization = value["computer"]
-        .as_str()
-        .and_then(parse_virtualization_from_ps_computer_system);
+    let computer = value["computer"].as_str();
+    let virtualization = computer.and_then(parse_virtualization_from_ps_computer_system);
+    let machine_model = computer.and_then(parse_powershell_machine_model);
     let gpus = match &value["gpus"] {
         serde_json::Value::Array(values) => values
             .iter()
@@ -1321,15 +1542,68 @@ fn parse_batched_powershell_fallback(json: &str) -> Option<WindowsPowerShellFall
     };
     let battery = value["battery"]
         .as_str()
-        .map(normalize_powershell_battery_status)
-        .filter(|s| !s.is_empty() && s.contains('%'));
+        .and_then(normalize_powershell_battery_status);
+    let motherboard = value["motherboard"]
+        .as_str()
+        .and_then(parse_powershell_joined_parts);
+    let bios = value["bios"]
+        .as_str()
+        .and_then(parse_powershell_joined_parts);
+    let ram_slots = value["ram_slots"]
+        .as_str()
+        .and_then(parse_powershell_ram_slots);
 
     Some(WindowsPowerShellFallback {
         windows_edition,
         virtualization,
         gpus,
         battery,
+        machine_model,
+        motherboard,
+        bios,
+        ram_slots,
     })
+}
+
+fn parse_powershell_machine_model(value: &str) -> Option<String> {
+    let mut parts = value.split('|');
+    compose_machine_model(parts.next(), parts.next())
+}
+
+fn parse_powershell_joined_parts(value: &str) -> Option<String> {
+    let parts: Vec<Option<&str>> = value.split('|').map(Some).collect();
+    join_wmi_parts_dynamic(&parts)
+}
+
+fn join_wmi_parts_dynamic(parts: &[Option<&str>]) -> Option<String> {
+    let mut values: Vec<String> = Vec::new();
+    for value in parts.iter().flatten().map(|value| value.trim()) {
+        let lower = value.to_ascii_lowercase();
+        let junk = value.is_empty()
+            || lower.contains("to be filled")
+            || lower.contains("system manufacturer")
+            || lower.contains("system product")
+            || matches!(lower.as_str(), "default string" | "none" | "not specified");
+        if !junk
+            && !values
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(value))
+        {
+            values.push(value.to_string());
+        }
+    }
+    (!values.is_empty()).then(|| values.join(" "))
+}
+
+fn parse_powershell_ram_slots(value: &str) -> Option<String> {
+    let mut parts = value.split('|');
+    let populated: usize = parts.next()?.trim().parse().ok()?;
+    let total: usize = parts.next()?.trim().parse().ok()?;
+    match (populated, total) {
+        (0, 0) => None,
+        (populated, 0) => Some(format!("{} populated", populated)),
+        (populated, total) => Some(format!("{}/{} populated", populated, total)),
+    }
 }
 
 fn get_windows_edition_ps() -> Option<String> {
@@ -1421,23 +1695,29 @@ fn get_battery_ps() -> Option<String> {
     )?
     .trim()
     .to_string();
-    if battery.is_empty() || !battery.contains('%') {
-        return None;
-    }
-    Some(normalize_powershell_battery_status(&battery))
+    normalize_powershell_battery_status(&battery)
 }
 
-fn normalize_powershell_battery_status(battery: &str) -> String {
-    battery
-        .replace("(1)", "(Discharging)")
-        .replace("(2)", "(AC Power)")
-        .replace("(3)", "(Charging)")
-        .replace("(4)", "(Low)")
-        .replace("(5)", "(Critical)")
-        .replace("(6)", "(Charging)")
-        .replace("(7)", "(Charging High)")
-        .replace("(8)", "(Charging Low)")
-        .replace("(9)", "(Charging Critical)")
+fn normalize_powershell_battery_status(battery: &str) -> Option<String> {
+    let battery = battery.trim();
+    let (percent, _) = battery.split_once('%')?;
+    let percent: u16 = percent.trim().parse().ok()?;
+    if percent > 100 {
+        return None;
+    }
+    Some(
+        battery
+            .replace("(1)", "(Discharging)")
+            .replace("(2)", "(Plugged in)")
+            .replace("(3)", "(Fully charged)")
+            .replace("(4)", "(Low)")
+            .replace("(5)", "(Critical)")
+            .replace("(6)", "(Charging)")
+            .replace("(7)", "(Charging High)")
+            .replace("(8)", "(Charging Low)")
+            .replace("(9)", "(Charging Critical)")
+            .replace("(11)", "(Partially charged)"),
+    )
 }
 
 // --- C.8: GPU software-adapter filter (v3.13.0+) ---
@@ -1460,14 +1740,27 @@ fn filter_software_gpus(gpus: Vec<String>) -> Vec<String> {
         "RDPDD Chained DD",
         "RDP Encoder Mirror",
     ];
-    gpus.into_iter()
-        .filter(|name| {
+    let mut filtered: Vec<String> = Vec::new();
+    for name in gpus {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let is_software = {
             let lower = name.to_lowercase();
-            !SOFTWARE_GPU_NEEDLES
+            SOFTWARE_GPU_NEEDLES
                 .iter()
                 .any(|n| lower.contains(&n.to_lowercase()))
-        })
-        .collect()
+        };
+        if !is_software
+            && !filtered
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
+            filtered.push(name.to_string());
+        }
+    }
+    filtered
 }
 
 // --- C.10: native battery via GetSystemPowerStatus (v3.13.0+) ---
@@ -1502,7 +1795,7 @@ fn get_battery_native() -> Option<String> {
     // BatteryLifePercent: 0-100, or 255 (0xFF) when unknown. Skip on unknown
     // so we never render "255% (Unknown)".
     let percent = sps.BatteryLifePercent;
-    if percent == 0xFF {
+    if percent > 100 {
         return None;
     }
     if sps.BatteryFlag == BATTERY_FLAG_UNKNOWN {
@@ -1511,9 +1804,8 @@ fn get_battery_native() -> Option<String> {
 
     // 3-state model (v3.13.0+, gaming-laptop friendly):
     //
-    //   1. On AC, fully topped up (≥ 95%, not actively charging) → "AC Power"
-    //      with no percentage. The battery is full and idle; the percentage
-    //      is uninformative and adds noise.
+    //   1. On AC, fully topped up and not actively charging → preserve the
+    //      exact percentage and report "Plugged in".
     //   2. On AC, battery still in play (charging OR firmware-limited
     //      charging OR PSU undersized for peak load — common on Alienware /
     //      ROG / Razer with discrete GPUs that can momentarily exceed the
@@ -1551,14 +1843,11 @@ fn get_battery_native() -> Option<String> {
         if charging {
             return Some(format!("{}% (Charging)", percent));
         }
-        // Fully topped up on AC: percentage is noise. Just say "AC Power".
-        if percent >= 95 {
-            return Some("AC Power".to_string());
-        }
-        // On AC but battery is at < 95% and not charging — either firmware
+        // On AC but not charging — either the battery is full, firmware
         // is intentionally holding charge low (battery-longevity mode) OR
         // the PSU can't keep up with the current load (gaming-laptop case).
-        // Either way, the percentage matters.
+        // The single snapshot cannot distinguish those cases; the percentage
+        // plus "Plugged in" is the precise observation.
         return Some(format!("{}% (Plugged in)", percent));
     }
 
@@ -1635,19 +1924,13 @@ fn get_best_route_interface_index() -> Option<u32> {
     }
 }
 
-// --- C.5: Fast Startup uptime annotation (v3.12.0+) ---
+// --- C.5: legacy Fast Startup diagnostics (v3.12.0+) ---
 //
-// Win10/Win11 default to "Fast Startup" (HiberbootEnabled=1), which
-// hibernates the kernel session at shutdown and resumes it at next boot.
-// `GetTickCount64` (and sysinfo's `System::uptime()`) report time-since the
-// CURRENT kernel session started — usually a few hours. `LastBootUpTime`
-// from WMI's Win32_OperatingSystem reports the LAST COLD BOOT time — often
-// weeks ago on laptops that get used daily. We surface both so the table is
-// honest about what's happening:
-//   "9d 4h 12m (session: 7h 14m)"
-// References:
-//   https://learn.microsoft.com/en-us/answers/questions/1443763/how-to-get-oss-start-time-when-fast-startup-mode-i
-//   https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem
+// These public helpers are retained for compatibility, but report generation
+// no longer combines them into a fabricated "session" duration. Fast Startup
+// configuration, `Win32_OperatingSystem.LastBootUpTime`, kernel uptime, and
+// interactive logon time are distinct facts. Neither boot-time source is a
+// login timestamp, and `LastBootUpTime` does not by itself prove a cold boot.
 
 /// Read `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power` value
 /// `HiberbootEnabled` (DWORD). Returns `true` only when explicitly = 1.
@@ -1680,8 +1963,10 @@ pub fn detect_fast_startup() -> bool {
     false
 }
 
-/// Query `Win32_OperatingSystem.LastBootUpTime` and convert to seconds elapsed
-/// since the last *cold* boot. Returns `None` on any WMI/parse failure.
+/// Query `Win32_OperatingSystem.LastBootUpTime` and convert it to elapsed
+/// seconds. The historical function name is retained for source compatibility;
+/// callers must not interpret the value as proof of a cold boot or a login
+/// duration. Returns `None` on any WMI/parse failure.
 ///
 /// Uses `wmi::WMIDateTime` which the `wmi` crate's serde deserializer parses
 /// from the CIM datetime format (`yyyymmddHHMMSS.mmmmmmsUUU`) into a
@@ -1727,7 +2012,10 @@ mod powershell_fallback_tests {
             "edition": "Microsoft Windows 11 Pro",
             "computer": "Microsoft Corporation|Virtual Machine|True",
             "gpus": ["Intel Arc Graphics", "NVIDIA RTX"],
-            "battery": "87% (2)"
+            "battery": "87% (2)",
+            "motherboard": "Dell Inc.|0ABC12|A01",
+            "bios": "Dell Inc.|1.2.3",
+            "ram_slots": "2|4"
         }"#;
 
         let parsed = parse_batched_powershell_fallback(json).expect("valid fallback JSON");
@@ -1740,7 +2028,14 @@ mod powershell_fallback_tests {
             parsed.gpus,
             vec!["Intel Arc Graphics".to_string(), "NVIDIA RTX".to_string()]
         );
-        assert_eq!(parsed.battery.as_deref(), Some("87% (AC Power)"));
+        assert_eq!(parsed.battery.as_deref(), Some("87% (Plugged in)"));
+        assert_eq!(
+            parsed.machine_model.as_deref(),
+            Some("Microsoft Corporation Virtual Machine")
+        );
+        assert_eq!(parsed.motherboard.as_deref(), Some("Dell Inc. 0ABC12 A01"));
+        assert_eq!(parsed.bios.as_deref(), Some("Dell Inc. 1.2.3"));
+        assert_eq!(parsed.ram_slots.as_deref(), Some("2/4 populated"));
     }
 
     #[test]
@@ -1782,5 +2077,138 @@ mod powershell_fallback_tests {
         assert_eq!(parsed.virtualization.as_deref(), Some("QEMU"));
         assert_eq!(parsed.gpus, vec!["Virtio GPU".to_string()]);
         assert_eq!(parsed.battery, None);
+    }
+
+    #[test]
+    fn parses_windows_client_and_server_registry_versions() {
+        let client = r#"
+            ProductName         REG_SZ       Windows 10 Pro
+            InstallationType    REG_SZ       Client
+            DisplayVersion      REG_SZ       24H2
+            CurrentBuild        REG_SZ       26100
+            UBR                 REG_DWORD    0x10dd
+        "#;
+        assert_eq!(
+            parse_os_info_registry(client),
+            Some((
+                "Windows".to_string(),
+                "11 24H2".to_string(),
+                "10.0.26100.4317".to_string(),
+            ))
+        );
+
+        let server = r#"
+            ProductName         REG_SZ       Windows Server 2025 Datacenter
+            InstallationType    REG_SZ       Server
+            CurrentBuild        REG_SZ       26100
+            UBR                 REG_DWORD    0x2a
+        "#;
+        assert_eq!(
+            parse_os_info_registry(server),
+            Some((
+                "Windows Server".to_string(),
+                "2025 Datacenter".to_string(),
+                "10.0.26100.42".to_string(),
+            ))
+        );
+        assert_eq!(parse_os_info_registry("ProductName REG_SZ Windows"), None);
+    }
+
+    #[test]
+    fn bitlocker_keeps_conversion_and_protection_separate() {
+        assert_eq!(
+            format_bitlocker_status(Some(1), Some(100), 0, Some(7)),
+            "BitLocker: encrypted; protection suspended (XTS-AES-256)"
+        );
+        assert_eq!(
+            format_bitlocker_status(Some(2), Some(37), 1, Some(6)),
+            "BitLocker: encrypting 37%; protection on (XTS-AES-128)"
+        );
+        assert_eq!(
+            format_bitlocker_status(Some(3), Some(140), 2, None),
+            "BitLocker: decrypting 100%; protection unknown"
+        );
+        assert_eq!(
+            format_bitlocker_status(Some(0), Some(0), 0, Some(0)),
+            "BitLocker: decrypted"
+        );
+    }
+
+    #[test]
+    fn battery_status_codes_have_precise_labels() {
+        assert_eq!(
+            normalize_powershell_battery_status("100% (3)"),
+            Some("100% (Fully charged)".to_string())
+        );
+        assert_eq!(
+            normalize_powershell_battery_status("42% (6)"),
+            Some("42% (Charging)".to_string())
+        );
+        assert_eq!(
+            normalize_powershell_battery_status("78% (11)"),
+            Some("78% (Partially charged)".to_string())
+        );
+        assert_eq!(normalize_powershell_battery_status("255% (2)"), None);
+    }
+
+    #[test]
+    fn software_display_adapters_are_not_reported_as_gpus() {
+        let filtered = filter_software_gpus(vec![
+            "NVIDIA GeForce RTX 4090 Laptop GPU".to_string(),
+            " nvidia geForce RTX 4090 Laptop GPU ".to_string(),
+            "Microsoft Basic Render Driver".to_string(),
+            "Intel(R) UHD Graphics".to_string(),
+        ]);
+        assert_eq!(
+            filtered,
+            vec![
+                "NVIDIA GeForce RTX 4090 Laptop GPU".to_string(),
+                "Intel(R) UHD Graphics".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn default_route_adapter_keeps_ip_and_dns_coherent() {
+        let adapters = vec![
+            Win32NetworkAdapterConfig {
+                ip_address: Some(vec!["192.168.1.30".to_string()]),
+                dns_server_search_order: Some(vec!["192.168.1.1".to_string()]),
+                interface_index: Some(4),
+            },
+            Win32NetworkAdapterConfig {
+                ip_address: Some(vec!["100.64.0.2".to_string()]),
+                dns_server_search_order: Some(vec!["100.64.0.1".to_string()]),
+                interface_index: Some(9),
+            },
+        ];
+        let selected = select_primary_network_adapter(&adapters, Some(9)).unwrap();
+        assert_eq!(selected.interface_index, Some(9));
+        assert_eq!(
+            selected.dns_server_search_order.as_deref(),
+            Some(["100.64.0.1".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn link_local_only_best_adapter_falls_back_to_usable_address() {
+        let adapters = vec![
+            Win32NetworkAdapterConfig {
+                ip_address: Some(vec!["fe80::1%12".to_string()]),
+                dns_server_search_order: Some(vec!["fe80::1".to_string()]),
+                interface_index: Some(12),
+            },
+            Win32NetworkAdapterConfig {
+                ip_address: Some(vec!["10.0.0.20".to_string()]),
+                dns_server_search_order: Some(vec!["10.0.0.1".to_string()]),
+                interface_index: Some(5),
+            },
+        ];
+        assert_eq!(
+            select_primary_network_adapter(&adapters, Some(12))
+                .unwrap()
+                .interface_index,
+            Some(5)
+        );
     }
 }

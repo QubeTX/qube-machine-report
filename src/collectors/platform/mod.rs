@@ -15,8 +15,11 @@ pub mod macos;
 pub mod windows;
 
 /// Platform-specific extended information
+#[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct PlatformInfo {
+    /// OS build identifier when the platform exposes one separately.
+    pub os_build: Option<String>,
     /// Desktop environment (Linux)
     pub desktop_environment: Option<String>,
     /// Display server (Linux: X11/Wayland)
@@ -59,6 +62,9 @@ pub struct PlatformInfo {
     /// Only populated when the data is readable in the current security context;
     /// otherwise `None` (unelevated users may see this gap on certain configurations).
     pub encryption: Option<String>,
+    /// Whether a probe specifically failed because the current process lacks
+    /// privileges and elevation is expected to unlock useful data.
+    pub elevation_unlocks_more: bool,
 }
 
 /// Collect platform-specific information

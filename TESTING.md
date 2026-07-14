@@ -4,6 +4,82 @@ This file tracks the manual verification matrix that must pass before each tagge
 
 ## Per-version verification log
 
+### Unreleased macOS completion checkpoint — 2026-07-14
+
+- **Scope/state:** macOS implementation and local validation are complete on the
+  default branch while `Cargo.toml` intentionally remains `3.17.0`. This is not
+  a v4.0.0 release stamp. Alienware Windows, AMD64 Linux, Raspberry Pi 4,
+  version bump, tag/deployment, and homepage verification remain pending.
+- **SemVer boundary:** final API review found source-breaking additions to
+  public Rust records and changed collector-helper signatures. The deferred
+  release is therefore v4.0.0, not v3.18.0. CLI behavior and existing schema-v1
+  JSON keys remain compatible; affected records are `#[non_exhaustive]`.
+- **Host:** MacBook Pro M2 (`Mac14,7`), macOS 26.3.1 build 25D2128, 8 GiB,
+  APFS root, FileVault On, integrated battery, internal Retina display.
+- **Native Apple Silicon gate:** `cargo fmt --all -- --check`,
+  `cargo clippy --locked --all-targets --workspace -- -D warnings`,
+  `cargo test --locked --workspace --all-targets`, and
+  `cargo build --locked --release` pass. Test count: **115 library + 19
+  integration**, zero failures.
+- **External Rust consumer:** an isolated temporary crate using TR-300 as a path
+  dependency compiled and ran with `SystemInfo::collect_with_mode`,
+  `Config::default`, `report::generate`, and a wildcard arm for the
+  non-exhaustive `CollectMode` contract.
+- **Rosetta gate:** `cargo build --locked --release --target
+  x86_64-apple-darwin` and `cargo test --locked --target
+  x86_64-apple-darwin --workspace --all-targets` pass. Test count: **115
+  library + 19 integration**, zero failures. The executable is confirmed Mach-O
+  x86_64 and runs through `/usr/bin/arch -x86_64`.
+- **Live native parity:** schema v1 JSON matched `sw_vers` version/build,
+  `sysctl` model/physical/logical cores/RAM, `pmset` battery percent, and
+  `fdesetup` FileVault state. Reported values included `MacBook Pro (Mac14,7)`,
+  Apple M2, `4P + 4E`, arm64, APFS `/`, Normal boot, current logical/native
+  display resolution, nonzero available memory, battery health/cycles, and
+  Codex terminal detection.
+- **Live Rosetta parity:** the same host facts remained populated through the
+  native arm64 profiler slice; architecture was exactly `arm64 host / x86_64
+  (Rosetta 2)` and both frequency fields were `null` rather than the translated
+  2.4 GHz compatibility value.
+- **Mode/output contracts:** full/fast JSON parse; fast omits slow display and
+  encryption fields; `LC_ALL=C LANG=C` auto-falls back to printable ASCII with
+  every table line exactly 51 columns; native and Rosetta JSON expose no path
+  containing `serial`, `uuid`, or `udid`; zsh profile install/reinstall/uninstall
+  round-trip passes entirely inside a temporary home.
+- **Updater:** native and Rosetta `tr300 update --json` both returned success,
+  current/latest `3.17.0`, and `update_available: false`; no install was run.
+- **Performance:** observed release wall clock was native full 0.90s, native fast
+  0.21s, Rosetta full 1.52s, Rosetta fast 0.31s. Both fast paths are well below
+  the blocking 1.5s CI budget. The final five-run medians were 0.497s native
+  full, 0.234s native fast, 0.627s Rosetta full, and 0.338s Rosetta fast.
+- **Security/package:** `cargo audit` passes against 221 locked dependencies;
+  `crossbeam-epoch` is 0.9.20. Markdown collision/symlink and updater staging
+  tests pass. Package list/publish dry-run are rerun after the final docs/handoff
+  are present.
+- **CI enforcement change:** macOS ARM test/build/speed jobs no longer use
+  `continue-on-error`; RustSec audit is no longer advisory. The exact pushed
+  handoff commit must prove these gates hosted before this checkpoint is called
+  settled.
+- **Mac release freeze:** the Alienware pass must not change macOS collectors,
+  Apple target/artifact names, cargo-dist/release workflow, toolchain, or
+  signing/notarization inputs. Any necessary shared/dependency/workflow change
+  invalidates this stamp and requires this native + Rosetta matrix again on a
+  Mac before v4.0.0 can be tagged. The version-only package/root-lock update,
+  generated man-page version, release notes/ledger, and cfg-local Windows/Linux
+  evidence are release bookkeeping and do not invalidate the Mac runtime stamp.
+
+### v3.17.0 — 2026-06-08
+
+- Release commit/tag: `2d0c0b2470db603aa2e8058fee382b0dcaf0930c` / `v3.17.0`.
+- CI run 27116322705, Release run 27116326346, Crates.io Publish run
+  27116417286, and Windows Installers run 27116494691 all succeeded.
+- crates.io reports newest/max version `3.17.0`.
+- GitHub Release is published (not draft/prerelease) with 28 assets, including
+  both macOS architectures, Linux ARM64/x86_64 gnu/musl, Windows archive/MSI,
+  the three add-on Windows installers, checksums, canonical installer scripts,
+  and legacy `tr-300-installer.*` aliases.
+- User-visible scope: Windows cross-method install consolidation and edition-
+  preserving updates. macOS/Linux runtime collection was unchanged at this tag.
+
 ### v3.16.0 — 2026-06-03
 
 - **Stability & cross-platform hardening pass**, shipped as seven reviewed, individually-CI-green PRs (PR1 output/build robustness; PR2 macOS Tahoe codename + ARM-Linux CPU frequency; PR3 Windows MODEL row + GPU/boot/socket-count; PR4 Linux battery-units/lspci/ZFS; PR5 symlink-safe install + updater temp cleanup; PR6 Unicode-table-width + checksum tests; PR7 self-update cargo-path verify + rate-limit messaging), merged to master in order. Two audit findings (A3 macOS host-arch, D4 macOS battery wording) were verified non-issues after review and made no code change — see `MASTER_PLAN.md`.
@@ -58,19 +134,20 @@ This file tracks the manual verification matrix that must pass before each tagge
 - **`test`** — `cargo test --workspace --all-targets` on Linux + macOS ARM + Windows
 - **`build`** — release build smoke test on all three platforms (with a `--version` + `--fast --json` invocation to verify the binary runs)
 - **`speed`** — 5-run median of `tr300 --fast` on Linux + macOS ARM + Windows, fails if median > 1500 ms (auto-run safety gate). Reports times in the job summary.
-- **`audit`** — `cargo audit` against RustSec advisories (advisory-only; doesn't block)
+- **`audit`** — blocking `cargo audit` against RustSec advisories
 - **`dist-plan`** — verifies cargo-dist config parses, so dist regressions don't surprise us at tag time
 
 To reproduce locally before pushing:
 
 ```bash
-cargo fmt -- --check
-cargo clippy --all-targets --workspace -- -D warnings
-cargo test --workspace --all-targets
-cargo run -- --json | jq .            # parses without error
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --workspace -- -D warnings
+cargo test --locked --workspace --all-targets
+cargo audit
+cargo run -- --json --no-save | jq .  # parses without report-file side effects
 cargo run -- --json update | jq .     # update action JSON shape
 cargo run -- --fast --json | jq .     # same, fast mode
-cargo run -- --ascii                  # visual inspection
+cargo run -- --ascii --no-save        # visual inspection
 ```
 
 ### Output stability gates
@@ -87,9 +164,10 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | Platform | Required checks | Last verified |
 |---|---|---|
 | **macOS Intel (Sonoma 14.x)** | OS shows "macOS 14.x"; CPU brand contains "Intel"; uptime present; battery on laptop | — |
-| **macOS Apple Silicon M1** | CPU brand "Apple M1/Pro/Max" matches; freq ≠ 0; arch "Apple Silicon"; cores show P/E split | — |
+| **macOS Apple Silicon M1** | CPU brand "Apple M1/Pro/Max" matches; nonzero native frequency when the OS exposes one; arm64 arch; cores show P/E split | — |
+| **macOS Apple Silicon M2** | Native full/fast table+JSON; model/build/boot/display/FileVault/battery parity; P/E topology; memory definitions; privacy keys; speed | Unreleased checkpoint 2026-07-14 — MacBook Pro M2, Mac14,7, macOS 26.3.1 (25D2128) |
 | **macOS Apple Silicon M3 / M4** | CPU brand exact (no "Apple M1" stale); cores P/E; Mac marketing name correct; battery health present | — |
-| **macOS Apple Silicon under Rosetta 2** | Arch shows `x86_64 (Apple Silicon, Rosetta 2)` | — |
+| **macOS Apple Silicon under Rosetta 2** | Arch shows host+process scopes; native profiler preserves model/display/battery; translated compatibility frequency stays null | Unreleased checkpoint 2026-07-14 — x86_64 release binary under Rosetta on Mac14,7 |
 | **Ubuntu 22.04+ (systemd-resolved)** | DNS row shows upstream resolvers, NOT 127.0.0.53 | — |
 | **Debian 12 (no systemd-resolved)** | DNS row shows /etc/resolv.conf contents | — |
 | **Fedora / Arch** | Hypervisor "None" on bare metal; terminal detection works for Konsole + GNOME Terminal + Wezterm | — |
@@ -99,8 +177,8 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | **WSL2 on Win11** | Hypervisor shows "WSL2"; terminal shows "Windows Terminal" via WT_SESSION | — |
 | **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | 3.10.0 (footer hint visible; arch / OS / DNS unchanged in PR1) |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
-| **Windows 11 (BitLocker OFF)** | "Encryption" row shows "Off" or absent + footer hint when not elevated | — |
-| **Windows 11 as Administrator** | Encryption shows full method + protection level; **footer hint absent** | — |
+| **Windows 11 (BitLocker OFF)** | "Encryption" row shows an evidence-backed Off state or remains absent; no promise that elevation alone unlocks it | — |
+| **Windows 11 as Administrator** | Encryption shows evidence-backed method + protection level when available; no blanket elevation footer | — |
 | **Linux as root (sudo)** | Motherboard, BIOS, RAM slot rows present; **footer hint absent** | — |
 | **Linux as user (no sudo)** | Motherboard / BIOS / RAM rows absent; one-line footer hint visible (full mode); footer ABSENT in `--fast` | — |
 | **Windows 11 ARM** | Arch via IsWow64Process2 correct under both x64 and ARM64 native processes | — |

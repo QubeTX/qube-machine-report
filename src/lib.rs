@@ -19,6 +19,13 @@
 //! let report = report::generate(&info, &config);
 //! println!("{}", report);
 //! ```
+//!
+//! # Public data types in v4
+//!
+//! TR-300's extensible public records and enums are `#[non_exhaustive]`.
+//! Read their public fields and use collection/default/builder APIs, but avoid
+//! external struct literals and exhaustive matches so later additive machine
+//! facts do not force another source-breaking release.
 
 pub mod cli;
 pub mod collectors;
@@ -66,11 +73,11 @@ pub fn is_elevated() -> bool {
 /// Whether the current platform has elevation-gated data points worth
 /// surfacing in a footer hint when running unelevated.
 ///
-/// Linux: yes — dmidecode unlocks motherboard, BIOS, and RAM slot details.
-/// Windows: yes — BitLocker on older domain configs.
-/// macOS: no — sudo doesn't unlock anything aesthetically meaningful for the report.
+/// Linux: yes — `dmidecode` can unlock RAM module details when installed.
+/// Windows/macOS: no blanket claim is made because absence of an optional
+/// result does not prove elevation would make that probe succeed.
 pub fn platform_has_elevated_data() -> bool {
-    cfg!(target_os = "linux") || cfg!(target_os = "windows")
+    cfg!(target_os = "linux")
 }
 
 /// Format bytes as a human-readable string (B, KB, MB, GB, TB)

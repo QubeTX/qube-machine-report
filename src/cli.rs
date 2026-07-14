@@ -10,6 +10,7 @@ use clap::{Parser, ValueEnum};
 /// These mirror the legacy action flags (`--update`, `--install`,
 /// `--uninstall`) so users can run `tr300 update` or the installed
 /// `report update` alias without a double-dash flag.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Action {
     Update,
@@ -26,6 +27,7 @@ pub enum Action {
 }
 
 /// TR-300: Cross-platform system information report
+#[non_exhaustive]
 #[derive(Debug, Parser)]
 #[command(name = "tr300")]
 #[command(
@@ -78,6 +80,10 @@ pub struct Cli {
     /// Suppress the "Run with sudo / Administrator for more details" footer hint
     #[arg(long)]
     pub no_elevation_hint: bool,
+
+    /// Do not auto-save a Markdown report after a full table run
+    #[arg(long)]
+    pub no_save: bool,
 
     // ── Cross-method consolidation options (used only with the hidden
     //    `migrate-cleanup` action; all hidden from help). `--json` reuses the
@@ -157,5 +163,12 @@ mod tests {
     fn rejects_positional_and_flag_action_conflict() {
         let err = Cli::try_parse_from(["tr300", "update", "--install"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn parses_no_save_flag() {
+        let cli = Cli::try_parse_from(["tr300", "--no-save"])
+            .expect("--no-save should parse for report runs");
+        assert!(cli.no_save);
     }
 }

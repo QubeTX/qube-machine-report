@@ -4,7 +4,7 @@
 .SH NAME
 tr300 \- TR\-300 Machine Report \- Cross\-platform system information
 .SH SYNOPSIS
-\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIACTION\fR]
+\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-\-no\-save\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIACTION\fR]
 .SH DESCRIPTION
 TR\-300 displays comprehensive system information including OS, network, CPU,
 memory, disk usage, and session details in a formatted table.
@@ -38,6 +38,9 @@ Fast mode: skip slow platform\-specific collectors for quick auto\-run
 .TP
 \fB\-\-no\-elevation\-hint\fR
 Suppress the "Run with sudo / Administrator for more details" footer hint
+.TP
+\fB\-\-no\-save\fR
+Do not auto\-save a Markdown report after a full table run
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

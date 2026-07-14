@@ -8,6 +8,7 @@ use crate::error::Result;
 use std::env;
 
 /// Network information for TR-300
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct NetworkInfo {
     /// Machine's primary IP address (None if skipped in fast mode)
@@ -25,7 +26,7 @@ pub fn collect_network_info(mode: CollectMode) -> Result<NetworkInfo> {
     let machine_ip = if should_skip_slow {
         None
     } else {
-        Some(get_machine_ip())
+        get_machine_ip()
     };
 
     let client_ip = get_client_ip();
@@ -68,7 +69,7 @@ fn should_skip_network_on_platform() -> bool {
 }
 
 /// Get the machine's primary IP address
-fn get_machine_ip() -> String {
+fn get_machine_ip() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         get_machine_ip_windows()
@@ -86,16 +87,16 @@ fn get_machine_ip() -> String {
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
-        "Unknown".to_string()
+        None
     }
 }
 
 #[cfg(target_os = "windows")]
-fn get_machine_ip_windows() -> String {
+fn get_machine_ip_windows() -> Option<String> {
     // Use WMI for IP (no PowerShell subprocess)
     let (ip, _dns) = crate::collectors::platform::windows::get_network_info_wmi();
     if let Some(ip) = ip {
-        return ip;
+        return valid_routable_ip(&ip);
     }
 
     // Fallback: try ipconfig
@@ -107,52 +108,52 @@ fn get_machine_ip_windows() -> String {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.contains("IPv4 Address") {
-                if let Some(ip) = line.split(':').next_back() {
+                if let Some((_, ip)) = line.rsplit_once(':') {
                     let ip = ip.trim();
-                    if !ip.is_empty() && ip != "127.0.0.1" {
-                        return ip.to_string();
+                    if let Some(ip) = valid_routable_ip(ip) {
+                        return Some(ip);
                     }
                 }
             }
         }
     }
 
-    "Unknown".to_string()
+    None
 }
 
 #[cfg(target_os = "linux")]
-fn get_machine_ip_linux() -> String {
+fn get_machine_ip_linux() -> Option<String> {
     // Ask the kernel which source IP it would use for the default route.
     if let Some(stdout) = run_stdout("ip", ["route", "get", "1.1.1.1"], CommandTimeout::Normal) {
         if let Some(ip) = parse_route_src_ip(&stdout) {
-            return ip;
+            return Some(ip);
         }
     }
 
     // Fallback: hostname -I
     if let Some(stdout) = run_stdout("hostname", ["-I"], CommandTimeout::Normal) {
-        if let Some(ip) = stdout.split_whitespace().next() {
-            if !ip.is_empty() && ip != "127.0.0.1" {
-                return ip.to_string();
-            }
+        if let Some(ip) = stdout.split_whitespace().find_map(valid_routable_ip) {
+            return Some(ip);
         }
     }
 
-    "Unknown".to_string()
+    None
 }
 
 #[cfg(target_os = "macos")]
-fn get_machine_ip_macos() -> String {
+fn get_machine_ip_macos() -> Option<String> {
     if let Some(stdout) = run_stdout("scutil", ["--nwi"], CommandTimeout::Normal) {
+        if let Some(ip) = parse_scutil_nwi_primary_address(&stdout) {
+            return Some(ip);
+        }
         if let Some(iface) = parse_scutil_nwi_primary_interface(&stdout) {
             if let Some(ip) = run_stdout(
                 "ipconfig",
                 ["getifaddr", iface.as_str()],
                 CommandTimeout::Normal,
             ) {
-                let ip = ip.trim().to_string();
-                if !ip.is_empty() && ip != "127.0.0.1" {
-                    return ip;
+                if let Some(ip) = valid_routable_ip(ip.trim()) {
+                    return Some(ip);
                 }
             }
         }
@@ -161,9 +162,8 @@ fn get_machine_ip_macos() -> String {
     // Try ipconfig getifaddr en0 (WiFi) or en1 (Ethernet)
     for iface in &["en0", "en1", "en2"] {
         if let Some(output) = run_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal) {
-            let ip = output.trim().to_string();
-            if !ip.is_empty() && ip != "127.0.0.1" {
-                return ip;
+            if let Some(ip) = valid_routable_ip(output.trim()) {
+                return Some(ip);
             }
         }
     }
@@ -177,9 +177,8 @@ fn get_machine_ip_macos() -> String {
                     if let Some(output) =
                         run_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal)
                     {
-                        let ip = output.trim().to_string();
-                        if !ip.is_empty() && ip != "127.0.0.1" {
-                            return ip;
+                        if let Some(ip) = valid_routable_ip(output.trim()) {
+                            return Some(ip);
                         }
                     }
                 }
@@ -187,7 +186,7 @@ fn get_machine_ip_macos() -> String {
         }
     }
 
-    "Unknown".to_string()
+    None
 }
 
 /// Get client IP from SSH_CLIENT environment variable
@@ -195,16 +194,16 @@ fn get_client_ip() -> Option<String> {
     // Check SSH_CLIENT env var
     if let Ok(ssh_client) = env::var("SSH_CLIENT") {
         // Format: "IP PORT LOCAL_PORT"
-        if let Some(ip) = ssh_client.split_whitespace().next() {
-            return Some(ip.to_string());
+        if let Some(ip) = ssh_client.split_whitespace().next().and_then(valid_ip) {
+            return Some(ip);
         }
     }
 
     // Check SSH_CONNECTION env var
     if let Ok(ssh_conn) = env::var("SSH_CONNECTION") {
         // Format: "CLIENT_IP CLIENT_PORT SERVER_IP SERVER_PORT"
-        if let Some(ip) = ssh_conn.split_whitespace().next() {
-            return Some(ip.to_string());
+        if let Some(ip) = ssh_conn.split_whitespace().next().and_then(valid_ip) {
+            return Some(ip);
         }
     }
 
@@ -239,7 +238,7 @@ fn get_dns_servers_windows() -> Vec<String> {
     // Use WMI for DNS servers (no PowerShell subprocess)
     let (_ip, servers) = crate::collectors::platform::windows::get_network_info_wmi();
     if !servers.is_empty() {
-        return servers;
+        return validated_servers(servers);
     }
 
     // Fallback: parse ipconfig /all
@@ -252,17 +251,19 @@ fn get_dns_servers_windows() -> Vec<String> {
         for line in stdout.lines() {
             if line.contains("DNS Servers") {
                 in_dns_section = true;
-                if let Some(ip) = line.split(':').next_back() {
+                if let Some((_, ip)) = line.split_once(':') {
                     let ip = ip.trim();
-                    if !ip.is_empty() && !servers.contains(&ip.to_string()) {
-                        servers.push(ip.to_string());
+                    if let Some(ip) = valid_ip(ip) {
+                        if !servers.contains(&ip) {
+                            servers.push(ip);
+                        }
                     }
                 }
             } else if in_dns_section {
                 let trimmed = line.trim();
-                if trimmed.contains('.') && !trimmed.contains(':') {
-                    if !servers.contains(&trimmed.to_string()) {
-                        servers.push(trimmed.to_string());
+                if let Some(ip) = valid_ip(trimmed) {
+                    if !servers.contains(&ip) {
+                        servers.push(ip);
                     }
                 } else if !trimmed.is_empty() {
                     in_dns_section = false;
@@ -299,10 +300,12 @@ fn get_dns_servers_linux() -> Vec<String> {
     if let Some(stdout) = run_stdout("resolvectl", ["status"], CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.contains("DNS Servers:") {
-                if let Some(ips) = line.split(':').next_back() {
+                if let Some((_, ips)) = line.split_once(':') {
                     for ip in ips.split_whitespace() {
-                        if !servers.contains(&ip.to_string()) {
-                            servers.push(ip.to_string());
+                        if let Some(ip) = valid_ip(ip) {
+                            if !servers.contains(&ip) {
+                                servers.push(ip);
+                            }
                             if servers.len() >= 5 {
                                 break;
                             }
@@ -325,10 +328,12 @@ fn get_dns_servers_macos() -> Vec<String> {
         for line in stdout.lines() {
             let line = line.trim();
             if line.starts_with("nameserver[") {
-                if let Some(ip) = line.split(':').next_back() {
+                if let Some((_, ip)) = line.split_once(" : ") {
                     let ip = ip.trim();
-                    if !ip.is_empty() && !servers.contains(&ip.to_string()) {
-                        servers.push(ip.to_string());
+                    if let Some(ip) = valid_ip(ip) {
+                        if !servers.contains(&ip) {
+                            servers.push(ip);
+                        }
                         if servers.len() >= 5 {
                             break;
                         }
@@ -347,9 +352,7 @@ fn parse_route_src_ip(route_output: &str) -> Option<String> {
     while let Some(part) = parts.next() {
         if part == "src" {
             let ip = parts.next()?;
-            if !ip.is_empty() && ip != "127.0.0.1" {
-                return Some(ip.to_string());
-            }
+            return valid_routable_ip(ip);
         }
     }
     None
@@ -360,23 +363,62 @@ fn parse_resolv_conf_servers(content: &str, skip_loopback: bool) -> Vec<String> 
     let mut servers = Vec::new();
     for line in content.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
-        if !line.starts_with("nameserver") {
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("nameserver") {
             continue;
         }
-        let Some(ip) = line.split_whitespace().nth(1) else {
+        let Some(ip) = fields.next().and_then(valid_ip) else {
             continue;
         };
         if skip_loopback && (ip.starts_with("127.") || ip == "::1") {
             continue;
         }
-        if !servers.contains(&ip.to_string()) {
-            servers.push(ip.to_string());
+        if !servers.contains(&ip) {
+            servers.push(ip);
             if servers.len() >= 5 {
                 break;
             }
         }
     }
     servers
+}
+
+fn valid_ip(value: &str) -> Option<String> {
+    let value = value.trim().trim_matches(['[', ']']);
+    let parse_value = value.split('%').next().unwrap_or(value);
+    parse_value
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .map(|_| value.to_string())
+}
+
+fn valid_routable_ip(value: &str) -> Option<String> {
+    let normalized = valid_ip(value)?;
+    let parse_value = normalized.split('%').next().unwrap_or(&normalized);
+    let ip: std::net::IpAddr = parse_value.parse().ok()?;
+    let unsuitable = ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_multicast()
+        || matches!(ip, std::net::IpAddr::V4(v4) if v4.is_link_local())
+        || matches!(ip, std::net::IpAddr::V4(v4) if v4.is_broadcast())
+        || matches!(ip, std::net::IpAddr::V6(v6) if v6.is_unicast_link_local());
+    (!unsuitable).then_some(normalized)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn validated_servers(servers: Vec<String>) -> Vec<String> {
+    let mut validated = Vec::new();
+    for server in servers {
+        if let Some(server) = valid_ip(&server) {
+            if !validated.contains(&server) {
+                validated.push(server);
+            }
+        }
+        if validated.len() >= 5 {
+            break;
+        }
+    }
+    validated
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -393,8 +435,20 @@ fn parse_scutil_nwi_primary_interface(output: &str) -> Option<String> {
     None
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_scutil_nwi_primary_address(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let (_, value) = trimmed.split_once(" : ")?;
+        (trimmed.starts_with("address") || trimmed.starts_with("Address"))
+            .then(|| valid_routable_ip(value))
+            .flatten()
+    })
+}
+
 // Keep the old interface struct for backwards compatibility if needed
 /// Network interface information (legacy)
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
     pub name: String,
@@ -482,6 +536,56 @@ nameserver 2606:4700:4700::1111
     }
 
     #[test]
+    fn validates_ipv4_ipv6_and_rejects_endpoint_syntax() {
+        assert_eq!(valid_ip("192.0.2.10"), Some("192.0.2.10".to_string()));
+        assert_eq!(valid_ip("[fe80::1%en0]"), Some("fe80::1%en0".to_string()));
+        assert_eq!(valid_ip("192.0.2.10:53"), None);
+        assert_eq!(valid_ip("not-an-address"), None);
+    }
+
+    #[test]
+    fn routable_filter_rejects_loopback_and_link_local() {
+        assert_eq!(valid_routable_ip("127.0.0.1"), None);
+        assert_eq!(valid_routable_ip("169.254.10.2"), None);
+        assert_eq!(valid_routable_ip("::1"), None);
+        assert_eq!(valid_routable_ip("fe80::1%en0"), None);
+        assert_eq!(valid_routable_ip("224.0.0.1"), None);
+        assert_eq!(valid_routable_ip("ff02::1"), None);
+        assert_eq!(valid_routable_ip("255.255.255.255"), None);
+        assert_eq!(
+            valid_routable_ip("192.168.1.50"),
+            Some("192.168.1.50".to_string())
+        );
+    }
+
+    #[test]
+    fn validated_dns_servers_deduplicate_and_cap_results() {
+        let values = vec![
+            "1.1.1.1",
+            "bad",
+            "1.1.1.1",
+            "2606:4700:4700::1111",
+            "8.8.8.8",
+            "9.9.9.9",
+            "208.67.222.222",
+            "208.67.220.220",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        assert_eq!(
+            validated_servers(values),
+            vec![
+                "1.1.1.1",
+                "2606:4700:4700::1111",
+                "8.8.8.8",
+                "9.9.9.9",
+                "208.67.222.222",
+            ]
+        );
+    }
+
+    #[test]
     fn parses_macos_scutil_nwi_primary_interface() {
         let nwi = "\
 Network information
@@ -492,6 +596,15 @@ IPv4 network interface information
         assert_eq!(
             parse_scutil_nwi_primary_interface(nwi),
             Some("en0".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_macos_scutil_nwi_primary_address() {
+        let nwi = "address : 192.168.50.20\nAddress : fe80::1%en0\n";
+        assert_eq!(
+            parse_scutil_nwi_primary_address(nwi),
+            Some("192.168.50.20".to_string())
         );
     }
 }

@@ -9,13 +9,10 @@ use std::path::Path;
 /// Collect Linux-specific information
 /// Linux is already fast (reads /proc, env vars) — minimal skips in fast mode.
 pub fn collect(mode: CollectMode) -> PlatformInfo {
-    let elevated_details = if mode == CollectMode::Full && crate::is_elevated() {
-        get_dmidecode_details()
-    } else {
-        LinuxElevatedDetails::default()
-    };
+    let hardware_details = get_hardware_details(mode, crate::is_elevated());
 
     PlatformInfo {
+        os_build: None,
         desktop_environment: detect_desktop_environment(),
         display_server: detect_display_server(),
         boot_mode: if mode == CollectMode::Fast {
@@ -23,7 +20,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         } else {
             detect_boot_mode()
         },
-        virtualization: detect_virtualization(), // Fast: reads /proc
+        virtualization: detect_virtualization(mode),
         windows_edition: None,
         macos_codename: None,
         gpus: get_gpus(), // lspci is fast (~10-20ms), /sys/class/drm fallback is instant
@@ -43,11 +40,16 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         } else {
             get_zfs_health()
         },
-        motherboard: elevated_details.motherboard,
-        bios: elevated_details.bios,
-        ram_slots: elevated_details.ram_slots,
+        motherboard: hardware_details.motherboard,
+        bios: hardware_details.bios,
+        ram_slots: hardware_details.ram_slots,
         locale: get_locale(), // Fast: reads env var
-        encryption: None,     // LUKS detection deferred to a future PR
+        encryption: if mode == CollectMode::Full {
+            get_root_encryption()
+        } else {
+            None
+        },
+        elevation_unlocks_more: hardware_details.elevation_unlocks_more,
     }
 }
 
@@ -55,12 +57,16 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
 fn detect_desktop_environment() -> Option<String> {
     // Check XDG_CURRENT_DESKTOP first
     if let Ok(de) = env::var("XDG_CURRENT_DESKTOP") {
-        return Some(de);
+        if !de.trim().is_empty() {
+            return Some(de.trim().to_string());
+        }
     }
 
     // Check DESKTOP_SESSION
     if let Ok(session) = env::var("DESKTOP_SESSION") {
-        return Some(session);
+        if !session.trim().is_empty() {
+            return Some(session.trim().to_string());
+        }
     }
 
     // Check for specific environment variables
@@ -78,7 +84,10 @@ fn detect_desktop_environment() -> Option<String> {
 /// Detect the display server (X11 or Wayland)
 fn detect_display_server() -> Option<String> {
     if let Ok(session_type) = env::var("XDG_SESSION_TYPE") {
-        return Some(session_type);
+        let session_type = session_type.to_ascii_lowercase();
+        if matches!(session_type.as_str(), "x11" | "wayland") {
+            return Some(session_type);
+        }
     }
 
     if env::var("WAYLAND_DISPLAY").is_ok() {
@@ -96,13 +105,18 @@ fn detect_display_server() -> Option<String> {
 fn detect_boot_mode() -> Option<String> {
     if Path::new("/sys/firmware/efi").exists() {
         Some("UEFI".to_string())
-    } else {
+    } else if sysinfo::System::cpu_arch()
+        .as_deref()
+        .is_some_and(|arch| matches!(arch, "x86" | "x86_64"))
+    {
         Some("Legacy BIOS".to_string())
+    } else {
+        None
     }
 }
 
 /// Detect if running in a virtual machine
-fn detect_virtualization() -> Option<String> {
+fn detect_virtualization(mode: CollectMode) -> Option<String> {
     if let Ok(osrelease) = fs::read_to_string("/proc/sys/kernel/osrelease") {
         let lower = osrelease.to_lowercase();
         if lower.contains("microsoft-standard-wsl2") {
@@ -182,6 +196,19 @@ fn detect_virtualization() -> Option<String> {
         }
     }
 
+    if mode == CollectMode::Full {
+        if let Some(value) = run_stdout(
+            "systemd-detect-virt",
+            std::iter::empty::<&str>(),
+            CommandTimeout::Normal,
+        ) {
+            let value = value.trim();
+            if !value.is_empty() && value != "none" {
+                return Some(value.to_string());
+            }
+        }
+    }
+
     None
 }
 
@@ -222,16 +249,38 @@ fn get_gpus() -> Vec<String> {
         }
     }
 
-    // Fallback: check /sys/class/drm
+    // Raspberry Pi 4 GPUs are platform devices, not PCI display controllers.
+    // Device-tree compatibility is a stable hardware identity and avoids
+    // double-counting VC4 display and V3D render nodes.
+    if gpus.is_empty() {
+        if let Ok(compatible) = fs::read("/sys/firmware/devicetree/base/compatible") {
+            if let Some(gpu) = raspberry_pi_gpu_from_compatible(&compatible) {
+                gpus.push(gpu);
+            }
+        }
+    }
+
+    // Fallback: check /sys/class/drm and use the bound driver when available.
     if !gpus.is_empty() {
         return gpus;
     } else if let Ok(entries) = fs::read_dir("/sys/class/drm") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with("card") && !name.contains('-') {
-                let device_path = entry.path().join("device/vendor");
-                if device_path.exists() {
-                    gpus.push(format!("GPU {}", name));
+                let driver = fs::read_link(entry.path().join("device/driver"))
+                    .ok()
+                    .and_then(|path| {
+                        path.file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                    });
+                let label = match driver.as_deref() {
+                    Some("v3d") | Some("vc4") => "Broadcom VideoCore (V3D)".to_string(),
+                    Some(driver) => format!("{} ({})", driver, name),
+                    None if entry.path().join("device/vendor").exists() => format!("GPU {}", name),
+                    None => continue,
+                };
+                if !gpus.contains(&label) {
+                    gpus.push(label);
                 }
             }
         }
@@ -240,9 +289,26 @@ fn get_gpus() -> Vec<String> {
     gpus
 }
 
+fn raspberry_pi_gpu_from_compatible(compatible: &[u8]) -> Option<String> {
+    let compatible = String::from_utf8_lossy(compatible);
+    if compatible.contains("brcm,bcm2712") {
+        Some("Broadcom VideoCore VII (V3D)".to_string())
+    } else if compatible.contains("brcm,bcm2711") {
+        Some("Broadcom VideoCore VI (V3D)".to_string())
+    } else if compatible.contains("brcm,bcm2837") {
+        Some("Broadcom VideoCore IV".to_string())
+    } else {
+        None
+    }
+}
+
 /// Get system architecture
 fn get_architecture() -> Option<String> {
-    Some(std::env::consts::ARCH.to_string())
+    sysinfo::System::cpu_arch().or_else(|| {
+        run_stdout("uname", ["-m"], CommandTimeout::Normal)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 fn get_machine_model() -> Option<String> {
@@ -252,12 +318,23 @@ fn get_machine_model() -> Option<String> {
     ] {
         if let Ok(model) = fs::read_to_string(path) {
             let model = model.trim_matches(char::from(0)).trim();
-            if !model.is_empty() {
+            if !model.is_empty() && !is_placeholder(model) {
                 return Some(model.to_string());
             }
         }
     }
     None
+}
+
+fn is_placeholder(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    value.is_empty()
+        || value.contains("to be filled")
+        || value == "default string"
+        || value == "system product name"
+        || value == "system manufacturer"
+        || value == "not specified"
+        || value == "none"
 }
 
 /// Get terminal emulator name
@@ -279,20 +356,23 @@ fn get_terminal() -> Option<String> {
 
     // Check TERM_PROGRAM first
     if let Ok(term) = env::var("TERM_PROGRAM") {
-        return Some(term);
+        if !term.trim().is_empty() {
+            return Some(term.trim().to_string());
+        }
     }
 
     // Check common terminal env vars
     if let Ok(term) = env::var("TERMINAL") {
-        return Some(term);
+        if !term.trim().is_empty() {
+            return Some(term.trim().to_string());
+        }
     }
 
     if let Some(parent) = detect_terminal_from_ps(std::process::id()) {
         return Some(parent);
     }
 
-    // Fall back to TERM
-    env::var("TERM").ok()
+    None
 }
 
 /// Get shell name and version
@@ -424,11 +504,10 @@ fn get_battery() -> Option<String> {
 fn get_locale() -> Option<String> {
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
         if let Ok(value) = env::var(var) {
-            if value.is_empty() {
+            if value.trim().is_empty() {
                 continue;
             }
-            let clean = value.split('.').next().unwrap_or(&value);
-            return Some(clean.to_string());
+            return Some(value.trim().to_string());
         }
     }
 
@@ -436,10 +515,12 @@ fn get_locale() -> Option<String> {
     if let Some(stdout) = run_stdout_no_args("locale", CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.starts_with("LANG=") {
-                let lang = line.strip_prefix("LANG=").unwrap_or("");
-                let clean = lang.split('.').next().unwrap_or(lang);
-                if !clean.is_empty() {
-                    return Some(clean.to_string());
+                let lang = line
+                    .strip_prefix("LANG=")
+                    .unwrap_or("")
+                    .trim_matches(['\"', '\'']);
+                if !lang.is_empty() {
+                    return Some(lang.to_string());
                 }
             }
         }
@@ -504,16 +585,15 @@ fn terminal_label_from_process(process: &str) -> Option<String> {
         "ghostty" => Some("Ghostty".to_string()),
         "foot" => Some("foot".to_string()),
         "bash" | "zsh" | "fish" | "sh" | "nu" | "tr300" | "cargo" => None,
-        other if !other.is_empty() => Some(other.to_string()),
         _ => None,
     }
 }
 
 fn battery_summary_from_path(base: &Path) -> Option<String> {
-    let capacity = fs::read_to_string(base.join("capacity"))
-        .ok()?
-        .trim()
-        .to_string();
+    let capacity = read_u64_from_file(base.join("capacity"))?;
+    if capacity > 100 {
+        return None;
+    }
     let status = fs::read_to_string(base.join("status"))
         .ok()
         .map(|s| s.trim().to_string())
@@ -609,14 +689,44 @@ fn zfs_rank(state: &str) -> u8 {
 }
 
 #[derive(Default)]
-struct LinuxElevatedDetails {
+struct LinuxHardwareDetails {
     motherboard: Option<String>,
     bios: Option<String>,
     ram_slots: Option<String>,
+    elevation_unlocks_more: bool,
 }
 
-fn get_dmidecode_details() -> LinuxElevatedDetails {
-    LinuxElevatedDetails {
+fn get_hardware_details(mode: CollectMode, elevated: bool) -> LinuxHardwareDetails {
+    let mut details = LinuxHardwareDetails {
+        motherboard: sysfs_summary(&[
+            "/sys/class/dmi/id/board_vendor",
+            "/sys/class/dmi/id/board_name",
+            "/sys/class/dmi/id/board_version",
+        ]),
+        bios: sysfs_summary(&[
+            "/sys/class/dmi/id/bios_vendor",
+            "/sys/class/dmi/id/bios_version",
+            "/sys/class/dmi/id/bios_date",
+        ]),
+        ..LinuxHardwareDetails::default()
+    };
+
+    if mode == CollectMode::Full && elevated {
+        let elevated_details = get_dmidecode_details();
+        details.motherboard = details.motherboard.or(elevated_details.motherboard);
+        details.bios = details.bios.or(elevated_details.bios);
+        details.ram_slots = elevated_details.ram_slots;
+    }
+
+    details.elevation_unlocks_more = mode == CollectMode::Full
+        && !elevated
+        && Path::new("/sys/class/dmi/id").exists()
+        && command_exists("dmidecode");
+    details
+}
+
+fn get_dmidecode_details() -> LinuxHardwareDetails {
+    LinuxHardwareDetails {
         motherboard: get_dmidecode_summary(&[
             ("baseboard-manufacturer", ""),
             ("baseboard-product-name", " "),
@@ -627,7 +737,69 @@ fn get_dmidecode_details() -> LinuxElevatedDetails {
             ("bios-release-date", " "),
         ]),
         ram_slots: get_dmidecode_memory_summary(),
+        elevation_unlocks_more: false,
     }
+}
+
+fn sysfs_summary(paths: &[&str]) -> Option<String> {
+    let mut values = Vec::new();
+    for path in paths {
+        if let Ok(value) = fs::read_to_string(path) {
+            let value = value.trim();
+            if !is_placeholder(value)
+                && !values
+                    .iter()
+                    .any(|existing: &String| existing.eq_ignore_ascii_case(value))
+            {
+                values.push(value.to_string());
+            }
+        }
+    }
+    (!values.is_empty()).then(|| values.join(" "))
+}
+
+fn command_exists(command: &str) -> bool {
+    env::var_os("PATH").is_some_and(|paths| {
+        env::split_paths(&paths).any(|directory| directory.join(command).is_file())
+    })
+}
+
+fn get_root_encryption() -> Option<String> {
+    let root = run_stdout(
+        "findmnt",
+        ["-n", "-o", "SOURCE,FSTYPE", "/"],
+        CommandTimeout::Normal,
+    )?;
+    let mut fields = root.split_whitespace();
+    let source = fields.next()?;
+    let filesystem = fields.next().unwrap_or_default();
+
+    if filesystem.eq_ignore_ascii_case("zfs") {
+        let encryption_root = run_stdout(
+            "zfs",
+            ["get", "-H", "-o", "value", "encryptionroot", source],
+            CommandTimeout::Slow,
+        )?;
+        let value = encryption_root.trim();
+        return (!value.is_empty() && value != "-")
+            .then(|| "Root volume: ZFS native encryption".to_string());
+    }
+
+    if !source.starts_with("/dev/") {
+        return None;
+    }
+    let stack = run_stdout(
+        "lsblk",
+        ["-s", "-n", "-o", "TYPE,FSTYPE", source],
+        CommandTimeout::Normal,
+    )?;
+    stack
+        .lines()
+        .any(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.split_whitespace().any(|field| field == "crypt") || lower.contains("crypto_luks")
+        })
+        .then(|| "Root volume: LUKS/dm-crypt".to_string())
 }
 
 fn get_dmidecode_summary(fields: &[(&str, &str)]) -> Option<String> {
@@ -692,7 +864,8 @@ fn parse_dmidecode_memory_summary(output: &str) -> Option<String> {
 fn parse_memory_device(lines: &[&str]) -> Option<String> {
     let mut size = None;
     let mut mem_type = None;
-    let mut speed = None;
+    let mut rated_speed = None;
+    let mut configured_speed = None;
     let mut manufacturer = None;
     for line in lines {
         let trimmed = line.trim();
@@ -706,9 +879,8 @@ fn parse_memory_device(lines: &[&str]) -> Option<String> {
         match key {
             "Size" => size = Some(value.replace(' ', "")),
             "Type" => mem_type = Some(value.to_string()),
-            "Speed" | "Configured Memory Speed" if speed.is_none() => {
-                speed = Some(value.replace(' ', ""))
-            }
+            "Speed" => rated_speed = Some(value.replace(' ', "")),
+            "Configured Memory Speed" => configured_speed = Some(value.replace(' ', "")),
             "Manufacturer" => manufacturer = Some(value.to_string()),
             _ => {}
         }
@@ -718,7 +890,7 @@ fn parse_memory_device(lines: &[&str]) -> Option<String> {
     if let Some(mem_type) = mem_type {
         parts.push(mem_type);
     }
-    if let Some(speed) = speed {
+    if let Some(speed) = configured_speed.or(rated_speed) {
         parts.push(speed);
     }
     if let Some(manufacturer) = manufacturer {
@@ -782,6 +954,28 @@ mod tests {
     }
 
     #[test]
+    fn raspberry_pi_device_tree_maps_supported_video_core_generations() {
+        assert_eq!(
+            raspberry_pi_gpu_from_compatible(b"raspberrypi,4-model-b\0brcm,bcm2711\0"),
+            Some("Broadcom VideoCore VI (V3D)".to_string())
+        );
+        assert_eq!(
+            raspberry_pi_gpu_from_compatible(b"raspberrypi,5-model-b\0brcm,bcm2712\0"),
+            Some("Broadcom VideoCore VII (V3D)".to_string())
+        );
+        assert_eq!(raspberry_pi_gpu_from_compatible(b"vendor,board\0"), None);
+    }
+
+    #[test]
+    fn machine_model_placeholders_are_rejected() {
+        assert!(is_placeholder("To Be Filled By O.E.M."));
+        assert!(is_placeholder("System Product Name"));
+        assert!(is_placeholder(" default string "));
+        assert!(!is_placeholder("Alienware m18 R2"));
+        assert!(!is_placeholder("Raspberry Pi 4 Model B Rev 1.5"));
+    }
+
+    #[test]
     fn battery_health_percent_rejects_implausible_values() {
         assert_eq!(battery_health_percent(4800, 6000), Some(80));
         assert_eq!(battery_health_percent(6000, 6000), Some(100));
@@ -789,6 +983,31 @@ mod tests {
         assert_eq!(battery_health_percent(5000, 0), None);
         // Full more than 2x design → mismatched units / bad data → no health.
         assert_eq!(battery_health_percent(20000, 6000), None);
+    }
+
+    #[test]
+    fn battery_summary_uses_one_capacity_unit_family() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("capacity"), "73\n").unwrap();
+        fs::write(dir.path().join("status"), "Discharging\n").unwrap();
+        fs::write(dir.path().join("energy_full"), "4800\n").unwrap();
+        fs::write(dir.path().join("energy_full_design"), "6000\n").unwrap();
+        // Deliberately incompatible charge-family data must not be mixed with
+        // the complete energy pair above.
+        fs::write(dir.path().join("charge_full"), "100\n").unwrap();
+        fs::write(dir.path().join("charge_full_design"), "1000\n").unwrap();
+        assert_eq!(
+            battery_summary_from_path(dir.path()),
+            Some("73% (Discharging); health 80%".to_string())
+        );
+    }
+
+    #[test]
+    fn battery_summary_rejects_invalid_capacity() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("capacity"), "255\n").unwrap();
+        fs::write(dir.path().join("status"), "Unknown\n").unwrap();
+        assert_eq!(battery_summary_from_path(dir.path()), None);
     }
 
     #[test]
@@ -808,6 +1027,22 @@ Memory Device
         assert_eq!(
             parse_dmidecode_memory_summary(output),
             Some("2x16GB DDR5 5600MT/s SK Hynix".to_string())
+        );
+    }
+
+    #[test]
+    fn dmidecode_prefers_configured_memory_speed() {
+        let output = r#"
+Memory Device
+	Size: 32 GB
+	Type: DDR5
+	Speed: 5600 MT/s
+	Configured Memory Speed: 5200 MT/s
+	Manufacturer: Micron
+"#;
+        assert_eq!(
+            parse_dmidecode_memory_summary(output),
+            Some("1x32GB DDR5 5200MT/s Micron".to_string())
         );
     }
 }

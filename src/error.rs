@@ -9,6 +9,7 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, AppError>;
 
 /// Application-level errors for tr300
+#[non_exhaustive]
 #[derive(Error, Debug)]
 pub enum AppError {
     /// Failed to retrieve system information

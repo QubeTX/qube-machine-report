@@ -11,7 +11,7 @@
 use crate::config::{Config, OutputFormat};
 use crate::VERSION;
 
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 /// GitHub API endpoint for the latest release.
 const RELEASES_URL: &str =
@@ -491,8 +491,15 @@ fn fetch_latest_version() -> Result<String, String> {
         .as_str()
         .ok_or("Missing tag_name in response")?;
 
-    // Strip leading 'v' if present
-    Ok(tag.strip_prefix('v').unwrap_or(tag).to_string())
+    // Strip leading 'v' if present, then reject malformed release tags rather
+    // than letting a lossy numeric parser silently reinterpret them.
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+    if parse_numeric_version(version).is_none() {
+        return Err(format!(
+            "Latest release has an invalid version tag: {tag:?}"
+        ));
+    }
+    Ok(version.to_string())
 }
 
 /// Strip any prerelease (`-rc.1`) or build-metadata (`+nightly.42`)
@@ -527,11 +534,12 @@ fn is_newer(current: &str, latest: &str) -> bool {
     let current_stripped = strip_prerelease_metadata(current);
     let latest_stripped = strip_prerelease_metadata(latest);
 
-    let parse =
-        |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse::<u64>().ok()).collect() };
-
-    let c = parse(current_stripped);
-    let l = parse(latest_stripped);
+    let (Some(c), Some(l)) = (
+        parse_numeric_version(current_stripped),
+        parse_numeric_version(latest_stripped),
+    ) else {
+        return false;
+    };
 
     // Pad shorter vec with zeros
     let len = c.len().max(l.len());
@@ -554,6 +562,15 @@ fn is_newer(current: &str, latest: &str) -> bool {
     let current_has_suffix = current.len() != current_stripped.len();
     let latest_has_suffix = latest.len() != latest_stripped.len();
     current_has_suffix && !latest_has_suffix
+}
+
+fn parse_numeric_version(version: &str) -> Option<Vec<u64>> {
+    let parts: Vec<u64> = version
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    (!parts.is_empty()).then_some(parts)
 }
 
 // ── Strategy ordering ───────────────────────────────────────────────
@@ -589,13 +606,12 @@ fn cargo_invokable() -> bool {
 }
 
 fn tool_exists(tool: &str) -> bool {
-    Command::new(tool)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    crate::collectors::command::run_output(
+        tool,
+        ["--version"],
+        crate::collectors::command::CommandTimeout::Slow,
+    )
+    .is_some_and(|output| output.status.success())
 }
 
 fn build_strategy_list() -> Vec<UpdateStrategy> {
@@ -671,10 +687,22 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
             // to the prebuilt installer on mismatch.
             verify_cargo_post_install(latest)
         }
-        UpdateStrategy::InstallerCurl => try_installer_curl(),
-        UpdateStrategy::InstallerWget => try_installer_wget(),
-        UpdateStrategy::InstallerPowerShell => try_installer_powershell("powershell"),
-        UpdateStrategy::InstallerPwsh => try_installer_powershell("pwsh"),
+        UpdateStrategy::InstallerCurl => {
+            try_installer_curl()?;
+            verify_installer_post_install(latest, "shell installer")
+        }
+        UpdateStrategy::InstallerWget => {
+            try_installer_wget()?;
+            verify_installer_post_install(latest, "shell installer")
+        }
+        UpdateStrategy::InstallerPowerShell => {
+            try_installer_powershell("powershell")?;
+            verify_installer_post_install(latest, "PowerShell installer")
+        }
+        UpdateStrategy::InstallerPwsh => {
+            try_installer_powershell("pwsh")?;
+            verify_installer_post_install(latest, "PowerShell installer")
+        }
         UpdateStrategy::MsiGlobal => try_msi_install(msi_global_url(), latest),
         UpdateStrategy::MsiCorporate => try_msi_install(msi_corporate_url(), latest),
         UpdateStrategy::ExeGlobal => try_exe_install(exe_global_url(), latest),
@@ -808,14 +836,21 @@ fn try_installer_powershell(_launcher: &str) -> Result<(), StrategyError> {
 /// and scheduled a `MoveFileEx`-style delete-on-reboot instead).
 #[cfg(windows)]
 const MSI_EXIT_REBOOT_REQUIRED: i32 = 3010;
+#[cfg(windows)]
+const MAX_INSTALLER_BYTES: u64 = 256 * 1024 * 1024;
+#[cfg(windows)]
+const MAX_SIDECAR_BYTES: u64 = 16 * 1024;
 
 /// Download a file from `url` to `path` over HTTPS. Used by the MSI/EXE
-/// strategies to fetch the matching installer to `%TEMP%` before launching it.
-/// TLS validation is enforced by `ureq`; the caller then re-fetches the
-/// `.sha256` sidecar and runs `verify_checksum` for defense against a
-/// corporate-proxy interception or a tampered release asset.
+/// strategies to fetch the matching installer into a private randomized
+/// staging directory before launching it. TLS validation is enforced by
+/// `ureq`; the caller then verifies the release sidecar to detect corruption
+/// or an installer/sidecar mismatch. The sidecar is not an independent
+/// signature and does not replace HTTPS origin authentication.
 #[cfg(windows)]
 fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
+    use std::io::Read;
+
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(120))
         .build();
@@ -826,11 +861,38 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
         .call()
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    let mut file = std::fs::File::create(path)
+    if resp
+        .header("Content-Length")
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|length| length > MAX_INSTALLER_BYTES)
+    {
+        return Err(format!(
+            "Installer exceeds the {} MiB safety limit",
+            MAX_INSTALLER_BYTES / 1024 / 1024
+        ));
+    }
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
         .map_err(|e| format!("Failed to create temp file {}: {}", path.display(), e))?;
-    let mut reader = resp.into_reader();
-    std::io::copy(&mut reader, &mut file)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+    let reader = resp.into_reader();
+    let mut reader = reader.take(MAX_INSTALLER_BYTES + 1);
+    let write_result = std::io::copy(&mut reader, &mut file).and_then(|bytes| {
+        if bytes > MAX_INSTALLER_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "installer exceeded the 256 MiB safety limit",
+            ));
+        }
+        file.sync_all()
+    });
+    if let Err(error) = write_result {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(format!("Failed to write temp file: {}", error));
+    }
     Ok(())
 }
 
@@ -843,6 +905,8 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
 /// whitespace / missing asterisk via `parse_sha256_sidecar`.
 #[cfg(windows)]
 fn fetch_sha256_sidecar(url: &str) -> Result<String, String> {
+    use std::io::Read;
+
     let sidecar_url = format!("{}.sha256", url);
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(30))
@@ -852,8 +916,15 @@ fn fetch_sha256_sidecar(url: &str) -> Result<String, String> {
         .set("User-Agent", &format!("tr300/{}", VERSION))
         .call()
         .map_err(|e| format!("Sidecar request failed ({}): {}", sidecar_url, e))?;
-    resp.into_string()
-        .map_err(|e| format!("Failed to read sidecar body: {}", e))
+    let mut body = String::new();
+    resp.into_reader()
+        .take(MAX_SIDECAR_BYTES + 1)
+        .read_to_string(&mut body)
+        .map_err(|e| format!("Failed to read sidecar body: {}", e))?;
+    if body.len() as u64 > MAX_SIDECAR_BYTES {
+        return Err("SHA256 sidecar exceeded the 16 KiB safety limit".to_string());
+    }
+    Ok(body)
 }
 
 /// Extract the 64-char hex from a `.sha256` sidecar line. Returns
@@ -882,12 +953,11 @@ fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
 /// Fetch the `.sha256` sidecar, compute the SHA-256 of the downloaded
 /// installer, refuse to proceed on mismatch.
 ///
-/// Defends against a network MITM that replaces the installer bytes in
-/// flight (corporate TLS-interception proxies with a trusted root CA,
-/// hostile WiFi, captive portals). The sidecar is fetched in a separate
-/// request — an attacker would have to corrupt both the installer and
-/// the sidecar in a way that yields a matching hash, which is
-/// preimage-hard.
+/// Detects a corrupted download or a mismatch between the installer and its
+/// published release sidecar. Because both files come from the same HTTPS
+/// release origin, this is an integrity check rather than independent artifact
+/// authentication; a future signed-release design would be a separate trust
+/// layer.
 #[cfg(windows)]
 fn verify_checksum(installer_path: &std::path::Path, installer_url: &str) -> Result<(), String> {
     println!("  Verifying SHA256 checksum...");
@@ -911,9 +981,28 @@ fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "SHA256 mismatch — refusing to run installer.\n         Expected: {}\n         Got:      {}\n         This usually indicates a corrupted download or a network MITM.",
+            "SHA256 mismatch — refusing to run installer.\n         Expected: {}\n         Got:      {}\n         This indicates a corrupted or mismatched release asset.",
             expected, actual
         ))
+    }
+}
+
+#[cfg(any(windows, test))]
+struct StagedInstaller {
+    _dir: tempfile::TempDir,
+    path: std::path::PathBuf,
+}
+
+#[cfg(any(windows, test))]
+impl StagedInstaller {
+    fn new(extension: &str) -> std::io::Result<Self> {
+        let dir = tempfile::Builder::new().prefix("tr300-update-").tempdir()?;
+        let path = dir.path().join(format!("installer.{}", extension));
+        Ok(Self { _dir: dir, path })
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
     }
 }
 
@@ -971,6 +1060,21 @@ fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
     }
 }
 
+/// Confirm a cargo-dist shell/PowerShell installer actually replaced the
+/// running installation. Installer exit code 0 alone is not sufficient: a
+/// PATH conflict or locked destination can leave the old executable in place.
+fn verify_installer_post_install(expected: &str, label: &str) -> Result<(), StrategyError> {
+    match reexec_installed_version() {
+        Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
+        Some(installed) => Err(StrategyError::Runtime(format!(
+            "{label} reported success but the running install still reports v{installed} (expected v{expected})"
+        ))),
+        None => Err(StrategyError::Runtime(format!(
+            "{label} reported success but `tr300 --version` could not be run to verify v{expected}"
+        ))),
+    }
+}
+
 /// After the installer reports success, re-exec `<current_exe>
 /// --version` and confirm the on-disk binary has been updated. Catches
 /// the case where the installer exits 0 but the file replacement
@@ -1008,14 +1112,20 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
 /// msiexec returns 3010 and we surface that without claiming success.
 #[cfg(windows)]
 fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
-    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}.msi", latest));
+    let staged = StagedInstaller::new("msi").map_err(|error| {
+        StrategyError::Preflight(format!(
+            "Failed to create private update staging: {}",
+            error
+        ))
+    })?;
+    let temp_path = staged.path();
 
     let result = (|| -> Result<(), StrategyError> {
         println!("  Downloading MSI installer...");
-        download_to_file(url, &temp_path)
+        download_to_file(url, temp_path)
             .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
 
-        verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
+        verify_checksum(temp_path, url).map_err(StrategyError::Runtime)?;
 
         println!("  Launching Windows Installer...");
         // /passive shows a progress dialog with no user interaction; /norestart
@@ -1050,11 +1160,9 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         Ok(())
     })();
 
-    // Best-effort: don't leave the downloaded installer behind in %TEMP%, on
-    // success or failure. The SHA256 + post-install verify above are the
-    // load-bearing checks; this cleanup is pure hygiene and never alters the
-    // result. (msiexec has already exited, so the file is no longer in use.)
-    let _ = std::fs::remove_file(&temp_path);
+    // `staged` owns a private randomized directory. Its Drop cleanup runs on
+    // success or failure after msiexec exits and never changes the result.
+    drop(staged);
     result
 }
 
@@ -1069,19 +1177,25 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
 /// installs without elevation.
 #[cfg(windows)]
 fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
-    let temp_path = std::env::temp_dir().join(format!("tr300-update-{}-setup.exe", latest));
+    let staged = StagedInstaller::new("exe").map_err(|error| {
+        StrategyError::Preflight(format!(
+            "Failed to create private update staging: {}",
+            error
+        ))
+    })?;
+    let temp_path = staged.path();
 
     let result = (|| -> Result<(), StrategyError> {
         println!("  Downloading EXE installer...");
-        download_to_file(url, &temp_path)
+        download_to_file(url, temp_path)
             .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
 
-        verify_checksum(&temp_path, url).map_err(StrategyError::Runtime)?;
+        verify_checksum(temp_path, url).map_err(StrategyError::Runtime)?;
 
         println!("  Launching Inno Setup installer...");
         // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
         // suppresses non-critical message boxes; /NORESTART skips reboot prompts.
-        let status = Command::new(&temp_path)
+        let status = Command::new(temp_path)
             .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
             .status()
             .map_err(|e| {
@@ -1099,10 +1213,9 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         Ok(())
     })();
 
-    // Best-effort cleanup of the downloaded installer (success or failure); the
-    // verifies above are the load-bearing checks. The installer process has
-    // already exited by here.
-    let _ = std::fs::remove_file(&temp_path);
+    // Private staging is removed after the installer process exits. Cleanup is
+    // best-effort inside TempDir::drop and never overrides the update result.
+    drop(staged);
     result
 }
 
@@ -1123,7 +1236,9 @@ fn try_exe_install(_url: &str, _latest: &str) -> Result<(), StrategyError> {
 // ── Windows install-origin detection (v3.15.0+) ────────────────────
 
 /// Read the `HKCU\Software\TR300\InstallSource` registry value written by
-/// the four first-class installers on install. Authoritative when present.
+/// the four first-class installers on install. The caller still validates its
+/// edition scope against the running executable path because markers can be
+/// stale when installations coexist or are manually moved.
 /// Returns `None` if the key is missing, the value is missing, the value
 /// type isn't a string, or the value content doesn't match a known variant.
 #[cfg(windows)]
@@ -1146,30 +1261,39 @@ fn read_install_source_marker() -> Option<InstallOrigin> {
 /// Determine how this binary was installed on Windows.
 ///
 /// Strategy:
-/// 1. Read the `HKCU\Software\TR300\InstallSource` marker. Authoritative
-///    when present. All four first-class installers (Global MSI, Corporate
-///    MSI, Global EXE, Corporate EXE) write this marker on install.
+/// 1. Read the `HKCU\Software\TR300\InstallSource` marker and accept it only
+///    when its Global/Corporate scope matches the running executable. All four
+///    first-class installers write this marker on install.
 /// 2. If no marker, fall back to path-based detection on the running
 ///    binary's location. Handles the cargo install / PowerShell installer
 ///    path (which doesn't write a marker), and any pre-marker legacy
 ///    installs.
 ///
-/// The path fallback maps Program Files → `MsiGlobal` and
-/// LocalAppData\Programs → `MsiCorporate` (it can't distinguish MSI vs EXE
-/// when the marker is missing because both installer formats target the
-/// same paths within each edition — that's by design, see README "pick
-/// one format per edition"). When the marker IS present, the EXE vs MSI
-/// distinction is preserved.
+/// A marker-free Program Files or LocalAppData install is deliberately
+/// `Unknown`: those paths identify edition scope but cannot distinguish MSI
+/// from Inno EXE. Guessing would risk a cross-format update and duplicate
+/// uninstall registrations, so the conservative legacy chain is used.
 #[cfg(windows)]
 pub(crate) fn detect_install_origin() -> InstallOrigin {
-    if let Some(origin) = read_install_source_marker() {
-        return origin;
-    }
-
     let Ok(exe) = std::env::current_exe() else {
         return InstallOrigin::Unknown;
     };
-    classify_install_path(&exe.to_string_lossy())
+    let exe = exe.to_string_lossy();
+    if let Some(origin) = read_install_source_marker() {
+        // One HKCU marker can outlive an old/coexisting install. Trust it only
+        // when its edition scope matches the binary that is actually running.
+        let scope_matches = match origin {
+            InstallOrigin::MsiGlobal | InstallOrigin::ExeGlobal => is_global_install_path(&exe),
+            InstallOrigin::MsiCorporate | InstallOrigin::ExeCorporate => {
+                is_corporate_install_path(&exe)
+            }
+            InstallOrigin::CargoOrInstaller | InstallOrigin::Unknown => false,
+        };
+        if scope_matches {
+            return origin;
+        }
+    }
+    classify_install_path(&exe)
 }
 
 /// Pure-function half of `detect_install_origin()` for unit testing.
@@ -1178,15 +1302,29 @@ pub(crate) fn detect_install_origin() -> InstallOrigin {
 #[cfg(windows)]
 fn classify_install_path(exe_path: &str) -> InstallOrigin {
     let lower = exe_path.to_lowercase();
-    if lower.contains("\\program files\\tr300\\") {
-        InstallOrigin::MsiGlobal
-    } else if lower.contains("\\appdata\\local\\programs\\tr300\\") {
-        InstallOrigin::MsiCorporate
-    } else if lower.contains("\\.cargo\\bin\\") {
+    if lower.contains("\\.cargo\\bin\\") {
         InstallOrigin::CargoOrInstaller
     } else {
+        // Program Files and LocalAppData paths identify the edition scope but
+        // cannot distinguish MSI from Inno EXE. Choosing either would risk a
+        // cross-format update, so ambiguous/missing-marker installs use the
+        // conservative legacy update chain.
         InstallOrigin::Unknown
     }
+}
+
+#[cfg(windows)]
+fn is_global_install_path(exe_path: &str) -> bool {
+    exe_path
+        .to_ascii_lowercase()
+        .contains("\\program files\\tr300\\")
+}
+
+#[cfg(windows)]
+fn is_corporate_install_path(exe_path: &str) -> bool {
+    exe_path
+        .to_ascii_lowercase()
+        .contains("\\appdata\\local\\programs\\tr300\\")
 }
 
 #[cfg(test)]
@@ -1292,25 +1430,25 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn install_origin_classify_program_files_is_msi_global() {
+    fn install_origin_classify_program_files_without_marker_is_unknown() {
         assert_eq!(
             classify_install_path(r"C:\Program Files\tr300\bin\tr300.exe"),
-            InstallOrigin::MsiGlobal,
+            InstallOrigin::Unknown,
         );
         // Case-insensitive: drive letter or "Program Files" capitalization
         // shouldn't change the verdict.
         assert_eq!(
             classify_install_path(r"c:\PROGRAM FILES\tr300\BIN\tr300.exe"),
-            InstallOrigin::MsiGlobal,
+            InstallOrigin::Unknown,
         );
     }
 
     #[cfg(windows)]
     #[test]
-    fn install_origin_classify_localappdata_is_msi_corporate() {
+    fn install_origin_classify_localappdata_without_marker_is_unknown() {
         assert_eq!(
             classify_install_path(r"C:\Users\alice\AppData\Local\Programs\tr300\bin\tr300.exe"),
-            InstallOrigin::MsiCorporate,
+            InstallOrigin::Unknown,
         );
     }
 
@@ -1369,6 +1507,16 @@ mod tests {
     }
 
     #[test]
+    fn malformed_versions_are_not_lossily_reinterpreted() {
+        assert_eq!(parse_numeric_version("3.18.0"), Some(vec![3, 18, 0]));
+        assert_eq!(parse_numeric_version("3.foo.1"), None);
+        assert_eq!(parse_numeric_version("3..1"), None);
+        assert_eq!(parse_numeric_version(""), None);
+        assert!(!is_newer("3.17.0", "3.foo.1"));
+        assert!(!is_newer("broken", "3.18.0"));
+    }
+
+    #[test]
     fn test_is_newer_major_versions() {
         assert!(is_newer("3.8.0", "4.0.0"));
         assert!(!is_newer("4.0.0", "3.99.99"));
@@ -1415,10 +1563,31 @@ mod tests {
         assert!(checksum_verdict(hash, hash).is_ok());
         // Case-insensitive match passes (sidecars may be upper/lower case).
         assert!(checksum_verdict(&hash.to_uppercase(), hash).is_ok());
-        // A mismatch is REFUSED — this is the load-bearing MITM/corruption
-        // guard, so it must never silently pass.
+        // A mismatch is REFUSED — this is the load-bearing corruption/asset
+        // mismatch guard, so it must never silently pass.
         let err = checksum_verdict("deadbeef", hash).unwrap_err();
         assert!(err.contains("SHA256 mismatch"), "err: {err}");
+    }
+
+    #[test]
+    fn staged_installers_use_unique_private_directories_and_cleanup() {
+        let first = StagedInstaller::new("msi").unwrap();
+        let second = StagedInstaller::new("msi").unwrap();
+        let first_dir = first.path().parent().unwrap().to_path_buf();
+        let second_dir = second.path().parent().unwrap().to_path_buf();
+
+        assert_ne!(first_dir, second_dir);
+        assert_eq!(
+            first.path().extension().and_then(|ext| ext.to_str()),
+            Some("msi")
+        );
+        std::fs::write(first.path(), b"payload").unwrap();
+        assert!(first.path().is_file());
+
+        drop(first);
+        assert!(!first_dir.exists());
+        drop(second);
+        assert!(!second_dir.exists());
     }
 
     #[test]

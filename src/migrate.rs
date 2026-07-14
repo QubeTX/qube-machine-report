@@ -47,6 +47,7 @@ use crate::update::{detect_install_origin, InstallOrigin};
 
 /// Options for `migrate-cleanup`, mirrored from the CLI flags. Plain value so the
 /// resolution logic is unit-testable and the contract matches ND-300's exactly.
+#[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct MigrateOptions {
     pub cargo_copy: bool,

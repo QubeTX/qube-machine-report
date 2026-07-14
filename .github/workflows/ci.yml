@@ -9,7 +9,7 @@ name: CI
 #   test       — cargo test --workspace (Linux glibc + macOS ARM + Windows)
 #   build      — cargo build --release smoke test on every supported target
 #   speed      — measure tr300 --fast median wall-clock; fail above 1500 ms
-#   audit      — cargo-audit (advisory; continue-on-error so it never blocks)
+#   audit      — cargo-audit (blocking dependency-advisory gate)
 #   dist-plan  — verify cargo-dist plan parses (catches dist config errors before tagging)
 
 on:
@@ -51,13 +51,6 @@ jobs:
   test:
     name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    # TEMPORARY: macOS ARM is non-blocking for v3.14.5 due to GitHub
-    # hosted-runner flakiness — cargo aborts at 0s with no output across
-    # multiple identical-source retries (runs 25849362170, 25849631205,
-    # 25850000969, 25850258250 between 2026-05-14 07:46Z and 09:30Z).
-    # v3.14.4 (ac3fd34) passed all macOS ARM jobs cleanly. Revert this
-    # continue-on-error in the first stable release after macOS recovers.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,8 +70,6 @@ jobs:
   build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    # TEMPORARY: same macOS ARM flake as the `test` job — see comment there.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -106,10 +97,6 @@ jobs:
     name: Auto-run speed (${{ matrix.name }})
     needs: build
     runs-on: ${{ matrix.os }}
-    # TEMPORARY: same macOS ARM flake as the `test` + `build` jobs. The
-    # speed job runs its own `cargo build --release --bin tr300` and hits
-    # the same 0-second cargo abort on macOS. Revert with the other two.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -142,11 +129,11 @@ jobs:
             "$BIN" --fast >/dev/null
             end=$(date +%s%N)
             elapsed=$(( (end - start) / 1000000 ))
-            times+=($elapsed)
+            times+=("$elapsed")
             echo "Run $i: ${elapsed}ms"
           done
-          sorted=($(printf '%s\n' "${times[@]}" | sort -n))
-          median=${sorted[2]}
+          median=$(printf '%s\n' "${times[@]}" | sort -n | sed -n '3p')
+          budget_ms="${{ matrix.budget_ms }}"
           echo "Median: ${median}ms"
           {
             echo "## tr300 --fast on ${{ matrix.name }}"
@@ -154,7 +141,7 @@ jobs:
             echo "Runs: ${times[*]} (ms)"
             echo "Median: **${median}ms** (budget: ${{ matrix.budget_ms }}ms)"
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$median" -gt "${{ matrix.budget_ms }}" ]; then
+          if (( median > budget_ms )); then
             echo "::error::--fast median ${median}ms exceeds ${{ matrix.budget_ms }}ms budget"
             exit 1
           fi
@@ -194,7 +181,6 @@ jobs:
   audit:
     name: Security audit
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

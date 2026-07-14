@@ -8,8 +8,10 @@ use std::path::Path;
 /// Collect macOS-specific information
 /// In fast mode, skip system_profiler calls (slow ~1-2s each)
 pub fn collect(mode: CollectMode) -> PlatformInfo {
+    let translated = is_rosetta_translated();
     if mode == CollectMode::Fast {
         return PlatformInfo {
+            os_build: get_macos_build(),
             macos_codename: get_macos_codename(), // Fast: sw_vers is quick
             boot_mode: None,                      // Skip uname subprocess
             virtualization: None,                 // Skip system_profiler SPHardwareDataType
@@ -17,7 +19,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             display_server: Some("Quartz".to_string()),
             windows_edition: None,
             gpus: get_gpus_fast(), // ioreg is fast (~20-40ms) vs system_profiler (~1-2s)
-            architecture: get_architecture(),
+            architecture: get_architecture(translated),
             machine_model: get_machine_model(),
             cpu_core_topology: get_core_topology(),
             terminal: get_terminal(), // Fast: reads env vars
@@ -29,35 +31,93 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             bios: None,
             ram_slots: None,
             locale: get_locale(), // Fast: reads env var
-            encryption: None,     // FileVault detection deferred to PR #2
+            encryption: None,
+            elevation_unlocks_more: false,
         };
     }
 
-    // Call system_profiler once for both GPUs and resolution
-    let (gpus, display_resolution) = get_display_info();
+    // One structured snapshot supplies hardware, displays, power, and software
+    // data. This avoids multiple localized text parses and expensive repeated
+    // system_profiler launches.
+    let snapshot = get_system_profiler_snapshot(translated);
+    let (gpus, display_resolution) = snapshot
+        .as_ref()
+        .map(parse_display_info)
+        .unwrap_or_else(|| (get_gpus_fast(), None));
+    let machine_model = snapshot
+        .as_ref()
+        .and_then(parse_machine_model)
+        .or_else(get_machine_model);
+    let battery = snapshot
+        .as_ref()
+        .and_then(parse_snapshot_battery)
+        .or_else(get_battery);
+    let boot_mode = snapshot.as_ref().and_then(parse_boot_mode);
+    let virtualization = detect_virtualization(snapshot.as_ref());
 
     PlatformInfo {
+        os_build: get_macos_build(),
         macos_codename: get_macos_codename(),
-        boot_mode: detect_boot_mode(),
-        virtualization: detect_virtualization(),
+        boot_mode,
+        virtualization,
         desktop_environment: Some("Aqua".to_string()),
         display_server: Some("Quartz".to_string()),
         windows_edition: None,
         gpus,
-        architecture: get_architecture(),
-        machine_model: get_machine_model(),
+        architecture: get_architecture(translated),
+        machine_model,
         cpu_core_topology: get_core_topology(),
         terminal: get_terminal(),
         shell: get_shell(),
         display_resolution,
-        battery: get_battery_with_health().or_else(get_battery),
+        battery,
         zfs_health: None,
         motherboard: None,
         bios: None,
         ram_slots: None,
         locale: get_locale(),
-        encryption: None, // FileVault detection deferred to PR #2
+        encryption: get_filevault_status(),
+        elevation_unlocks_more: false,
     }
+}
+
+fn get_system_profiler_snapshot(translated: bool) -> Option<serde_json::Value> {
+    let direct_args = [
+        "-json",
+        "SPHardwareDataType",
+        "SPDisplaysDataType",
+        "SPPowerDataType",
+        "SPSoftwareDataType",
+    ];
+    // Under Rosetta, system_profiler's translated slice can return a generic
+    // machine name ("Mac"), `chip_type: Unknown`, and omit battery maximum
+    // capacity. Ask the universal `arch` launcher for the native arm64 slice;
+    // fall back to the translated profiler if that unexpectedly fails.
+    let json = if translated {
+        run_stdout(
+            "/usr/bin/arch",
+            [
+                "-arm64",
+                "/usr/sbin/system_profiler",
+                "-json",
+                "SPHardwareDataType",
+                "SPDisplaysDataType",
+                "SPPowerDataType",
+                "SPSoftwareDataType",
+            ],
+            CommandTimeout::Slow,
+        )
+        .or_else(|| run_stdout("system_profiler", direct_args, CommandTimeout::Slow))?
+    } else {
+        run_stdout("system_profiler", direct_args, CommandTimeout::Slow)?
+    };
+    serde_json::from_str(&json).ok()
+}
+
+fn get_macos_build() -> Option<String> {
+    run_stdout("sw_vers", ["-buildVersion"], CommandTimeout::Normal)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Get macOS version codename
@@ -76,11 +136,11 @@ fn get_macos_codename() -> Option<String> {
 ///
 /// Pure + testable. Apple jumped from 15 (Sequoia, 2024) straight to 26
 /// (Tahoe, 2025) when it switched to year-based version numbers, so there is
-/// no 16–25. Unknown *future* majors return a generic `"macOS <major>"` label
-/// rather than `None` so the OS row still renders something useful until the
-/// codename is added here.
+/// no 16–25. Unknown future majors remain `None`; a codename field must not
+/// contain a fabricated version label.
 fn macos_codename(major: u32, minor: u32) -> Option<String> {
     let name = match major {
+        27 => "Golden Gate",
         26 => "Tahoe",
         15 => "Sequoia",
         14 => "Sonoma",
@@ -93,52 +153,36 @@ fn macos_codename(major: u32, minor: u32) -> Option<String> {
             15 => "Catalina",
             14 => "Mojave",
             13 => "High Sierra",
-            _ => return Some(format!("macOS 10.{}", minor)),
+            _ => return None,
         },
-        n if n > 26 => return Some(format!("macOS {}", n)),
         _ => return None,
     };
     Some(name.to_string())
 }
 
-/// Detect boot mode (always UEFI on Intel Macs, native on Apple Silicon)
-fn detect_boot_mode() -> Option<String> {
-    // Check if running on Apple Silicon
-    let arch = run_stdout("uname", ["-m"], CommandTimeout::Normal)?
-        .trim()
-        .to_string();
-
-    if arch == "arm64" {
-        Some("Apple Silicon".to_string())
-    } else {
-        Some("UEFI".to_string())
+/// Parse the actual operating-system boot state. Architecture and firmware
+/// type are not boot modes, so this intentionally does not label Apple
+/// Silicon as a mode or assume every Intel boot was a normal UEFI boot.
+fn parse_boot_mode(snapshot: &serde_json::Value) -> Option<String> {
+    let software = snapshot["SPSoftwareDataType"].as_array()?.first()?;
+    let raw = software["boot_mode"].as_str()?.trim();
+    match raw {
+        "normal_boot" => Some("Normal".to_string()),
+        "safe_boot" => Some("Safe Mode".to_string()),
+        "recovery_boot" => Some("Recovery".to_string()),
+        value if !value.is_empty() => Some(value.to_string()),
+        _ => None,
     }
 }
 
 /// Detect if running in a virtual machine
-fn detect_virtualization() -> Option<String> {
-    // Check system_profiler for VM indicators
-    let info = run_stdout(
-        "system_profiler",
-        ["SPHardwareDataType"],
-        CommandTimeout::Slow,
-    )?
-    .to_lowercase();
-
-    if info.contains("vmware") {
-        return Some("VMware".to_string());
-    }
-    if info.contains("virtualbox") {
-        return Some("VirtualBox".to_string());
-    }
-    if info.contains("parallels") {
-        return Some("Parallels".to_string());
-    }
-    if info.contains("qemu") {
-        return Some("QEMU".to_string());
+fn detect_virtualization(snapshot: Option<&serde_json::Value>) -> Option<String> {
+    if let Some(kind) = snapshot.and_then(virtualization_from_snapshot) {
+        return Some(kind);
     }
 
-    // Check for Apple Virtualization framework
+    // A positive kernel signal is authoritative. A zero or failed probe is
+    // simply "not detected"; it is not proof of bare metal.
     let vmm = run_stdout(
         "sysctl",
         ["-n", "kern.hv_vmm_present"],
@@ -153,47 +197,133 @@ fn detect_virtualization() -> Option<String> {
     None
 }
 
-/// Get GPU names and display resolution from a single system_profiler call.
-/// Saves ~1-2 seconds by avoiding duplicate SPDisplaysDataType invocations.
-fn get_display_info() -> (Vec<String>, Option<String>) {
-    let mut gpus = Vec::new();
-    let mut resolution = None;
+fn virtualization_from_snapshot(snapshot: &serde_json::Value) -> Option<String> {
+    let hardware = snapshot["SPHardwareDataType"].as_array()?.first()?;
+    let evidence = [
+        hardware["machine_name"].as_str(),
+        hardware["machine_model"].as_str(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("|")
+    .to_ascii_lowercase();
+    if evidence.contains("parallels") {
+        Some("Parallels".to_string())
+    } else if evidence.contains("vmware") {
+        Some("VMware".to_string())
+    } else if evidence.contains("virtualbox") || evidence.contains("vbox") {
+        Some("VirtualBox".to_string())
+    } else if evidence.contains("qemu") {
+        Some("QEMU".to_string())
+    } else if evidence.contains("virtualmac") || evidence.contains("virtual mac") {
+        Some("Apple Virtualization".to_string())
+    } else {
+        None
+    }
+}
 
-    if let Some(stdout) = run_stdout(
-        "system_profiler",
-        ["SPDisplaysDataType"],
-        CommandTimeout::Slow,
-    ) {
-        for line in stdout.lines() {
-            let trimmed = line.trim();
-            // GPU: "Chipset Model:" lines
-            if trimmed.starts_with("Chipset Model:") {
-                if let Some(gpu) = trimmed.strip_prefix("Chipset Model:") {
-                    let gpu = gpu.trim();
-                    if !gpu.is_empty() {
-                        gpus.push(gpu.to_string());
-                    }
-                }
+fn parse_display_info(snapshot: &serde_json::Value) -> (Vec<String>, Option<String>) {
+    let mut gpus = Vec::new();
+    let mut displays: Vec<(String, String)> = Vec::new();
+    for adapter in snapshot["SPDisplaysDataType"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(gpu) = adapter
+            .get("sppci_model")
+            .or_else(|| adapter.get("_name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            push_unique_case_insensitive(&mut gpus, gpu);
+        }
+        for display in adapter["spdisplays_ndrvs"].as_array().into_iter().flatten() {
+            if display["spdisplays_online"].as_str() == Some("spdisplays_no") {
+                continue;
             }
-            // Resolution: "Resolution:" lines
-            if resolution.is_none() && trimmed.starts_with("Resolution:") {
-                if let Some(res) = trimmed.strip_prefix("Resolution:") {
-                    let res = res.trim();
-                    let clean: String = res
-                        .chars()
-                        .filter(|c| c.is_ascii_digit() || *c == 'x')
-                        .collect();
-                    if clean.contains('x') {
-                        resolution = Some(clean);
-                    } else if !res.is_empty() {
-                        resolution = Some(res.to_string());
-                    }
+            let name = display["_name"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("Display");
+            let physical = display["_spdisplays_pixels"]
+                .as_str()
+                .map(normalize_resolution)
+                .filter(|value| !value.is_empty());
+            let logical = display["_spdisplays_resolution"]
+                .as_str()
+                .map(normalize_resolution)
+                .filter(|value| !value.is_empty());
+            let resolution = match (logical, physical) {
+                (Some(logical), Some(physical))
+                    if logical.split('@').next() != Some(physical.as_str()) =>
+                {
+                    Some(format!("{} / {}px", logical, physical))
+                }
+                (Some(logical), _) => Some(logical),
+                (None, physical) => physical,
+            };
+            if let Some(resolution) = resolution {
+                if !displays.iter().any(|(existing_name, existing_resolution)| {
+                    existing_name.eq_ignore_ascii_case(name)
+                        && existing_resolution.eq_ignore_ascii_case(&resolution)
+                }) {
+                    displays.push((name.to_string(), resolution));
                 }
             }
         }
     }
+    let display = match displays.as_slice() {
+        [] => None,
+        [(_, resolution)] => Some(resolution.clone()),
+        _ => Some(
+            displays
+                .into_iter()
+                .map(|(name, resolution)| format!("{}: {}", name, resolution))
+                .collect::<Vec<_>>()
+                .join("; "),
+        ),
+    };
+    (gpus, display)
+}
 
-    (gpus, resolution)
+fn normalize_resolution(value: &str) -> String {
+    value
+        .replace(" x ", "x")
+        .replace(" × ", "x")
+        .replace(" @ ", "@")
+        .replace(".00Hz", "Hz")
+        .trim()
+        .to_string()
+}
+
+fn push_unique_case_insensitive(values: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if !value.is_empty()
+        && !values
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(value))
+    {
+        values.push(value.to_string());
+    }
+}
+
+fn parse_machine_model(snapshot: &serde_json::Value) -> Option<String> {
+    let hardware = snapshot["SPHardwareDataType"].as_array()?.first()?;
+    let name = hardware["machine_name"].as_str().map(str::trim);
+    let identifier = hardware["machine_model"].as_str().map(str::trim);
+    match (
+        name.filter(|v| !v.is_empty()),
+        identifier.filter(|v| !v.is_empty()),
+    ) {
+        (Some(name), Some(identifier)) => Some(format!("{} ({})", name, identifier)),
+        (Some(name), None) => Some(name.to_string()),
+        (None, Some(identifier)) => Some(identifier.to_string()),
+        (None, None) => None,
+    }
 }
 
 /// Get GPU names quickly using ioreg (fast, ~20-40ms vs system_profiler ~1-2s)
@@ -209,9 +339,7 @@ fn get_gpus_fast() -> Vec<String> {
                 if let Some(start) = trimmed.find("<\"") {
                     if let Some(end) = trimmed.rfind("\">") {
                         let gpu = &trimmed[start + 2..end];
-                        if !gpu.is_empty() {
-                            gpus.push(gpu.to_string());
-                        }
+                        push_unique_case_insensitive(&mut gpus, gpu);
                     }
                 }
             }
@@ -228,8 +356,7 @@ fn get_gpus_fast() -> Vec<String> {
             let brand = output.trim().to_string();
             if brand.contains("Apple") {
                 // Apple Silicon has integrated GPU in the SoC
-                let chip = brand.replace("Apple ", "");
-                gpus.push(format!("Apple {} GPU", chip));
+                push_unique_case_insensitive(&mut gpus, &brand);
             }
         }
     }
@@ -237,24 +364,36 @@ fn get_gpus_fast() -> Vec<String> {
     gpus
 }
 
-#[allow(dead_code)]
-fn get_gpus() -> Vec<String> {
-    get_display_info().0
+/// Get system architecture
+fn get_architecture(translated: bool) -> Option<String> {
+    let host = run_stdout("uname", ["-m"], CommandTimeout::Normal)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| std::env::consts::ARCH.to_string());
+    Some(format_architecture(
+        &host,
+        std::env::consts::ARCH,
+        translated,
+    ))
 }
 
-/// Get system architecture
-fn get_architecture() -> Option<String> {
-    let translated = run_stdout(
+pub(crate) fn is_rosetta_translated() -> bool {
+    run_stdout(
         "sysctl",
         ["-n", "sysctl.proc_translated"],
         CommandTimeout::Normal,
     )
     .map(|s| s.trim() == "1")
-    .unwrap_or(false);
+    .unwrap_or(false)
+}
+
+fn format_architecture(host: &str, runtime: &str, translated: bool) -> String {
     if translated {
-        return Some("x86_64 (Apple Silicon, Rosetta 2)".to_string());
+        // Rosetta 2 exists only on Apple Silicon. `uname -m` can report the
+        // translated process architecture, so state both scopes explicitly.
+        return format!("arm64 host / {} (Rosetta 2)", runtime);
     }
-    Some(std::env::consts::ARCH.to_string())
+    host.to_string()
 }
 
 pub fn get_cpu_brand() -> Option<String> {
@@ -270,22 +409,6 @@ pub fn get_cpu_brand() -> Option<String> {
     } else {
         Some(brand)
     }
-}
-
-pub fn apple_silicon_max_frequency_mhz(brand: &str) -> Option<u64> {
-    let brand = brand.to_ascii_lowercase();
-    let mhz = if brand.contains("m4") {
-        4400
-    } else if brand.contains("m3") {
-        4050
-    } else if brand.contains("m2") {
-        3500
-    } else if brand.contains("m1") {
-        3200
-    } else {
-        return None;
-    };
-    Some(mhz)
 }
 
 pub fn get_computer_name() -> Option<String> {
@@ -311,12 +434,30 @@ fn get_machine_model() -> Option<String> {
 }
 
 fn get_core_topology() -> Option<String> {
-    let p = sysctl_usize("hw.perflevel0.physicalcpu")?;
-    let e = sysctl_usize("hw.perflevel1.physicalcpu").unwrap_or(0);
-    if e == 0 {
-        return None;
+    let mut levels = Vec::new();
+    let count = sysctl_usize("hw.nperflevels")?;
+    for index in 0..count.min(16) {
+        let name = run_stdout(
+            "sysctl",
+            ["-n", &format!("hw.perflevel{}.name", index)],
+            CommandTimeout::Normal,
+        )
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+        let count = sysctl_usize(&format!("hw.perflevel{}.physicalcpu", index));
+        let (Some(name), Some(count)) = (name, count) else {
+            continue;
+        };
+        let label = match name.to_ascii_lowercase().as_str() {
+            value if value.contains("performance") => "P".to_string(),
+            value if value.contains("efficiency") => "E".to_string(),
+            _ => name,
+        };
+        if count > 0 {
+            levels.push(format!("{}{}", count, label));
+        }
     }
-    Some(format!("{}P + {}E", p, e))
+    (levels.len() > 1).then(|| levels.join(" + "))
 }
 
 fn sysctl_usize(name: &str) -> Option<usize> {
@@ -328,18 +469,38 @@ fn sysctl_usize(name: &str) -> Option<usize> {
 
 /// Get terminal emulator name
 fn get_terminal() -> Option<String> {
-    // Check TERM_PROGRAM first (set by most macOS terminals)
-    if let Ok(term) = env::var("TERM_PROGRAM") {
-        return Some(match term.as_str() {
-            "Apple_Terminal" => "Terminal.app".to_string(),
-            "iTerm.app" => "iTerm2".to_string(),
-            "vscode" => "VS Code".to_string(),
-            _ => term,
-        });
+    // TERM_PROGRAM is the most direct signal. LC_TERMINAL and the inherited
+    // bundle identifier cover iTerm2 and app-hosted shells that omit it.
+    for variable in ["TERM_PROGRAM", "LC_TERMINAL", "__CFBundleIdentifier"] {
+        if let Ok(value) = env::var(variable) {
+            if let Some(label) = terminal_label(value.trim()) {
+                return Some(label);
+            }
+        }
     }
 
-    // Fall back to TERM
-    env::var("TERM").ok()
+    // TERM describes terminal capabilities, not the emulator. Avoid reporting
+    // `dumb`/`xterm-256color` as if it were an application name.
+    None
+}
+
+fn terminal_label(value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    Some(
+        match value {
+            "Apple_Terminal" | "com.apple.Terminal" => "Terminal.app",
+            "iTerm.app" | "iTerm2" | "com.googlecode.iterm2" => "iTerm2",
+            "vscode" | "com.microsoft.VSCode" => "VS Code",
+            "WarpTerminal" | "dev.warp.Warp-Stable" => "Warp",
+            "WezTerm" | "com.github.wez.wezterm" => "WezTerm",
+            "ghostty" | "com.mitchellh.ghostty" => "Ghostty",
+            "com.openai.codex" => "Codex",
+            other => other,
+        }
+        .to_string(),
+    )
 }
 
 /// Get shell name and version
@@ -352,26 +513,11 @@ fn get_shell() -> Option<String> {
 
     // Try to get version
     let version_output = match shell_name.as_str() {
-        "bash" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        "zsh" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        "fish" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
+        "bash" | "zsh" | "fish" => run_stdout(&shell_path, ["--version"], CommandTimeout::Normal),
         _ => None,
     };
 
-    if let Some(output) = version_output {
-        let version_str = String::from_utf8_lossy(&output.stdout);
+    if let Some(version_str) = version_output {
         if let Some(line) = version_str.lines().next() {
             // Extract version number
             for word in line.split_whitespace() {
@@ -396,82 +542,49 @@ fn get_shell() -> Option<String> {
     Some(shell_name)
 }
 
-/// Get display resolution
-#[allow(dead_code)]
-fn get_display_resolution() -> Option<String> {
-    get_display_info().1
-}
-
 /// Get battery status
 fn get_battery() -> Option<String> {
-    if let Some(stdout) = run_stdout("pmset", ["-g", "batt"], CommandTimeout::Normal) {
-        // Parse output like:
-        // Now drawing from 'Battery Power'
-        //  -InternalBattery-0 (id=...)	85%; charging; 1:23 remaining
-        for line in stdout.lines() {
-            if line.contains("InternalBattery") || line.contains('%') {
-                // Extract percentage and status
-                let mut percentage = String::new();
-                let mut status = String::new();
-
-                for part in line.split(';') {
-                    let part = part.trim();
-                    if part.ends_with('%') {
-                        percentage = part.to_string();
-                    } else if part.contains("charging")
-                        || part.contains("discharging")
-                        || part.contains("charged")
-                        || part.contains("AC")
-                    {
-                        status = part.to_string();
-                    }
-                }
-
-                // Also check for percentage in format "85%"
-                if percentage.is_empty() {
-                    for word in line.split_whitespace() {
-                        if word.ends_with('%') {
-                            percentage = word.to_string();
-                            break;
-                        }
-                    }
-                }
-
-                if !percentage.is_empty() {
-                    if !status.is_empty() {
-                        // Capitalize first letter (safe for multi-byte chars)
-                        let status = {
-                            let mut chars = status.chars();
-                            match chars.next() {
-                                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-                                None => String::new(),
-                            }
-                        };
-                        return Some(format!("{} ({})", percentage, status));
-                    }
-                    return Some(percentage);
-                }
-            }
-        }
-    }
-
-    None
+    let stdout = run_stdout("pmset", ["-g", "batt"], CommandTimeout::Normal)?;
+    parse_pmset_battery(&stdout)
 }
 
-fn get_battery_with_health() -> Option<String> {
-    let base = get_battery()?;
-    let json = run_stdout(
-        "system_profiler",
-        ["SPPowerDataType", "-json"],
-        CommandTimeout::Slow,
-    )?;
-    let health = parse_system_profiler_battery_health(&json)?;
-    Some(format!("{}; {}", base, health))
+fn parse_pmset_battery(output: &str) -> Option<String> {
+    let line = output.lines().find(|line| line.contains('%'))?;
+    let percentage = line.split_whitespace().find_map(|word| {
+        let word = word.trim_matches(|c: char| c == ';' || c == ',');
+        let number = word.strip_suffix('%')?.parse::<u8>().ok()?;
+        (number <= 100).then(|| format!("{}%", number))
+    })?;
+    let lower = line.to_ascii_lowercase();
+    let status = if lower.contains("discharging") {
+        Some("Discharging")
+    } else if lower.contains("not charging") {
+        Some("Not charging")
+    } else if lower.contains("charging") {
+        Some("Charging")
+    } else if lower.contains("charged") {
+        Some("Charged")
+    } else {
+        None
+    };
+    Some(match status {
+        Some(status) => format!("{} ({})", percentage, status),
+        None => percentage,
+    })
 }
 
 /// Get system locale
 fn get_locale() -> Option<String> {
-    // Try defaults command for AppleLocale
+    for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(value) = env::var(var) {
+            if !value.trim().is_empty() {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+
+    // Region preference is a fallback when no process locale exists. Preserve
+    // Apple's @rg override rather than silently discarding it.
     if let Some(output) = run_stdout(
         "defaults",
         ["read", "-g", "AppleLocale"],
@@ -483,48 +596,127 @@ fn get_locale() -> Option<String> {
         }
     }
 
-    // Check LANG environment variable
-    if let Ok(lang) = env::var("LANG") {
-        let clean = lang.split('.').next().unwrap_or(&lang);
-        return Some(clean.to_string());
-    }
-
     None
 }
 
 fn clean_apple_locale(locale: &str) -> String {
-    locale.split('@').next().unwrap_or(locale).to_string()
+    locale.trim().to_string()
 }
 
-fn parse_system_profiler_battery_health(json: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(json).ok()?;
-    let batteries = value["SPPowerDataType"].as_array()?;
-    let text = batteries
+fn parse_snapshot_battery(snapshot: &serde_json::Value) -> Option<String> {
+    let battery = snapshot["SPPowerDataType"]
+        .as_array()?
         .iter()
-        .find_map(find_battery_health_value)
-        .filter(|s| !s.is_empty())?;
-    Some(format!("health {}", text))
+        .find(|entry| entry["_name"].as_str() == Some("spbattery_information"))?;
+    let charge = &battery["sppower_battery_charge_info"];
+    let percent = charge["sppower_battery_state_of_charge"].as_u64()?;
+    if percent > 100 {
+        return None;
+    }
+    let charging = charge["sppower_battery_is_charging"].as_str() == Some("TRUE");
+    let full = charge["sppower_battery_fully_charged"].as_str() == Some("TRUE");
+    let connected =
+        find_string_value(snapshot, "sppower_battery_charger_connected") == Some("TRUE");
+    let status = if charging {
+        "Charging"
+    } else if full {
+        "Charged"
+    } else if connected {
+        "Plugged in"
+    } else {
+        "Discharging"
+    };
+    let mut result = format!("{}% ({})", percent, status);
+    let health = &battery["sppower_battery_health_info"];
+    let condition = health["sppower_battery_health"].as_str();
+    let maximum = health["sppower_battery_health_maximum_capacity"].as_str();
+    let cycles = health["sppower_battery_cycle_count"].as_u64().or_else(|| {
+        health["sppower_battery_cycle_count"]
+            .as_str()
+            .and_then(|value| value.trim().parse().ok())
+    });
+    let mut details = Vec::new();
+    if let Some(condition) = condition.map(str::trim).filter(|value| !value.is_empty()) {
+        details.push(condition.to_string());
+    }
+    if let Some(maximum) = maximum {
+        details.push(format!("max {}", maximum));
+    }
+    if let Some(cycles) = cycles {
+        details.push(format!("{} cycles", cycles));
+    }
+    if !details.is_empty() {
+        result.push_str("; ");
+        result.push_str(&details.join(", "));
+    }
+    Some(result)
 }
 
-fn find_battery_health_value(value: &serde_json::Value) -> Option<String> {
+fn find_string_value<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     match value {
         serde_json::Value::Object(map) => {
-            for (key, value) in map {
-                let key_lower = key.to_ascii_lowercase();
-                if key_lower.contains("condition") || key_lower.contains("health") {
-                    if let Some(s) = value.as_str() {
-                        return Some(s.to_string());
-                    }
-                }
-                if let Some(found) = find_battery_health_value(value) {
-                    return Some(found);
-                }
+            if let Some(found) = map.get(key).and_then(serde_json::Value::as_str) {
+                return Some(found);
             }
-            None
+            map.values().find_map(|value| find_string_value(value, key))
         }
-        serde_json::Value::Array(values) => values.iter().find_map(find_battery_health_value),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(|value| find_string_value(value, key)),
         _ => None,
     }
+}
+
+fn get_filevault_status() -> Option<String> {
+    let status = crate::collectors::command::run_stdout_c_locale(
+        "fdesetup",
+        ["status"],
+        CommandTimeout::Normal,
+    )?;
+    parse_filevault_status(&status)
+}
+
+fn parse_filevault_status(status: &str) -> Option<String> {
+    let lower = status.to_ascii_lowercase();
+    if lower.contains("encryption in progress") {
+        Some(format_filevault_progress(
+            "FileVault encryption in progress",
+            &lower,
+        ))
+    } else if lower.contains("decryption in progress") {
+        Some(format_filevault_progress(
+            "FileVault decryption in progress",
+            &lower,
+        ))
+    } else if lower.contains("filevault is on") {
+        Some("FileVault On".to_string())
+    } else if lower.contains("filevault is off") {
+        Some("FileVault Off".to_string())
+    } else {
+        None
+    }
+}
+
+fn format_filevault_progress(label: &str, status: &str) -> String {
+    let percent = status
+        .split("percent completed")
+        .nth(1)
+        .and_then(|tail| {
+            tail.chars()
+                .position(|character| character.is_ascii_digit())
+                .map(|i| &tail[i..])
+        })
+        .and_then(|tail| {
+            let digits: String = tail
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            digits.parse::<u8>().ok()
+        })
+        .filter(|percent| *percent <= 100);
+    percent
+        .map(|percent| format!("{} ({}%)", label, percent))
+        .unwrap_or_else(|| label.to_string())
 }
 
 #[cfg(test)]
@@ -532,15 +724,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn apple_locale_strips_region_extension() {
-        assert_eq!(clean_apple_locale("en_US@rg=gbzzzz"), "en_US");
-    }
-
-    #[test]
-    fn apple_silicon_frequency_lookup_handles_m_families() {
-        assert_eq!(apple_silicon_max_frequency_mhz("Apple M1 Pro"), Some(3200));
-        assert_eq!(apple_silicon_max_frequency_mhz("Apple M4 Max"), Some(4400));
-        assert_eq!(apple_silicon_max_frequency_mhz("Intel Core i9"), None);
+    fn apple_locale_preserves_region_extension() {
+        assert_eq!(clean_apple_locale("en_US@rg=gbzzzz"), "en_US@rg=gbzzzz");
     }
 
     #[test]
@@ -552,23 +737,204 @@ mod tests {
         // 10.x era keys off the minor.
         assert_eq!(macos_codename(10, 15), Some("Catalina".to_string()));
         assert_eq!(macos_codename(10, 14), Some("Mojave".to_string()));
-        assert_eq!(macos_codename(10, 11), Some("macOS 10.11".to_string()));
-        // Unknown future major still renders a useful label, not None.
-        assert_eq!(macos_codename(27, 0), Some("macOS 27".to_string()));
+        assert_eq!(macos_codename(10, 11), None);
+        assert_eq!(macos_codename(27, 0), Some("Golden Gate".to_string()));
+        assert_eq!(macos_codename(28, 0), None);
     }
 
     #[test]
-    fn parses_system_profiler_battery_health_json() {
-        let json = r#"{
-          "SPPowerDataType": [{
-            "sppower_battery_health_info": {
-              "sppower_battery_health": "Normal"
-            }
-          }]
-        }"#;
+    fn rosetta_architecture_names_host_and_process_scopes() {
         assert_eq!(
-            parse_system_profiler_battery_health(json),
-            Some("health Normal".to_string())
+            format_architecture("x86_64", "x86_64", true),
+            "arm64 host / x86_64 (Rosetta 2)"
+        );
+        assert_eq!(format_architecture("arm64", "aarch64", false), "arm64");
+        assert_eq!(format_architecture("x86_64", "x86_64", false), "x86_64");
+    }
+
+    #[test]
+    fn boot_mode_comes_from_the_os_state_not_the_cpu_architecture() {
+        let normal = serde_json::json!({
+            "SPSoftwareDataType": [{ "boot_mode": "normal_boot" }]
+        });
+        let safe = serde_json::json!({
+            "SPSoftwareDataType": [{ "boot_mode": "safe_boot" }]
+        });
+        assert_eq!(parse_boot_mode(&normal).as_deref(), Some("Normal"));
+        assert_eq!(parse_boot_mode(&safe).as_deref(), Some("Safe Mode"));
+        assert_eq!(parse_boot_mode(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn snapshot_virtualization_identifies_known_mac_guests() {
+        let apple = serde_json::json!({
+            "SPHardwareDataType": [{
+                "machine_name": "Mac",
+                "machine_model": "VirtualMac2,1"
+            }]
+        });
+        let parallels = serde_json::json!({
+            "SPHardwareDataType": [{
+                "machine_name": "Parallels ARM Virtual Machine",
+                "machine_model": "Parallels20,1"
+            }]
+        });
+        assert_eq!(
+            virtualization_from_snapshot(&apple).as_deref(),
+            Some("Apple Virtualization")
+        );
+        assert_eq!(
+            virtualization_from_snapshot(&parallels).as_deref(),
+            Some("Parallels")
+        );
+    }
+
+    #[test]
+    fn terminal_labels_cover_native_macos_hosts() {
+        assert_eq!(
+            terminal_label("com.apple.Terminal").as_deref(),
+            Some("Terminal.app")
+        );
+        assert_eq!(terminal_label("com.openai.codex").as_deref(), Some("Codex"));
+        assert_eq!(
+            terminal_label("dev.warp.Warp-Stable").as_deref(),
+            Some("Warp")
+        );
+        assert_eq!(terminal_label(""), None);
+    }
+
+    #[test]
+    fn display_parser_prefers_current_logical_mode_and_ignores_offline_entries() {
+        let snapshot = serde_json::json!({
+            "SPDisplaysDataType": [{
+                "sppci_model": "Apple M2",
+                "spdisplays_ndrvs": [{
+                    "_name": "Color LCD",
+                    "_spdisplays_pixels": "2880 x 1800",
+                    "_spdisplays_resolution": "1440 x 900 @ 60.00Hz",
+                    "spdisplays_online": "spdisplays_yes"
+                }, {
+                    "_name": "Disconnected Display",
+                    "_spdisplays_pixels": "1920 x 1080",
+                    "spdisplays_online": "spdisplays_no"
+                }]
+            }, {
+                "sppci_model": "apple m2"
+            }]
+        });
+        assert_eq!(
+            parse_display_info(&snapshot),
+            (
+                vec!["Apple M2".to_string()],
+                Some("1440x900@60Hz / 2880x1800px".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn parses_structured_snapshot_without_leaking_device_identifiers() {
+        let snapshot: serde_json::Value = serde_json::from_str(
+            r#"{
+          "SPHardwareDataType": [{
+            "machine_name": "MacBook Pro",
+            "machine_model": "Mac14,7",
+            "serial_number": "must-not-appear"
+          }],
+          "SPDisplaysDataType": [{
+            "sppci_model": "Apple M2",
+            "spdisplays_ndrvs": [{
+              "_name": "Color LCD",
+              "_spdisplays_pixels": "2880 x 1800",
+              "_spdisplays_display-serial-number": "must-not-appear"
+            }]
+          }],
+          "SPPowerDataType": [{
+            "_name": "spbattery_information",
+            "sppower_battery_charge_info": {
+              "sppower_battery_state_of_charge": 49,
+              "sppower_battery_is_charging": "FALSE",
+              "sppower_battery_fully_charged": "FALSE"
+            },
+            "sppower_battery_health_info": {
+              "sppower_battery_health": "Good",
+              "sppower_battery_health_maximum_capacity": "88%",
+              "sppower_battery_cycle_count": 114
+            }
+          }, {
+            "sppower_battery_charger_connected": "FALSE"
+          }]
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parse_machine_model(&snapshot),
+            Some("MacBook Pro (Mac14,7)".to_string())
+        );
+        assert_eq!(
+            parse_display_info(&snapshot),
+            (vec!["Apple M2".to_string()], Some("2880x1800".to_string()))
+        );
+        assert_eq!(
+            parse_snapshot_battery(&snapshot),
+            Some("49% (Discharging); Good, max 88%, 114 cycles".to_string())
+        );
+        let combined = format!(
+            "{:?}{:?}{:?}",
+            parse_machine_model(&snapshot),
+            parse_display_info(&snapshot),
+            parse_snapshot_battery(&snapshot)
+        );
+        assert!(!combined.contains("must-not-appear"));
+    }
+
+    #[test]
+    fn parses_pmset_battery_without_device_prefix() {
+        let output = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=123)\t49%; discharging; 4:00 remaining\n";
+        assert_eq!(
+            parse_pmset_battery(output),
+            Some("49% (Discharging)".to_string())
+        );
+        assert_eq!(
+            parse_pmset_battery(" -InternalBattery-0\t100%; charged; 0:00 remaining\n"),
+            Some("100% (Charged)".to_string())
+        );
+        assert_eq!(
+            parse_pmset_battery(" -InternalBattery-0\t80%; not charging; 0:00 remaining\n"),
+            Some("80% (Not charging)".to_string())
+        );
+        assert_eq!(
+            parse_pmset_battery(" -InternalBattery-0\t255%; charging\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_filevault_states() {
+        assert_eq!(
+            parse_filevault_status("FileVault is On."),
+            Some("FileVault On".to_string())
+        );
+        assert_eq!(
+            parse_filevault_status("FileVault is Off."),
+            Some("FileVault Off".to_string())
+        );
+        assert_eq!(
+            parse_filevault_status(
+                "FileVault is On. Encryption in progress: Percent completed = 42"
+            ),
+            Some("FileVault encryption in progress (42%)".to_string())
+        );
+        assert_eq!(
+            parse_filevault_status(
+                "FileVault is Off. Decryption in progress: Percent completed = 73"
+            ),
+            Some("FileVault decryption in progress (73%)".to_string())
+        );
+        assert_eq!(
+            parse_filevault_status(
+                "FileVault is On. Encryption in progress: Percent completed = 255"
+            ),
+            Some("FileVault encryption in progress".to_string())
         );
     }
 }

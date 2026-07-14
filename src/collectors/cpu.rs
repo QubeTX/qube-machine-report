@@ -13,7 +13,17 @@ use std::thread;
 use std::time::Duration;
 use sysinfo::System;
 
+type LoadAverages = (
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+);
+
 /// CPU information
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct CpuInfo {
     /// CPU brand/model name
@@ -26,14 +36,22 @@ pub struct CpuInfo {
     pub sockets: Option<usize>,
     /// CPU frequency in MHz
     pub frequency_mhz: u64,
+    /// Meaning of `frequency_mhz` (`maximum` or `reported`). `None` when the
+    /// platform could not provide a non-zero value.
+    pub frequency_kind: Option<String>,
     /// Current CPU usage percentage (0-100)
     pub usage_percent: f32,
-    /// 1-minute load average (None if skipped in fast mode on Windows)
+    /// 1-minute Unix load normalized by logical processor count. Windows: None.
     pub load_1m: Option<f64>,
-    /// 5-minute load average (None if skipped in fast mode on Windows)
+    /// 5-minute Unix load normalized by logical processor count. Windows: None.
     pub load_5m: Option<f64>,
-    /// 15-minute load average (None if skipped in fast mode on Windows)
+    /// 15-minute Unix load normalized by logical processor count. Windows: None.
     pub load_15m: Option<f64>,
+    /// Raw operating-system load averages. Unix load is runnable/queued work,
+    /// not CPU utilization; Windows leaves these fields unavailable.
+    pub raw_load_1m: Option<f64>,
+    pub raw_load_5m: Option<f64>,
+    pub raw_load_15m: Option<f64>,
 }
 
 /// Collect CPU information
@@ -48,7 +66,9 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     }
 
     let cpus = sys.cpus();
-    let physical_cores = sys.physical_core_count().unwrap_or(cpus.len());
+    // Unknown physical topology must stay unknown. Falling back to the logical
+    // count incorrectly labeled vCPUs and SMT threads as physical cores.
+    let physical_cores = sys.physical_core_count().unwrap_or(0);
     let logical_cores = cpus.len();
 
     let brand = cpus
@@ -57,7 +77,7 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
         .unwrap_or_else(|| "Unknown CPU".to_string());
     let brand = platform_cpu_brand(brand);
 
-    // Frequency strategy:
+    // Frequency strategy (one explicit contract per value):
     //   1. Prefer CPUID leaf 16h (Intel "Processor Frequency Information") — EBX
     //      returns the architectural max frequency. Reflects silicon-rated boost
     //      and is unaffected by the OS power plan. 0 on AMD / older CPUs.
@@ -67,19 +87,30 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     //   3. Finally fall back to sysinfo's static value (base clock from registry
     //      on Windows; current frequency on Linux).
     let sysinfo_mhz = cpus.first().map(|c| c.frequency()).unwrap_or(0);
-    let frequency_mhz_raw = cpuid_16h_max_mhz();
+    let maximum_mhz = cpuid_16h_max_mhz();
     #[cfg(target_os = "windows")]
-    let frequency_mhz_raw = frequency_mhz_raw.or_else(|| cpu_max_mhz_windows(logical_cores));
-    #[cfg(target_os = "macos")]
-    let frequency_mhz_raw = frequency_mhz_raw
-        .or_else(|| crate::collectors::platform::macos::apple_silicon_max_frequency_mhz(&brand));
+    let maximum_mhz = maximum_mhz.or_else(|| cpu_max_mhz_windows(logical_cores));
     // ARM Linux has no CPUID leaf 16h and sysinfo often reports 0 MHz, which
     // renders "0.00 GHz". Fall back to the kernel's rated max from sysfs.
     #[cfg(target_os = "linux")]
-    let frequency_mhz_raw = frequency_mhz_raw.or_else(linux_cpufreq_max_mhz);
-    let frequency_mhz = frequency_mhz_raw
-        .map(|v| v.max(sysinfo_mhz))
-        .unwrap_or(sysinfo_mhz);
+    let maximum_mhz = maximum_mhz.or_else(linux_cpufreq_max_mhz);
+    #[cfg(target_os = "macos")]
+    let translated_frequency = crate::collectors::platform::macos::is_rosetta_translated();
+    #[cfg(not(target_os = "macos"))]
+    let translated_frequency = false;
+    let (frequency_mhz, frequency_kind) = if translated_frequency {
+        // Rosetta exposes a compatibility 2.4 GHz sysctl value on Apple
+        // Silicon that disagrees with the native processor frequency. The
+        // architecture row already identifies translation; absence is more
+        // accurate than displaying the compatibility shim as hardware data.
+        (0, None)
+    } else if let Some(maximum) = maximum_mhz.filter(|v| *v > 0) {
+        (maximum, Some("maximum".to_string()))
+    } else if sysinfo_mhz > 0 {
+        (sysinfo_mhz, Some("reported".to_string()))
+    } else {
+        (0, None)
+    };
 
     let usage_percent: f32 = if cpus.is_empty() {
         0.0
@@ -88,11 +119,12 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
     };
 
     // Get load averages and socket count (platform-specific)
-    let (load_1m, load_5m, load_15m) = get_load_averages(mode, logical_cores, usage_percent);
+    let (load_1m, load_5m, load_15m, raw_load_1m, raw_load_5m, raw_load_15m) =
+        get_load_averages(mode, logical_cores);
     let sockets = if mode == CollectMode::Fast {
         None // Skip subprocess call in fast mode
     } else {
-        Some(get_socket_count())
+        get_socket_count()
     };
 
     Ok(CpuInfo {
@@ -101,22 +133,22 @@ pub fn collect(mode: CollectMode) -> Result<CpuInfo> {
         logical_cores,
         sockets,
         frequency_mhz,
+        frequency_kind,
         usage_percent,
         load_1m,
         load_5m,
         load_15m,
+        raw_load_1m,
+        raw_load_5m,
+        raw_load_15m,
     })
 }
 
-/// Get load averages as percentages
+/// Get normalized and raw load averages.
 /// On Unix, these are fast (read from /proc or libc) so always collected.
-/// On Windows, these depend on the 200ms sleep, so skip in fast mode.
+/// Windows has no equivalent Unix-style load average and returns no values.
 #[cfg(unix)]
-fn get_load_averages(
-    _mode: CollectMode,
-    core_count: usize,
-    _current_usage: f32,
-) -> (Option<f64>, Option<f64>, Option<f64>) {
+fn get_load_averages(_mode: CollectMode, core_count: usize) -> LoadAverages {
     use std::fs;
 
     // Try to read from /proc/loadavg on Linux
@@ -132,12 +164,16 @@ fn get_load_averages(
                 parts[1].parse::<f64>(),
                 parts[2].parse::<f64>(),
             ) {
-                let max_load = core_count.max(1) as f64;
-                return (
-                    Some((load1 / max_load * 100.0).min(100.0)),
-                    Some((load5 / max_load * 100.0).min(100.0)),
-                    Some((load15 / max_load * 100.0).min(100.0)),
-                );
+                if [load1, load5, load15].into_iter().all(valid_load) {
+                    return (
+                        Some(normalize_load(load1, core_count)),
+                        Some(normalize_load(load5, core_count)),
+                        Some(normalize_load(load15, core_count)),
+                        Some(load1),
+                        Some(load5),
+                        Some(load15),
+                    );
+                }
             }
         }
     }
@@ -145,52 +181,71 @@ fn get_load_averages(
     // Fallback: try libc getloadavg
     let mut loadavg: [f64; 3] = [0.0; 3];
     unsafe {
-        if libc::getloadavg(loadavg.as_mut_ptr(), 3) == 3 {
-            let max_load = core_count.max(1) as f64;
+        if libc::getloadavg(loadavg.as_mut_ptr(), 3) == 3 && loadavg.into_iter().all(valid_load) {
             return (
-                Some((loadavg[0] / max_load * 100.0).min(100.0)),
-                Some((loadavg[1] / max_load * 100.0).min(100.0)),
-                Some((loadavg[2] / max_load * 100.0).min(100.0)),
+                Some(normalize_load(loadavg[0], core_count)),
+                Some(normalize_load(loadavg[1], core_count)),
+                Some(normalize_load(loadavg[2], core_count)),
+                Some(loadavg[0]),
+                Some(loadavg[1]),
+                Some(loadavg[2]),
             );
         }
     }
 
     // Both sources failed — report "unavailable" rather than a fake 0% load.
-    (None, None, None)
+    (None, None, None, None, None, None)
 }
 
-/// Get load averages on Windows (uses current CPU usage for all)
-/// In fast mode, skip since the 200ms sleep was skipped (no accurate data)
+#[cfg(unix)]
+fn valid_load(load: f64) -> bool {
+    load.is_finite() && load >= 0.0
+}
+
+#[cfg(unix)]
+fn normalize_load(load: f64, core_count: usize) -> f64 {
+    load / core_count.max(1) as f64 * 100.0
+}
+
+/// Windows has no Unix-style load average.
 #[cfg(windows)]
-fn get_load_averages(
-    mode: CollectMode,
-    _core_count: usize,
-    current_usage: f32,
-) -> (Option<f64>, Option<f64>, Option<f64>) {
-    if mode == CollectMode::Fast {
-        return (None, None, None);
-    }
-    // Windows doesn't have load averages, so we use current CPU usage
-    let usage = current_usage as f64;
-    (Some(usage), Some(usage), Some(usage))
+fn get_load_averages(_mode: CollectMode, _core_count: usize) -> LoadAverages {
+    // Windows has no Unix-style load average. CPU utilization is carried in
+    // `usage_percent`; fabricating 1/5/15-minute values from one sample made
+    // the old labels materially false.
+    (None, None, None, None, None, None)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn get_load_averages(
-    mode: CollectMode,
-    _core_count: usize,
-    current_usage: f32,
-) -> (Option<f64>, Option<f64>, Option<f64>) {
-    if mode == CollectMode::Fast {
-        return (None, None, None);
-    }
-    let usage = current_usage as f64;
-    (Some(usage), Some(usage), Some(usage))
+fn get_load_averages(_mode: CollectMode, _core_count: usize) -> LoadAverages {
+    (None, None, None, None, None, None)
 }
 
 /// Get number of CPU sockets
 #[cfg(target_os = "linux")]
-fn get_socket_count() -> usize {
+fn get_socket_count() -> Option<usize> {
+    let mut packages = std::collections::HashSet::new();
+    if let Ok(cpus) = std::fs::read_dir("/sys/devices/system/cpu") {
+        for cpu in cpus.flatten() {
+            let name = cpu.file_name().to_string_lossy().to_string();
+            if !name.strip_prefix("cpu").is_some_and(|suffix| {
+                !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+            }) {
+                continue;
+            }
+            if let Ok(package) =
+                std::fs::read_to_string(cpu.path().join("topology/physical_package_id"))
+            {
+                if let Ok(package) = package.trim().parse::<i32>() {
+                    packages.insert(package);
+                }
+            }
+        }
+    }
+    if !packages.is_empty() {
+        return Some(packages.len());
+    }
+
     // Force LC_ALL=C so `lscpu` emits English labels — non-English
     // locales rename `Socket(s):` to e.g. `Sockel:` (German),
     // silently breaking the substring match. (audit finding F19,
@@ -204,41 +259,40 @@ fn get_socket_count() -> usize {
             if line.starts_with("Socket(s):") {
                 if let Some(num) = line.split(':').nth(1) {
                     if let Ok(sockets) = num.trim().parse::<usize>() {
-                        return sockets;
+                        return (sockets > 0).then_some(sockets);
                     }
                 }
             }
         }
     }
 
-    // Fallback: assume 1 socket
-    1
+    None
 }
 
 #[cfg(target_os = "windows")]
-fn get_socket_count() -> usize {
+fn get_socket_count() -> Option<usize> {
     // C.9 (v3.13.0+): native GetLogicalProcessorInformationEx, ~10x faster
     // than the WMI path it replaces. WMI fallback retained for systems where
     // the native call returns nothing unexpected.
     crate::collectors::platform::windows::get_socket_count_native()
-        .unwrap_or_else(crate::collectors::platform::windows::get_socket_count_wmi)
+        .or_else(crate::collectors::platform::windows::get_socket_count_wmi)
 }
 
 #[cfg(target_os = "macos")]
-fn get_socket_count() -> usize {
+fn get_socket_count() -> Option<usize> {
     // Use sysctl to get package count
     if let Some(stdout) = run_stdout("sysctl", ["-n", "hw.packages"], CommandTimeout::Normal) {
         if let Ok(count) = stdout.trim().parse::<usize>() {
-            return count.max(1);
+            return (count > 0).then_some(count);
         }
     }
 
-    1
+    None
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-fn get_socket_count() -> usize {
-    1
+fn get_socket_count() -> Option<usize> {
+    None
 }
 
 #[cfg(target_os = "linux")]
@@ -328,9 +382,16 @@ fn cpuid_16h_max_mhz() -> Option<u64> {
 /// without this ARM Linux renders "0.00 GHz". `cpuinfo_max_freq` is in kHz.
 #[cfg(target_os = "linux")]
 fn linux_cpufreq_max_mhz() -> Option<u64> {
-    let raw =
-        std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").ok()?;
-    parse_cpufreq_khz_to_mhz(&raw)
+    let entries = std::fs::read_dir("/sys/devices/system/cpu/cpufreq").ok()?;
+    entries
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("policy"))
+        .filter_map(|entry| {
+            std::fs::read_to_string(entry.path().join("cpuinfo_max_freq"))
+                .ok()
+                .and_then(|raw| parse_cpufreq_khz_to_mhz(&raw))
+        })
+        .max()
 }
 
 /// Parse a sysfs `cpuinfo_max_freq` value (kHz) into MHz. Returns `None` for an
@@ -338,7 +399,8 @@ fn linux_cpufreq_max_mhz() -> Option<u64> {
 #[cfg(target_os = "linux")]
 fn parse_cpufreq_khz_to_mhz(s: &str) -> Option<u64> {
     let khz: u64 = s.trim().parse().ok()?;
-    (khz > 0).then_some(khz / 1000)
+    let mhz = khz / 1000;
+    (mhz > 0).then_some(mhz)
 }
 
 // Windows: query CallNtPowerInformation for accurate per-core max frequency.
@@ -411,7 +473,9 @@ impl CpuInfo {
 
     /// Get core count string
     pub fn cores_string(&self) -> String {
-        if self.physical_cores == self.logical_cores {
+        if self.physical_cores == 0 {
+            format!("{} logical processors", self.logical_cores)
+        } else if self.physical_cores == self.logical_cores {
             format!("{} cores", self.physical_cores)
         } else {
             format!(
@@ -430,8 +494,49 @@ mod linux_freq_tests {
     fn cpufreq_khz_to_mhz_converts_and_rejects_bad_input() {
         assert_eq!(parse_cpufreq_khz_to_mhz("2400000"), Some(2400));
         assert_eq!(parse_cpufreq_khz_to_mhz("1800000\n"), Some(1800));
+        assert_eq!(parse_cpufreq_khz_to_mhz("999"), None);
         assert_eq!(parse_cpufreq_khz_to_mhz("0"), None);
         assert_eq!(parse_cpufreq_khz_to_mhz("garbage"), None);
         assert_eq!(parse_cpufreq_khz_to_mhz(""), None);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod load_tests {
+    use super::*;
+
+    #[test]
+    fn normalized_load_preserves_overload_above_one_hundred_percent() {
+        assert_eq!(normalize_load(0.5, 4), 12.5);
+        assert_eq!(normalize_load(8.0, 4), 200.0);
+        assert!(valid_load(0.0));
+        assert!(!valid_load(f64::NAN));
+        assert!(!valid_load(f64::INFINITY));
+        assert!(!valid_load(-0.1));
+    }
+}
+
+#[cfg(test)]
+mod cpu_info_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_physical_topology_is_labeled_as_logical_only() {
+        let info = CpuInfo {
+            brand: "CPU".to_string(),
+            physical_cores: 0,
+            logical_cores: 8,
+            sockets: None,
+            frequency_mhz: 0,
+            frequency_kind: None,
+            usage_percent: 0.0,
+            load_1m: None,
+            load_5m: None,
+            load_15m: None,
+            raw_load_1m: None,
+            raw_load_5m: None,
+            raw_load_15m: None,
+        };
+        assert_eq!(info.cores_string(), "8 logical processors");
     }
 }

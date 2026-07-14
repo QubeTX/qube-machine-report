@@ -8,7 +8,18 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v3.16.0](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.16.0) (2026-06-03). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
+Latest release: [v3.17.0](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.17.0) (2026-06-08). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
+
+Development status: the default branch contains an unreleased macOS accuracy
+and reliability checkpoint. v3.17.0 remains the installable release until live
+Windows, AMD Linux, and Raspberry Pi 4 validation is complete and v4.0.0 is
+explicitly tagged.
+
+The next version is a major release for Rust-library SemVer only: public
+information records gained fields and are now non-exhaustive. The `tr300`
+command, existing schema-v1 JSON keys, installer names, and update path remain
+compatible. Applications that directly construct or exhaustively match public
+Rust records should follow the v4 migration note when it is published.
 
 ## Features
 
@@ -19,13 +30,20 @@ Latest release: [v3.16.0](https://github.com/QubeTX/qube-machine-report/releases
 - VPN-aware network information on Windows — `MACHINE IP` and `DNS IP` rows reflect the active default route (`GetBestInterfaceEx`-driven) so Tailscale / WireGuard / OpenVPN / corporate VPN tunnels are reported correctly instead of a coin-flip pick
 - Hypervisor / virtualization detection (CPUID-based; disambiguates Win11 VBS from real VMs)
 - Session info with last-login/current-session tracking; Windows uses WTS APIs with a boot-time fallback
-- Disk encryption status (BitLocker on Windows when readable)
+- Disk encryption status (FileVault on macOS, BitLocker on Windows, and root
+  encryption signals on Linux when readable)
+- Native macOS detail from a single structured snapshot: model, OS build/name,
+  real Normal/Safe/Recovery boot state, Apple chip and P/E topology, logical and
+  native display resolution, battery health/cycles, and explicit Rosetta host /
+  process architecture without leaking hardware identifiers
 - Fast Startup-aware uptime on Windows — when the kernel session age and the WMI cold-boot time diverge by >1h (typical on Win10/Win11 laptops with `HiberbootEnabled`), the `UPTIME` row renders both as `9d 4h 12m (session: 7h 14m)`
 - 5-state battery awareness on Windows — distinguishes `AC Power` (plugged in, fully topped up), `X% (Charging)`, `X% (Plugged in)` (gaming-laptop case where peak GPU draw exceeds the brick wattage, OR firmware-limited charging modes like ThinkPad battery longevity), `X% (Discharging)`, plus `Critical` / `Low` overrides
 - Smart terminal detection on Windows — env-var pre-checks (`WT_SESSION`, `TERM_PROGRAM`, `CURSOR_TRACE_ID`) then a parent-process walk via Toolhelp32 that recognizes Windows Terminal, WezTerm, Alacritty, VS Code, Cursor, Windsurf, Hyper, Tabby, Ghostty, Kitty, MinTTY, Claude Code, and Antigravity even when env vars are absent
 - PowerShell 7+ ("PowerShell Core") detection on Windows — reads `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\SemanticVersion` so `pwsh` users see the actual installed version instead of falling back to Windows PowerShell 5.x
-- JSON output for scripting
-- Auto-save markdown report to Downloads folder on manual runs
+- Schema-versioned JSON output for scripting, including collection mode and
+  explicit CPU-load, frequency, disk, and memory value definitions
+- Collision-safe auto-save of Markdown reports to Downloads on manual runs,
+  with `--no-save` for scripts and temporary checks
 - Fast mode (`--fast`) for sub-second auto-run startup
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Resilient self-update with cargo-first probing and shell/PowerShell installer fallbacks — the cargo path now verifies the new version actually landed (and falls through to the prebuilt installer if crates.io is lagging), so `tr300 update` no longer reports a false success
@@ -83,9 +101,10 @@ one of these installers.
 | A locked-down machine that blocks `C:\Program Files` writes | **Corporate** |
 | A server, ARM Windows, or anything else | Use the bare EXE / shell installer below |
 
-If you accidentally install both editions, they coexist (different
-Add/Remove Programs entries) but PATH ordering picks which one wins. Uninstall
-one before installing the other for a clean state.
+The v3.17.0+ installers offer to remove an older Cargo copy and the other
+edition (both cleanup choices are on by default), keeping one active install.
+You can opt out during an interactive install when side-by-side copies are
+intentional.
 
 ### macOS / Linux
 
@@ -137,7 +156,7 @@ cargo install tr300
 **From a specific Git tag:**
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.15.1
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.17.0
 ```
 
 **Local clone for development:**
@@ -159,6 +178,9 @@ tr300 --ascii
 
 # Output as JSON
 tr300 --json
+
+# Display a full table without writing a Markdown file to Downloads
+tr300 --no-save
 
 # Custom title
 tr300 --title "MY SERVER"
@@ -216,7 +238,7 @@ tr300 --help
 │ MEMORY       │ 18.00/31.52 GiB [57.1%]            │
 │ USAGE        │ ██████████████████░░░░░░░░░░░░░░░░ │
 ├──────────────┼────────────────────────────────────┤
-│ LAST LOGIN   │ Login tracking unavailable         │
+│ LAST LOGIN   │ Jul 13 22:41                        │
 │ UPTIME       │ 5h 38m                             │
 ├──────────────┴────────────────────────────────────┤
 └──────────────┴────────────────────────────────────┘
@@ -240,7 +262,8 @@ exclusive with each other and with the legacy action flags.
 | `-t, --title <TITLE>` | Custom title for the report header |
 | `--no-color` | Disable colored output |
 | `--fast` | Fast mode: skip slow collectors for quick auto-run |
-| `--no-elevation-hint` | Suppress the "Run with sudo / Administrator" footer hint |
+| `--no-save` | Do not auto-save Markdown after a full table run |
+| `--no-elevation-hint` | Suppress the optional Linux `sudo` detail hint |
 | `--update` | Legacy flag form of `tr300 update` |
 | `--install` | Add to shell profile with alias and auto-run |
 | `--uninstall` | Remove from shell profile |
@@ -347,16 +370,15 @@ dependency set that local release verification used.
 ## Elevation Tier
 
 TR-300 detects whether it is running with elevated privileges (root on Unix /
-Administrator on Windows) and surfaces additional data when it is.
+Administrator on Windows) and exposes that fact to JSON consumers.
 
-- **Default (unelevated)** — the report renders exactly as it always has, with one
-  small addition on Linux and Windows: a single dim line below the table noting that
-  running with sudo / Administrator would unlock more details (motherboard / BIOS /
-  RAM slots on Linux; BitLocker status on Windows). This hint is **never** shown
-  during `--fast` auto-run, so the prompt-ready experience is unchanged.
-- **Elevated** — extra rows render inline (motherboard, BIOS, RAM slot summary on
-  Linux when `dmidecode` is available; BitLocker status when readable on Windows).
-- **macOS** — no elevation tier; everything TR-300 needs is accessible without sudo.
+- **Linux, unelevated** — a single dim footer notes that `sudo` may unlock RAM
+  module details when `dmidecode` is installed. The hint is never shown during
+  `--fast` auto-run.
+- **Linux, elevated** — available `dmidecode` details render inline.
+- **Windows and macOS** — no blanket elevation promise is shown. Optional
+  BitLocker/FileVault data is reported when the OS exposes it; a missing value
+  does not prove that Administrator or `sudo` would fix the probe.
 
 To opt out of the hint, run `tr300 --no-elevation-hint` (or wire the flag into your
 shell alias). The hint is rendered with ANSI dim, so respects `--no-color` as well.
@@ -472,9 +494,30 @@ cargo clippy --all-targets --workspace -- -D warnings
 # Check formatting
 cargo fmt --all -- --check
 
+# Audit the locked dependency graph
+cargo audit
+
 # Run with arguments
 cargo run -- --ascii
 ```
+
+### Rust library migration for v4
+
+The high-level APIs remain the preferred path:
+
+```rust,no_run
+use tr300::{report, CollectMode, Config, SystemInfo};
+
+let info = SystemInfo::collect_with_mode(CollectMode::Full)?;
+let rendered = report::generate(&info, &Config::default());
+println!("{rendered}");
+# Ok::<(), tr300::AppError>(())
+```
+
+Public data records and extensible enums are now `#[non_exhaustive]`. Downstream
+code may read public fields, but should stop constructing those records with
+external struct literals and should include a wildcard arm when matching public
+enums. The CLI and existing schema-v1 JSON keys do not require migration.
 
 ### Man Page (Linux/macOS)
 

@@ -48,3 +48,6 @@ coverage/
 # Claude Code runtime artifacts: per-session lock from ScheduleWakeup, etc.
 # Contents are sessionId + pid + epoch — stale if pulled on another machine.
 .claude/*.lock
+
+# Local SHAUGHV task board and working memory
+.tasks/

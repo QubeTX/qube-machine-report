@@ -1,17 +1,23 @@
 //! Memory information collector
 
+use crate::collectors::CollectMode;
 use crate::error::Result;
 use sysinfo::System;
 
 /// Memory information
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct MemoryInfo {
     /// Total physical memory in bytes
     pub total_bytes: u64,
     /// Used physical memory in bytes
     pub used_bytes: u64,
+    /// Definition used for `used_bytes` on this platform.
+    pub usage_kind: String,
     /// Available physical memory in bytes
     pub available_bytes: u64,
+    /// Definition used for `available_bytes` on this platform.
+    pub availability_kind: String,
     /// Total swap in bytes
     pub swap_total_bytes: u64,
     /// Used swap in bytes
@@ -20,39 +26,73 @@ pub struct MemoryInfo {
 
 /// Collect memory information
 pub fn collect() -> Result<MemoryInfo> {
+    collect_with_mode(CollectMode::Full)
+}
+
+/// Collect memory information while honoring the fast-mode subprocess budget.
+pub fn collect_with_mode(mode: CollectMode) -> Result<MemoryInfo> {
     let mut sys = System::new();
     sys.refresh_memory();
 
-    let used_bytes = platform_used_bytes(sys.used_memory());
+    let total_bytes = sys.total_memory();
+    let (used_bytes, available_bytes, usage_kind, availability_kind) =
+        platform_memory_bytes(sys.used_memory(), sys.available_memory(), total_bytes, mode);
 
     Ok(MemoryInfo {
-        total_bytes: sys.total_memory(),
+        total_bytes,
         used_bytes,
-        available_bytes: sys.available_memory(),
+        usage_kind,
+        available_bytes,
+        availability_kind,
         swap_total_bytes: sys.total_swap(),
         swap_used_bytes: sys.used_swap(),
     })
 }
 
 #[cfg(target_os = "macos")]
-fn platform_used_bytes(sysinfo_used: u64) -> u64 {
-    if let Some(activity_monitor_used) = macos_activity_monitor_used_bytes() {
-        let baseline = sysinfo_used.max(1);
-        let delta = activity_monitor_used.abs_diff(baseline);
-        if delta as f64 / baseline as f64 > 0.05 {
-            return activity_monitor_used;
-        }
+fn platform_memory_bytes(
+    sysinfo_used: u64,
+    _sysinfo_available: u64,
+    total: u64,
+    mode: CollectMode,
+) -> (u64, u64, String, String) {
+    let _ = mode;
+    if let Some(vm_stat_used) = macos_vm_stat_used_bytes() {
+        let used = vm_stat_used.min(total);
+        return (
+            used,
+            total.saturating_sub(used),
+            "active+wired+compressed".to_string(),
+            "total-minus-reported-used".to_string(),
+        );
     }
-    sysinfo_used
+    let used = sysinfo_used.min(total);
+    (
+        used,
+        total.saturating_sub(used),
+        "sysinfo-used".to_string(),
+        "total-minus-reported-used".to_string(),
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
-fn platform_used_bytes(sysinfo_used: u64) -> u64 {
-    sysinfo_used
+fn platform_memory_bytes(
+    _sysinfo_used: u64,
+    sysinfo_available: u64,
+    total: u64,
+    _mode: CollectMode,
+) -> (u64, u64, String, String) {
+    let available = sysinfo_available.min(total);
+    (
+        total.saturating_sub(available),
+        available,
+        "total-minus-operating-system-available".to_string(),
+        "operating-system-available".to_string(),
+    )
 }
 
 #[cfg(target_os = "macos")]
-fn macos_activity_monitor_used_bytes() -> Option<u64> {
+fn macos_vm_stat_used_bytes() -> Option<u64> {
     let stdout = crate::collectors::command::run_stdout(
         "vm_stat",
         std::iter::empty::<&str>(),
@@ -156,7 +196,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_vm_stat_activity_monitor_used_memory() {
+    fn parses_vm_stat_used_memory_components() {
         let vm_stat = "\
 Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages active:                               10.

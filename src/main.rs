@@ -35,11 +35,9 @@ fn main() -> Result<()> {
         config = config.with_title(title);
     }
 
-    // Enable UTF-8 output on Windows. Bound for the lifetime of main()
-    // so the prior console codepage is restored on normal exit — see
-    // ConsoleCpGuard's Drop impl. (The update / install / uninstall
-    // paths that call `std::process::exit` skip Drop on purpose; their
-    // output is one-shot and CP restoration isn't a UX concern there.)
+    // Enable UTF-8 output on Windows. Bound for the lifetime of main() so the
+    // prior console codepage is restored on normal exit. Early action exits
+    // explicitly drop the guard before `process::exit` for the same guarantee.
     #[cfg(windows)]
     let _cp_guard = enable_utf8_console();
 
@@ -48,21 +46,24 @@ fn main() -> Result<()> {
         // Hidden, installer-internal: consolidate to a single install. Advisory —
         // never fails (exit 0 on partial/empty); only a true internal error is
         // nonzero. Mirrors `nd300 migrate-cleanup`.
-        let opts = tr300::migrate::MigrateOptions {
-            cargo_copy: cli.cargo_copy,
-            other_edition: cli.other_edition,
-            quiet: cli.quiet,
-            dry_run: cli.dry_run,
-            json: cli.json,
-            user_profile: cli.user_profile.clone(),
-            cargo_home: cli.cargo_home.clone(),
-        };
+        let mut opts = tr300::migrate::MigrateOptions::default();
+        opts.cargo_copy = cli.cargo_copy;
+        opts.other_edition = cli.other_edition;
+        opts.quiet = cli.quiet;
+        opts.dry_run = cli.dry_run;
+        opts.json = cli.json;
+        opts.user_profile = cli.user_profile.clone();
+        opts.cargo_home = cli.cargo_home.clone();
         let exit_code = tr300::migrate::run(&config, &opts);
+        #[cfg(windows)]
+        drop(_cp_guard);
         std::process::exit(exit_code);
     }
 
     if cli.update || action == Some(Action::Update) {
         let exit_code = update::run(&config);
+        #[cfg(windows)]
+        drop(_cp_guard);
         std::process::exit(exit_code);
     }
 
@@ -82,17 +83,20 @@ fn main() -> Result<()> {
     };
 
     // Run the report
-    run_report(&config, mode)
+    run_report(&config, mode, cli.no_save)
 }
 
 /// Run the main system report
-fn run_report(config: &Config, mode: CollectMode) -> Result<()> {
+fn run_report(config: &Config, mode: CollectMode, no_save: bool) -> Result<()> {
+    use std::io::Write;
+
     let info = SystemInfo::collect_with_mode(mode)?;
     let output = report::generate(&info, config);
     print!("{}", output);
+    std::io::stdout().flush()?;
 
     // Auto-save markdown report in full table mode (not --fast, not --json)
-    if mode == CollectMode::Full && config.format == OutputFormat::Table {
+    if mode == CollectMode::Full && config.format == OutputFormat::Table && !no_save {
         match report::save_markdown_report(&info) {
             Ok(outcome) if outcome.used_cwd_fallback => eprintln!(
                 "Report saved: {} (Downloads folder not found — saved to the current directory)",
@@ -116,7 +120,10 @@ fn run_install() -> Result<()> {
     println!("  - Added 'report' alias for tr300");
     println!("  - Added auto-run on new interactive shells");
     println!();
-    println!("Please restart your shell or run 'source ~/.bashrc' (or equivalent)");
+    #[cfg(target_os = "macos")]
+    println!("Please restart your shell or run 'source ~/.zshrc' (or the profile shown above)");
+    #[cfg(not(target_os = "macos"))]
+    println!("Please restart your shell or run 'source ~/.bashrc' (or the profile shown above)");
     println!("to activate the changes.");
     Ok(())
 }
@@ -165,6 +172,11 @@ fn run_uninstall() -> Result<()> {
             install::uninstall_complete()?;
             println!();
             println!("TR-300 has been completely removed from your system.");
+            Ok(())
+        }
+        _ => {
+            println!();
+            println!("Uninstall cancelled: unsupported option; no changes were made.");
             Ok(())
         }
     }
@@ -221,10 +233,8 @@ fn is_utf8_locale() -> bool {
 /// in a guard whose `Drop` puts the prior CP back makes the side effect
 /// scoped to TR-300's lifetime in main().
 ///
-/// Note: `std::process::exit` does NOT run Drop, by design. The
-/// update / install / uninstall paths call `exit` and skip restoration
-/// — fine, those flows produce one-shot output and the user expects
-/// the codepage they see during the run.
+/// Note: `std::process::exit` does not run `Drop`; callers using it must drop
+/// this guard explicitly first.
 #[cfg(windows)]
 struct ConsoleCpGuard {
     prev: u32,

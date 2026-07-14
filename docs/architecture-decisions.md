@@ -12,6 +12,13 @@
 
 ## Table of contents
 
+- [Cross-platform report semantics (unreleased v4.0 checkpoint)](#cross-platform-report-semantics-unreleased-v400-checkpoint)
+  - [Why this is v4.0.0 rather than v3.18.0](#why-this-is-v400-rather-than-v3180)
+  - [Evidence-backed optional values](#evidence-backed-optional-values)
+  - [One native macOS snapshot, including Rosetta](#one-native-macos-snapshot-including-rosetta)
+  - [Disk and memory value definitions](#disk-and-memory-value-definitions)
+  - [Bounded subprocess, save, JSON, and update primitives](#bounded-subprocess-save-json-and-update-primitives)
+  - [Recovered gates must block](#recovered-gates-must-block)
 - [Toolchain & release](#toolchain--release)
   - [MSRV policy (v3.11.1+, addendum v3.13.1)](#msrv-policy-v3111-addendum-v3131)
   - [Self-update auto-rustup (v3.11.1+)](#self-update-auto-rustup-v3111)
@@ -31,6 +38,203 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
+
+---
+
+## Cross-platform report semantics (unreleased v4.0 checkpoint)
+
+Substantially revised 2026-07-14. These decisions are present on the default
+branch while the manifest intentionally remains v3.17.0; they become released
+behavior only after the v4.0.0 hardware matrix and deployment complete.
+
+### Why this is v4.0.0 rather than v3.18.0
+
+The command-line and JSON work is additive: existing schema-v1 keys retain
+their names and types. The Rust library surface is different. `SystemInfo`,
+`Config`, and several public collector records gained fields, and selected
+public collector helper signatures changed. A downstream crate that uses a
+struct literal or exhaustive pattern can therefore stop compiling. Rust SemVer
+treats that as a major change even when ordinary CLI users see no break.
+
+The release is consequently planned as v4.0.0. Changed record types are marked
+`#[non_exhaustive]` at the major boundary so future additive fields can remain
+minor releases. The v4 migration note must tell library consumers to prefer
+collection/default APIs, avoid exhaustive public-record patterns, and update
+calls to the changed collector helpers. This is more accurate than either
+calling the source break “additive” or falsely presenting JSON as incompatible.
+
+### Evidence-backed optional values
+
+An absent optional field means “TR-300 could not establish this fact through a
+reliable, bounded source.” It does **not** mean the negative of the fact.
+
+Examples:
+
+- No virtualization signal is not proof of Bare Metal. A hypervisor label is
+  emitted only for positive CPUID, registry, `/proc`, container, WSL, or known
+  macOS guest-model evidence.
+- A failed BitLocker/FileVault/LUKS probe is not proof that encryption is Off,
+  and not proof that elevation would make the probe work.
+- Missing physical topology is not replaced with logical processors. SMT and
+  vCPU counts must not be relabeled as physical cores.
+- Windows has no Unix-style 1m/5m/15m load average. One instantaneous CPU sample
+  is not repeated into three fake time windows.
+- Rosetta's translated compatibility CPU frequency is not host hardware data;
+  `null` is more precise.
+
+**Rejected alternative: friendly defaults such as `Bare Metal`, `1 socket`, or
+logical=physical.** These look complete but turn lack of evidence into a false
+claim, which is especially damaging in JSON automation. Optional absence is
+deliberate information.
+
+### One native macOS snapshot, including Rosetta
+
+Full-mode macOS launches one bounded
+`system_profiler -json SPHardwareDataType SPDisplaysDataType SPPowerDataType
+SPSoftwareDataType` snapshot. The collector parses only the facts it displays:
+model name/identifier, GPU names, current display mode and native pixel size,
+battery condition/maximum capacity/cycles, actual boot state, and known guest
+virtualization indicators. It deliberately does not surface serial numbers,
+hardware UUIDs, platform serials, or other unique device identifiers.
+
+One snapshot was chosen over several profiler invocations because profiler is
+the slowest Mac probe, JSON is less locale-sensitive than its text format, and
+the fields describe one coherent moment. Missing/malformed sections retain the
+existing quick `sysctl`/`ioreg`/`pmset` fallbacks.
+
+When the TR-300 process is translated, `/usr/bin/arch -arm64
+/usr/sbin/system_profiler ...` requests the native slice. Live testing showed
+the x86_64 slice can return generic model/chip values and omit battery maximum
+capacity. The native slice describes the same physical host accurately while
+`sysctl.proc_translated` still lets the report name the process scope as
+`arm64 host / x86_64 (Rosetta 2)`. If native launch fails, the translated
+profiler remains a fallback.
+
+**Rejected alternatives:**
+
+- Run separate profiler commands per data type: slower and can describe
+  different moments.
+- Parse localized text: brittle across locales and macOS revisions.
+- Label Apple Silicon as a boot mode: CPU architecture is unrelated to Normal,
+  Safe, or Recovery boot state.
+- Trust the translated 2.4 GHz value: it is a compatibility observation, not a
+  defensible host-frequency measurement.
+- Include hardware serial/UUID for “more information”: unnecessary for a
+  machine-health report and creates privacy/tracking risk.
+
+macOS 26 `Tahoe` and macOS 27 `Golden Gate` mappings are checked against
+[Apple's current macOS page](https://www.apple.com/os/macos/); unknown future
+versions remain unlabeled rather than being guessed.
+
+### Disk and memory value definitions
+
+#### Disk
+
+The report chooses one system/root volume: `/` on Unix or the normalized system
+drive on Windows, then a single largest fixed-volume fallback, then a removable
+volume only if no fixed volume exists. It never sums every mount. APFS volumes,
+BTRFS subvolumes, bind mounts, Windows drive letters, and container mounts can
+overlap or describe independent resources; a machine-wide sum is not a coherent
+capacity.
+
+On Unix, `statvfs` distinguishes total blocks, all free blocks, and blocks
+available to an unprivileged caller. On Windows, `GetDiskFreeSpaceExW` provides
+the corresponding total/free/available values. Therefore:
+
+- `disk.used_bytes = total - free` and means allocated bytes.
+- `disk.available_bytes` means bytes available to the current caller.
+- `disk.percent` is allocated / total.
+
+These values can legitimately make used + available differ from total because
+of reserved blocks, quota views, and filesystem policies. JSON names both
+definitions so consumers do not infer the wrong equation.
+
+#### Memory
+
+Non-macOS platforms use operating-system available memory and define used as
+`total - available`. macOS uses the Activity Monitor-compatible working set
+from `vm_stat`: `(active + wired + compressed) * page_size`. Available is
+`total - reported_used`, so the displayed pair is internally consistent and
+cannot say both “81% used” and “0 available.”
+
+Inactive/cached pages are intentionally not counted as used in that Mac formula.
+Swap is reported separately. JSON includes `usage_definition` and
+`availability_definition` because “used RAM” is not a universal kernel metric.
+
+**Rejected alternative: expose sysinfo's Mac used and available counters
+together.** On the live M2 host, compressor accounting made those independent
+values contradictory. A shared definition is more useful than mixing two
+legitimate but incompatible accounting views.
+
+### Bounded subprocess, save, JSON, and update primitives
+
+Optional tools are untrusted from a reliability perspective: they may hang,
+spawn descendants, block after filling one pipe, or produce unbounded output.
+`src/collectors/command.rs` therefore drains stdout/stderr concurrently, caps
+captured output at 8 MiB, enforces fast/normal/slow deadlines, kills the Unix
+process group on timeout, and uses a Windows Job Object best-effort. A missing
+tool, timeout, nonzero status, malformed response, or overflow yields `None`.
+
+**Rejected alternative: `Command::output()` plus a polling timeout.** A child
+can block in `write()` after a pipe fills, never reaching the timeout polling
+state; killing only the immediate process can also leave descendants alive.
+
+Report JSON is assembled as a typed `serde_json::Value` and serialized once.
+This centralizes escaping and non-finite handling. Schema version 1 remains
+because every new field is additive; existing key names and types are retained.
+
+Markdown files use an OS Downloads directory when available, unique suffixes,
+`create_new`, flush/sync, and cleanup on error. Existing paths and symlinks are
+never followed or overwritten. `--no-save` is the explicit side-effect-free
+path for tests/scripts.
+
+Windows updater payloads use a `tempfile`-managed private randomized directory,
+bounded response sizes, and RAII cleanup. The SHA256 sidecar detects corruption
+or a mismatched payload/sidecar pair; it is not described as an independent
+signature because both files share release transport. Post-install `--version`
+remains the success source of truth.
+
+### Recovered gates must block
+
+The macOS ARM test/build/speed jobs were made non-blocking in v3.14.5 after a
+short period of hosted-runner zero-second failures. Subsequent local and hosted
+evidence recovered, and the v4.0 checkpoint adds native/Rosetta coverage plus
+substantial Mac-specific behavior. Leaving `continue-on-error` in place would
+turn that evidence into dashboard decoration. The exceptions are removed: a
+red macOS test, release build, or 1.5s speed result blocks CI.
+
+The same rule applies to `cargo audit`. The only known locked advisory was
+resolved by moving `crossbeam-epoch` to 0.9.20; keeping audit advisory-only after
+the graph is clean would allow a new known vulnerability through a release.
+
+Intel hosted CI remains a separate capacity decision: per-commit CI tests Apple
+Silicon, local Rosetta runs exercise the x86_64 binary in this checkpoint, and
+cargo-dist still builds the Intel artifact at tag time. See the existing Intel
+macOS coverage policy below.
+
+#### Alienware continuation freeze
+
+The Mac checkpoint is a release boundary, not an invitation to refactor Mac
+code from Windows. The Alienware continuation must leave macOS collectors/cfg
+branches, Apple target triples, artifact and installer names, cargo-dist/
+`release.yml`, toolchain pins, and signing/notarization inputs untouched. The
+tracked repository does not expose explicit Apple notarization configuration;
+external secrets/settings are therefore treated as opaque and known-working,
+not something to reconstruct or normalize on Windows.
+
+A Windows/Linux finding should be fixed in cfg-local code. If correctness truly
+requires a shared module, schema, dependency/Cargo.lock, or workflow change, the
+native/Rosetta evidence above is no longer sufficient for the changed commit.
+The release must return to a Mac for the complete arm64 + Rosetta gate before a
+tag. Hosted Apple Silicon CI alone does not prove the translated x86_64 path or
+preserve external notarization behavior.
+
+The narrow release-bookkeeping exception is a version-only `package.version`
+change plus the matching root-package version in `Cargo.lock`, generated man
+version text, release notes/verification ledgers, and cfg-local Windows/Linux
+evidence. Those edits do not change the Mac runtime or Apple packaging inputs.
+Dependency resolution, features, shared code, `build.rs`, dist metadata, or
+release workflow edits are not bookkeeping and still invalidate the stamp.
 
 ---
 
@@ -1078,4 +1282,3 @@ script, cmd wins.
 contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
-
