@@ -53,8 +53,8 @@ This file tracks the manual verification matrix that must pass before each tagge
   full, 0.234s native fast, 0.627s Rosetta full, and 0.338s Rosetta fast.
 - **Security/package:** `cargo audit` passes against 221 locked dependencies;
   `crossbeam-epoch` is 0.9.20. Markdown collision/symlink and updater staging
-  tests pass. Package list/publish dry-run are rerun after the final docs/handoff
-  are present.
+  tests pass. Clean committed-tree `cargo package --locked --list`,
+  `cargo publish --dry-run --locked`, and `dist plan` pass.
 - **CI enforcement change:** macOS ARM test/build/speed jobs no longer use
   `continue-on-error`; RustSec audit is no longer advisory. The exact pushed
   handoff commit must prove these gates hosted before this checkpoint is called

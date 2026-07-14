@@ -8,7 +8,7 @@
 **Published version:** `3.17.0`  
 **Planned version:** `4.0.0`, only after deferred hardware validation  
 **Baseline:** `2d0c0b2470db603aa2e8058fee382b0dcaf0930c` (`v3.17.0`)  
-**Checkpoint implementation commit:** recorded in the follow-up handoff commit  
+**Checkpoint implementation commit:** `8e0df9e900c067ed92127f6750f50747cdbbda99`  
 **Task IDs:** `#v400`, `#core`, `#plat`, `#test`, `#docs`, `#winhw`,
 `#ship`, `#site`
 
@@ -188,6 +188,8 @@ APFS, FileVault On.
   high-level collection/default/render APIs and wildcard enum matching.
 - Final five-run medians: native full 0.497s, native fast 0.234s, Rosetta full
   0.627s, Rosetta fast 0.338s.
+- Clean committed-tree `cargo package --locked --list`,
+  `cargo publish --dry-run --locked`, and `dist plan` — pass.
 
 ## Changed Files
 
