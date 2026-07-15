@@ -10,8 +10,9 @@ default branch; do not create a second `main` branch)
 **Release version:** `4.0.1` fix-forward (`v4.0.0` is immutable and failed
 closed before GitHub artifact hosting)
 **Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
-**Release commit / hosted run IDs:** recorded in the “Release ledger” below
-after hosted publication
+**Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
+**Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
+Windows Installers 29392382949
 **Task IDs:** `#v400`, `#core`, `#plat`, `#test`, `#docs`, `#winhw`,
 `#ship`, `#site`
 
@@ -145,30 +146,31 @@ the later Alienware session.
    v4.0.1 temporarily adds/restores that keychain and verifies the embedded
    leaf-certificate fingerprint.
 4. **Synchronize release docs, agent rules, release skills, board, and handoff —
-   complete for the release commit.** The full tracked doc set and local board
-   describe the new behavior. This active handoff still must receive observed
-   commit/run/asset/homepage evidence in the closing ledger update.
+   complete.** The full tracked doc set and local board describe the behavior,
+   observed release outcome, deployed homepage, frozen Mac path, and remaining
+   personal-hardware work.
 5. **Run the comprehensive pre-release gate — complete.** Native and Rosetta
    Rust gates, runtime parity/privacy/save smokes, package/publish dry-run,
    audit, cargo-dist plan, workflow/script lint, Windows cross-check, external
-   consumer smoke, and secret scans pass. The post-commit clean-tree package
-   repetition remains the final local release check.
-6. **Push exact release commit and prove hosted source gates — v4.0.0 source
-   complete; v4.0.1 pending.** v4.0.0 commit
-   `c21d5981d4109199fa4bcba15ef8af6285a33d56` passed CI run 29389974094 and
-   crates run 29390118811 published `tr300 4.0.0`. Repeat both for v4.0.1.
-7. **Publish and verify release artifacts — v4.0.0 failed closed; v4.0.1
-   pending.** Push only `v4.0.1`,
-   wait for `release.yml` and `windows-installers.yml`, require both Apple
-   `Accepted` results, verify both public Mac archives, and confirm 28 assets.
-8. **Update/deploy the TR-300 homepage — pending until step 7 is complete.**
-   Work in `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`,
-   follow that repository's instructions, test, push its default branch, and
-   verify deployment.
-9. **Finalize board, handoff, durable memory, and cleanup — pending.** Record
-   exact SHAs/run IDs/URLs/evidence, keep personal hardware tasks open, write
-   one ad-hoc Codex memory note without secrets, remove exact temporary
-   credential/test directories, and release the controlled Chrome tabs.
+   consumer smoke, and secret scans pass. The clean release commit repeated the
+   39-file locked package/publish dry-run without changing the worktree.
+6. **Push exact release commit and prove hosted source gates — complete.**
+   v4.0.1 source commit `b67ad083503d0fff840af8467015d05c659268ea`
+   passed CI 29391956665 and crates run 29392101640; crates.io serves the
+   unyanked package from that exact SHA.
+7. **Publish and verify release artifacts — complete.** Explicit tag `v4.0.1`
+   points to the tested SHA. Cargo-dist 29392185522 and Windows Installers
+   29392382949 succeeded, both hosted Apple jobs were `Accepted`, both public
+   Mac archives passed signature/checksum/version checks, and the public release
+   contains exactly 28 verified assets.
+8. **Update/deploy the TR-300 homepage — complete.** Homepage commit
+   `d77397479ad2b1189cce86b5402eaf1cc966abdf` is pushed to its default branch;
+   production at `https://reports.qubetx.com/` serves the verified v4.0.1
+   content with passing lint/build/link and Chrome desktop/mobile checks.
+9. **Finalize board, handoff, durable memory, and cleanup — in progress only
+   for closing bookkeeping.** Keep personal hardware tasks open, write the one
+   requested ad-hoc memory note without secrets, remove only known temporary
+   credential/test paths, and release the controlled Chrome tab.
 10. **Personal fleet verification — explicitly post-release.** Retest personal
     Alienware Windows installers/collectors/update behavior, then the AMD Linux
     laptop and 64-bit Raspberry Pi 4. Patch forward from real findings.
@@ -426,7 +428,7 @@ upgrade paths.
 - Release sequence is source commit -> exact-SHA `ci.yml` ->
   exact-SHA `crates-publish.yml` / crates.io -> explicit `v4.0.1` tag ->
   `release.yml` -> `windows-installers.yml` -> public artifact audit ->
-  release-ledger doc commit -> homepage deployment.
+  homepage deployment -> release-ledger documentation and attestation.
 - Never use `git push --tags`. Never move/delete a published tag. If tag-time
   release fails, inspect the partial state and use the documented fix-forward
   path.
@@ -444,57 +446,78 @@ upgrade paths.
   `https://github.com/QubeTX/qube-machine-report/releases/tag/v4.0.1` after
   publication; crates.io is `https://crates.io/crates/tr300/4.0.1`.
 - The homepage repo is
-  `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`. It must
-  not claim v4.0.1 or notarized downloadable assets until the public release
-  audit succeeds.
+  `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`.
+  Commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is deployed at
+  `https://reports.qubetx.com/`; SD-300 and Shaughv OS remain intentionally
+  WIP-delisted and must not be re-linked yet.
 
 ## Release Ledger
 
-Fill this section from observed hosted state, never from expectation.
+This section records observed hosted state, never expectation.
 
 - v4.0.0 partial state: commit/tag
   `c21d5981d4109199fa4bcba15ef8af6285a33d56` / `v4.0.0`; CI run 29389974094
   passed; crates run 29390118811 published an unyanked package; release run
   29390216481 failed closed in both Apple jobs before upload/host; no GitHub
   Release assets were published
-- v4.0.1 release source commit: **PENDING**
-- Default-branch CI workflow/run: **PENDING**
-- Crates publish workflow/run and crates.io verification: **PENDING**
-- Tag: `v4.0.1` — **PENDING**
-- cargo-dist release workflow/run: **PENDING**
-- Apple arm64 submission/result: **PENDING hosted proof**
-- Apple x86_64 submission/result: **PENDING hosted proof**
-- Windows supplemental installer workflow/run: **PENDING**
-- GitHub Release asset count: **PENDING (required: 28)**
-- Public arm64 archive checksum/signature/version: **PENDING**
-- Public x86_64 archive checksum/signature/version: **PENDING**
-- Release-ledger follow-up commit/CI: **PENDING**
-- Homepage commit/deployment URL/verification: **PENDING**
+- v4.0.1 release source commit:
+  `b67ad083503d0fff840af8467015d05c659268ea`
+- Default-branch CI: run 29391956665, success across all 13 blocking jobs on
+  that exact SHA
+- Crates publish: run 29392101640, success on the same SHA; crates.io version
+  4.0.1 is unyanked with checksum
+  `55086eb631a3b67c8ab0eaa53b9c3783097044ef77321ec8e6849c30e32275da`
+- Tag: lightweight `v4.0.1` resolves locally/remotely to the release SHA;
+  immutable `v4.0.0` remains at its original SHA
+- Cargo-dist: run 29392185522, success
+- Apple arm64 hosted submission/result:
+  `97b0c295-89d8-4758-a4c3-1dc345c28f0e` / `Accepted`
+- Apple x86_64 hosted submission/result:
+  `09cf1403-e546-4f5e-8de1-9bf92fd602e9` / `Accepted`
+- Windows supplemental installers: run 29392382949, success
+- GitHub Release: non-draft/non-prerelease, exact tested target, 28 assets
+- Public arm64 archive: SHA-256
+  `b2cd1ecbc86d7f86beddb7b15044ac5839d894a4eae781c1bdfb01a305cf3342`;
+  archive/sidecar/aggregate/manifest agree; signed/hardened/timestamped arm64
+  binary reports 4.0.1 with the expected identifier/team/certificate
+- Public x86_64 archive: SHA-256
+  `cbc2800cf4e2dad47d8113db33a8092019c6efeccc0e8ee61cae023fff3cb861`;
+  archive/sidecar/aggregate/manifest agree; signed/hardened/timestamped x86_64
+  binary reports 4.0.1 with the expected identifier/team/certificate
+- Installer aliases: canonical/legacy shell hash
+  `79bdb3ab32bcee155967a8ca1fdfccf955cae612d5d8afee27132788bd9e01b1`;
+  canonical/legacy PowerShell hash
+  `7e5f59911fdb73e2405d2354fe24bc1d60b3e39b40c534599ef48ee32899cb66`
+- Supplemental Windows hashes: Corporate MSI
+  `6ca603d30a13aca11c21aab348ea7aa3ab932c18ebdb58462557fbb7fb771f3d`,
+  Global EXE
+  `f9477c0ea53fd81f7e11fc3d279e884531a8303e9165f565a6dadc321220f47a`,
+  Corporate EXE
+  `339cfd02ed7fb0d3741909c07477fd3cbfe803a21bac88237cb519613fe559d3`
+- Homepage: commit `d77397479ad2b1189cce86b5402eaf1cc966abdf`, package 1.13.0,
+  production `https://reports.qubetx.com/`, bundle `index-DghJyecZ.js`;
+  lint/build/wrapper/
+  link checks and Chrome desktop/mobile inspection pass with zero site-origin
+  console errors, no horizontal overflow, and 49 exact 51-column sample rows
+- Release-ledger follow-up commit/CI: this edit must be committed and verified;
+  its observed SHA/run will replace this sentence in a final attestation commit
 
 ## What's Next
 
-The exact next action is to finish the v4.0.1 keychain-search fix-forward,
-repeat native/Rosetta plus real two-archive Apple proof, run the full release
-gate, commit, and push `master`. Do not move `v4.0.0` and do not tag v4.0.1
-until its exact SHA passes hosted CI and the crates workflow settles.
+The release and homepage are complete. The next machine must begin with the
+post-release hardware queue, not reopen or regenerate the Mac release path:
 
-After local green:
-
-1. Secret-scan and review the complete diff and packaged file list.
-2. Commit v4.0.1 on `master` and push `origin master`.
-3. Wait for exact-SHA `ci.yml`; then wait for the exact-SHA crates workflow and
-   verify crates.io 4.0.1.
-4. Create/push only `v4.0.1`.
-5. Watch `release.yml`. Inspect both Apple job logs for `Accepted`.
-6. Watch `windows-installers.yml` and confirm all supplemental assets.
-7. Confirm exactly 28 assets; download both Mac archives/sidecars and verify
-   checksums, `tr300 --version`, Developer ID chain, team, timestamp, and runtime.
-8. Replace every PENDING field in this ledger and the release ledger in
-   `TESTING.md` / `MASTER_PLAN.md` with observed values; update the task board.
-9. Commit/push release evidence and wait for its doc-only CI.
-10. Update/test/push/deploy the homepage and record its exact evidence here.
-11. Write the requested durable ad-hoc Codex memory note without secrets,
-    securely remove only the known temporary Apple-test directories/keychain,
-    finalize the controlled Chrome tabs, and report completion.
-12. On the personal Alienware later, begin with `#winhw` and this handoff. Do
-    not touch the frozen Mac surfaces. Then run `#plat` on AMD Linux and Pi 4.
+1. On the personal Alienware, run task `#winhw`: compare full/fast/table/JSON/
+   manual-save output to native Windows tools and exercise the installed
+   edition's updater/installer-origin path. Record evidence and patch forward.
+2. On the personal AMD64 Linux laptop, run the Linux portion of `#plat` against
+   native topology, disk/memory, network/DNS, battery/encryption, login, and
+   elevated/unelevated facts.
+3. On the 64-bit Raspberry Pi 4, finish `#plat` with devicetree CPU/model,
+   frequency, load, filesystem, network, graceful-missing-tool, installer, and
+   fast-budget checks.
+4. Preserve the absolute Mac freeze above. Windows/Linux-only cfg code and
+   tests may change; any shared/dependency/build/dist/workflow/Apple change
+   reopens the stated native arm64 + Rosetta + real notary gates before a tag.
+5. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
+   work is actually ready.

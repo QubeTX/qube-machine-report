@@ -55,6 +55,14 @@ Raspberry Pi 4. Those checks remain post-release patch work and must not be
 reported as completed evidence. Managed-work antivirus behavior is a separate
 endpoint-policy case, not personal Windows field-accuracy proof.
 
+Observed distribution state: release source
+`b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates, both
+hosted Apple notarization jobs, the 28-asset public audit, and supplemental
+Windows packaging. Homepage commit
+`d77397479ad2b1189cce86b5402eaf1cc966abdf` is deployed at
+`https://reports.qubetx.com/`. Exact run IDs, submissions, and hashes live in
+`TESTING.md` and the current tracked handoff.
+
 v4 is intentional: new public Rust record fields and changed public collector
 helper signatures are source-breaking under SemVer even though the CLI and
 existing schema-v1 JSON keys remain compatible. Changed public record types are

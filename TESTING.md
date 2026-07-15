@@ -40,9 +40,47 @@ as passed.
   (x86_64). The original keychain search list matched byte-for-byte after
   success and after injected real timestamp/notary transport failures; those
   transient failures did not repack or claim acceptance.
-- **Hosted/public proof still required:** exact-SHA CI/crates, both hosted Apple
-  `Accepted` logs, public archive verification, all 28 assets, and homepage
-  deployment.
+- **Hosted source/package proof:** release source commit
+  `b67ad083503d0fff840af8467015d05c659268ea` passed CI run 29391956665 across
+  all 13 blocking jobs. Crates.io Publish run 29392101640 completed from that
+  same SHA; crates.io serves unyanked `tr300 4.0.1` with checksum
+  `55086eb631a3b67c8ab0eaa53b9c3783097044ef77321ec8e6849c30e32275da`.
+- **Hosted release proof:** lightweight tag `v4.0.1` resolves to the release
+  source commit without moving `v4.0.0`. Cargo-dist run 29392185522 and Windows
+  Installers run 29392382949 completed successfully. Hosted notarization was
+  `Accepted` for arm64 submission `97b0c295-89d8-4758-a4c3-1dc345c28f0e`
+  and x86_64 submission `09cf1403-e546-4f5e-8de1-9bf92fd602e9` before the
+  non-draft/non-prerelease GitHub Release published.
+- **Public artifact proof:** the release targets the exact tested SHA and has
+  exactly 28 assets. Downloaded arm64 and x86_64 archives matched their
+  sidecars, `sha256.sum`, cargo-dist manifest, and GitHub asset digests at
+  `b2cd1ecbc86d7f86beddb7b15044ac5839d894a4eae781c1bdfb01a305cf3342`
+  and `cbc2800cf4e2dad47d8113db33a8092019c6efeccc0e8ee61cae023fff3cb861`.
+  Both extracted binaries report `tr300 4.0.1`, have the correct Mach-O
+  architecture, and pass strict Developer ID verification with identifier
+  `com.qubetx.tr300`, Team ID `M9D5379H93`, hardened runtime, secure timestamp,
+  and embedded certificate SHA-1
+  `739B04530883FF9B665C66BD464F98C622971B32`.
+- **Installer proof:** canonical and legacy shell aliases are byte-identical
+  (SHA-256 `79bdb3ab32bcee155967a8ca1fdfccf955cae612d5d8afee27132788bd9e01b1`),
+  as are the PowerShell aliases
+  (`7e5f59911fdb73e2405d2354fe24bc1d60b3e39b40c534599ef48ee32899cb66`).
+  Supplemental Corporate MSI, Global EXE, and Corporate EXE assets match their
+  sidecars/GitHub digests at
+  `6ca603d30a13aca11c21aab348ea7aa3ab932c18ebdb58462557fbb7fb771f3d`,
+  `f9477c0ea53fd81f7e11fc3d279e884531a8303e9165f565a6dadc321220f47a`,
+  and `339cfd02ed7fb0d3741909c07477fd3cbfe803a21bac88237cb519613fe559d3`.
+- **Homepage proof:** homepage commit
+  `d77397479ad2b1189cce86b5402eaf1cc966abdf` on its default branch deploys
+  package 1.13.0 to `https://reports.qubetx.com/`. Lint, Vite production build,
+  Bash/PowerShell wrapper syntax, production wrapper equality, release/docs/
+  installer link checks, and Chrome desktop/mobile inspection pass. Production
+  serves bundle `index-DghJyecZ.js`; both viewport widths have no horizontal
+  overflow or site-origin console warning/error, and all 49 sample rows are
+  exactly 51 columns. SD-300 and Shaughv OS remain intentionally WIP-delisted.
+- **Remaining evidence boundary:** personal Alienware Windows, AMD64 Linux, and
+  Raspberry Pi 4 checks remain explicit post-release patch tasks; none is
+  retroactively claimed by the hosted release evidence above.
 
 ### v4.0.0 — 2026-07-14
 

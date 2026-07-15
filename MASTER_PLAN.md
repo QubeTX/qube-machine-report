@@ -4,10 +4,10 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-15 00:10 CDT
+**Last updated:** 2026-07-15 01:20 CDT
 **Release / working manifest:** 4.0.1
-**Release scope:** Mac/local/hosted gates block v4.0.1; personal
-Alienware/AMD/Pi evidence follows release and drives patches
+**Release scope:** v4.0.1 and its homepage are deployed; personal
+Alienware/AMD/Pi evidence remains open and drives forward patches
 **Default branch:** `master`
 **Repository:** `QubeTX/qube-machine-report`
 
@@ -141,10 +141,10 @@ substitute for this personal Alienware accuracy matrix.
 - battery absence, missing desktop/tool fallbacks, fast runtime budget
 - installer/update path on the actual distribution
 
-## 5. v4.0.1 fix-forward release sequence
+## 5. v4.0.1 fix-forward release outcome — complete
 
 The maintainer explicitly approved sections 4A–4C after release, accepting
-forward patches. Do not use that deferral to weaken any Mac/local/hosted gate.
+forward patches. Every Mac/local/hosted gate still passed before publication.
 
 The immutable `v4.0.0` tag points to
 `c21d5981d4109199fa4bcba15ef8af6285a33d56`. CI run 29389974094 passed and
@@ -154,55 +154,37 @@ identity but `codesign` could not resolve it because the new keychain was not
 on the user search list. Do not move or delete that tag. v4.0.1 is the required
 patch fix-forward.
 
-1. Add the signing keychain to the runner's user search list only during
-   `codesign`, restore the original list immediately and from cleanup, and
-   verify the embedded leaf-certificate fingerprint.
-2. Bump `Cargo.toml`, the root `Cargo.lock`, generated man page, both
-   changelogs, README/current-version guides, testing ledger, ADR, and handoff
-   to `4.0.1` (the Rust 1.95 pins do not move).
-3. Run:
+- Release source commit:
+  `b67ad083503d0fff840af8467015d05c659268ea`.
+- Clean-tree local package gate: 39 packaged files; locked publish dry-run
+  compiled successfully.
+- Exact-SHA CI: run 29391956665, success across all 13 blocking jobs.
+- Exact-SHA crates workflow: run 29392101640, success; unyanked crate checksum
+  `55086eb631a3b67c8ab0eaa53b9c3783097044ef77321ec8e6849c30e32275da`.
+- Explicit tag `v4.0.1` resolves to the release SHA; `v4.0.0` remains unchanged.
+- Cargo-dist run 29392185522 and Windows Installers run 29392382949 succeeded.
+- Hosted Apple `Accepted` submissions: arm64
+  `97b0c295-89d8-4758-a4c3-1dc345c28f0e`; x86_64
+  `09cf1403-e546-4f5e-8de1-9bf92fd602e9`.
+- The public GitHub Release is non-draft/non-prerelease with exactly 28 assets.
+  Both downloaded Mac archives match sidecar/aggregate/manifest/GitHub digests,
+  report 4.0.1, and pass strict Developer ID/team/identifier/runtime/timestamp/
+  embedded-certificate checks. Canonical/legacy installer aliases match, and
+  every supplemental Windows installer matches its sidecar.
 
-   ```bash
-   cargo fmt --all -- --check
-   cargo clippy --locked --all-targets --workspace -- -D warnings
-   cargo test --locked --workspace --all-targets
-   cargo build --locked --release
-   cargo package --locked --list
-   cargo publish --dry-run --locked
-   cargo audit
-   dist plan
-   actionlint .github/workflows/*.yml
-   shellcheck scripts/sign-notarize-macos.sh
-   ```
+## 6. Homepage deployment — complete
 
-   Also rerun native/Rosetta full suites, release builds, full/fast/JSON/ASCII/
-   manual-save/no-write smokes, privacy/parity checks, and the real cargo-dist
-   Developer ID/notary/repack/checksum test.
-4. Commit `release: v4.0.1 macOS signing fix-forward` and push `master`.
-5. Wait for `.github/workflows/ci.yml` on the exact release SHA. Every macOS
-   leg and the audit are hard gates.
-6. Confirm `crates-publish.yml` published v4.0.1 from that same SHA.
-7. Create and push only `v4.0.1`; never use `git push --tags` and never move
-   `v4.0.0`.
-8. Require both Apple jobs to sign and receive `Accepted` before hosting.
-   Download/extract both public Mac archives and verify checksums, Developer ID,
-   hardened runtime, timestamp, team, and version.
-9. Verify cargo-dist's GitHub Release and `windows-installers.yml`, including
-   all archives, checksums, four first-class Windows installers, legacy
-   `tr-300-installer.*` updater aliases, and the expected 28-asset total.
-10. Record real workflow IDs, SHA, package state, asset count, and live updater
-    discovery plus Apple submission/signature evidence in `TESTING.md`.
-
-## 6. Homepage sequence
-
-Only after section 5 is fully deployed:
-
-1. Open `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`.
-2. Read that repository's `AGENTS.md` / `CLAUDE.md` / project guide.
-3. Update the TR-300 page from verified production facts—version, features,
-   platform notes, commands, installer/package/release links.
-4. Run its complete lint/test/build/link suite and review desktop/mobile output.
-5. Commit and push its default branch.
+- Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is pushed to its
+  default branch and production at `https://reports.qubetx.com/` serves its
+  exact `index-DghJyecZ.js` bundle.
+- Package 1.13.0 describes v4.0.1, all four manual save spellings, read-only
+  default/startup output, native accuracy semantics, fail-safe managed-Windows
+  updates, and enforced notarized Apple Silicon/Intel downloads.
+- ESLint, Vite build, wrapper syntax/equality, canonical release/package/docs/
+  installer links, and Chrome desktop/mobile checks pass. There is no horizontal
+  overflow or site-origin console error; every sample row is exactly 51 columns.
+- SD-300 and Shaughv OS remain intentionally WIP-delisted and must not be
+  re-linked until their separate work is ready.
 
 ## 7. Non-negotiable contracts
 
@@ -227,16 +209,16 @@ Only after section 5 is fully deployed:
   forces native + Rosetta Mac revalidation; Apple-input changes also require a
   real archive notary test before any tag.
 
-## 8. Completion definition
+## 8. Completion state
 
-The v4.0.1 **release** is complete when:
+The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
 
 - Mac evidence above remains green in hosted blocking CI.
-- all local release gates pass from a clean tree.
-- crates.io and GitHub Release point to the exact tested commit/tag.
-- both Mac archives are Developer ID signed/Apple accepted and all expected
+- All local release gates pass from a clean tree.
+- Crates.io and GitHub Release point to the exact tested commit/tag.
+- Both Mac archives are Developer ID signed/Apple accepted and all expected
   release assets/self-update discovery are verified.
-- the homepage accurately reflects the deployed release and is pushed.
+- The homepage accurately reflects the deployed release and is live.
 
 The broader cross-platform hardening milestone stays open until the personal
 Alienware, AMD Linux, and Pi 4 matrices are recorded and any confirmed defects

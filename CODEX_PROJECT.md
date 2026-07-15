@@ -19,7 +19,13 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Cargo package / binary / library import: `tr300`
 - Release/manifest version: `4.0.1` (2026-07-15). v4.0.0 published to
   crates.io but its immutable tag failed closed before GitHub artifact hosting;
-  v4.0.1 is the keychain-search fix-forward.
+  v4.0.1 is the deployed keychain-search fix-forward. Release source
+  `b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates,
+  both hosted Apple jobs, the 28-asset public audit, and supplemental Windows
+  packaging.
+- Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
+  `https://reports.qubetx.com/` with the v4.0.1 persistence, accuracy,
+  update-failure, and Mac trust contract.
 - Personal-fleet evidence: post-release; never claim the Alienware, AMD laptop,
   or Pi 4 is verified until its board task contains real evidence
 - Major-version reason: public Rust structs gained fields and selected public
@@ -71,9 +77,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Live Windows report/install/update verification on the user's personal
   Alienware. Managed-work antivirus behavior is a separate endpoint-policy case.
 - Live Linux AMD64 and Raspberry Pi 4/aarch64 report verification.
-- TR-300 page changes in
-  `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`; update
-  and push that repository only after v4.0.1 deployment is verified.
+- SD-300 and Shaughv OS remain intentionally WIP-delisted on the homepage; do
+  not restore their marketing links until their separate work is ready.
 
 ## Product and Architecture
 
@@ -111,6 +116,11 @@ do not have to infer platform semantics.
    Windows installers, legacy aliases, and expected 28 assets.
 7. Only then update, test, commit, and push the homepage repository.
 8. Keep personal Alienware/AMD/Pi tasks open and patch forward from real findings.
+
+Observed v4.0.1 runs: CI 29391956665, crates 29392101640, cargo-dist
+29392185522, and Windows Installers 29392382949. The public tag/release targets
+the exact source SHA above; the complete hashes and Apple submission IDs live
+in `TESTING.md` and the tracked handoff.
 
 Never publish locally merely because a token exists. Never tag before the
 default-branch CI and crates workflow settle.

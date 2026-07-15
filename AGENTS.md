@@ -44,6 +44,13 @@ Never put secrets in board or memory files; use environment variables, the OS ke
   is required because public Rust records gained fields and collector helpers
   changed signature; the CLI and additive schema-v1 JSON stay compatible.
   Changed public records are `#[non_exhaustive]`.
+- Verified distribution state: release source
+  `b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates,
+  both hosted Apple notarization jobs, the 28-asset public audit, and the
+  supplemental Windows workflow. Homepage commit
+  `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
+  `https://reports.qubetx.com/`; exact evidence is in `TESTING.md` and the
+  current handoff.
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -775,10 +782,10 @@ Built by `windows-installers.yml` using `iscc.exe` (installed via `choco install
 
 ### Release checklist
 
-v4.0.0 was explicitly authorized before personal Alienware, AMD64 Linux, and
+v4.0.1 was explicitly released before personal Alienware, AMD64 Linux, and
 Raspberry Pi 4 evidence; those checks remain mandatory post-release tasks and
 must not be retroactively claimed as release evidence. Every Mac/local/hosted
-gate below remains blocking.
+gate below remains blocking for future releases.
 
 1. Update version in `Cargo.toml`.
 2. Update the full documentation set for any user-visible release, install,
