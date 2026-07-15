@@ -81,8 +81,26 @@ pub struct Cli {
     #[arg(long)]
     pub no_elevation_hint: bool,
 
-    /// Do not auto-save a Markdown report after a full table run
-    #[arg(long)]
+    /// Save this full table report as Markdown in Downloads
+    #[arg(
+        short = 'r',
+        long = "report",
+        visible_short_alias = 's',
+        visible_alias = "save",
+        conflicts_with_all = [
+            "fast",
+            "json",
+            "no_save",
+            "update",
+            "install",
+            "uninstall",
+            "action"
+        ]
+    )]
+    pub save_report: bool,
+
+    /// Deprecated compatibility no-op; reports are no longer saved by default
+    #[arg(long, hide = true)]
     pub no_save: bool,
 
     // ── Cross-method consolidation options (used only with the hidden
@@ -166,9 +184,28 @@ mod tests {
     }
 
     #[test]
-    fn parses_no_save_flag() {
+    fn parses_all_manual_save_aliases() {
+        for flag in ["-r", "--report", "-s", "--save"] {
+            let cli = Cli::try_parse_from(["tr300", flag])
+                .unwrap_or_else(|error| panic!("{flag} should request a saved report: {error}"));
+            assert!(cli.save_report, "{flag} did not set save_report");
+        }
+    }
+
+    #[test]
+    fn rejects_manual_save_for_non_full_table_modes() {
+        for incompatible in ["--fast", "--json"] {
+            let error = Cli::try_parse_from(["tr300", "--save", incompatible])
+                .expect_err("manual Markdown save should require a full table report");
+            assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+        }
+    }
+
+    #[test]
+    fn retains_no_save_as_a_hidden_compatibility_no_op() {
         let cli = Cli::try_parse_from(["tr300", "--no-save"])
-            .expect("--no-save should parse for report runs");
+            .expect("older scripts using --no-save should keep working");
         assert!(cli.no_save);
+        assert!(!cli.save_report);
     }
 }

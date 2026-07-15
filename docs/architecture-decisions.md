@@ -12,13 +12,17 @@
 
 ## Table of contents
 
-- [Cross-platform report semantics (unreleased v4.0 checkpoint)](#cross-platform-report-semantics-unreleased-v400-checkpoint)
+- [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
   - [Why this is v4.0.0 rather than v3.18.0](#why-this-is-v400-rather-than-v3180)
   - [Evidence-backed optional values](#evidence-backed-optional-values)
   - [One native macOS snapshot, including Rosetta](#one-native-macos-snapshot-including-rosetta)
   - [Disk and memory value definitions](#disk-and-memory-value-definitions)
   - [Bounded subprocess, save, JSON, and update primitives](#bounded-subprocess-save-json-and-update-primitives)
+  - [Why report persistence is explicit-only](#why-report-persistence-is-explicit-only)
+  - [Why endpoint-policy update blocks stop the strategy chain](#why-endpoint-policy-update-blocks-stop-the-strategy-chain)
   - [Recovered gates must block](#recovered-gates-must-block)
+  - [Enforced Developer ID signing and Apple notarization](#enforced-developer-id-signing-and-apple-notarization)
+  - [Post-release personal-hardware evidence boundary](#post-release-personal-hardware-evidence-boundary)
 - [Toolchain & release](#toolchain--release)
   - [MSRV policy (v3.11.1+, addendum v3.13.1)](#msrv-policy-v3111-addendum-v3131)
   - [Self-update auto-rustup (v3.11.1+)](#self-update-auto-rustup-v3111)
@@ -41,11 +45,11 @@
 
 ---
 
-## Cross-platform report semantics (unreleased v4.0 checkpoint)
+## Cross-platform report semantics (v4.0.0)
 
-Substantially revised 2026-07-14. These decisions are present on the default
-branch while the manifest intentionally remains v3.17.0; they become released
-behavior only after the v4.0.0 hardware matrix and deployment complete.
+Substantially revised and released 2026-07-14. Personal Alienware, AMD64 Linux
+laptop, and Raspberry Pi 4 live checks remain explicit post-release evidence
+for patches; their absence must not be rewritten as proof.
 
 ### Why this is v4.0.0 rather than v3.18.0
 
@@ -56,7 +60,7 @@ public collector helper signatures changed. A downstream crate that uses a
 struct literal or exhaustive pattern can therefore stop compiling. Rust SemVer
 treats that as a major change even when ordinary CLI users see no break.
 
-The release is consequently planned as v4.0.0. Changed record types are marked
+The release is consequently v4.0.0. Changed record types are marked
 `#[non_exhaustive]` at the major boundary so future additive fields can remain
 minor releases. The v4 migration note must tell library consumers to prefer
 collection/default APIs, avoid exhaustive public-record patterns, and update
@@ -185,20 +189,74 @@ because every new field is additive; existing key names and types are retained.
 
 Markdown files use an OS Downloads directory when available, unique suffixes,
 `create_new`, flush/sync, and cleanup on error. Existing paths and symlinks are
-never followed or overwritten. `--no-save` is the explicit side-effect-free
-path for tests/scripts.
+never followed or overwritten. The writer is reachable only through explicit
+`-r`/`--report`/`-s`/`--save`; ordinary full/fast/JSON runs are the
+side-effect-free default. `--no-save` remains a hidden compatibility no-op.
 
 Windows updater payloads use a `tempfile`-managed private randomized directory,
-bounded response sizes, and RAII cleanup. The SHA256 sidecar detects corruption
-or a mismatched payload/sidecar pair; it is not described as an independent
-signature because both files share release transport. Post-install `--version`
-remains the success source of truth.
+bounded response sizes, explicit cleanup, and cleanup diagnostics. The SHA256
+sidecar detects corruption or a mismatched payload/sidecar pair; it is not
+described as an independent signature because both files share release
+transport. Post-install `--version` remains the success source of truth.
+
+### Why report persistence is explicit-only
+
+The original convenience behavior automatically wrote a Markdown file after
+every full table run. On a managed Windows endpoint, the operator observed the
+work antivirus flagging that unexpected report-file activity and freezing the
+machine. The data collection and terminal output were healthy; the unsolicited
+persistence was the trigger.
+
+The reliable default is therefore read-only: `tr300`, `report`, fast, ASCII,
+and JSON modes do not call `save_markdown_report`. Users who want an artifact
+make that intent explicit with `-r`/`--report`/`-s`/`--save`. Those flags
+conflict with fast/JSON/actions so the saved document retains the established
+full-table contract. The existing writer is preserved exactly where it matters:
+manual files remain collision-safe, symlink-resistant, flushed, and cleaned on
+incomplete writes.
+
+**Rejected alternatives:**
+
+- Keep auto-save and merely document `--no-save`: a safe managed-machine run
+  should not depend on remembering an opt-out.
+- Remove saving entirely: deliberate support/report workflows still need the
+  Markdown artifact.
+- Detect “corporate antivirus” dynamically: endpoint products and policies are
+  not reliably enumerable, and guessing would reintroduce inconsistent behavior.
+
+### Why endpoint-policy update blocks stop the strategy chain
+
+Self-update necessarily writes a staged installer. A policy product can deny
+directory creation, file writes/sync, or process launch through ordinary I/O
+errors or Windows policy codes. Treating that like a transient strategy failure
+and immediately trying cargo plus multiple installers performs more of the
+activity the endpoint just rejected and can compound a workstation freeze.
+
+v4 classifies likely policy errors as `PolicyBlocked`, records `blocked` in
+human/JSON diagnostics, stops the fallback chain, explicitly cleans staging,
+keeps the current installation, links to official manual downloads, and exits
+2. Failed JSON contains `manual_install_url`; blocked JSON also contains the
+direct `official_releases_url`, so non-interactive callers get the same recovery
+path as terminal users. A verified successful install remains success even if best-effort staging
+cleanup later reports a warning; success is still determined by re-running the
+installed `tr300 --version`.
+
+**Rejected alternatives:**
+
+- Prompt to force a direct running-binary replacement: antivirus can interrupt
+  the overwrite and destroy the only working copy; the user explicitly withdrew
+  this idea.
+- Continue trying other installers: they require the same denied write/launch
+  primitives and increase endpoint noise.
+- Label every I/O failure “antivirus”: unknown failures remain normal failures;
+  only a conservative error set gets the policy-specific label, while all paths
+  still fail without claiming success.
 
 ### Recovered gates must block
 
 The macOS ARM test/build/speed jobs were made non-blocking in v3.14.5 after a
 short period of hosted-runner zero-second failures. Subsequent local and hosted
-evidence recovered, and the v4.0 checkpoint adds native/Rosetta coverage plus
+evidence recovered, and v4.0.0 adds native/Rosetta coverage plus
 substantial Mac-specific behavior. Leaving `continue-on-error` in place would
 turn that evidence into dashboard decoration. The exceptions are removed: a
 red macOS test, release build, or 1.5s speed result blocks CI.
@@ -208,33 +266,89 @@ resolved by moving `crossbeam-epoch` to 0.9.20; keeping audit advisory-only afte
 the graph is clean would allow a new known vulnerability through a release.
 
 Intel hosted CI remains a separate capacity decision: per-commit CI tests Apple
-Silicon, local Rosetta runs exercise the x86_64 binary in this checkpoint, and
+Silicon, local Rosetta runs exercise the x86_64 binary for v4.0.0, and
 cargo-dist still builds the Intel artifact at tag time. See the existing Intel
 macOS coverage policy below.
 
+### Enforced Developer ID signing and Apple notarization
+
+Auditing the public v3.17.0 arm64 archive showed `Signature=adhoc`, no Team ID,
+Gatekeeper rejection, and no stapled ticket. Local collector testing cannot
+repair a public distribution-trust gap, and an undocumented external setup
+cannot enforce future releases initiated from Windows.
+
+v4.0.0 makes the trust path tracked and fail-closed. In publishing Apple matrix
+jobs, `release.yml` invokes `scripts/sign-notarize-macos.sh` after
+`dist build` and before cargo-dist Post-build/upload. The script uses an
+ephemeral keychain and work directory, imports one Developer ID Application
+identity, resolves exactly one configured match inside that keychain, and signs
+by its certificate fingerprint. This avoids the macOS `codesign` ambiguity that
+occurs when the same certificate display name also exists in the login
+keychain. It signs with stable identifier `com.qubetx.tr300`, hardened runtime,
+and a trusted timestamp; verifies authority, Team ID, identifier, runtime, and
+timestamp; submits the binary to Apple with a least-privilege App Store Connect
+API key; and requires `Accepted`. It then repacks the exact signed bytes,
+regenerates the `.sha256` sidecar, patches the archive checksum in the per-target
+cargo-dist manifest, verifies it, and deletes decoded credentials.
+
+Repository secrets hold the PKCS#12, its password, API private key, key ID, and
+issuer ID; repository variables select the signing identity/team. Only the
+names are documented. Pull-request planning does not receive them because the
+step additionally requires cargo-dist's publishing output.
+
+The product is a standalone Mach-O CLI, not an `.app` or installer `.pkg`.
+There is therefore no staplable ticket container. Apple's accepted service
+record binds the signed bytes online. `codesign --verify --strict` plus
+`notarytool` acceptance is the correct proof; `spctl --type execute` reports
+that the code is valid but not an app and is not used as a false gate.
+
+**Rejected alternatives:**
+
+- Manual signing on one Mac after each tag: not enforceable when the maintainer
+  pushes from Windows and easy to forget.
+- Host first and replace assets later: creates a public unsigned window and a
+  race between manifests/checksums.
+- Unsigned fallback when secrets are absent: defeats the stated trust contract.
+- Wrap the CLI in an app/pkg solely for stapling: changes install/launch
+  semantics without improving the accepted bare executable.
+
 #### Alienware continuation freeze
 
-The Mac checkpoint is a release boundary, not an invitation to refactor Mac
-code from Windows. The Alienware continuation must leave macOS collectors/cfg
-branches, Apple target triples, artifact and installer names, cargo-dist/
-`release.yml`, toolchain pins, and signing/notarization inputs untouched. The
-tracked repository does not expose explicit Apple notarization configuration;
-external secrets/settings are therefore treated as opaque and known-working,
-not something to reconstruct or normalize on Windows.
+The enforced Mac path is a release boundary, not an invitation to refactor Mac
+code from Windows. Later Alienware/Linux/Pi work must leave macOS collectors/cfg
+branches, Apple target triples, artifact/installer names,
+`scripts/sign-notarize-macos.sh`, the Apple `release.yml` step, toolchain pins,
+and Apple secrets/variables untouched. Do not regenerate or rotate this setup
+from Windows.
 
 A Windows/Linux finding should be fixed in cfg-local code. If correctness truly
-requires a shared module, schema, dependency/Cargo.lock, or workflow change, the
-native/Rosetta evidence above is no longer sufficient for the changed commit.
-The release must return to a Mac for the complete arm64 + Rosetta gate before a
-tag. Hosted Apple Silicon CI alone does not prove the translated x86_64 path or
-preserve external notarization behavior.
+requires a shared module, schema, dependency/Cargo.lock, workflow, or Apple
+artifact change, the native/Rosetta evidence is no longer sufficient for that
+commit. Return to a Mac for the complete arm64 + Rosetta gate; if Apple inputs
+changed, repeat a real cargo-dist archive signing/notary/repack test. Hosted
+Apple Silicon CI alone does not prove the translated x86_64 path.
 
-The narrow release-bookkeeping exception is a version-only `package.version`
-change plus the matching root-package version in `Cargo.lock`, generated man
-version text, release notes/verification ledgers, and cfg-local Windows/Linux
-evidence. Those edits do not change the Mac runtime or Apple packaging inputs.
-Dependency resolution, features, shared code, `build.rs`, dist metadata, or
-release workflow edits are not bookkeeping and still invalidate the stamp.
+### Post-release personal-hardware evidence boundary
+
+The strongest original plan required personal Alienware, AMD64 Linux laptop,
+and Raspberry Pi 4 evidence before v4.0.0. Those machines were unavailable when
+the maintainer needed the release finished. The maintainer explicitly chose to
+release after comprehensive Mac/local/hosted gates and perform the personal
+matrix afterward, shipping forward patches for real findings.
+
+This is a scope decision, not fabricated evidence. Hosted Windows/Linux jobs
+prove compilation, unit behavior, and runner smokes; they do not prove OEM GPU/
+battery/firmware, personal network, or Pi-specific runtime facts. The task board,
+`TESTING.md`, and handoff keep those rows open. The managed work machine's
+antivirus incident informs report/update side-effect design but is not the
+personal Alienware accuracy test.
+
+**Rejected alternatives:**
+
+- Mark hardware rows waived/passed: false and destroys the evidence ledger.
+- Keep the release indefinitely blocked despite direct maintainer risk
+  acceptance: conflates a product milestone with unavailable lab scheduling.
+- Drop the tasks after release: removes the feedback loop the deferral depends on.
 
 ---
 
@@ -963,13 +1077,31 @@ The Industry Standard Solution to the duplicate-install problem is **don't let u
 Why HKCU and not HKLM:
 - `tr300 update` always runs as the user, who reads HKCU naturally.
 - Writing to HKLM from a perMachine MSI works but requires elevation-aware Component authoring (`Component KeyPath` semantics get awkward with HKLM writes from a perUser-or-perMachine wrapper).
-- The rare "admin installed perMachine MSI on behalf of end user X, user X now runs `tr300 update`" case is covered by the path-based fallback in `classify_install_path()` — `\Program Files\tr300\` in the running binary's path implies MSI Global even without a marker.
+- The marker is accepted only when its Global/Corporate scope matches the
+  running path, preventing a stale HKCU value from selecting a coexisting
+  install's product.
 
-The path-based fallback also handles **pre-v3.15.0 installs** that don't have the marker. Those users get a sensible default: Program Files → MSI Global, LocalAppData → MSI Corporate. New installs always set the marker.
+Marker-free `.cargo\bin` installs use the legacy Cargo/PowerShell chain.
+Marker-free Program Files and LocalAppData copies are deliberately `Unknown`:
+those paths reveal Global versus Corporate scope but not MSI versus Inno EXE,
+because both formats share the edition path. Guessing would create a
+cross-format Add/Remove Programs entry. New first-class installs set the marker;
+an admin-installed copy run by another user therefore takes the conservative
+legacy/manual path rather than a fabricated product identity.
 
-**Why no SHA256 verification on downloaded installers.** The existing cargo-dist PowerShell installer also doesn't verify SHA256 — it trusts HTTPS to github.com. Adding SHA256 verification to `try_msi_install()` / `try_exe_install()` would require fetching the `.sha256` sidecar, parsing it, computing the hash, comparing — about 60 LOC for marginal additional security (the actual threat model would require an attacker to compromise GitHub's TLS certificates AND the GitHub Actions runner that built the binary). Tracked as future work; not blocking v3.15.0.
+**Checksum evolution.** v3.15.0 initially trusted HTTPS alone. v3.15.4 added
+SHA-256 sidecar verification before MSI/EXE launch, and later releases retained
+it as a load-bearing corruption/mismatch check. The payload and sidecar share
+one release origin, so this is not an independent signature and must not be
+described as proof against an origin or TLS-interception compromise.
 
-**Why `.github/workflows/windows-installers.yml` triggers on `release: published`, not `push: tags`.** The release.yml workflow (cargo-dist) needs to create the GitHub Release before `gh release upload` from windows-installers.yml can attach assets to it. `release: types: [published]` fires after `release.yml` finishes, which is the correct sequencing. The alternative — `push: tags` with a `needs:` dependency — doesn't work across separate workflow files in GitHub Actions.
+**Why `.github/workflows/windows-installers.yml` uses `workflow_run`.** The
+cargo-dist workflow must create the GitHub Release before supplemental assets
+can attach. A `release: published` event created with the default
+`GITHUB_TOKEN` does not trigger a downstream workflow because of GitHub's loop
+prevention; v3.15.1 exposed that failure. `workflow_run` on successful
+completion of the named Release workflow provides the required sequencing, and
+`workflow_dispatch` remains the repair path.
 
 **Why Inno Setup, not NSIS or WiX Burn.**
 
@@ -992,7 +1124,8 @@ Real options for fixing this (not done in v3.15.0):
 - *Use a single perUser MSI that auto-detects "in admin? install perMachine. Otherwise perUser."* — see WiX #7137 above. Too unreliable.
 - *Drop the perMachine MSI entirely and ship only perUser* — would break IT-managed deployment via Intune / SCCM. Real users need perMachine for managed rollouts.
 - *Ship only one EXE format with a runtime `--user / --machine` switch* — not supported by Inno Setup's `PrivilegesRequired` directive. Would require building two binaries anyway.
-- *Include code signing in this release* — too much scope. Tracked as future work.
+- *Include Windows Authenticode signing in this release* — too much scope.
+  Tracked as future work; this is distinct from v4's Apple Developer ID path.
 - *Submit to WinGet / Scoop in this release* — high-value follow-up, but adds external dependencies (PR review processes). Defer to v3.16.0.
 
 References:
@@ -1152,7 +1285,7 @@ attack cost meaningfully, and it matches the security posture of
 cargo-dist's own shell installer (`curl ... | sh`), which the
 PowerShell installer one-liner already inherits via cargo-dist.
 
-**Rejected alternative: code signing.** Would be stronger, but
+**Rejected alternative: Windows Authenticode signing.** Would be stronger, but
 acquiring an EV cert and threading signing through release.yml +
 windows-installers.yml is a multi-month project. SHA256 sidecar
 verification is the 90% solution that ships in days.

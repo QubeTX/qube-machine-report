@@ -3,25 +3,23 @@
 ## TL;DR
 
 TR-300 is a standalone Rust CLI and library that produces compact, fixed-width
-machine reports on macOS, Linux, and Windows. The published version is v3.17.0.
-The default branch now contains an unreleased reliability/accuracy checkpoint:
-macOS is implementation-complete and thoroughly verified on Apple Silicon and
-under Rosetta; Windows live validation on the Alienware, AMD64 Linux, Raspberry
-Pi 4, the v4.0.0 bump/release, and the public homepage update are deliberately
-deferred.
+machine reports on macOS, Linux, and Windows. The v4.0.0 release hardens
+cross-platform facts, makes report persistence explicit-only, fails updates
+gracefully under endpoint policy, and enforces Developer ID signing plus Apple
+notarization for both Mac archives. macOS is comprehensively verified on Apple
+Silicon and under Rosetta. Personal Alienware, AMD64 Linux laptop, and Raspberry
+Pi 4 checks remain explicit post-release patch work by maintainer decision.
 
 Start the next session with
-[`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md),
+[`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Published release: `3.17.0` (2026-06-08)
-- Working manifest version: `3.17.0` — intentionally not bumped in this
-  checkpoint, so default-branch crates publishing will skip an already-published
-  version
-- Planned next release: `4.0.0`, only after deferred hardware validation
+- Release/manifest version: `4.0.0` (2026-07-14)
+- Personal-fleet evidence: post-release; never claim the Alienware, AMD laptop,
+  or Pi 4 is verified until its board task contains real evidence
 - Major-version reason: public Rust structs gained fields and selected public
   collector helpers changed signature. CLI and schema-v1 JSON compatibility are
   retained; changed record types are now `#[non_exhaustive]` for safer future
@@ -32,7 +30,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Last source/docs verification: 2026-07-14 on a MacBook Pro M2, macOS 26.3.1
   build 25D2128
 
-### Completed in the macOS checkpoint
+### Completed for v4.0.0
 
 - A single structured full-mode macOS snapshot supplies model, display, GPU,
   battery, boot-state, and virtualization facts with graceful fallbacks.
@@ -47,24 +45,31 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   nullable/context fields without renaming existing keys.
 - Optional commands drain both pipes, cap output, time out, and terminate their
   process tree/group best-effort.
-- Markdown saves are collision-safe and symlink-resistant; `--no-save` disables
-  the side effect.
-- Updater payloads use private randomized staging and bounded downloads.
+- Ordinary reports create no report file. `-r`/`--report`/`-s`/`--save`
+  invoke the existing collision-safe, symlink-resistant writer; `--no-save` is
+  a hidden compatibility no-op.
+- Updater payloads use private randomized staging, bounded downloads, explicit
+  cleanup, and post-install version verification. Likely antivirus/Group Policy
+  write or launch blocks stop the fallback chain, retain the current install,
+  and return actionable failure without a direct-overwrite escape hatch.
+- `scripts/sign-notarize-macos.sh` signs both cargo-dist Mac binaries with
+  Developer ID/hardened runtime/timestamp, requires Apple `Accepted` before
+  upload, repacks the exact bytes, and regenerates manifest/sidecar checksums.
 - CI's macOS test/build/speed legs and RustSec audit are blocking again.
-- Native and Rosetta each pass 115 library + 19 integration tests; native and
-  translated release binaries pass full/fast JSON and table smokes, a 51-column
-  non-UTF ASCII fallback, privacy assertions, and updater no-op checks.
+- Native and Rosetta final evidence includes complete suites, release binaries,
+  full/fast JSON and table smokes, a 51-column non-UTF ASCII fallback, privacy,
+  explicit-save/no-write behavior, updater checks, and a real archive
+  Developer ID/notary/repack round-trip. Exact counts and run IDs live in
+  `TESTING.md`.
 
-### Deferred — do not mark complete from this Mac checkpoint
+### Post-release — do not mark complete without hardware evidence
 
-- Live Windows report/install/update verification on the user's Alienware.
+- Live Windows report/install/update verification on the user's personal
+  Alienware. Managed-work antivirus behavior is a separate endpoint-policy case.
 - Live Linux AMD64 and Raspberry Pi 4/aarch64 report verification.
-- Exact-SHA hosted CI from the final handoff commit (must be watched after push).
-- Version bump to `4.0.0`, crates.io publish, tag, cargo-dist release, Windows
-  installer assets, and production artifact verification.
 - TR-300 page changes in
   `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`; update
-  that repository only after v4.0.0 is actually deployed.
+  and push that repository only after v4.0.0 deployment is verified.
 
 ## Product and Architecture
 
@@ -87,15 +92,20 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
-1. Complete live Windows/Linux hardware checks and resolve findings forward.
-2. Bump `Cargo.toml` to `4.0.0`; keep the full docs set synchronized.
-3. Run locked fmt, clippy, tests, release builds, package list, publish dry-run,
-   security audit, and cargo-dist plan.
-4. Commit and push `master`; wait for `.github/workflows/ci.yml` to pass on the
+1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
+   synchronized at `4.0.0`.
+2. Run locked fmt, clippy, tests, native/Rosetta release builds and smokes,
+   package list, publish dry-run, security audit, cargo-dist plan, actionlint,
+   shellcheck, and real Mac archive sign/notary/repack proof.
+3. Commit and push `master`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
-5. Create and push only tag `v4.0.0` after CI/crates settle.
-6. Verify cargo-dist's GitHub Release and all Windows installer assets/aliases.
+4. Create and push only tag `v4.0.0` after CI/crates settle.
+5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
+   extracted signatures/checksums from both public Mac archives.
+6. Verify cargo-dist's GitHub Release, the Windows Installers workflow, all four
+   Windows installers, legacy aliases, and expected 28 assets.
 7. Only then update, test, commit, and push the homepage repository.
+8. Keep personal Alienware/AMD/Pi tasks open and patch forward from real findings.
 
 Never publish locally merely because a token exists. Never tag before the
 default-branch CI and crates workflow settle.
@@ -163,13 +173,18 @@ excluded. The tracked project tree is:
 ├── build.rs
 ├── docs
 │   ├── agents/handoff
-│   │   └── 2026-07-14-001-macos-hardening-alienware-continuation.md
-│   └── architecture-decisions.md
+│   │   ├── 2026-07-14-001-macos-hardening-alienware-continuation.md
+│   │   └── 2026-07-14-002-v4-release-and-personal-fleet-continuation.md
+│   ├── architecture-decisions.md
+│   └── thinking
+│       └── 2026-07-14-tr300-v4-release-reliability.md
 ├── inno
 │   ├── corporate.iss
 │   └── global.iss
 ├── man/tr300.1
 ├── rust-toolchain.toml
+├── scripts
+│   └── sign-notarize-macos.sh
 ├── src
 │   ├── cli.rs
 │   ├── collectors
@@ -211,9 +226,9 @@ excluded. The tracked project tree is:
 ## Local Task Board
 
 The SHAUGHV board is intentionally local and gitignored at `.tasks/`. Its live
-root is recorded in `.tasks/.board-server.json`; do not assume a port. Before
-this checkpoint is pushed, the board must show macOS implementation/validation
-complete and retain separate pending tasks for Alienware Windows validation,
-Linux/Raspberry Pi validation, v4.0.0 release, and post-deployment homepage
-synchronization. The tracked handoff duplicates all resume-critical state so a
-fresh Alienware clone does not depend on the ignored board directory.
+root is recorded in `.tasks/.board-server.json`; do not assume a port. It must
+retain separate post-release tasks for personal Alienware and Linux/Raspberry
+Pi validation, distinguish managed-work antivirus evidence, and keep release/
+homepage status exact. The tracked handoff duplicates all resume-critical state
+so a fresh Alienware clone does not depend on the ignored board directory and
+clearly freezes the enforced Mac signing/notary path.

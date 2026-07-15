@@ -8,7 +8,8 @@ Companion docs:
 - [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — long-form rationale for major decisions (MSRV / `rust-toolchain.toml`, auto-rustup self-update, Intel macOS CI coverage policy, Windows accuracy patterns by version). Open this when you're about to undo or revise an existing decision and need the original reasoning + rejected alternatives.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
-- [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — exact Mac checkpoint and Alienware continuation.
+- [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
+- [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
 Last verified against source: 2026-07-14
 
@@ -36,12 +37,13 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published and manifest version: `3.17.0` (`Cargo.toml`); the default
-  branch contains an unreleased Mac-complete hardening checkpoint for planned
-  v4.0.0, with Windows/Linux hardware validation deliberately deferred. The
-  major boundary is required because public Rust records gained fields and
-  collector helpers changed signature; the CLI and additive schema-v1 JSON stay
-  compatible. Changed public records are now `#[non_exhaustive]`.
+- Current published and manifest version: `4.0.0` (`Cargo.toml`). Personal
+  Alienware, AMD64 Linux laptop, and Raspberry Pi 4 live verification is
+  deliberately post-release by explicit maintainer decision and remains patch
+  work; do not claim that hardware evidence already exists. The major boundary
+  is required because public Rust records gained fields and collector helpers
+  changed signature; the CLI and additive schema-v1 JSON stay compatible.
+  Changed public records are `#[non_exhaustive]`.
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`
@@ -73,12 +75,13 @@ keys remain available. The exact v4 boundary includes `Action`, `Cli`,
 .github/workflows/
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
   crates-publish.yml          # publishes new crates.io versions after successful default-branch CI
-  release.yml                 # cargo-dist generated release workflow
+  release.yml                 # cargo-dist workflow + aliases + fail-closed Apple signing/notary step
   windows-installers.yml      # hand-authored; builds Corporate MSI + both Inno Setup EXEs after release.yml (v3.15.0+)
 
 docs/
   agents/handoff/              # tracked cross-machine continuation records
   architecture-decisions.md   # long-form rationale for MSRV policy, Windows accuracy patterns, etc.
+  thinking/                    # tracked release/design reasoning canvases
 
 rust-toolchain.toml           # rustup pin (channel = "1.95", rustfmt + clippy components) — see "Toolchain pinning"
 
@@ -122,6 +125,9 @@ src/
 tests/
   integration.rs
 
+scripts/
+  sign-notarize-macos.sh       # fail-closed Developer ID + Apple notary archive gate
+
 wix/
   main.wxs                    # Global MSI packaging template (perMachine, system PATH)
 
@@ -162,9 +168,9 @@ README.md                     # user-facing docs
 8. Collect system data with `SystemInfo::collect_with_mode(mode)`.
 9. Render output with `report::generate(...)`.
 10. Print to stdout.
-11. In full table mode only, auto-save a collision-safe Markdown report to the
-    OS Downloads directory unless `--no-save` was supplied, then print the path
-    or warning to stderr.
+11. Only when the CLI supplied `-r`/`--report`/`-s`/`--save`, save the full
+    table as a collision-safe Markdown report in the OS Downloads directory and
+    print the path or warning to stderr. Ordinary runs never call the writer.
 
 Important ordering rule:
 - Do not print Unicode box-drawing characters before `is_utf8_locale()` and Windows UTF-8 setup have run.
@@ -186,7 +192,9 @@ Current supported flags:
 - `-t, --title <TITLE>` -> custom title
 - `--no-color` -> disables update-flow ANSI styling
 - `--fast` -> skip slow collectors for quick auto-run startup
-- `--no-save` -> suppress automatic Markdown persistence after a full table run
+- `-r, --report` with visible aliases `-s, --save` -> manually persist a full
+  table Markdown report; conflicts with fast/JSON/action modes
+- `--no-save` -> hidden backwards-compatible no-op; reports are not saved by default
 - `--no-elevation-hint` -> suppress the optional Linux elevation footer
 
 Current supported positional actions:
@@ -236,8 +244,8 @@ Install profile auto-run uses `tr300 --fast`; the `report` alias still runs full
 - `Config::format == OutputFormat::Table`: render fixed-width terminal table.
 - `Config::format == OutputFormat::Json`: build a typed `serde_json::Value` and
   serialize it once.
-- Full table mode auto-save calls `save_markdown_report(info)` unless the CLI
-  supplied `--no-save`.
+- Full table mode calls `save_markdown_report(info)` only when the CLI supplied
+  an explicit save alias. Normal full/fast/JSON runs perform no report-file write.
 
 Table rendering is fixed width:
 - Label column: 12 chars
@@ -559,14 +567,22 @@ Behavior:
 - strips leading `v` from release tags
 - compares semver-like numeric components
 - builds the strategy list by detecting install origin:
-  - **Windows (v3.15.0+):** `detect_install_origin()` reads `HKCU\Software\TR300\InstallSource` written by all four first-class installers (Global MSI, Corporate MSI, Global EXE, Corporate EXE). Returns one matching strategy — no cross-fallback between installer types. MSI strategies run `msiexec /i /passive /norestart`; EXE strategies run `setup.exe /SILENT /SUPPRESSMSGBOXES /NORESTART`. Path-based fallback (`\Program Files\tr300\` → MsiGlobal, `\AppData\Local\Programs\tr300\` → MsiCorporate, `\.cargo\bin\` → CargoOrInstaller, else → Unknown) handles legacy installs without the marker.
+  - **Windows (v3.15.0+):** `detect_install_origin()` reads `HKCU\Software\TR300\InstallSource` written by all four first-class installers (Global MSI, Corporate MSI, Global EXE, Corporate EXE), and accepts it only when its edition scope matches the running path. It returns one matching strategy — no cross-fallback between installer types. MSI strategies run `msiexec /i /passive /norestart`; EXE strategies run `setup.exe /SILENT /SUPPRESSMSGBOXES /NORESTART`. Without a valid marker, `\.cargo\bin\` maps to CargoOrInstaller; marker-free Program Files/LocalAppData and all other paths are Unknown because a path cannot distinguish MSI from Inno EXE. Both use the conservative legacy chain rather than guessing across installer products.
   - **Other origins (`CargoOrInstaller` / `Unknown` on Windows, or non-Windows):** legacy probe-and-retry chain — `cargo install tr300 --force` first when `cargo --version` succeeds, macOS/Linux fallback to cargo-dist shell installer through `curl` then `wget`, Windows fallback to cargo-dist PowerShell installer through `powershell` then `pwsh`.
 - runs `rustup update stable` best-effort before the cargo strategy when rustup is available
-- records skipped/failed strategy attempts and falls through until one strategy succeeds (only on the legacy chain — MSI/EXE strategies don't cross-fall-back)
+- records skipped/failed/blocked strategy attempts and falls through until one
+  strategy succeeds (only on the legacy chain — MSI/EXE strategies don't
+  cross-fall-back)
 - downloads installer payloads/sidecars with explicit size caps into a private
-  randomized staging directory that is removed on success or failure; checksum
-  comparison detects corruption/mismatch but is not an independent signature
-  because payload and sidecar share transport
+  randomized staging directory that is explicitly removed on success or
+  failure; cleanup failure is appended to the diagnostic. Checksum comparison
+  detects corruption/mismatch but is not an independent signature because
+  payload and sidecar share transport
+- classifies likely antivirus/Group Policy/filesystem blocks during create,
+  write, sync, or launch as `PolicyBlocked`, stops the fallback chain rather
+  than making more write-heavy attempts, retains the current install, reports
+  the official release/manual URL, and exits 2. Do not add a force prompt,
+  atomic-backup bypass, or direct running-binary replacement fallback
 - verifies the installed binary's `--version` before claiming success
 - **Cross-method consolidation (`tr300 migrate-cleanup`, v3.17.0+, `src/migrate.rs`):** hidden `#[value(hide=true)]` `Action::MigrateCleanup` + hidden flags. The four installers invoke it (interactive checkboxes + silent self-update, both default ON) to keep one install at a time — removes a shadowing `~\.cargo\bin` copy and/or the other edition. Only deletes `tr300.exe` (allowlist); never cargo/rustup/PATH/`~/Downloads`/the running install; needs-admin → skip, exit 0; advisory (never fails an install). Reuses `detect_install_origin`/`InstallOrigin` (`pub(crate)`). WiX: deferred `Impersonate='yes'` `FileKey` CA (no `WixUtilExtension`). Inno Global EXE omits `--user-profile` (no reliable pre-elevation constant) → process-env fallback. Edition paths/marker strings are in the windows-distribution lockstep.
 
@@ -576,7 +592,10 @@ JSON mode:
 - fields include `action`, `success`, `message`, `current_version`, `latest_version`, and `update_available` when available
 - **Windows (v3.15.0+):** every response also includes a top-level `install_origin` field (`msi-global`, `msi-corporate`, `exe-global`, `exe-corporate`, `cargo-or-installer`, or `unknown`).
 - successful updates include legacy `"method"` plus precise `"strategy"` (the v3.15.0+ values are `msi_global`, `msi_corporate`, `exe_global`, `exe_corporate`; the legacy values are `cargo`, `installer_curl`, `installer_wget`, `installer_powershell`, `installer_pwsh`).
-- failed updates include an `"attempts"` array with per-strategy diagnostics
+- failed updates include an `"attempts"` array with per-strategy diagnostics;
+  `result` is `skipped`, `failed`, or `blocked`; every failed JSON response
+  includes `manual_install_url`, and a blocked response also includes
+  `official_releases_url`
 
 Exit codes:
 - `0`: success or already current
@@ -588,11 +607,47 @@ Exit codes:
 
 Release automation uses cargo-dist and GitHub Actions.
 
-### macOS release freeze for Alienware continuation
+### Enforced macOS signing/notarization and post-release freeze
 
-The 2026-07-14 Mac path is validated and must be treated as frozen during the
-Alienware Windows/Linux pass. Do **not** change any of the following from
-Windows merely to clean up, generalize, regenerate, or align them:
+v4.0.0 makes the Mac trust path explicit and fail-closed. In each publishing
+Apple matrix job, `.github/workflows/release.yml` runs
+`scripts/sign-notarize-macos.sh` after `dist build` and before cargo-dist
+Post-build/upload. The script:
+
+1. creates an ephemeral keychain and private work directory;
+2. imports the Developer ID Application PKCS#12, resolves exactly one matching
+   identity inside that keychain, and signs by its certificate fingerprint so
+   a duplicate display name in the login keychain cannot make signing ambiguous;
+3. signs `tr300` with identifier `com.qubetx.tr300`, hardened runtime, and a
+   trusted timestamp, then verifies authority, Team ID, identifier, runtime,
+   and timestamp;
+4. submits the exact binary to Apple Notary Service and requires `Accepted`;
+5. repacks those exact signed bytes, regenerates the `.sha256` sidecar, patches
+   the per-target cargo-dist manifest checksum, and verifies the sidecar; and
+6. deletes the keychain and decoded credentials on every exit path.
+
+A standalone CLI is not an `.app`/`.pkg` container and therefore has nothing
+staplable. The release gate is Developer ID verification plus Apple's accepted
+online notarization record. Do not make `spctl --type execute` acceptance of the
+bare binary a false blocker; it reports that the code is valid but is not an app.
+
+Repository Actions configuration uses these names (values are secrets and must
+never enter git, logs, tasks, handoffs, or docs):
+
+- secrets: `APPLE_CERTIFICATE_P12_BASE64`,
+  `APPLE_CERTIFICATE_PASSWORD`, `APPLE_API_KEY_P8_BASE64`,
+  `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`;
+- variables: `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID`.
+
+The least-privilege App Store Connect key has Developer role. The selected
+Developer ID Application certificate expires in 2031. Rotate credentials only
+from a trusted Mac with a fresh local signing/notary proof, then run both hosted
+Apple tag jobs; never recreate or “fix” credentials from Windows just because a
+later unrelated job fails.
+
+After v4.0.0, this path is frozen during personal Alienware/Linux/Pi patch work.
+Do **not** change any of the following from Windows/Linux merely to clean up,
+generalize, regenerate, or align them:
 
 - `src/collectors/platform/macos.rs`;
 - macOS branches in `src/collectors/{cpu,memory,network,os,session}.rs`,
@@ -600,22 +655,20 @@ Windows merely to clean up, generalize, regenerate, or align them:
 - the `aarch64-apple-darwin` / `x86_64-apple-darwin` targets, archive names,
   shell-installer names, cargo-dist config, `rust-toolchain.toml`, or macOS
   package/signing/notarization inputs;
-- `.github/workflows/release.yml` or any repository/organization secrets and
-  external signing/notarization settings.
+- `scripts/sign-notarize-macos.sh`, the Apple step in
+  `.github/workflows/release.yml`, or repository/organization Apple secrets and
+  variables.
 
-No explicit Apple notarization configuration is visible in the tracked source,
-so treat the existing external/release setup as opaque and working—do not try to
-recreate or “fix” it on the Alienware. Windows/Linux work should stay inside
-their cfg-gated collectors/installers and tests. Release bookkeeping is allowed:
-the eventual version-only `package.version` update, the matching root `tr300`
-entry in `Cargo.lock`, generated man-page version text, changelog/release-ledger
-edits, and Windows/Linux-only evidence do not alter the frozen Mac runtime.
+Windows/Linux work should stay inside cfg-gated collectors/installers and tests.
+Release bookkeeping and Windows/Linux-only evidence do not alter the frozen Mac
+runtime.
 
 Anything broader reopens the Mac gate: a dependency or dependency-resolution
 change, shared runtime/renderer/command-helper/schema source edit, `build.rs`, a
 macOS cfg branch, dist/toolchain/release workflow change, or Apple artifact
 change requires stopping before the tag and rerunning native arm64 + Rosetta
-full tests/smokes on a Mac, plus hosted macOS CI. Passing Windows/Linux alone is
+full tests/smokes on a Mac, a real archive signing/notary round-trip when Apple
+inputs changed, and hosted macOS CI/tag jobs. Passing Windows/Linux alone is
 insufficient.
 
 `Cargo.toml` (`[workspace.metadata.dist]`):
@@ -640,7 +693,8 @@ insufficient.
 
 High-level job flow:
 1. `plan`
-2. `build-local-artifacts`
+2. `build-local-artifacts` — Apple publishing jobs sign and notarize after
+   `dist build`, before Post-build/upload; any Apple failure blocks hosting
 3. `build-global-artifacts`
 4. `host`
 5. `announce`
@@ -648,6 +702,8 @@ High-level job flow:
 Triggers:
 - pull requests run cargo-dist planning
 - pushes of semver-like tags matching `**[0-9]+.[0-9]+.[0-9]+*` publish releases
+- Apple secrets are consumed only when `needs.plan.outputs.publishing == 'true'`;
+  pull-request planning never receives them
 
 ### Installer outputs
 
@@ -716,10 +772,10 @@ Built by `windows-installers.yml` using `iscc.exe` (installed via `choco install
 
 ### Release checklist
 
-The 2026-07-14 Mac checkpoint is intentionally **not** a release: keep the
-manifest at 3.17.0 until Alienware Windows, AMD64 Linux, and Raspberry Pi 4
-evidence is recorded. On the next machine, start from the tracked handoff and
-do not tag or update the homepage early.
+v4.0.0 was explicitly authorized before personal Alienware, AMD64 Linux, and
+Raspberry Pi 4 evidence; those checks remain mandatory post-release tasks and
+must not be retroactively claimed as release evidence. Every Mac/local/hosted
+gate below remains blocking.
 
 1. Update version in `Cargo.toml`.
 2. Update the full documentation set for any user-visible release, install,
@@ -738,6 +794,10 @@ do not tag or update the homepage early.
    - `cargo test --workspace --all-targets`
    - `cargo package --locked --list`
    - `cargo publish --dry-run --locked`
+   - `actionlint .github/workflows/*.yml` and `shellcheck` on changed shell scripts
+   - after shared/Mac/release changes: native Apple Silicon + Rosetta tests and
+     smokes; after Apple-input changes, a real cargo-dist archive
+     sign/notary/repack/checksum round-trip
 4. Commit with message `release: vX.Y.Z - <summary>`.
 5. Push the default branch, **wait for `ci.yml` to go green on the exact
    commit**, then confirm `crates-publish.yml` either published the new
@@ -747,8 +807,13 @@ do not tag or update the homepage early.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
    workflow trigger; an explicit single-tag push is sufficient).
 8. Wait for `.github/workflows/release.yml` to publish the GitHub Release
-   assets and installers, including the `tr300-installer.*` assets and
-   `tr-300-installer.*` compatibility aliases.
+   assets and installers. Require both Apple jobs to report Developer ID
+   signing and Apple `Accepted` before host; then extract both Mac archives and
+   verify their signatures/checksums.
+9. Wait for `windows-installers.yml` and verify all four first-class Windows
+   installers, both legacy installer aliases, and the expected 28-asset release.
+10. Only after the deployed release is verified, update/test/push the TR-300
+    homepage and record exact run IDs/evidence in `TESTING.md` and the handoff.
 
 After changing `[workspace.metadata.dist]`, regenerate the workflow with:
 
@@ -807,7 +872,10 @@ cargo run -- --ascii
 cargo run -- --json
 cargo run -- --title "MY TITLE"
 cargo run -- --no-color
-cargo run -- --no-save
+cargo run -- --report
+cargo run -- -r
+cargo run -- --save
+cargo run -- -s
 cargo run -- --update
 cargo run -- update
 cargo run -- --update --json
@@ -870,7 +938,8 @@ Dev:
   keeps non-finite values valid
 - custom title injection
 - `--no-color`
-- `--no-save` suppresses the Markdown side-effect message
+- default/full/fast/JSON runs do not emit a save message or create a report file
+- `-r`/`--report`/`-s`/`--save` invoke isolated manual persistence
 - fast mode omits slow conditional rows and elevation footer
 - exact 51-column ASCII table width
 - expected key report fields
@@ -879,8 +948,9 @@ The library suite also covers bounded subprocess success/timeout/large-output/
 overflow, save collisions/symlinks, zsh profile round-trip, macOS structured
 parsers/privacy/Rosetta/boot/display/battery/FileVault/terminal/locale,
 disk/root selection, memory parsing, session parsers, updater staging/checksum/
-version semantics, and cross-platform fallback helpers. As of the Mac checkpoint:
-115 library + 19 integration tests pass natively and under Rosetta.
+version/policy-block semantics, release signing/notary manifest behavior, and
+cross-platform fallback helpers. Record exact final v4 counts/evidence in
+`TESTING.md` rather than leaving stale counts here.
 
 For markdown-only guide edits, Rust tests are not required. For source changes, run at least the affected test scope, and prefer `cargo test` before release work.
 
@@ -894,8 +964,9 @@ For markdown-only guide edits, Rust tests are not required. For source changes, 
 - Intel macOS has no per-commit hosted runner; local Rosetta covers the x86_64
   binary and cargo-dist still builds Intel at tag time. Do not claim physical
   Intel-hardware validation from Rosetta.
-- Windows/Linux platform code in the Mac checkpoint is compile/fixture tested,
-  not live-hardware verified. See the tracked handoff before release work.
+- Personal Alienware/AMD Linux/Pi 4 evidence is post-release and remains open.
+  Hosted/cross-compiled evidence is not live-hardware proof; see the tracked
+  handoff before changing those platform paths.
 - `--install`, `--uninstall`, `--update`, and their positional equivalents have real user-environment side effects. Treat them carefully in tests and automation.
 - Some historical docs/examples may mention older behaviors; source code is authoritative.
 - PowerShell can be unavailable or restricted on some Windows environments; Windows collectors and installers should retain graceful fallbacks.

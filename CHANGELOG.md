@@ -7,17 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> **macOS completion checkpoint — 2026-07-14 01:45 CDT.** The manifest stays
-> at v3.17.0 for this default-branch checkpoint. The macOS implementation and
-> local validation are complete; live Windows/Alienware, AMD64 Linux, and
-> Raspberry Pi 4 validation remain explicit prerequisites for the later
-> v4.0.0 release and homepage update.
+## [4.0.0] - 2026-07-14
 
 ### Added
-- **`--no-save` report option.** Full table runs can now suppress the automatic
-  Markdown file, which also keeps integration tests and scripted validation out
-  of the user's real Downloads folder. The generated man page and CLI tests
-  cover the option.
+- **Explicit report persistence.** Normal `tr300`/`report` runs are now
+  read-only. Markdown is written only when requested with `-r`, `--report`,
+  `-s`, or `--save`. The existing collision-safe, symlink-resistant writer and
+  Downloads/cwd fallback remain unchanged for those manual invocations.
 - **More precise additive schema-v1 context.** JSON now includes
   `collection_mode`; OS build/codename; physical and logical CPU counts;
   frequency provenance; raw Unix load averages alongside normalized capacity;
@@ -30,15 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   virtualization evidence. FileVault status, OS build, current codenames,
   terminal host, and Apple Silicon performance/efficiency topology are also
   surfaced when available.
+- **Enforced macOS release trust.** Both Apple cargo-dist archives are signed
+  with a Developer ID Application certificate, hardened runtime, and a trusted
+  timestamp, then submitted to Apple Notary Service before upload. A missing
+  credential, signing error, or non-`Accepted` response fails the release job;
+  no unsigned fallback can reach the GitHub Release.
 
 ### Changed
-- **The next release is v4.0.0 for Rust-library SemVer honesty.** The CLI,
+- **This release is v4.0.0 for Rust-library SemVer honesty.** The CLI,
   existing JSON keys, and schema version remain compatible, but the public
   `SystemInfo`, `Config`, and collector records gained fields and a small number
   of public collector helpers changed signature. Code that constructs those
   records directly or exhaustively matches them must be updated. Changed public
-  public data records and extensible enums are now `#[non_exhaustive]` so later
+  data records and extensible enums are now `#[non_exhaustive]` so later
   additive information or action variants do not require another major release.
+- **Endpoint-policy update failures now stop safely.** If antivirus, Group
+  Policy, or filesystem policy appears to block installer staging, writes, or
+  launch, the updater records a `blocked` attempt, stops trying additional
+  write-heavy strategies, retains the current installation, prints official
+  manual-download guidance (including stable URL fields in JSON), and exits 2.
+  It never falls back to an unsafe direct binary overwrite or claims success
+  without re-running `tr300 --version`.
 - **Report JSON is built as a typed `serde_json::Value`.** `serde_json` now owns
   escaping, punctuation, optional values, and non-finite-number handling instead
   of a hand-assembled format string, while preserving schema v1.
@@ -52,8 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   macOS RAM uses Activity Monitor-compatible active + wired + compressed pages,
   with availability derived as the exact complement.
 - **Updater downloads use private randomized staging directories** with bounded
-  response sizes and cleanup on every exit path. Checksum language now correctly
-  describes corruption/mismatch detection rather than independent authenticity.
+  response sizes, explicit cleanup, cleanup diagnostics, and post-install
+  verification. Checksum language correctly describes corruption/mismatch
+  detection rather than independent authenticity.
 
 ### Fixed
 - **macOS no longer reports zero available RAM while showing partial use.** The
@@ -74,8 +83,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remain unknown; and sub-minute uptime retains seconds.
 
 ### Security
-- Markdown report creation uses `create_new`, collision suffixes, and a
-  symlink-resistant flow so an existing path is never overwritten or followed.
+- Ordinary report execution no longer touches a report file. Manual creation
+  uses `create_new`, collision suffixes, and a symlink-resistant flow so an
+  existing path is never overwritten or followed.
+- The exact Developer ID-signed executable bytes accepted by Apple are repacked
+  into each hosted Mac archive; the archive sidecar and cargo-dist manifest are
+  regenerated from those bytes before upload. The ephemeral keychain identity
+  is selected by certificate fingerprint and checked for the expected
+  authority, Team ID, identifier, hardened runtime, and timestamp. The
+  standalone CLI has no staplable `.app`/`.pkg` container, so acceptance is
+  verified through Apple's online notarization record plus the code signature.
 - Structured macOS parsing deliberately excludes serial numbers, hardware UUIDs,
   and other unique device identifiers; native and Rosetta privacy assertions
   verify those keys never enter report JSON.
@@ -85,15 +102,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 - macOS test/build/speed jobs and RustSec audit are blocking CI gates again; the
   obsolete macOS `continue-on-error` exceptions have been removed.
-- Local macOS validation passes 115 library tests and 19 integration tests both
-  natively on Apple Silicon and under Rosetta. Release smokes passed on a MacBook
-  Pro M2 running macOS 26.3.1 (build 25D2128): native fast 0.21s, Rosetta fast
-  0.31s, full/fast table and JSON parity, ASCII locale fallback, FileVault and
-  battery parity, updater no-op, and zsh profile round-trip.
-- Windows code passes `cargo xwin clippy --all-targets --workspace -- -D warnings`,
-  but its live collector/installer checks are intentionally deferred to the
-  Alienware. Linux AMD64 and Raspberry Pi 4 checks are likewise still pending;
-  no v4.0.0 tag or deployment claim is made by this checkpoint.
+- Local macOS validation covers the complete native Apple Silicon and Rosetta
+  test suites, release builds, full/fast table and JSON parity, ASCII fallback,
+  manual-save/no-write behavior, privacy, updater behavior, zsh profile edits,
+  and a real cargo-dist Developer ID/notary/repack round-trip on a MacBook Pro M2
+  running macOS 26.3.1 (build 25D2128).
+- Windows source continues to pass MSVC cross-check/clippy. By explicit
+  maintainer decision, live checks on the personal Alienware, AMD64 Linux laptop,
+  and Raspberry Pi 4 are post-release evidence for forward patches rather than
+  v4.0.0 blockers. Managed-work antivirus behavior is tracked separately from
+  personal Windows field-accuracy validation.
 
 ## [3.17.0] - 2026-06-08
 

@@ -1,25 +1,29 @@
 # TR-300 Testing Guide
 
-This file tracks the manual verification matrix that must pass before each tagged release, plus the automated gates that protect the auto-run UX.
+This file tracks local/hosted release gates and the manual verification matrix.
+When the maintainer explicitly defers unavailable personal hardware, the open
+matrix row stays visible as post-release patch work rather than being presented
+as passed.
 
 ## Per-version verification log
 
-### Unreleased macOS completion checkpoint — 2026-07-14
+### v4.0.0 — 2026-07-14
 
-- **Scope/state:** macOS implementation and local validation are complete on the
-  default branch while `Cargo.toml` intentionally remains `3.17.0`. This is not
-  a v4.0.0 release stamp. Alienware Windows, AMD64 Linux, Raspberry Pi 4,
-  version bump, tag/deployment, and homepage verification remain pending.
+- **Scope/state:** manifest and release docs are v4.0.0. macOS collection,
+  shared runtime hardening, manual-only persistence, graceful endpoint-policy
+  update failure, and fail-closed Mac signing/notarization are release scope.
+  The maintainer explicitly approved personal Alienware, AMD64 Linux, and
+  Raspberry Pi 4 verification after release with forward patches as needed.
 - **SemVer boundary:** final API review found source-breaking additions to
-  public Rust records and changed collector-helper signatures. The deferred
-  release is therefore v4.0.0, not v3.18.0. CLI behavior and existing schema-v1
+  public Rust records and changed collector-helper signatures. The release is
+  therefore v4.0.0, not v3.18.0. CLI behavior and existing schema-v1
   JSON keys remain compatible; affected records are `#[non_exhaustive]`.
 - **Host:** MacBook Pro M2 (`Mac14,7`), macOS 26.3.1 build 25D2128, 8 GiB,
   APFS root, FileVault On, integrated battery, internal Retina display.
 - **Native Apple Silicon gate:** `cargo fmt --all -- --check`,
   `cargo clippy --locked --all-targets --workspace -- -D warnings`,
   `cargo test --locked --workspace --all-targets`, and
-  `cargo build --locked --release` pass. Test count: **115 library + 19
+  `cargo build --locked --release` pass. Test count: **121 library + 19
   integration**, zero failures.
 - **External Rust consumer:** an isolated temporary crate using TR-300 as a path
   dependency compiled and ran with `SystemInfo::collect_with_mode`,
@@ -27,7 +31,7 @@ This file tracks the manual verification matrix that must pass before each tagge
   non-exhaustive `CollectMode` contract.
 - **Rosetta gate:** `cargo build --locked --release --target
   x86_64-apple-darwin` and `cargo test --locked --target
-  x86_64-apple-darwin --workspace --all-targets` pass. Test count: **115
+  x86_64-apple-darwin --workspace --all-targets` pass. Test count: **121
   library + 19 integration**, zero failures. The executable is confirmed Mach-O
   x86_64 and runs through `/usr/bin/arch -x86_64`.
 - **Live native parity:** schema v1 JSON matched `sw_vers` version/build,
@@ -44,28 +48,55 @@ This file tracks the manual verification matrix that must pass before each tagge
   encryption fields; `LC_ALL=C LANG=C` auto-falls back to printable ASCII with
   every table line exactly 51 columns; native and Rosetta JSON expose no path
   containing `serial`, `uuid`, or `udid`; zsh profile install/reinstall/uninstall
-  round-trip passes entirely inside a temporary home.
-- **Updater:** native and Rosetta `tr300 update --json` both returned success,
-  current/latest `3.17.0`, and `update_available: false`; no install was run.
-- **Performance:** observed release wall clock was native full 0.90s, native fast
-  0.21s, Rosetta full 1.52s, Rosetta fast 0.31s. Both fast paths are well below
-  the blocking 1.5s CI budget. The final five-run medians were 0.497s native
-  full, 0.234s native fast, 0.627s Rosetta full, and 0.338s Rosetta fast.
-- **Security/package:** `cargo audit` passes against 221 locked dependencies;
-  `crossbeam-epoch` is 0.9.20. Markdown collision/symlink and updater staging
-  tests pass. Clean committed-tree `cargo package --locked --list`,
-  `cargo publish --dry-run --locked`, and `dist plan` pass.
-- **CI enforcement change:** macOS ARM test/build/speed jobs no longer use
-  `continue-on-error`; RustSec audit is no longer advisory. The exact pushed
-  handoff commit must prove these gates hosted before this checkpoint is called
-  settled.
-- **Mac release freeze:** the Alienware pass must not change macOS collectors,
-  Apple target/artifact names, cargo-dist/release workflow, toolchain, or
-  signing/notarization inputs. Any necessary shared/dependency/workflow change
-  invalidates this stamp and requires this native + Rosetta matrix again on a
-  Mac before v4.0.0 can be tagged. The version-only package/root-lock update,
-  generated man-page version, release notes/ledger, and cfg-local Windows/Linux
-  evidence are release bookkeeping and do not invalidate the Mac runtime stamp.
+  round-trip passes entirely inside a temporary home. Normal full/fast/JSON
+  runs create no report file; each of `-r`, `--report`, `-s`, and `--save`
+  requests the existing collision-safe manual writer.
+- **Updater:** native and Rosetta v4 `tr300 update --json` both returned
+  success, `current_version: 4.0.0`, latest hosted `3.17.0`, and
+  `update_available: false`; no install was run.
+  v4 unit tests classify likely endpoint-policy staging/launch errors as
+  `blocked`, stop later strategies, preserve the installed binary, and include
+  cleanup/manual-release context without any force/direct-overwrite path.
+- **Performance:** final five-run release medians are 0.51s native full, 0.23s
+  native fast, 0.72s Rosetta full, and 0.36s Rosetta fast. Both fast paths are
+  well below the blocking 1.5s CI budget.
+- **Apple release trust:** the least-privilege App Store Connect API credential
+  and selected Developer ID Application identity were tested without exposing
+  values. The script resolves exactly one imported identity in its ephemeral
+  keychain and signs by certificate fingerprint, preventing ambiguity when a
+  developer login keychain contains the same certificate. Both actual v4
+  release binaries completed the full sign/notary/repack/rehash path:
+  aarch64 submission `c2afae62-1873-4337-8c88-1bbfa26c23eb` and x86_64
+  submission `fe2dcc67-cfe1-49be-8d4c-59daf8697c61` were `Accepted`. This
+  final pass supplied the signing identity in the SHA-1 fingerprint form used
+  by the repository variable, so it exercised the exact hosted configuration.
+  Extracted
+  binaries report `tr300 4.0.0` and verify identifier `com.qubetx.tr300`,
+  Developer ID authority, Team ID `M9D5379H93`, hardened runtime, and secure
+  timestamp. Final local archive/sidecar/manifest SHA-256 values were
+  `b1085dcc6e1bf5ce0e3a2fdeab0342cf4f4ae94506a007c2089a8a3db785a244`
+  (arm64) and
+  `703dfe22a8fbdc2b5bcb6e4bafce99b0e558f920ef1f8284774eca5ba2a34f30`
+  (x86_64). `actionlint`, `shellcheck`, and `bash -n` pass.
+- **Security/package:** `cargo audit` passes against the locked dependency set;
+  `crossbeam-epoch` is 0.9.20. Markdown collision/symlink, updater staging/
+  policy-block, and release-manifest tests pass. The final dirty-tree package
+  and publish dry-run pass with 39 packaged files (632.9 KiB / 164.7 KiB
+  compressed), and `cargo dist plan` contains all six configured targets. The
+  same package/dry-run check is repeated without `--allow-dirty` after commit.
+- **CI enforcement:** macOS ARM test/build/speed jobs have no
+  `continue-on-error`; RustSec audit is blocking. The exact release SHA must be
+  green and crates.io publication must settle before `v4.0.0` is tagged.
+- **Mac release freeze:** post-release Alienware/Linux/Pi work must not change
+  macOS collectors/cfg branches, Apple targets/artifact names,
+  `scripts/sign-notarize-macos.sh`, the Apple `release.yml` step, toolchain, or
+  signing/notarization secrets/variables. Any shared/dependency/workflow/Apple
+  change requires native + Rosetta proof again on a Mac; Apple-input changes
+  also require a real archive notary round-trip.
+- **Post-release hardware boundary:** hosted Windows/Linux checks are not the
+  missing personal-hardware evidence. Alienware/AMD/Pi rows remain open, and
+  the managed-work antivirus case is tracked separately from personal Windows
+  accuracy.
 
 ### v3.17.0 — 2026-06-08
 
@@ -144,11 +175,17 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets --workspace -- -D warnings
 cargo test --locked --workspace --all-targets
 cargo audit
-cargo run -- --json --no-save | jq .  # parses without report-file side effects
+cargo run -- --json | jq .            # parses; normal runs never save
 cargo run -- --json update | jq .     # update action JSON shape
 cargo run -- --fast --json | jq .     # same, fast mode
-cargo run -- --ascii --no-save        # visual inspection
+cargo run -- --ascii                  # visual inspection; no file write
+actionlint .github/workflows/*.yml
+shellcheck scripts/sign-notarize-macos.sh
 ```
+
+For a release, additionally prove native/Rosetta release binaries, isolated
+manual-save aliases, no-write ordinary runs, and a real cargo-dist
+sign/notary/repack/checksum round-trip as described in `MASTER_PLAN.md`.
 
 ### Output stability gates
 
@@ -165,17 +202,17 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 |---|---|---|
 | **macOS Intel (Sonoma 14.x)** | OS shows "macOS 14.x"; CPU brand contains "Intel"; uptime present; battery on laptop | — |
 | **macOS Apple Silicon M1** | CPU brand "Apple M1/Pro/Max" matches; nonzero native frequency when the OS exposes one; arm64 arch; cores show P/E split | — |
-| **macOS Apple Silicon M2** | Native full/fast table+JSON; model/build/boot/display/FileVault/battery parity; P/E topology; memory definitions; privacy keys; speed | Unreleased checkpoint 2026-07-14 — MacBook Pro M2, Mac14,7, macOS 26.3.1 (25D2128) |
+| **macOS Apple Silicon M2** | Native full/fast table+JSON; model/build/boot/display/FileVault/battery parity; P/E topology; memory definitions; privacy keys; speed | v4.0.0 — MacBook Pro M2, Mac14,7, macOS 26.3.1 (25D2128) |
 | **macOS Apple Silicon M3 / M4** | CPU brand exact (no "Apple M1" stale); cores P/E; Mac marketing name correct; battery health present | — |
-| **macOS Apple Silicon under Rosetta 2** | Arch shows host+process scopes; native profiler preserves model/display/battery; translated compatibility frequency stays null | Unreleased checkpoint 2026-07-14 — x86_64 release binary under Rosetta on Mac14,7 |
+| **macOS Apple Silicon under Rosetta 2** | Arch shows host+process scopes; native profiler preserves model/display/battery; translated compatibility frequency stays null | v4.0.0 — x86_64 release binary under Rosetta on Mac14,7 |
 | **Ubuntu 22.04+ (systemd-resolved)** | DNS row shows upstream resolvers, NOT 127.0.0.53 | — |
 | **Debian 12 (no systemd-resolved)** | DNS row shows /etc/resolv.conf contents | — |
 | **Fedora / Arch** | Hypervisor "None" on bare metal; terminal detection works for Konsole + GNOME Terminal + Wezterm | — |
 | **Alpine in Docker** | Container detected; no panic on missing `lspci` / `lastlog` / systemd | — |
-| **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | — |
+| **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | Post-v4.0.0 personal-hardware task open |
 | **AWS EC2 (Graviton or Intel)** | Hypervisor shows "amazon" / "kvm"; cloud detection works | — |
 | **WSL2 on Win11** | Hypervisor shows "WSL2"; terminal shows "Windows Terminal" via WT_SESSION | — |
-| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | 3.10.0 (footer hint visible; arch / OS / DNS unchanged in PR1) |
+| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Personal Alienware post-v4.0.0 retest open; prior 3.10.0 evidence remains historical |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
 | **Windows 11 (BitLocker OFF)** | "Encryption" row shows an evidence-backed Off state or remains absent; no promise that elevation alone unlocks it | — |
 | **Windows 11 as Administrator** | Encryption shows evidence-backed method + protection level when available; no blanket elevation footer | — |

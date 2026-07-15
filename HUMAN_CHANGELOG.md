@@ -13,15 +13,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-> **Mac completion checkpoint — July 14, 2026.** The Mac work is finished and
-> thoroughly tested, but this is not v4.0.0 yet. Windows will be rechecked on
-> the Alienware, and AMD Linux plus Raspberry Pi 4 will be checked before the
-> release and website are updated.
+## [4.0.0] - 2026-07-14
 
 ### Added
-- **You can run `tr300 --no-save`** when you want the terminal report without a
-  Markdown copy in Downloads. This is useful for scripts, tests, and temporary
-  checks.
+- **Reports are saved only when you ask.** Ordinary `tr300` and `report` runs
+  now show information without creating a file. Use `-r`, `--report`, `-s`, or
+  `--save` when you want the same safe Markdown copy in Downloads.
 - **JSON reports explain their numbers more clearly.** Scripts can now see
   whether collection was full or fast, distinguish physical cores from logical
   processors, read exact uptime and OS build details, and understand what disk,
@@ -29,9 +26,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Mac reports contain substantially better native detail.** Full reports can
   show the real boot state, FileVault, model, Apple chip and core layout, current
   screen resolution, battery health/cycles, OS build/name, and terminal host.
+- **Mac downloads are now signed and checked by Apple automatically.** A release
+  cannot publish either Mac archive unless its Developer ID signature is valid
+  and Apple accepts it. This works even when the release is started from
+  Windows.
 
 ### Changed
-- **The eventual release number is 4.0.0, not 3.18.0.** Nothing breaks for
+- **The release number is 4.0.0, not 3.18.0.** Nothing breaks for
   normal command-line use or existing JSON keys. The major number is for people
   who embed TR-300's Rust library directly: its public information records grew
   new fields, so Rust code that builds those records by hand needs a small
@@ -48,6 +49,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the way macOS accounts for active, wired, and compressed memory.
 - **Temporary self-update downloads are private, randomly named, size-limited,
   and cleaned up** whether the update succeeds or fails.
+- **Updates stop cleanly when workplace security blocks a write or installer.**
+  TR-300 keeps the working version, stops making more write-heavy attempts,
+  explains what happened, includes official manual/release links in terminal
+  and JSON output, and returns failure instead of pretending the update worked.
+  It never offers an unsafe direct replacement path.
 
 ### Fixed
 - **Mac available memory no longer says zero while the machine is only partly
@@ -63,7 +69,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counts, or time-windowed Windows load values when it does not have evidence.
 
 ### Security
-- Saved reports never overwrite or follow an existing file path.
+- Normal reports no longer write a file at all. Reports you deliberately save
+  still never overwrite or follow an existing path.
+- Both Mac downloads carry the exact expected Developer ID/team signatures,
+  hardened runtime, trusted timestamps, and an Apple-accepted notarization
+  record.
 - Mac reports intentionally omit serial numbers, hardware UUIDs, and similar
   unique device identifiers.
 - The locked dependency set is clear of known RustSec advisories.
@@ -71,13 +81,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Internal
 - Mac test, build, and speed results now block CI again, and the dependency
   security audit is blocking too.
-- All 134 tests pass both natively on Apple Silicon and through Rosetta. Live
-  full/fast, table/JSON, ASCII fallback, battery, FileVault, updater, and zsh
-  profile checks passed on the local M2 MacBook Pro. Fast mode measured 0.21s
-  natively and 0.31s through Rosetta, well below the 1.5s gate.
-- Windows code compiles cleanly, but its real hardware/installer validation is
-  deliberately saved for the Alienware. AMD Linux, Raspberry Pi 4, the v4.0.0
-  release, and the website update also remain pending.
+- Native Apple Silicon and Rosetta suites, release builds, real report checks,
+  privacy checks, manual-save behavior, and an actual Apple notarization
+  round-trip passed on the local M2 MacBook Pro.
+- Windows code still cross-checks cleanly. Emmett explicitly chose to ship this
+  release before returning to the personal Alienware, AMD Linux laptop, and
+  Raspberry Pi 4; those checks stay on the board and any real mismatch becomes
+  a follow-up patch. The work machine's antivirus behavior is separate from the
+  personal Windows accuracy check.
 
 ## [3.17.0] - 2026-06-08
 

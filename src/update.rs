@@ -47,6 +47,7 @@ const EXE_CORPORATE_URL: &str = "https://github.com/QubeTX/qube-machine-report/r
 const CRATE_NAME: &str = "tr300";
 
 const MANUAL_INSTALL_URL: &str = "https://github.com/QubeTX/qube-machine-report#installation";
+const RELEASES_PAGE: &str = "https://github.com/QubeTX/qube-machine-report/releases/latest";
 
 // ── Strategy types ─────────────────────────────────────────────────
 
@@ -183,12 +184,16 @@ enum StrategyError {
     Preflight(String),
     /// Strategy launched and exited non-zero.
     Runtime(String),
+    /// A write, staged file, or launcher was blocked by endpoint/filesystem
+    /// policy. Stop instead of trying more write-heavy strategies.
+    PolicyBlocked(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttemptKind {
     Skipped,
     Failed,
+    Blocked,
 }
 
 #[derive(Debug)]
@@ -325,6 +330,7 @@ pub fn run(config: &Config) -> i32 {
                 let kind = match record.kind {
                     AttemptKind::Skipped => "skipped",
                     AttemptKind::Failed => "failed",
+                    AttemptKind::Blocked => "blocked",
                 };
                 println!(
                     "      · {} — {}: {}",
@@ -335,6 +341,13 @@ pub fn run(config: &Config) -> i32 {
             }
             println!();
             println!("  To update manually, see: {}", MANUAL_INSTALL_URL);
+            if failure
+                .attempts
+                .iter()
+                .any(|attempt| attempt.kind == AttemptKind::Blocked)
+            {
+                println!("  Official releases: {}", RELEASES_PAGE);
+            }
             2
         }
     }
@@ -393,34 +406,52 @@ fn run_json() -> i32 {
             0
         }
         Err(failure) => {
-            let attempts: Vec<serde_json::Value> = failure
-                .attempts
-                .iter()
-                .map(|record| {
-                    serde_json::json!({
-                        "strategy": record.strategy.json_id(),
-                        "result": match record.kind {
-                            AttemptKind::Skipped => "skipped",
-                            AttemptKind::Failed => "failed",
-                        },
-                        "message": record.message,
-                    })
-                })
-                .collect();
-            let mut payload = serde_json::json!({
-                "action": "update",
-                "success": false,
-                "message": "Update failed; see attempts",
-                "current_version": current,
-                "latest_version": latest,
-                "update_available": true,
-                "attempts": attempts,
-            });
+            let mut payload = update_failure_payload(&current, &latest, &failure);
             inject_install_origin(&mut payload);
             println!("{}", payload);
             2
         }
     }
+}
+
+fn update_failure_payload(
+    current: &str,
+    latest: &str,
+    failure: &UpdateFailure,
+) -> serde_json::Value {
+    let attempts: Vec<serde_json::Value> = failure
+        .attempts
+        .iter()
+        .map(|record| {
+            serde_json::json!({
+                "strategy": record.strategy.json_id(),
+                "result": match record.kind {
+                    AttemptKind::Skipped => "skipped",
+                    AttemptKind::Failed => "failed",
+                    AttemptKind::Blocked => "blocked",
+                },
+                "message": record.message,
+            })
+        })
+        .collect();
+    let blocked = failure
+        .attempts
+        .iter()
+        .any(|attempt| attempt.kind == AttemptKind::Blocked);
+    let mut payload = serde_json::json!({
+        "action": "update",
+        "success": false,
+        "message": "Update failed; see attempts",
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": true,
+        "attempts": attempts,
+        "manual_install_url": MANUAL_INSTALL_URL,
+    });
+    if blocked {
+        payload["official_releases_url"] = serde_json::Value::String(RELEASES_PAGE.to_string());
+    }
+    payload
 }
 
 /// Add a top-level `install_origin` field to the JSON payload on Windows.
@@ -652,9 +683,20 @@ fn execute_update(
     latest: &str,
     strategies: &[UpdateStrategy],
 ) -> Result<UpdateStrategy, UpdateFailure> {
+    execute_update_with(latest, strategies, try_strategy)
+}
+
+fn execute_update_with<F>(
+    latest: &str,
+    strategies: &[UpdateStrategy],
+    mut attempt: F,
+) -> Result<UpdateStrategy, UpdateFailure>
+where
+    F: FnMut(UpdateStrategy, &str) -> Result<(), StrategyError>,
+{
     let mut attempts = Vec::new();
     for &strategy in strategies {
-        match try_strategy(strategy, latest) {
+        match attempt(strategy, latest) {
             Ok(()) => return Ok(strategy),
             Err(StrategyError::Preflight(message)) => {
                 eprintln!("  · skipped {}: {}", strategy.label(), message);
@@ -671,6 +713,18 @@ fn execute_update(
                     kind: AttemptKind::Failed,
                     message,
                 });
+            }
+            Err(StrategyError::PolicyBlocked(message)) => {
+                eprintln!("  · {} blocked: {}", strategy.label(), message);
+                attempts.push(AttemptRecord {
+                    strategy,
+                    kind: AttemptKind::Blocked,
+                    message,
+                });
+                // A policy/antivirus block is a machine-level signal. Trying
+                // another downloader or replacement method can repeat the
+                // freeze and does not make an unsafe direct overwrite sound.
+                break;
             }
         }
     }
@@ -751,16 +805,54 @@ fn run_command_status(launcher: &str, args: &[&str]) -> Result<(), StrategyError
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StrategyError::Preflight(
             format!("{} not on PATH", launcher),
         )),
-        Err(e) => Err(StrategyError::Preflight(format!(
-            "Failed to spawn {}: {}",
+        Err(e) if likely_endpoint_policy_error(&e) => Err(StrategyError::PolicyBlocked(format!(
+            "endpoint security or execution policy blocked `{}`: {}. TR-300 stopped without trying another updater; the update was not reported as successful",
             launcher, e
         ))),
+        Err(e) => Err(StrategyError::Preflight(format!("Failed to spawn {}: {}", launcher, e))),
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(StrategyError::Runtime(format!(
             "{} exited with code {}",
             launcher,
             status.code().unwrap_or(-1)
         ))),
+    }
+}
+
+fn likely_endpoint_policy_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::NotFound
+    ) || matches!(
+        error.raw_os_error(),
+        // Windows: access denied, sharing/lock violation, virus detected or
+        // removed, operation aborted, and operation cancelled by policy/UAC.
+        Some(5 | 32 | 33 | 225 | 226 | 995 | 1223)
+    )
+}
+
+#[cfg(windows)]
+fn prelaunch_installer_io_error(
+    operation: &str,
+    path: &std::path::Path,
+    official_url: &str,
+    error: std::io::Error,
+) -> StrategyError {
+    let detail = format!(
+        "{} at {} failed: {}. The installer was not launched and the existing TR-300 installation was left in place",
+        operation,
+        path.display(),
+        error
+    );
+    if likely_endpoint_policy_error(&error) {
+        StrategyError::PolicyBlocked(format!(
+            "{}. Endpoint security or filesystem policy may be responsible. Ask IT to allow the official asset or install it manually: {}",
+            detail, official_url
+        ))
+    } else {
+        StrategyError::Runtime(detail)
     }
 }
 
@@ -836,6 +928,9 @@ fn try_installer_powershell(_launcher: &str) -> Result<(), StrategyError> {
 /// and scheduled a `MoveFileEx`-style delete-on-reboot instead).
 #[cfg(windows)]
 const MSI_EXIT_REBOOT_REQUIRED: i32 = 3010;
+/// Windows Installer policy explicitly forbids this installation.
+#[cfg(windows)]
+const MSI_EXIT_INSTALL_REJECTED_BY_POLICY: i32 = 1625;
 #[cfg(windows)]
 const MAX_INSTALLER_BYTES: u64 = 256 * 1024 * 1024;
 #[cfg(windows)]
@@ -848,7 +943,7 @@ const MAX_SIDECAR_BYTES: u64 = 16 * 1024;
 /// or an installer/sidecar mismatch. The sidecar is not an independent
 /// signature and does not replace HTTPS origin authentication.
 #[cfg(windows)]
-fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
+fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), StrategyError> {
     use std::io::Read;
 
     let agent = ureq::AgentBuilder::new()
@@ -859,24 +954,26 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
         .get(url)
         .set("User-Agent", &format!("tr300/{}", VERSION))
         .call()
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| StrategyError::Runtime(format!("Request failed: {}", e)))?;
 
     if resp
         .header("Content-Length")
         .and_then(|value| value.parse::<u64>().ok())
         .is_some_and(|length| length > MAX_INSTALLER_BYTES)
     {
-        return Err(format!(
+        return Err(StrategyError::Runtime(format!(
             "Installer exceeds the {} MiB safety limit",
             MAX_INSTALLER_BYTES / 1024 / 1024
-        ));
+        )));
     }
 
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|e| format!("Failed to create temp file {}: {}", path.display(), e))?;
+        .map_err(|error| {
+            prelaunch_installer_io_error("creating the staged installer", path, url, error)
+        })?;
     let reader = resp.into_reader();
     let mut reader = reader.take(MAX_INSTALLER_BYTES + 1);
     let write_result = std::io::copy(&mut reader, &mut file).and_then(|bytes| {
@@ -891,7 +988,12 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), String> {
     if let Err(error) = write_result {
         drop(file);
         let _ = std::fs::remove_file(path);
-        return Err(format!("Failed to write temp file: {}", error));
+        return Err(prelaunch_installer_io_error(
+            "writing or syncing the staged installer",
+            path,
+            url,
+            error,
+        ));
     }
     Ok(())
 }
@@ -941,12 +1043,11 @@ fn parse_sha256_sidecar(content: &str) -> Option<String> {
 
 /// Compute the SHA-256 of `path`, returning the lowercase hex.
 #[cfg(windows)]
-fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
+fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher).map_err(|e| format!("Failed to hash: {}", e))?;
+    std::io::copy(&mut file, &mut hasher)?;
     Ok(format!("{:x}", hasher.finalize()))
 }
 
@@ -959,17 +1060,27 @@ fn compute_sha256(path: &std::path::Path) -> Result<String, String> {
 /// authentication; a future signed-release design would be a separate trust
 /// layer.
 #[cfg(windows)]
-fn verify_checksum(installer_path: &std::path::Path, installer_url: &str) -> Result<(), String> {
+fn verify_checksum(
+    installer_path: &std::path::Path,
+    installer_url: &str,
+) -> Result<(), StrategyError> {
     println!("  Verifying SHA256 checksum...");
-    let sidecar_content = fetch_sha256_sidecar(installer_url)?;
+    let sidecar_content = fetch_sha256_sidecar(installer_url).map_err(StrategyError::Runtime)?;
     let expected = parse_sha256_sidecar(&sidecar_content).ok_or_else(|| {
-        format!(
+        StrategyError::Runtime(format!(
             "Malformed .sha256 sidecar from {}.sha256: {:?}",
             installer_url, sidecar_content
+        ))
+    })?;
+    let actual = compute_sha256(installer_path).map_err(|error| {
+        prelaunch_installer_io_error(
+            "reading the staged installer for checksum verification",
+            installer_path,
+            installer_url,
+            error,
         )
     })?;
-    let actual = compute_sha256(installer_path)?;
-    checksum_verdict(&actual, &expected)
+    checksum_verdict(&actual, &expected).map_err(StrategyError::Runtime)
 }
 
 /// Compare a computed SHA-256 against the expected sidecar hash, refusing on
@@ -989,7 +1100,7 @@ fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
 
 #[cfg(any(windows, test))]
 struct StagedInstaller {
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
     path: std::path::PathBuf,
 }
 
@@ -998,11 +1109,57 @@ impl StagedInstaller {
     fn new(extension: &str) -> std::io::Result<Self> {
         let dir = tempfile::Builder::new().prefix("tr300-update-").tempdir()?;
         let path = dir.path().join(format!("installer.{}", extension));
-        Ok(Self { _dir: dir, path })
+        Ok(Self { dir, path })
     }
 
     fn path(&self) -> &std::path::Path {
         &self.path
+    }
+
+    fn close(self) -> std::io::Result<()> {
+        self.dir.close()
+    }
+}
+
+#[cfg(any(windows, test))]
+fn finish_staged_attempt(
+    staged: StagedInstaller,
+    result: Result<(), StrategyError>,
+) -> Result<(), StrategyError> {
+    let staging_dir = staged
+        .path()
+        .parent()
+        .unwrap_or_else(|| staged.path())
+        .to_path_buf();
+    match staged.close() {
+        Ok(()) => result,
+        Err(cleanup_error) => {
+            let cleanup_note = format!(
+                "staging cleanup at {} also failed: {}. Security software may still be holding the file; it is safe to remove that tr300-update directory after the scanner releases it",
+                staging_dir.display(),
+                cleanup_error
+            );
+            match result {
+                // The installed version was already re-executed and verified.
+                // A leftover temp directory must not turn a real update into a
+                // false failure, but it should never be silent.
+                Ok(()) => {
+                    eprintln!("  · warning: {}", cleanup_note);
+                    Ok(())
+                }
+                Err(StrategyError::Preflight(message)) => Err(StrategyError::Preflight(format!(
+                    "{}; {}",
+                    message, cleanup_note
+                ))),
+                Err(StrategyError::Runtime(message)) => Err(StrategyError::Runtime(format!(
+                    "{}; {}",
+                    message, cleanup_note
+                ))),
+                Err(StrategyError::PolicyBlocked(message)) => Err(StrategyError::PolicyBlocked(
+                    format!("{}; {}", message, cleanup_note),
+                )),
+            }
+        }
     }
 }
 
@@ -1113,19 +1270,20 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
 #[cfg(windows)]
 fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("msi").map_err(|error| {
-        StrategyError::Preflight(format!(
-            "Failed to create private update staging: {}",
-            error
-        ))
+        prelaunch_installer_io_error(
+            "creating a private update staging directory",
+            &std::env::temp_dir(),
+            url,
+            error,
+        )
     })?;
     let temp_path = staged.path();
 
     let result = (|| -> Result<(), StrategyError> {
         println!("  Downloading MSI installer...");
-        download_to_file(url, temp_path)
-            .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
+        download_to_file(url, temp_path)?;
 
-        verify_checksum(temp_path, url).map_err(StrategyError::Runtime)?;
+        verify_checksum(temp_path, url)?;
 
         println!("  Launching Windows Installer...");
         // /passive shows a progress dialog with no user interaction; /norestart
@@ -1136,7 +1294,9 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         let status = Command::new("msiexec")
             .args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"])
             .status()
-            .map_err(|e| StrategyError::Preflight(format!("Failed to spawn msiexec: {}", e)))?;
+            .map_err(|error| {
+                prelaunch_installer_io_error("launching Windows Installer", temp_path, url, error)
+            })?;
 
         let code = status.code().unwrap_or(-1);
         if code == MSI_EXIT_REBOOT_REQUIRED {
@@ -1149,10 +1309,16 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
                 MSI_EXIT_REBOOT_REQUIRED
             )));
         }
+        if code == MSI_EXIT_INSTALL_REJECTED_BY_POLICY {
+            return Err(StrategyError::PolicyBlocked(format!(
+                "Windows Installer rejected the update by system policy (msiexec exit {}). TR-300 stopped without trying another replacement method and will not claim success. Ask IT to approve the official installer: {}",
+                MSI_EXIT_INSTALL_REJECTED_BY_POLICY, url
+            )));
+        }
         if !status.success() {
             return Err(StrategyError::Runtime(format!(
-                "msiexec exited with code {} (likely user cancel, UAC denied, or install error)",
-                code
+                "msiexec exited with code {} (likely user cancel, UAC denied, security software, or install error). The update was not verified; check the retained installation with `tr300 --version`",
+                code,
             )));
         }
 
@@ -1160,10 +1326,7 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         Ok(())
     })();
 
-    // `staged` owns a private randomized directory. Its Drop cleanup runs on
-    // success or failure after msiexec exits and never changes the result.
-    drop(staged);
-    result
+    finish_staged_attempt(staged, result)
 }
 
 /// Download the matching Inno Setup EXE installer, verify its SHA256,
@@ -1178,19 +1341,20 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
 #[cfg(windows)]
 fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("exe").map_err(|error| {
-        StrategyError::Preflight(format!(
-            "Failed to create private update staging: {}",
-            error
-        ))
+        prelaunch_installer_io_error(
+            "creating a private update staging directory",
+            &std::env::temp_dir(),
+            url,
+            error,
+        )
     })?;
     let temp_path = staged.path();
 
     let result = (|| -> Result<(), StrategyError> {
         println!("  Downloading EXE installer...");
-        download_to_file(url, temp_path)
-            .map_err(|e| StrategyError::Runtime(format!("Download failed: {}", e)))?;
+        download_to_file(url, temp_path)?;
 
-        verify_checksum(temp_path, url).map_err(StrategyError::Runtime)?;
+        verify_checksum(temp_path, url)?;
 
         println!("  Launching Inno Setup installer...");
         // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
@@ -1198,14 +1362,14 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         let status = Command::new(temp_path)
             .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
             .status()
-            .map_err(|e| {
-                StrategyError::Preflight(format!("Failed to spawn EXE installer: {}", e))
+            .map_err(|error| {
+                prelaunch_installer_io_error("launching the EXE installer", temp_path, url, error)
             })?;
 
         if !status.success() {
             return Err(StrategyError::Runtime(format!(
-                "EXE installer exited with code {} (likely user cancel, UAC denied, or install error)",
-                status.code().unwrap_or(-1)
+                "EXE installer exited with code {} (likely user cancel, UAC denied, security software, or install error). The update was not verified; check the retained installation with `tr300 --version`",
+                status.code().unwrap_or(-1),
             )));
         }
 
@@ -1213,10 +1377,7 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         Ok(())
     })();
 
-    // Private staging is removed after the installer process exits. Cleanup is
-    // best-effort inside TempDir::drop and never overrides the update result.
-    drop(staged);
-    result
+    finish_staged_attempt(staged, result)
 }
 
 #[cfg(not(windows))]
@@ -1588,6 +1749,70 @@ mod tests {
         assert!(!first_dir.exists());
         drop(second);
         assert!(!second_dir.exists());
+    }
+
+    #[test]
+    fn explicit_staging_cleanup_preserves_a_verified_success() {
+        let staged = StagedInstaller::new("exe").unwrap();
+        let staging_dir = staged.path().parent().unwrap().to_path_buf();
+        std::fs::write(staged.path(), b"payload").unwrap();
+
+        assert!(finish_staged_attempt(staged, Ok(())).is_ok());
+        assert!(!staging_dir.exists());
+    }
+
+    #[test]
+    fn endpoint_policy_io_errors_are_classified_conservatively() {
+        assert!(likely_endpoint_policy_error(&std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "blocked"
+        )));
+        assert!(likely_endpoint_policy_error(
+            &std::io::Error::from_raw_os_error(225)
+        ));
+        assert!(!likely_endpoint_policy_error(&std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "bad payload"
+        )));
+    }
+
+    #[test]
+    fn endpoint_policy_block_stops_fallback_chain() {
+        let strategies = [UpdateStrategy::Cargo, UpdateStrategy::InstallerCurl];
+        let mut calls = 0;
+        let failure = execute_update_with("4.0.0", &strategies, |_strategy, _latest| {
+            calls += 1;
+            Err(StrategyError::PolicyBlocked(
+                "simulated endpoint policy block".to_string(),
+            ))
+        })
+        .expect_err("a policy block must fail the update");
+
+        assert_eq!(calls, 1, "no second write strategy should be attempted");
+        assert_eq!(failure.attempts.len(), 1);
+        assert_eq!(failure.attempts[0].kind, AttemptKind::Blocked);
+        assert!(failure.attempts[0].message.contains("endpoint policy"));
+
+        let payload = update_failure_payload("3.17.0", "4.0.0", &failure);
+        assert_eq!(payload["success"], false);
+        assert_eq!(payload["attempts"][0]["result"], "blocked");
+        assert_eq!(payload["manual_install_url"], MANUAL_INSTALL_URL);
+        assert_eq!(payload["official_releases_url"], RELEASES_PAGE);
+    }
+
+    #[test]
+    fn ordinary_update_failure_has_manual_url_without_policy_specific_url() {
+        let failure = UpdateFailure {
+            attempts: vec![AttemptRecord {
+                strategy: UpdateStrategy::Cargo,
+                kind: AttemptKind::Failed,
+                message: "simulated ordinary failure".to_string(),
+            }],
+        };
+        let payload = update_failure_payload("3.17.0", "4.0.0", &failure);
+        assert_eq!(payload["attempts"][0]["result"], "failed");
+        assert_eq!(payload["manual_install_url"], MANUAL_INSTALL_URL);
+        assert!(payload.get("official_releases_url").is_none());
     }
 
     #[test]

@@ -8,18 +8,14 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v3.17.0](https://github.com/QubeTX/qube-machine-report/releases/tag/v3.17.0) (2026-06-08). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
+Latest release: [v4.0.0](https://github.com/QubeTX/qube-machine-report/releases/tag/v4.0.0) (2026-07-14). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
 
-Development status: the default branch contains an unreleased macOS accuracy
-and reliability checkpoint. v3.17.0 remains the installable release until live
-Windows, AMD Linux, and Raspberry Pi 4 validation is complete and v4.0.0 is
-explicitly tagged.
-
-The next version is a major release for Rust-library SemVer only: public
+v4 is a major release for Rust-library SemVer only: public
 information records gained fields and are now non-exhaustive. The `tr300`
 command, existing schema-v1 JSON keys, installer names, and update path remain
 compatible. Applications that directly construct or exhaustively match public
-Rust records should follow the v4 migration note when it is published.
+Rust records must use constructors/default updates or non-exhaustive matching.
+The high-level collection/report APIs remain available.
 
 ## Features
 
@@ -42,11 +38,14 @@ Rust records should follow the v4 migration note when it is published.
 - PowerShell 7+ ("PowerShell Core") detection on Windows — reads `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>\SemanticVersion` so `pwsh` users see the actual installed version instead of falling back to Windows PowerShell 5.x
 - Schema-versioned JSON output for scripting, including collection mode and
   explicit CPU-load, frequency, disk, and memory value definitions
-- Collision-safe auto-save of Markdown reports to Downloads on manual runs,
-  with `--no-save` for scripts and temporary checks
+- Read-only ordinary reports with explicit, collision-safe Markdown saving via
+  `-r`/`--report`/`-s`/`--save`
 - Fast mode (`--fast`) for sub-second auto-run startup
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Resilient self-update with cargo-first probing and shell/PowerShell installer fallbacks — the cargo path now verifies the new version actually landed (and falls through to the prebuilt installer if crates.io is lagging), so `tr300 update` no longer reports a false success
+- Endpoint-policy-aware update failure: antivirus/Group Policy write or launch
+  blocks retain the current install, stop additional write-heavy fallbacks, and
+  return actionable manual-release guidance
 - Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
 - Self-installation with shell alias and auto-run
 
@@ -115,6 +114,13 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-rep
 Installs to `~/.cargo/bin/tr300` and modifies your shell's PATH. **Does not
 require Rust** — downloads the prebuilt binary from the GitHub Release.
 
+Starting with v4.0.0, both macOS release binaries are Developer ID signed with
+hardened runtime and a trusted timestamp, and GitHub Actions requires Apple
+Notary Service acceptance before either archive can be published. Because
+`tr300` is a standalone command rather than an `.app`/`.pkg` bundle, there is no
+ticket container to staple; Gatekeeper can validate the signed bytes through
+Apple's online notarization record.
+
 ### Alternative install methods
 
 <details>
@@ -156,7 +162,7 @@ cargo install tr300
 **From a specific Git tag:**
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v3.17.0
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v4.0.0
 ```
 
 **Local clone for development:**
@@ -170,7 +176,7 @@ cargo build --release
 ## Usage
 
 ```bash
-# Display system report (default)
+# Display system report without creating a report file (default)
 tr300
 
 # Use ASCII characters instead of Unicode
@@ -179,8 +185,12 @@ tr300 --ascii
 # Output as JSON
 tr300 --json
 
-# Display a full table without writing a Markdown file to Downloads
-tr300 --no-save
+# Save the full table as a Markdown report in Downloads
+tr300 --report
+# Equivalent save forms:
+tr300 -r
+tr300 --save
+tr300 -s
 
 # Custom title
 tr300 --title "MY SERVER"
@@ -262,7 +272,7 @@ exclusive with each other and with the legacy action flags.
 | `-t, --title <TITLE>` | Custom title for the report header |
 | `--no-color` | Disable colored output |
 | `--fast` | Fast mode: skip slow collectors for quick auto-run |
-| `--no-save` | Do not auto-save Markdown after a full table run |
+| `-r, -s, --report, --save` | Save this full table report as Markdown in Downloads |
 | `--no-elevation-hint` | Suppress the optional Linux `sudo` detail hint |
 | `--update` | Legacy flag form of `tr300 update` |
 | `--install` | Add to shell profile with alias and auto-run |
@@ -304,10 +314,13 @@ install or update to fail.
 | `cargo install` / PowerShell installer | Falls through to the legacy chain (cargo first, then `irm \| iex` PowerShell installer) | No |
 
 Detection uses a `HKCU\Software\TR300\InstallSource` registry marker that the
-four first-class installers write at install time. If the marker is missing
-(legacy install from before v3.15.0), the updater falls back to inspecting the
-running binary's path: `C:\Program Files\tr300\` → MSI Global, `%LocalAppData%
-\Programs\tr300\` → MSI Corporate, `~\.cargo\bin\` → legacy chain.
+four first-class installers write at install time, and verifies that its
+Global/Corporate scope matches the running path. If the marker is missing or
+stale, `~\.cargo\bin\` uses the legacy Cargo/PowerShell chain. A marker-free
+Program Files or LocalAppData copy is reported as `unknown` and also uses that
+conservative chain: the path identifies the edition, but cannot safely tell an
+MSI from an Inno EXE, so TR-300 does not guess and create a second installer
+registration.
 
 **Security (v3.15.2+):** every downloaded MSI / EXE installer is checked against
 its published `.sha256` sidecar before launching. A network MITM (corporate
@@ -322,6 +335,14 @@ scheduled a delete-on-reboot (msiexec exit code 3010) rather than replacing
 the locked binary in-place, the JSON `attempts[].message` contains an
 actionable "Reboot, then verify with `tr300 --version`" rather than a
 false-positive success.
+
+**Endpoint-policy failure (v4.0.0+):** if antivirus, Group Policy, AppLocker,
+or filesystem policy appears to block installer staging, a staged write, or
+installer launch, TR-300 stops the fallback chain instead of trying more
+write-heavy methods. The current installation is left in place, the update
+returns exit code 2, and terminal/JSON output records the attempt as `blocked`
+with the official release/manual-install link. There is no force/direct binary
+replacement path.
 
 **On macOS / Linux:**
 
@@ -343,8 +364,10 @@ on Windows (`msi-global` / `msi-corporate` / `exe-global` / `exe-corporate` /
 `cargo-or-installer` / `unknown`). Successful updates include the legacy
 `"method"` field plus a precise `"strategy"` value (`msi_global`,
 `msi_corporate`, `exe_global`, `exe_corporate`, or the legacy installer IDs).
-Failed updates include an `"attempts"` array with each strategy result and
-diagnostic message.
+Failed updates include an `"attempts"` array with each strategy result
+(`"skipped"`, `"failed"`, or `"blocked"`) and diagnostic message, plus a
+`"manual_install_url"`. Policy-blocked failures also include the direct
+`"official_releases_url"`.
 
 ## Release Automation
 
@@ -358,11 +381,14 @@ GitHub Actions handles both release assets and crates.io publishing:
   with `--locked`, and publishes `tr300` only when the repository
   `CARGO_REGISTRY_TOKEN` Actions secret is configured.
 - `Release` is the cargo-dist workflow triggered by an explicit version tag such
-  as `v3.14.3`; it builds the cross-platform archives and installers. New
+  as `v4.0.0`; it builds the cross-platform archives and installers. Before
+  upload, both Apple targets must pass Developer ID signing and Apple
+  notarization; the job fails closed if any credential or Apple gate fails. New
   installer assets use `tr300-installer.*`; the workflow also publishes
   `tr-300-installer.*` compatibility aliases so v3.14.2 binaries can
   self-update after the old package name was removed. The cargo-dist config
-  permits that checked-in workflow customization with `allow-dirty = ["ci"]`.
+  permits checked-in workflow/MSI customizations with
+  `allow-dirty = ["ci", "msi"]`.
 
 `Cargo.lock` is tracked so the crates.io publish workflow uses the same resolved
 dependency set that local release verification used.

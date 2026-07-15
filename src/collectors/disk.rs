@@ -80,8 +80,14 @@ fn disk_space_for_mount(path: &std::path::Path, fallback: (u64, u64)) -> (u64, u
     } else {
         stats.f_bsize
     };
+    // libc's statvfs counter typedefs vary by Unix target. These casts are
+    // required on targets where they are narrower than u64 and are identities
+    // on Linux; keep one portable calculation instead of divergent formulas.
+    #[allow(clippy::unnecessary_cast)]
     let total = (stats.f_blocks as u64).saturating_mul(fragment_size);
+    #[allow(clippy::unnecessary_cast)]
     let free = (stats.f_bfree as u64).saturating_mul(fragment_size);
+    #[allow(clippy::unnecessary_cast)]
     let available = (stats.f_bavail as u64).saturating_mul(fragment_size);
     if total == 0 {
         (fallback.0, fallback.1, fallback.1)

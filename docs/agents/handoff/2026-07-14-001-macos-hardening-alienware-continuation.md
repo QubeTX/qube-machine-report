@@ -1,5 +1,11 @@
 # Handoff: macOS hardening to Alienware continuation
 
+> Superseded for current v4 release/personal-fleet continuation by
+> [2026-07-14-002-v4-release-and-personal-fleet-continuation.md](./2026-07-14-002-v4-release-and-personal-fleet-continuation.md).
+> Keep this file as the historical implementation checkpoint; use the newer
+> handoff for the manual-save, policy-blocked updater, enforced Apple
+> notarization, release ledger, and revised post-release hardware boundary.
+
 **Date:** 2026-07-14 CDT  
 **Session:** 001  
 **Agent:** Codex  

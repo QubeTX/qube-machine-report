@@ -10,9 +10,7 @@ use predicates::prelude::*;
 use serde_json::Value;
 
 fn tr300() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_tr300"));
-    command.arg("--no-save");
-    command
+    Command::new(env!("CARGO_BIN_EXE_tr300"))
 }
 
 #[test]
@@ -34,7 +32,7 @@ fn test_version_flag() {
 }
 
 #[test]
-fn test_no_save_suppresses_markdown_side_effect_message() {
+fn test_default_report_has_no_markdown_side_effect_message() {
     tr300()
         .assert()
         .success()

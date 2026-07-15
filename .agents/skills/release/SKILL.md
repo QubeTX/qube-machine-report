@@ -28,6 +28,7 @@ You'll never use `--no-verify`, `--no-gpg-sign`, or `git push --tags` anywhere i
 
 | Bump | When | Example from history |
 |---|---|---|
+| Major (`X.Y.Z → (X+1).0.0`) | Public Rust source compatibility breaks even if CLI/JSON remain compatible | v3.17.0 → v4.0.0 (public records gained fields/signatures changed) |
 | Minor (`X.Y.0 → X.(Y+1).0`) | New user-visible flags, fields, behavior, or surface | v3.13.1 → v3.14.0 (positional `update`/`install`/`uninstall` actions) |
 | Patch (`X.Y.Z → X.Y.(Z+1)`) | Accuracy fixes, release-infra fixes, doc-only releases | v3.13.0 → v3.13.1 (`rust-toolchain.toml` MSRV pin) |
 
@@ -48,11 +49,12 @@ The reconciled canonical list is ten files. The first three are mandatory on any
 | # | File | What goes in |
 |---|---|---|
 | 1 | `CHANGELOG.md` | Prepend a `## [X.Y.Z] - YYYY-MM-DD` block at the top of the file (above `[Unreleased]` if present, or replacing the `Unreleased` heading). Keep-a-Changelog voice: grouped under `### Added` / `### Changed` / `### Fixed` / `### Internal`. Reference task IDs in parens for traceability. Match the voice of the most recent entry — read it first. |
+| 1b | `HUMAN_CHANGELOG.md` | Mirror the same release/date/groupings in plain English. Strip run IDs, SHAs, APIs, paths, GUIDs, task IDs, and dependency identifiers; keep user commands, platforms/installers, behavior, and benefit. Never update only one changelog. |
 | 2 | `README.md` | Update flag tables, install snippets, or sample output if anything user-visible changed. Skip if release is purely internal. |
 | 3 | `TESTING.md` | Append a `### vX.Y.Z — YYYY-MM-DD` block to the "Per-release verification log" listing local gates that passed, runtime smoke results, and the CI/crates-publish/release.yml run IDs (the IDs come after pushing — fill them in during step 12). Match the format of the most recent entry. |
 | 4 | `CODEX_PROJECT.md` | Only if release/install/update/deployment behavior changed. Otherwise skip. |
 | 5 | `AGENTS.md` | Bump the "Last verified against source" date. Update any drifted fact (current version line, MSRV, dependency versions). |
-| 6 | `AGENTS.md` | Add architectural notes for any new pattern introduced this release. Cite source URLs inline (man pages, Apple docs, Microsoft Learn). Skip if no new pattern. |
+| 6 | `CLAUDE.md` | Add architectural notes for any new pattern introduced this release. Cite source URLs inline (man pages, Apple docs, Microsoft Learn). Skip if no new pattern. |
 | 7 | `MASTER_PLAN.md` | Bump "Last updated" and "Current version" lines. Append or update the "Tag status" bulleted entry **after** the release publishes (the run IDs and asset count come from the actual published runs in step 12). |
 | 8 | `docs/architecture-decisions.md` | Only when rationale or release workflow itself changes. Skip otherwise. |
 | 9 | `/Users/realemmetts/.codex/AGENTS.md` | Only when repo deployment workflow changes AND the path exists on the current host. This is the original macOS author's global Codex guide; Windows hosts silently skip. Check `Test-Path` (or `test -f`) before editing. |
@@ -73,6 +75,9 @@ cargo test --workspace --all-targets
 cargo package --locked --list
 cargo publish --dry-run --locked
 cargo build --release --workspace
+cargo audit
+actionlint .github/workflows/*.yml
+shellcheck scripts/sign-notarize-macos.sh
 ```
 
 Then runtime smoke on the freshly-built binary:
@@ -82,6 +87,13 @@ Then runtime smoke on the freshly-built binary:
 ./target/release/tr300 --fast --json | python3 -m json.tool   # parses cleanly
 ./target/release/tr300 --ascii               # visual smoke; table renders
 ```
+
+After any shared/macOS/release-workflow change, also run native Apple Silicon
+and Rosetta all-target tests, both release builds, full/fast/JSON/ASCII/
+manual-save/no-write smokes, and privacy/parity checks. After Apple credential,
+script, archive, or workflow-input changes, run a real cargo-dist archive
+Developer ID signing → Apple `Accepted` → repack → sidecar/manifest checksum
+test. Do not tag from Windows/Linux-only evidence after reopening the Mac gate.
 
 Why both `cargo package --locked --list` and `cargo publish --dry-run --locked` — they catch different classes of issue. `package --list` shows what files end up in the crate (look for accidentally-included `.env` / `target/` / fixtures; the release commit is the cheapest time to catch them). `publish --dry-run` runs the full publish pipeline minus the upload — it catches the `Cargo.lock` resolver mismatches, version conflicts, and credential issues that bite at the publish step otherwise.
 
@@ -149,7 +161,7 @@ Green means all of these passed:
 - `test` (cargo test --workspace --all-targets on Linux + macOS ARM + Windows)
 - `build` (release build smoke on all three platforms)
 - `speed` (5-run median of `tr300 --fast` < 1500 ms on all three platforms)
-- `audit` (cargo audit, advisory-only)
+- `audit` (cargo audit, blocking)
 - `dist-plan` (cargo-dist config parses)
 
 If any job fails:
@@ -204,7 +216,9 @@ gh run list --workflow=release.yml --limit 3
 gh run watch <run-id>
 ```
 
-`release.yml` is auto-generated by cargo-dist v0.31.0. Success looks like 10 jobs passing:
+`release.yml` is generated by cargo-dist v0.31.0 and checked in with the
+documented compatibility-alias and fail-closed Apple signing/notarization
+customizations. Success looks like 10 jobs passing:
 
 - `plan` (1 job)
 - `build-local-artifacts` (6 jobs — one per target: `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`)
@@ -212,15 +226,31 @@ gh run watch <run-id>
 - `host` (1 job)
 - `announce` (1 job)
 
-The published GitHub Release has **22 assets for v3.14.3+**:
+For both Apple build jobs, verify that the pre-upload signing step completed,
+Apple returned `Accepted`, and cargo-dist uploaded the repacked signed archive.
+Missing credentials, signing failure, or any non-`Accepted` result must fail the
+job; there is deliberately no unsigned fallback.
+
+After `release.yml` succeeds, watch the matching `windows-installers.yml` run.
+It downloads the release's Windows binary, builds the Corporate MSI plus Global
+and Corporate Inno Setup EXEs, and uploads those three installers and their
+three SHA-256 sidecars.
+
+The complete published GitHub Release has **28 assets for v4.0.0+**:
 - 6 platform binaries (tarballs / zip)
 - 1 MSI installer for Windows
 - 1 source tarball
 - 2 canonical installer scripts (`tr300-installer.sh`, `tr300-installer.ps1`)
 - 2 legacy alias installer scripts (`tr-300-installer.sh`, `tr-300-installer.ps1`) — preserved for v3.14.2 updater compatibility
-- A handful of cargo-dist metadata files (`dist-manifest.json`, checksums)
+- Cargo-dist metadata and checksums (22 cargo-dist assets total)
+- 1 Corporate MSI plus 2 Inno Setup EXEs
+- 3 SHA-256 sidecars for those additional Windows installers
 
-Pre-v3.14.3 releases had 20 assets (no legacy alias scripts). v3.14.4 onward should match v3.14.3 at 22.
+Download both public macOS archives and their sidecars. Verify each checksum,
+extract each binary, and confirm its version plus Developer ID signature,
+Team ID, timestamp, hardened-runtime flag, and Apple trust chain with
+`codesign`. The notarization proof is the `Accepted` workflow log; bare CLI
+archives are not expected to carry a stapled app ticket.
 
 If `release.yml` fails, you can't re-tag (tags are immutable). See § 13 for the fix-forward path.
 
@@ -232,7 +262,9 @@ After the GitHub Release publishes successfully, collect:
 - master CI run ID (from § 8)
 - crates-publish run ID (from § 9)
 - release.yml run ID (from § 11)
-- GitHub Release asset count (should be 22 for v3.14.3+)
+- windows-installers.yml run ID
+- both Apple `Accepted` results and public macOS signature/checksum evidence
+- GitHub Release asset count (should be 28 for v4.0.0+)
 
 Then update two files:
 
@@ -242,11 +274,11 @@ Then update two files:
 - Runtime smoke results
 - "**CI verification** — `master` CI run <id> passed..."
 - "**Crates.io verification** — crates-publish run <id> published `tr300` X.Y.Z..."
-- "**Release verification** — release.yml run <id> passed... GitHub Release published with N cargo-dist assets"
+- "**Release verification** — release.yml run <id> passed, both Apple jobs were accepted and signed archives verified, windows-installers.yml run <id> passed, and the GitHub Release published N assets"
 
 **`MASTER_PLAN.md`** — locate the "Tag status (as of YYYY-MM-DD)" bulleted list and append a new entry for `vX.Y.Z`:
 ```
-- `vX.Y.Z` (`<commit-sha>`): tagged + pushed; CI run <id> succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; crates-publish run <id> published `tr300` X.Y.Z to crates.io after rerunning fmt/clippy/tests/package/dry-run; release.yml run <id> succeeded across plan + six target artifact builds + global artifacts + host + announce; GitHub Release published with 22 assets, including canonical `tr300-installer.*` installers and `tr-300-installer.*` compatibility aliases.
+- `vX.Y.Z` (`<commit-sha>`): tagged + pushed; CI run <id> succeeded across fmt/clippy/test/build/audit/dist-plan/speed gates; crates-publish run <id> published `tr300` X.Y.Z to crates.io after rerunning fmt/clippy/tests/package/dry-run; release.yml run <id> succeeded across plan + six target artifact builds + global artifacts + host + announce, including Accepted notarization and verified Developer ID signatures for both macOS archives; windows-installers.yml run <id> published the three supplemental Windows installers and sidecars; GitHub Release published with 28 assets, including canonical `tr300-installer.*` installers and `tr-300-installer.*` compatibility aliases.
 ```
 
 Also bump the "Last updated" and "Current version" lines at the top of `MASTER_PLAN.md`.
@@ -310,11 +342,11 @@ These have all bitten previous releases. They're the load-bearing why-not-this-i
 
 - **The crate name is `tr300`** (lowercase, no hyphen) since v3.14.3. `cargo install tr300`, library import path `tr300`, installer URLs `tr300-installer.*`. The legacy `tr-300` crate name is GONE from crates.io (recreated under the corrected name in v3.14.3). Legacy `tr-300-installer.*` aliases stay in releases for v3.14.2 updater compatibility, but new install instructions point at `tr300`.
 
-- **`cargo-dist` regenerates `release.yml`** via `dist init` (the binary is named `dist`, not `cargo dist`). After regeneration, **preserve the legacy installer alias copy step** that lives in the workflow — without it, the v3.14.2 updater can't fall through from the deleted old Cargo package to the installer fallback.
+- **`cargo-dist` regenerates `release.yml`** via `dist init` (the binary is named `dist`, not `cargo dist`). After regeneration, preserve both the legacy installer alias copy step and the fail-closed Apple signing/notarization step. Losing either breaks an established compatibility or trust contract and requires another Mac gate.
 
 - **`Cargo.lock` is tracked.** Both local `cargo package --locked` and the CI publish workflow use `--locked`. Keep `Cargo.lock` in git — don't add it to `.gitignore` and don't delete it before a release.
 
-- **`Cargo.toml` has `allow-dirty = ["ci"]`** in `[workspace.metadata.dist]`. This is the flag that lets the checked-in `release.yml` keep its small legacy-alias customization without failing `dist plan` in CI. If you regenerate the workflow, preserve this flag.
+- **`Cargo.toml` has `allow-dirty = ["ci", "msi"]`** in `[workspace.metadata.dist]`. `"ci"` permits the legacy-alias and Apple-trust workflow customizations; `"msi"` permits the customized WiX source. Preserve both.
 
 - **`gh run watch` blocks until completion**, but it doesn't return useful info on failure. Pair it with `gh run view <run-id> --log-failed` to actually see the error. The `--exit-status` flag on `gh run watch` will make it exit non-zero on failure, which is useful for scripting.
 

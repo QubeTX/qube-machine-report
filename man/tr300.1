@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH tr300 1  "tr300 3.17.0"
+.TH tr300 1  "tr300 4.0.0"
 .SH NAME
 tr300 \- TR\-300 Machine Report \- Cross\-platform system information
 .SH SYNOPSIS
-\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-\-no\-save\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIACTION\fR]
+\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-r\fR|\fB\-\-report\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIACTION\fR]
 .SH DESCRIPTION
 TR\-300 displays comprehensive system information including OS, network, CPU,
 memory, disk usage, and session details in a formatted table.
@@ -39,8 +39,8 @@ Fast mode: skip slow platform\-specific collectors for quick auto\-run
 \fB\-\-no\-elevation\-hint\fR
 Suppress the "Run with sudo / Administrator for more details" footer hint
 .TP
-\fB\-\-no\-save\fR
-Do not auto\-save a Markdown report after a full table run
+\fB\-r\fR, \fB\-\-report\fR
+Save this full table report as Markdown in Downloads
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)
@@ -63,6 +63,6 @@ install
 uninstall
 .RE
 .SH VERSION
-v3.17.0
+v4.0.0
 .SH AUTHORS
 Emmett S <hey@emmetts.dev>

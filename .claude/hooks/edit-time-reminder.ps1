@@ -39,7 +39,7 @@ if ($p -match '(^|/)src/collectors/platform/windows\.rs') {
     $msgs.Add('editing the Windows collectors -> load the windows-accuracy skill. Invariants: run the WMI batch on a fresh worker thread (COM init mode); pick PSCore version by (u64,u64,u64) semver tuple, not string sort; detect Win11 by CurrentBuild greater-or-equal 22000; do not reintroduce net user parsing for last-login.')
 }
 if ($p -match '(^|/)wix/' -or $p -match '(^|/)wix-corporate/' -or $p -match '(^|/)inno/' -or $p -match '(^|/)windows-installers\.yml' -or $p -match '(^|/)release\.yml' -or $p -match '(^|/)src/update\.rs') {
-    $msgs.Add('editing Windows packaging / self-update -> load the windows-distribution-and-update skill. Invariants: the four product GUIDs are PERMANENT (never regenerate); registry InstallSource marker strings stay in lockstep across installer template / update.rs / JSON; keep the SHA256 + post-install version verify; do not hand-edit auto-generated release.yml outside the allow-dirty zone.')
+    $msgs.Add('editing Windows packaging / self-update -> load the windows-distribution-and-update skill. Invariants: the four product GUIDs are PERMANENT (never regenerate); registry InstallSource marker strings stay in lockstep across installer template / update.rs / JSON; keep SHA256 + post-install version verify; preserve release.yml legacy aliases and fail-closed Apple signing/notarization zones.')
 }
 if ($base -eq 'changelog.md' -or $base -eq 'human_changelog.md') {
     $msgs.Add('editing a changelog -> load the tr300-changelog skill. Invariant: update CHANGELOG.md and HUMAN_CHANGELOG.md in the SAME commit, stripping technical noise from the human mirror.')

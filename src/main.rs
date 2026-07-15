@@ -83,11 +83,11 @@ fn main() -> Result<()> {
     };
 
     // Run the report
-    run_report(&config, mode, cli.no_save)
+    run_report(&config, mode, cli.save_report)
 }
 
 /// Run the main system report
-fn run_report(config: &Config, mode: CollectMode, no_save: bool) -> Result<()> {
+fn run_report(config: &Config, mode: CollectMode, save_report: bool) -> Result<()> {
     use std::io::Write;
 
     let info = SystemInfo::collect_with_mode(mode)?;
@@ -95,8 +95,12 @@ fn run_report(config: &Config, mode: CollectMode, no_save: bool) -> Result<()> {
     print!("{}", output);
     std::io::stdout().flush()?;
 
-    // Auto-save markdown report in full table mode (not --fast, not --json)
-    if mode == CollectMode::Full && config.format == OutputFormat::Table && !no_save {
+    // Saving is deliberately opt-in. Ordinary report runs must not touch the
+    // filesystem: managed Windows antivirus products can treat an unexpected
+    // report-file write as suspicious and stall the host. Clap restricts the
+    // explicit save aliases to full table mode; retain the defensive runtime
+    // gate in case this function is later called from another entry point.
+    if save_report && mode == CollectMode::Full && config.format == OutputFormat::Table {
         match report::save_markdown_report(&info) {
             Ok(outcome) if outcome.used_cwd_fallback => eprintln!(
                 "Report saved: {} (Downloads folder not found — saved to the current directory)",
