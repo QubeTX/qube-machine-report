@@ -344,6 +344,8 @@ These have all bitten previous releases. They're the load-bearing why-not-this-i
 
 - **`cargo-dist` regenerates `release.yml`** via `dist init` (the binary is named `dist`, not `cargo dist`). After regeneration, preserve both the legacy installer alias copy step and the fail-closed Apple signing/notarization step. Losing either breaks an established compatibility or trust contract and requires another Mac gate.
 
+- **A newly created signing keychain is not automatically searchable by `codesign`.** Preserve the v4.0.1 script sequence: capture the user search list, temporarily prepend the ephemeral keychain for the fingerprint-based signing call, restore the list immediately and from cleanup, then compare the embedded leaf-certificate fingerprint. Removing that sequence recreates v4.0.0's clean-runner failure even though `security find-identity` succeeds.
+
 - **`Cargo.lock` is tracked.** Both local `cargo package --locked` and the CI publish workflow use `--locked`. Keep `Cargo.lock` in git — don't add it to `.gitignore` and don't delete it before a release.
 
 - **`Cargo.toml` has `allow-dirty = ["ci", "msi"]`** in `[workspace.metadata.dist]`. `"ci"` permits the legacy-alias and Apple-trust workflow customizations; `"msi"` permits the customized WiX source. Preserve both.

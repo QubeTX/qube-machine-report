@@ -13,6 +13,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-07-15
+
+### Fixed
+- **Mac downloads can now complete their automatic signing step on GitHub's
+  clean Mac runners.** The first 4.0.0 release attempt stopped safely before
+  uploading anything when the runner could not find the newly imported signing
+  certificate. This patch makes that temporary certificate visible only while
+  signing, restores the runner immediately afterward, and double-checks that
+  the exact expected certificate ended up inside each binary. The failed 4.0.0
+  tag is kept as an honest historical record; 4.0.1 is the downloadable release.
+
 ## [4.0.0] - 2026-07-14
 
 ### Added

@@ -62,7 +62,26 @@ keychain="${work_dir}/tr300-signing.keychain-db"
 mkdir -m 700 "$credential_dir"
 chmod 700 "$work_dir"
 
+original_user_keychains=()
+while IFS= read -r line; do
+    keychain_path=${line#*\"}
+    keychain_path=${keychain_path%\"*}
+    if [[ -n $keychain_path ]]; then
+        original_user_keychains+=("$keychain_path")
+    fi
+done < <(security list-keychains -d user)
+keychain_search_modified=false
+
+restore_keychain_search() {
+    if [[ $keychain_search_modified != true ]]; then
+        return 0
+    fi
+    security list-keychains -d user -s "${original_user_keychains[@]}"
+    keychain_search_modified=false
+}
+
 cleanup() {
+    restore_keychain_search >/dev/null 2>&1 || true
     security delete-keychain "$keychain" >/dev/null 2>&1 || true
     rm -rf "$work_dir"
 }
@@ -123,6 +142,14 @@ if [[ ! -f $binary || ! -x $binary ]]; then
 fi
 
 echo "Signing ${archive_name} with hardened runtime..."
+# `codesign --keychain` restricts identity lookup but does not itself put a
+# newly-created keychain on the user's search list. GitHub's clean macOS
+# runners therefore could enumerate the imported identity with `security` yet
+# fail to resolve the exact same fingerprint in `codesign`. Add the ephemeral
+# keychain only for the signing operation and restore the original list
+# immediately afterward (and again from the cleanup trap on any failure).
+security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
+keychain_search_modified=true
 codesign \
     --force \
     --identifier com.qubetx.tr300 \
@@ -131,6 +158,7 @@ codesign \
     --keychain "$keychain" \
     --sign "$signing_fingerprint" \
     "$binary"
+restore_keychain_search
 codesign --verify --strict --verbose=4 "$binary"
 
 # Verify identity metadata as well as the cryptographic envelope. This catches
@@ -147,6 +175,19 @@ if ! printf '%s\n' "$signature_details" | grep -Fqx "TeamIdentifier=${APPLE_TEAM
 fi
 if ! printf '%s\n' "$signature_details" | grep -Fqx "Authority=${imported_identity}"; then
     echo "signed binary Developer ID authority mismatch for ${target}" >&2
+    exit 1
+fi
+certificate_prefix="${work_dir}/embedded-signing-certificate"
+codesign -d --extract-certificates="$certificate_prefix" "$binary" >/dev/null 2>&1
+embedded_fingerprint=$(openssl x509 \
+    -inform DER \
+    -in "${certificate_prefix}0" \
+    -noout \
+    -fingerprint \
+    -sha1 \
+    | sed 's/.*=//; s/://g')
+if [[ $embedded_fingerprint != "$signing_fingerprint" ]]; then
+    echo "signed binary certificate fingerprint mismatch for ${target}" >&2
     exit 1
 fi
 if ! printf '%s\n' "$signature_details" | grep -Eq '^CodeDirectory .*flags=.*\(runtime\)'; then

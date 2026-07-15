@@ -1,13 +1,14 @@
 # Handoff: v4 release and personal fleet continuation
 
-**Date:** 2026-07-14 CDT
+**Date:** 2026-07-14–15 CDT
 **Session:** 002
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
 **Working directory:** `/Users/realemmetts/Downloads/temp_git/qube-machine-report`
 **Default branch:** `master` (the operator's “push to main” means the remote
 default branch; do not create a second `main` branch)
-**Release version:** `4.0.0`
+**Release version:** `4.0.1` fix-forward (`v4.0.0` is immutable and failed
+closed before GitHub artifact hosting)
 **Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
 **Release commit / hosted run IDs:** recorded in the “Release ledger” below
 after hosted publication
@@ -37,7 +38,7 @@ That checkpoint deliberately deferred the v4 version bump and release until
 the other personal machines were available.
 
 The operator then changed the release boundary: the personal Windows, Linux,
-and Raspberry Pi verification may happen after v4.0.0, with forward patches as
+and Raspberry Pi verification may happen after v4.0.1, with forward patches as
 needed. The managed work Alienware is useful only for the antivirus failure
 case; it is not a substitute for personal Windows accuracy/installer evidence.
 The local task board was updated so those hardware passes remain explicit
@@ -99,6 +100,21 @@ manifest agreed on SHA-256
 `547d9426-6ab2-43a1-87df-e837aded786b`, and
 `eda85d0f-b9ee-43bd-9891-df909fd3724e` were also `Accepted`.
 
+The immutable v4.0.0 hosted run then revealed that local login-keychain state
+had masked a clean-runner prerequisite: a new keychain must be on the user
+search list for `codesign` even when `security find-identity` can enumerate it.
+v4.0.1 fixes that lifecycle and verifies the embedded leaf certificate. Both
+actual v4.0.1 cargo-dist archives passed the corrected path: arm64 submission
+`52b52e88-8eb9-457b-bb01-6c39f01da913` and x86_64 submission
+`e018b7e1-d16e-4a33-b2a2-5b62512652b5` returned `Accepted`. Their binaries
+report `tr300 4.0.1`; archive/sidecar/manifest SHA-256 values are
+`eb9be3c3afe19a6e6e07f6482f5fb1073e5d2407fd30fc449e362d76c41c59b9`
+(arm64) and
+`5549e3d26ddcd20b0ec74f11e083d94183b30ab6eaf4e80f9f42f3ac9610ec46`
+(x86_64). The embedded leaf fingerprint matches the configured identity, and
+the original user keychain search list was restored exactly after success and
+after real timestamp/notary transport failures.
+
 Apple does not provide a useful stapling path for a bare CLI binary inside a
 tar.gz archive: `stapler` targets supported bundles/packages, and
 `spctl --type execute` does not treat a standalone signed CLI as an app bundle.
@@ -122,9 +138,12 @@ the later Alienware session.
    terminal chain behavior, cleanup context, human/JSON diagnostics, and
    injected-executor tests.
 3. **Fail-closed Developer ID signing/notarization — implemented and proven
-   locally.** `scripts/sign-notarize-macos.sh` and
-   `.github/workflows/release.yml` contain the enforcement. Two real Apple
-   submissions were accepted.
+   locally; clean-runner discovery fix in v4.0.1.**
+   `scripts/sign-notarize-macos.sh` and `.github/workflows/release.yml` contain
+   the enforcement. v4.0.0's hosted attempt proved fail-closed behavior but
+   exposed that a new keychain must be on the user search list for `codesign`.
+   v4.0.1 temporarily adds/restores that keychain and verifies the embedded
+   leaf-certificate fingerprint.
 4. **Synchronize release docs, agent rules, release skills, board, and handoff —
    complete for the release commit.** The full tracked doc set and local board
    describe the new behavior. This active handoff still must receive observed
@@ -134,10 +153,12 @@ the later Alienware session.
    audit, cargo-dist plan, workflow/script lint, Windows cross-check, external
    consumer smoke, and secret scans pass. The post-commit clean-tree package
    repetition remains the final local release check.
-6. **Push exact release commit and prove hosted source gates — pending.** Push
-   `master`, wait for `ci.yml` and `crates-publish.yml` on the exact SHA, and
-   confirm crates.io `tr300 4.0.0`.
-7. **Publish and verify release artifacts — pending.** Push only `v4.0.0`,
+6. **Push exact release commit and prove hosted source gates — v4.0.0 source
+   complete; v4.0.1 pending.** v4.0.0 commit
+   `c21d5981d4109199fa4bcba15ef8af6285a33d56` passed CI run 29389974094 and
+   crates run 29390118811 published `tr300 4.0.0`. Repeat both for v4.0.1.
+7. **Publish and verify release artifacts — v4.0.0 failed closed; v4.0.1
+   pending.** Push only `v4.0.1`,
    wait for `release.yml` and `windows-installers.yml`, require both Apple
    `Accepted` results, verify both public Mac archives, and confirm 28 assets.
 8. **Update/deploy the TR-300 homepage — pending until step 7 is complete.**
@@ -215,8 +236,8 @@ the later Alienware session.
 
 ### Documentation and operating contract
 
-- `CHANGELOG.md` and `HUMAN_CHANGELOG.md` contain matching v4.0.0 technical
-  and plain-English groupings.
+- `CHANGELOG.md` and `HUMAN_CHANGELOG.md` contain matching v4.0.0 feature and
+  v4.0.1 fix-forward technical/plain-English groupings.
 - `README.md` documents manual report saving, fail-safe policy blocks, and
   Developer ID/notarized Mac releases.
 - `AGENTS.md` and `CLAUDE.md` define the exact save/update behavior, Apple
@@ -335,7 +356,7 @@ the downloaded public archives verify.
 
 - Personal Alienware Windows accuracy/installer/update tests, AMD64 Linux
   hardware tests, and Raspberry Pi 4 aarch64 tests are intentionally not part
-  of the v4.0.0 pre-release evidence. They are post-release tasks approved by
+  of the v4.0.1 pre-release evidence. They are post-release tasks approved by
   the operator.
 - The managed Windows endpoint may still block official installers or Cargo
   writes. TR-300 can fail safely and explain the manual path; it cannot override
@@ -360,7 +381,7 @@ the downloaded public archives verify.
 
 ### Absolute macOS freeze for the personal Alienware continuation
 
-The v4.0.0 Mac path is complete only as the combination of source behavior,
+The v4.0.1 Mac path is complete only as the combination of source behavior,
 native/Rosetta evidence, Developer ID signing, Apple acceptance, and the
 checked-in enforcement. From Windows, **do not change any of the following**
 merely to clean up, generalize, regenerate, or make Windows/Linux code look
@@ -403,12 +424,15 @@ upgrade paths.
 - Work directly on `master` because it is the remote default branch and the
   operator explicitly authorized it. Preserve the full local/hosted gate.
 - Release sequence is source commit -> exact-SHA `ci.yml` ->
-  exact-SHA `crates-publish.yml` / crates.io -> explicit `v4.0.0` tag ->
+  exact-SHA `crates-publish.yml` / crates.io -> explicit `v4.0.1` tag ->
   `release.yml` -> `windows-installers.yml` -> public artifact audit ->
   release-ledger doc commit -> homepage deployment.
 - Never use `git push --tags`. Never move/delete a published tag. If tag-time
   release fails, inspect the partial state and use the documented fix-forward
   path.
+- `v4.0.0` is exactly that partial state: its immutable tag and crates.io
+  package exist, but release run 29390216481 failed both Apple jobs before
+  Post-build/upload and skipped host/announce. Never move or reuse it.
 - `.tasks/` is local/gitignored. Resolve the board from
   `.tasks/.board-server.json` and verify its root. Do not assume port 4319 on
   another host.
@@ -417,21 +441,26 @@ upgrade paths.
   Do not print `gh secret` values or try to export them.
 - The official repo is
   `https://github.com/QubeTX/qube-machine-report`; the release is
-  `https://github.com/QubeTX/qube-machine-report/releases/tag/v4.0.0` after
-  publication; crates.io is `https://crates.io/crates/tr300/4.0.0`.
+  `https://github.com/QubeTX/qube-machine-report/releases/tag/v4.0.1` after
+  publication; crates.io is `https://crates.io/crates/tr300/4.0.1`.
 - The homepage repo is
   `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`. It must
-  not claim v4.0.0 or notarized downloadable assets until the public release
+  not claim v4.0.1 or notarized downloadable assets until the public release
   audit succeeds.
 
 ## Release Ledger
 
 Fill this section from observed hosted state, never from expectation.
 
-- Release source commit: **PENDING**
+- v4.0.0 partial state: commit/tag
+  `c21d5981d4109199fa4bcba15ef8af6285a33d56` / `v4.0.0`; CI run 29389974094
+  passed; crates run 29390118811 published an unyanked package; release run
+  29390216481 failed closed in both Apple jobs before upload/host; no GitHub
+  Release assets were published
+- v4.0.1 release source commit: **PENDING**
 - Default-branch CI workflow/run: **PENDING**
 - Crates publish workflow/run and crates.io verification: **PENDING**
-- Tag: `v4.0.0` — **PENDING**
+- Tag: `v4.0.1` — **PENDING**
 - cargo-dist release workflow/run: **PENDING**
 - Apple arm64 submission/result: **PENDING hosted proof**
 - Apple x86_64 submission/result: **PENDING hosted proof**
@@ -444,17 +473,18 @@ Fill this section from observed hosted state, never from expectation.
 
 ## What's Next
 
-The exact next action is to commit the synchronized v4 tree, repeat the
-package/publish dry-run from that clean commit, and push `master`. Do not tag
-until the exact release SHA passes hosted CI and the crates workflow settles.
+The exact next action is to finish the v4.0.1 keychain-search fix-forward,
+repeat native/Rosetta plus real two-archive Apple proof, run the full release
+gate, commit, and push `master`. Do not move `v4.0.0` and do not tag v4.0.1
+until its exact SHA passes hosted CI and the crates workflow settles.
 
 After local green:
 
 1. Secret-scan and review the complete diff and packaged file list.
-2. Commit v4.0.0 on `master` and push `origin master`.
+2. Commit v4.0.1 on `master` and push `origin master`.
 3. Wait for exact-SHA `ci.yml`; then wait for the exact-SHA crates workflow and
-   verify crates.io 4.0.0.
-4. Create/push only `v4.0.0`.
+   verify crates.io 4.0.1.
+4. Create/push only `v4.0.1`.
 5. Watch `release.yml`. Inspect both Apple job logs for `Accepted`.
 6. Watch `windows-installers.yml` and confirm all supplemental assets.
 7. Confirm exactly 28 assets; download both Mac archives/sidecars and verify

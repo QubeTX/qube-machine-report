@@ -7,6 +7,43 @@ as passed.
 
 ## Per-version verification log
 
+### v4.0.1 — 2026-07-15
+
+- **Fix-forward reason:** immutable tag `v4.0.0` points to
+  `c21d5981d4109199fa4bcba15ef8af6285a33d56`. CI run 29389974094 passed and
+  crates run 29390118811 published `tr300 4.0.0`, but cargo-dist release run
+  29390216481 failed closed before the host job. On clean GitHub Apple runners,
+  `security find-identity` saw the imported certificate while `codesign` could
+  not resolve its SHA-1 selector because the ephemeral keychain was absent from
+  the user search list. No GitHub Release or unsigned Mac artifact was hosted.
+- **Correction:** `scripts/sign-notarize-macos.sh` temporarily prepends only its
+  ephemeral keychain to the user search list for the signing call, restores the
+  original list immediately and from the cleanup trap, and verifies the leaf
+  certificate embedded in the signed Mach-O has the exact resolved SHA-1
+  fingerprint. Existing authority, Team ID, identifier, hardened-runtime,
+  timestamp, Apple `Accepted`, repack, sidecar, and manifest gates remain.
+- **Local proof:** native arm64 and Rosetta x86_64 builds plus 121 library + 19
+  integration tests pass; the isolated no-write/four-manual-save/JSON/privacy/
+  51-column ASCII smoke passes; format, warning-denying Clippy, RustSec audit,
+  39-file package/publish dry-run, cargo-dist plan, actionlint, shellcheck, and
+  Bash syntax pass.
+- **Real Apple proof:** both actual cargo-dist v4.0.1 archives passed the full
+  fixed script. Arm64 submission `52b52e88-8eb9-457b-bb01-6c39f01da913` and
+  x86_64 submission `e018b7e1-d16e-4a33-b2a2-5b62512652b5` are `Accepted`.
+  Extracted binaries report `tr300 4.0.1`, verify identifier
+  `com.qubetx.tr300`, Team ID `M9D5379H93`, expected Developer ID authority,
+  hardened runtime, timestamp, and embedded leaf fingerprint. Archive,
+  sidecar, and manifest SHA-256 values agree at
+  `eb9be3c3afe19a6e6e07f6482f5fb1073e5d2407fd30fc449e362d76c41c59b9`
+  (arm64) and
+  `5549e3d26ddcd20b0ec74f11e083d94183b30ab6eaf4e80f9f42f3ac9610ec46`
+  (x86_64). The original keychain search list matched byte-for-byte after
+  success and after injected real timestamp/notary transport failures; those
+  transient failures did not repack or claim acceptance.
+- **Hosted/public proof still required:** exact-SHA CI/crates, both hosted Apple
+  `Accepted` logs, public archive verification, all 28 assets, and homepage
+  deployment.
+
 ### v4.0.0 — 2026-07-14
 
 - **Scope/state:** manifest and release docs are v4.0.0. macOS collection,
@@ -209,10 +246,10 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | **Debian 12 (no systemd-resolved)** | DNS row shows /etc/resolv.conf contents | — |
 | **Fedora / Arch** | Hypervisor "None" on bare metal; terminal detection works for Konsole + GNOME Terminal + Wezterm | — |
 | **Alpine in Docker** | Container detected; no panic on missing `lspci` / `lastlog` / systemd | — |
-| **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | Post-v4.0.0 personal-hardware task open |
+| **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | Post-v4.0.1 personal-hardware task open |
 | **AWS EC2 (Graviton or Intel)** | Hypervisor shows "amazon" / "kvm"; cloud detection works | — |
 | **WSL2 on Win11** | Hypervisor shows "WSL2"; terminal shows "Windows Terminal" via WT_SESSION | — |
-| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Personal Alienware post-v4.0.0 retest open; prior 3.10.0 evidence remains historical |
+| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Personal Alienware post-v4.0.1 retest open; prior 3.10.0 evidence remains historical |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
 | **Windows 11 (BitLocker OFF)** | "Encryption" row shows an evidence-backed Off state or remains absent; no promise that elevation alone unlocks it | — |
 | **Windows 11 as Administrator** | Encryption shows evidence-backed method + protection level when available; no blanket elevation footer | — |

@@ -3,7 +3,7 @@
 ## TL;DR
 
 TR-300 is a standalone Rust CLI and library that produces compact, fixed-width
-machine reports on macOS, Linux, and Windows. The v4.0.0 release hardens
+machine reports on macOS, Linux, and Windows. The v4 release line hardens
 cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
 notarization for both Mac archives. macOS is comprehensively verified on Apple
@@ -17,7 +17,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Release/manifest version: `4.0.0` (2026-07-14)
+- Release/manifest version: `4.0.1` (2026-07-15). v4.0.0 published to
+  crates.io but its immutable tag failed closed before GitHub artifact hosting;
+  v4.0.1 is the keychain-search fix-forward.
 - Personal-fleet evidence: post-release; never claim the Alienware, AMD laptop,
   or Pi 4 is verified until its board task contains real evidence
 - Major-version reason: public Rust structs gained fields and selected public
@@ -27,10 +29,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
 - Default branch: `master`
 - Release tooling: cargo-dist `0.31.0`
-- Last source/docs verification: 2026-07-14 on a MacBook Pro M2, macOS 26.3.1
+- Last source/docs verification: 2026-07-15 on a MacBook Pro M2, macOS 26.3.1
   build 25D2128
 
-### Completed for v4.0.0
+### v4.0.0 feature set, released through the v4.0.1 fix-forward
 
 - A single structured full-mode macOS snapshot supplies model, display, GPU,
   battery, boot-state, and virtualization facts with graceful fallbacks.
@@ -53,8 +55,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   write or launch blocks stop the fallback chain, retain the current install,
   and return actionable failure without a direct-overwrite escape hatch.
 - `scripts/sign-notarize-macos.sh` signs both cargo-dist Mac binaries with
-  Developer ID/hardened runtime/timestamp, requires Apple `Accepted` before
-  upload, repacks the exact bytes, and regenerates manifest/sidecar checksums.
+  Developer ID/hardened runtime/timestamp, temporarily exposes only its
+  ephemeral keychain to `codesign`, verifies the embedded certificate
+  fingerprint, requires Apple `Accepted` before upload, repacks the exact
+  bytes, and regenerates manifest/sidecar checksums.
 - CI's macOS test/build/speed legs and RustSec audit are blocking again.
 - Native and Rosetta final evidence includes complete suites, release binaries,
   full/fast JSON and table smokes, a 51-column non-UTF ASCII fallback, privacy,
@@ -69,7 +73,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Live Linux AMD64 and Raspberry Pi 4/aarch64 report verification.
 - TR-300 page changes in
   `/Users/realemmetts/Downloads/temp_git/qube-machine-report-homepage`; update
-  and push that repository only after v4.0.0 deployment is verified.
+  and push that repository only after v4.0.1 deployment is verified.
 
 ## Product and Architecture
 
@@ -93,13 +97,14 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.0.0`.
+   synchronized at `4.0.1`.
 2. Run locked fmt, clippy, tests, native/Rosetta release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, and real Mac archive sign/notary/repack proof.
 3. Commit and push `master`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
-4. Create and push only tag `v4.0.0` after CI/crates settle.
+4. Create and push only tag `v4.0.1` after CI/crates settle. The immutable
+   `v4.0.0` tag records the failed-closed first hosting attempt and must not move.
 5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
    extracted signatures/checksums from both public Mac archives.
 6. Verify cargo-dist's GitHub Release, the Windows Installers workflow, all four

@@ -8,7 +8,7 @@ Cross-platform system information report with Unicode box-drawing tables.
 
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
-Latest release: [v4.0.0](https://github.com/QubeTX/qube-machine-report/releases/tag/v4.0.0) (2026-07-14). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
+Latest release: [v4.0.1](https://github.com/QubeTX/qube-machine-report/releases/tag/v4.0.1) (2026-07-15). Windows users get four installer options — Global / Corporate Editions, each in MSI and EXE formats — none of which require Rust on the install machine. macOS / Linux ship via cargo-dist's shell installer. The crates.io package is [`tr300`](https://crates.io/crates/tr300).
 
 v4 is a major release for Rust-library SemVer only: public
 information records gained fields and are now non-exhaustive. The `tr300`
@@ -162,7 +162,7 @@ cargo install tr300
 **From a specific Git tag:**
 ```bash
 rustup update stable
-cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v4.0.0
+cargo install --git https://github.com/QubeTX/qube-machine-report.git --tag v4.0.1
 ```
 
 **Local clone for development:**
@@ -381,7 +381,7 @@ GitHub Actions handles both release assets and crates.io publishing:
   with `--locked`, and publishes `tr300` only when the repository
   `CARGO_REGISTRY_TOKEN` Actions secret is configured.
 - `Release` is the cargo-dist workflow triggered by an explicit version tag such
-  as `v4.0.0`; it builds the cross-platform archives and installers. Before
+  as `v4.0.1`; it builds the cross-platform archives and installers. Before
   upload, both Apple targets must pass Developer ID signing and Apple
   notarization; the job fails closed if any credential or Apple gate fails. New
   installer assets use `tr300-installer.*`; the workflow also publishes

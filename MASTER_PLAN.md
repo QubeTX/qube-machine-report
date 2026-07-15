@@ -4,9 +4,9 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-14 23:47 CDT
-**Release / working manifest:** 4.0.0
-**Release scope:** Mac/local/hosted gates block v4.0.0; personal
+**Last updated:** 2026-07-15 00:10 CDT
+**Release / working manifest:** 4.0.1
+**Release scope:** Mac/local/hosted gates block v4.0.1; personal
 Alienware/AMD/Pi evidence follows release and drives patches
 **Default branch:** `master`
 **Repository:** `QubeTX/qube-machine-report`
@@ -109,7 +109,7 @@ runtime claims remain gated by the hardware matrix below.
 
 ### A. Personal Alienware / Windows
 
-After v4.0.0, run the full, fast, JSON, and manually saved Markdown report from
+After v4.0.1, run the full, fast, JSON, and manually saved Markdown report from
 the intended Windows install
 and compare every visible fact with native Windows tools:
 
@@ -141,16 +141,25 @@ substitute for this personal Alienware accuracy matrix.
 - battery absence, missing desktop/tool fallbacks, fast runtime budget
 - installer/update path on the actual distribution
 
-## 5. v4.0.0 release sequence
+## 5. v4.0.1 fix-forward release sequence
 
 The maintainer explicitly approved sections 4A–4C after release, accepting
 forward patches. Do not use that deferral to weaken any Mac/local/hosted gate.
 
-1. Bump `Cargo.toml` and the root `Cargo.lock` entry to `4.0.0` (the Rust 1.95
-   pins do not move).
-2. Convert the checkpoint changelog material into synchronized
-   v4.0.0 technical/human release entries, include the concise Rust-library
-   migration note, and refresh every required guide.
+The immutable `v4.0.0` tag points to
+`c21d5981d4109199fa4bcba15ef8af6285a33d56`. CI run 29389974094 passed and
+crates run 29390118811 published the source package, but release run
+29390216481 failed closed before hosting: the clean Apple runners imported the
+identity but `codesign` could not resolve it because the new keychain was not
+on the user search list. Do not move or delete that tag. v4.0.1 is the required
+patch fix-forward.
+
+1. Add the signing keychain to the runner's user search list only during
+   `codesign`, restore the original list immediately and from cleanup, and
+   verify the embedded leaf-certificate fingerprint.
+2. Bump `Cargo.toml`, the root `Cargo.lock`, generated man page, both
+   changelogs, README/current-version guides, testing ledger, ADR, and handoff
+   to `4.0.1` (the Rust 1.95 pins do not move).
 3. Run:
 
    ```bash
@@ -169,11 +178,12 @@ forward patches. Do not use that deferral to weaken any Mac/local/hosted gate.
    Also rerun native/Rosetta full suites, release builds, full/fast/JSON/ASCII/
    manual-save/no-write smokes, privacy/parity checks, and the real cargo-dist
    Developer ID/notary/repack/checksum test.
-4. Commit `release: v4.0.0 - <summary>` and push `master`.
+4. Commit `release: v4.0.1 macOS signing fix-forward` and push `master`.
 5. Wait for `.github/workflows/ci.yml` on the exact release SHA. Every macOS
    leg and the audit are hard gates.
-6. Confirm `crates-publish.yml` published v4.0.0 from that same SHA.
-7. Create and push only `v4.0.0`; never use `git push --tags`.
+6. Confirm `crates-publish.yml` published v4.0.1 from that same SHA.
+7. Create and push only `v4.0.1`; never use `git push --tags` and never move
+   `v4.0.0`.
 8. Require both Apple jobs to sign and receive `Accepted` before hosting.
    Download/extract both public Mac archives and verify checksums, Developer ID,
    hardened runtime, timestamp, team, and version.
@@ -219,7 +229,7 @@ Only after section 5 is fully deployed:
 
 ## 8. Completion definition
 
-The v4.0.0 **release** is complete when:
+The v4.0.1 **release** is complete when:
 
 - Mac evidence above remains green in hosted blocking CI.
 - all local release gates pass from a clean tree.

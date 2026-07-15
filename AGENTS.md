@@ -11,7 +11,7 @@ Companion docs:
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-07-14
+Last verified against source: 2026-07-15
 
 ## Task management system
 
@@ -37,7 +37,7 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published and manifest version: `4.0.0` (`Cargo.toml`). Personal
+- Current published and manifest version: `4.0.1` (`Cargo.toml`). Personal
   Alienware, AMD64 Linux laptop, and Raspberry Pi 4 live verification is
   deliberately post-release by explicit maintainer decision and remains patch
   work; do not claim that hardware evidence already exists. The major boundary
@@ -616,15 +616,18 @@ Post-build/upload. The script:
 
 1. creates an ephemeral keychain and private work directory;
 2. imports the Developer ID Application PKCS#12, resolves exactly one matching
-   identity inside that keychain, and signs by its certificate fingerprint so
-   a duplicate display name in the login keychain cannot make signing ambiguous;
+   identity inside that keychain, temporarily adds that private keychain to the
+   user search list, and signs by its certificate fingerprint so a duplicate
+   display name in the login keychain cannot make signing ambiguous;
 3. signs `tr300` with identifier `com.qubetx.tr300`, hardened runtime, and a
-   trusted timestamp, then verifies authority, Team ID, identifier, runtime,
-   and timestamp;
+   trusted timestamp; immediately restores the original keychain search list;
+   then verifies the embedded leaf-certificate fingerprint, authority, Team ID,
+   identifier, runtime, and timestamp;
 4. submits the exact binary to Apple Notary Service and requires `Accepted`;
 5. repacks those exact signed bytes, regenerates the `.sha256` sidecar, patches
    the per-target cargo-dist manifest checksum, and verifies the sidecar; and
-6. deletes the keychain and decoded credentials on every exit path.
+6. restores the original keychain search list from cleanup as a fallback and
+   deletes the keychain and decoded credentials on every exit path.
 
 A standalone CLI is not an `.app`/`.pkg` container and therefore has nothing
 staplable. The release gate is Developer ID verification plus Apple's accepted
@@ -645,7 +648,7 @@ from a trusted Mac with a fresh local signing/notary proof, then run both hosted
 Apple tag jobs; never recreate or “fix” credentials from Windows just because a
 later unrelated job fails.
 
-After v4.0.0, this path is frozen during personal Alienware/Linux/Pi patch work.
+After v4.0.1, this path is frozen during personal Alienware/Linux/Pi patch work.
 Do **not** change any of the following from Windows/Linux merely to clean up,
 generalize, regenerate, or align them:
 

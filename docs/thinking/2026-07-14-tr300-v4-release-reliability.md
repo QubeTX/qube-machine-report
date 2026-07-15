@@ -359,3 +359,27 @@ The clean-tree package/dry-run gate follows the release commit. In the logical
 audit, local `M` and `C` are established; hosted `M` and `W` remain open until
 the exact-SHA CI/crates and tag workflows prove them. Therefore `R` still must
 not be claimed before those hosted observations.
+
+---
+
+## Checkpoint — v4.0.1 immutable-tag fix-forward
+
+The hosted v4.0.0 observation corrected an environmental confounder in local
+`M`: the developer login keychain contained the same certificate, so local
+fingerprint signing succeeded even though the ephemeral keychain itself was not
+on the user search list. Clean GitHub runners imported and enumerated the
+identity, then correctly failed before upload when `codesign` could not resolve
+it. CI and crates publication had passed, and the tag was already shared;
+therefore moving v4.0.0 would violate the immutable-tag premise. A v4.0.1 patch
+is the only valid fix-forward.
+
+The correction snapshots the original user keychain list, prepends the private
+keychain only for the signing call, restores the list immediately and in the
+cleanup trap, and compares the certificate extracted from the signed Mach-O
+with the exact resolved SHA-1 fingerprint. Local v4.0.1 cargo-dist proofs now
+establish this stronger `M`: submissions
+`52b52e88-8eb9-457b-bb01-6c39f01da913` (arm64) and
+`e018b7e1-d16e-4a33-b2a2-5b62512652b5` (x86_64) were `Accepted`; both search
+list restoration and fail-closed behavior were observed under real timestamp/
+notary transport failures. Hosted `M` remains open until the v4.0.1 tag jobs
+repeat that result on clean runners.

@@ -49,7 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Published and manifest version: **4.0.0**. The maintainer explicitly authorized
+Published and manifest version: **4.0.1**. The maintainer explicitly authorized
 release before live checks on the personal Alienware, AMD64 Linux laptop, and
 Raspberry Pi 4. Those checks remain post-release patch work and must not be
 reported as completed evidence. Managed-work antivirus behavior is a separate
@@ -354,10 +354,13 @@ constrained runner to every commit and do not drop the Intel dist target.
 cargo-dist Post-build/upload. It imports the Developer ID certificate into an
 ephemeral keychain, resolves the one expected identity there, and signs by its
 certificate fingerprint so a duplicate display name in the login keychain is
-not ambiguous. It signs `tr300` with identifier `com.qubetx.tr300` plus
-hardened runtime/timestamp; verifies authority, Team ID, identifier, runtime,
-and timestamp; requires Apple Notary Service `Accepted`; repacks those exact
-bytes; updates the archive sidecar and per-target manifest checksum; then
+not ambiguous. Because clean runners do not automatically search a newly
+created keychain, the script temporarily prepends only that keychain for the
+signing call and restores the original list immediately and from cleanup. It
+signs `tr300` with identifier `com.qubetx.tr300` plus hardened runtime/timestamp;
+verifies the embedded leaf fingerprint, authority, Team ID, identifier,
+runtime, and timestamp; requires Apple Notary Service `Accepted`; repacks those
+exact bytes; updates the archive sidecar and per-target manifest checksum; then
 removes all decoded credentials. Missing credentials or any Apple failure
 blocks hosting; never add an unsigned fallback.
 
@@ -389,7 +392,7 @@ are green. Windows/Linux evidence alone is insufficient.
 
 Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → doc-set update → master push → wait for `ci.yml` green → wait for `crates-publish.yml` → tag push → watch `release.yml` → fix-forward loop — is the [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md) § "Release checklist" as the canonical 10-file doc list. Load-bearing invariants:
 
-**v4.0.0 scope:** personal Alienware/AMD Linux/Pi 4 checks are post-release by
+**v4.0.1 scope:** personal Alienware/AMD Linux/Pi 4 checks are post-release by
 explicit maintainer decision. They never substitute for or waive the final
 native/Rosetta, package/security, exact-SHA CI/crates, Apple notarization, and
 release-asset gates. Keep the tasks/handoff honest and patch forward from real

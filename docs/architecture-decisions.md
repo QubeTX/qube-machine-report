@@ -291,6 +291,18 @@ API key; and requires `Accepted`. It then repacks the exact signed bytes,
 regenerates the `.sha256` sidecar, patches the archive checksum in the per-target
 cargo-dist manifest, verifies it, and deletes decoded credentials.
 
+The immutable v4.0.0 tag exposed a clean-runner distinction that a developer
+Mac with the same certificate in its login keychain had masked: importing an
+identity into a newly created keychain does not automatically put that keychain
+on the calling user's search list, and `codesign` requires signing identities to
+be discoverable there even when `--keychain` narrows lookup. The v4.0.0 workflow
+therefore failed closed before upload. v4.0.1 snapshots the original user
+search list, prepends the ephemeral keychain only for `codesign`, restores the
+list immediately and in the cleanup trap, and extracts the embedded leaf
+certificate from the final Mach-O to compare its SHA-1 fingerprint with the
+resolved identity. This keeps fingerprint selection unambiguous while making
+the clean CI environment behave like the proven local environment.
+
 Repository secrets hold the PKCS#12, its password, API private key, key ID, and
 issuer ID; repository variables select the signing identity/team. Only the
 names are documented. Pull-request planning does not receive them because the

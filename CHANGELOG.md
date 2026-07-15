@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-07-15
+
+### Fixed
+- **Hosted macOS signing now makes the ephemeral keychain discoverable to
+  `codesign`.** The first v4.0.0 tag correctly failed closed before artifact
+  upload because clean GitHub macOS runners could enumerate the imported
+  Developer ID identity but could not resolve its certificate fingerprint
+  outside the user keychain search list. The release script now adds only its
+  private keychain for the signing operation, restores the runner's original
+  search list immediately and from the cleanup trap, and verifies the embedded
+  leaf-certificate fingerprint in addition to authority, Team ID, identifier,
+  hardened runtime, timestamp, checksum, and Apple notarization acceptance.
+
+### Internal
+- v4.0.0 remains the immutable historical failed binary-release tag and the
+  published crates.io source package. No GitHub Release assets were hosted from
+  its failed workflow. v4.0.1 is the required patch-version fix-forward.
+
 ## [4.0.0] - 2026-07-14
 
 ### Added
