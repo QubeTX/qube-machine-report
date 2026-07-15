@@ -499,8 +499,11 @@ This section records observed hosted state, never expectation.
   lint/build/wrapper/
   link checks and Chrome desktop/mobile inspection pass with zero site-origin
   console errors, no horizontal overflow, and 49 exact 51-column sample rows
-- Release-ledger follow-up commit/CI: this edit must be committed and verified;
-  its observed SHA/run will replace this sentence in a final attestation commit
+- Release-ledger documentation commit:
+  `771fd09a90baf94db64f21471482c296acf71d05`; CI run 29394204632 passed all
+  13 jobs on that exact SHA. Crates.io Publish run 29394374303 succeeded and
+  correctly skipped the already-published 4.0.1 package. This subsequent
+  docs-only attestation commit records those necessarily post-commit facts.
 
 ## What's Next
 

@@ -78,6 +78,11 @@ as passed.
   serves bundle `index-DghJyecZ.js`; both viewport widths have no horizontal
   overflow or site-origin console warning/error, and all 49 sample rows are
   exactly 51 columns. SD-300 and Shaughv OS remain intentionally WIP-delisted.
+- **Release-ledger proof:** documentation commit
+  `771fd09a90baf94db64f21471482c296acf71d05` records the observed release and
+  homepage evidence. CI run 29394204632 passed all 13 jobs on that exact SHA;
+  Crates.io Publish run 29394374303 also succeeded and correctly skipped the
+  already-published 4.0.1 package.
 - **Remaining evidence boundary:** personal Alienware Windows, AMD64 Linux, and
   Raspberry Pi 4 checks remain explicit post-release patch tasks; none is
   retroactively claimed by the hosted release evidence above.
