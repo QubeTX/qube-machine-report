@@ -18,6 +18,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the rest of Emmett's repositories. The change keeps the same project history
   and does not replace or alter any published downloads, installers, package,
   or website content.
+- **The two everyday GitHub build workflows now use GitHub's current checkout
+  runtime.** This clears a deprecation warning before it can become a future
+  build problem; release and Windows packaging workflows already used the same
+  supported version.
 
 ## [4.0.1] - 2026-07-15
 

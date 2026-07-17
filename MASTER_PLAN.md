@@ -17,6 +17,8 @@ The branch migration is complete: commit
 skipping the already-published 4.0.1 package. Fresh-clone/default/redirect,
 workflow activity, immutable tags, 28 release assets, public Mac signatures,
 crates.io, and the production homepage/install wrappers were re-verified.
+The branch CI and crates workflows also use `actions/checkout@v6` on its
+supported Node 24 runtime, matching release and supplemental Windows packaging.
 
 ## 1. Read order for the next machine
 

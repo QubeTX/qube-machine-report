@@ -58,6 +58,9 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Repo: `https://github.com/QubeTX/qube-machine-report`
 - Default branch: `main` (renamed atomically from `master` on 2026-07-17;
   `origin/master` no longer exists)
+- Actions checkout runtime: all four workflows use `actions/checkout@v6`
+  (Node 24). Do not regress branch CI or crates publishing to the deprecated
+  Node 20-based v4 action.
 - Release tooling: cargo-dist `0.31.0`
 
 The crate exposes both:

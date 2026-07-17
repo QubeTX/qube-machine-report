@@ -340,6 +340,10 @@ Three GitHub Actions workflows guard release quality (full job-by-job detail + l
 - **`release.yml`** — cargo-dist v0.31.0, tag-triggered (`vX.Y.Z`); 6 targets + shell/PowerShell/MSI installers + legacy `tr-300-installer.*` aliases. It is generated and then intentionally checked in with the alias-copy and fail-closed Apple signing/notarization zones. Do not regenerate or edit across those zones without preserving both and reopening the Mac gate.
 - **`crates-publish.yml`** — after `CI` succeeds on `main`; checks out the exact tested SHA, re-runs gates `--locked`, publishes to crates.io with `CARGO_REGISTRY_TOKEN`.
 
+All four workflows use `actions/checkout@v6` on Node 24. Keep the branch CI and
+crates workflow aligned with the release and supplemental Windows workflows;
+do not reintroduce the deprecated Node 20-based checkout v4 action.
+
 Reproduce locally: `cargo fmt --all -- --check && cargo clippy --locked
 --all-targets --workspace -- -D warnings && cargo test --locked --workspace
 --all-targets && cargo build --locked --release --workspace && cargo audit`.

@@ -515,6 +515,11 @@ This section records observed hosted state, never expectation.
   clones use `main`, the old GitHub branch URL redirects, `origin/master` is
   absent, all workflows remain active, and tags/releases/Apple proof/crates.io/
   production homepage bytes were re-audited unchanged.
+- Branch-runner follow-up: `ci.yml` and `crates-publish.yml` now use
+  `actions/checkout@v6` on Node 24, matching the already-proven release and
+  supplemental Windows workflows. This removes checkout v4's Node 20
+  deprecation annotation without touching product, dependency, distribution,
+  Apple, installer, tag, or artifact inputs.
 
 ## What's Next
 

@@ -17,6 +17,12 @@ as passed.
   packaging follows the tag-triggered Release workflow; and GitHub reported no
   open pull requests, branch protection, rulesets, webhooks, deployment
   environments, or other visible policy tied to `master`.
+- **Runner-compatibility follow-up:** the first fully green `main` runs exposed
+  GitHub's non-failing Node 20 deprecation annotation for
+  `actions/checkout@v4`. Both branch workflows now use
+  `actions/checkout@v6` and its supported Node 24 runtime, matching the
+  previously proven release and supplemental Windows workflows. This changes
+  no product, dependency, package, installer, signing, or artifact input.
 - **Migration method:** GitHub's atomic branch-rename API moved the unchanged
   `cd3c179540b48770e1c555cbf60c809d702eb999` branch tip to `main`, updated the
   repository default, and removed the old remote branch. The local branch now

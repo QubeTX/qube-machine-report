@@ -39,7 +39,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed all 13 CI jobs in run
   29557626125 on `main`; downstream crates run 29557758673 succeeded by safely
   skipping already-published 4.0.1. Tags, public artifacts, Apple proof, and the
-  production homepage were re-audited unchanged.
+  production homepage were re-audited unchanged. The branch CI and crates
+  workflows use `actions/checkout@v6` on Node 24, aligned with the release and
+  supplemental Windows workflows.
 - Release tooling: cargo-dist `0.31.0`
 - Last source/docs verification: 2026-07-15 on a MacBook Pro M2, macOS 26.3.1
   build 25D2128

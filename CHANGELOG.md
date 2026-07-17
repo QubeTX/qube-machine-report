@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status, testing ledger, and handoff were aligned to `main`. Version tags,
   crates.io packages, notarized macOS artifacts, Windows installers, and the
   production homepage are unchanged.
+- **Branch CI now uses `actions/checkout@v6`.** The CI and crates-publishing
+  workflows now run checkout on its supported Node 24 runtime, matching the
+  already-proven release and supplemental Windows workflows and removing the
+  hosted Node 20 deprecation annotation.
 
 ## [4.0.1] - 2026-07-15
 
