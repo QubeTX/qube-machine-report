@@ -14,7 +14,7 @@ closed before GitHub artifact hosting)
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
 Windows Installers 29392382949
 **Task IDs:** `#v400`, `#core`, `#plat`, `#test`, `#docs`, `#winhw`,
-`#ship`, `#site`, `#brmain`
+`#ship`, `#site`, `#brmain`, `#adrlog`
 
 This is the exhaustive portable continuation record. The richer SHAUGHV task
 board is local and gitignored; a fresh checkout must read this file, `AGENTS.md`,
@@ -527,6 +527,15 @@ This section records observed hosted state, never expectation.
   29559148638 with zero annotations and no checkout-v4/Node-20 log match.
   Exact-SHA crates run 29559305341 used checkout v6, found 4.0.1 already
   published, and skipped token/check/publish steps as designed.
+- Architecture-ledger closeout: substantive documentation commit
+  `e38fe2abcffdf6f85d4dac1c12dd294f36604a59` expands the canonical ADR to
+  include the current status matrix; explicit one-product, full/fast,
+  table/JSON/locale/privacy contracts; the v3.17 advisory Windows
+  consolidation rationale; and the exhaustive `main`/checkout-v6 decision.
+  CI run 29560970377 passed all 13 exact-SHA jobs with zero annotations and no
+  deprecated checkout/Node-runtime log match. Crates run 29561137746 checked
+  out the same SHA and safely skipped existing 4.0.1 before token/check/
+  package/publish access. The follow-up commit only records this evidence.
 
 ## What's Next
 

@@ -56,6 +56,14 @@ as passed.
   non-draft/non-prerelease 28-asset release with zero empty assets; and crates.io
   still serves unyanked 4.0.1 with checksum
   `55086eb631a3b67c8ab0eaa53b9c3783097044ef77321ec8e6849c30e32275da`.
+- **Hosted substantive-commit proof:** ADR backfill commit
+  `e38fe2abcffdf6f85d4dac1c12dd294f36604a59` passed all 13 exact-SHA jobs in
+  CI run 29560970377 across Linux, Apple Silicon macOS, and Windows, including
+  all three fast-mode speed budgets and blocking RustSec. The run had zero
+  annotations and no deprecated checkout/Node-runtime log match. Exact-SHA
+  crates run 29561137746 found existing 4.0.1 and skipped registry-token access,
+  format/clippy/test/package, and publish steps. The follow-up commit records
+  this proof only and must itself receive final exact-SHA CI/crates closure.
 
 ### Repository default-branch migration — 2026-07-17
 

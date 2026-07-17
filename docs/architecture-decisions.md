@@ -684,6 +684,13 @@ their values must never enter this ADR, git, task memory, or logs.
 - All four workflows remained active. v4 tags, 28 release assets, crates.io
   checksum, public Mac signature/notary evidence, and production homepage
   bundle/wrappers were re-audited unchanged.
+- Architecture-ledger backfill
+  `e38fe2abcffdf6f85d4dac1c12dd294f36604a59`: CI 29560970377 passed all 13
+  jobs on the exact commit with zero annotations and no deprecated checkout/
+  Node-runtime log match. Crates run 29561137746 checked out the same SHA,
+  found 4.0.1 already published, and skipped registry-token access plus every
+  check/package/publish step. This is the hosted proof for the substantive ADR
+  reconciliation; the follow-up commit only records that proof.
 
 ### MSRV policy (v3.11.1+, addendum v3.13.1)
 

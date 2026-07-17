@@ -4,7 +4,7 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-17 01:35 CDT
+**Last updated:** 2026-07-17 02:52 CDT
 **Release / working manifest:** 4.0.1
 **Release scope:** v4.0.1 and its homepage are deployed; personal
 Alienware/AMD/Pi evidence remains open and drives forward patches
@@ -26,6 +26,9 @@ The canonical ADR is also reconciled through this state: its coverage index and
 expanded records preserve the one-Rust architecture, collection/output
 contracts, v4 safety/trust/evidence boundaries, Windows consolidation, and the
 full `main`/checkout-v6 decision for the next machine.
+Substantive ledger commit `e38fe2abcffdf6f85d4dac1c12dd294f36604a59`
+passed all 13 jobs in CI run 29560970377 with zero annotations; exact-SHA crates
+run 29561137746 performed the expected existing-4.0.1 pre-token safe skip.
 
 ## 1. Read order for the next machine
 
