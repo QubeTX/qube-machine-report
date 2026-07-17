@@ -1,6 +1,6 @@
 # Handoff: v4 release and personal fleet continuation
 
-**Date:** 2026-07-14–15 CDT
+**Date:** 2026-07-14–17 CDT
 **Session:** 002
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
@@ -507,6 +507,14 @@ This section records observed hosted state, never expectation.
   13 jobs on that exact SHA. Crates.io Publish run 29394374303 succeeded and
   correctly skipped the already-published 4.0.1 package. This subsequent
   docs-only attestation commit records those necessarily post-commit facts.
+- Default-branch migration: GitHub atomically renamed `master` to `main` at
+  unchanged pre-migration tip `cd3c179540b48770e1c555cbf60c809d702eb999`.
+  Alignment commit `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7`
+  passed all 13 jobs in CI run 29557626125 on `main`; exact-SHA downstream
+  crates run 29557758673 succeeded and skipped already-published 4.0.1. Fresh
+  clones use `main`, the old GitHub branch URL redirects, `origin/master` is
+  absent, all workflows remain active, and tags/releases/Apple proof/crates.io/
+  production homepage bytes were re-audited unchanged.
 
 ## What's Next
 

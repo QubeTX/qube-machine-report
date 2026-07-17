@@ -21,10 +21,42 @@ as passed.
   `cd3c179540b48770e1c555cbf60c809d702eb999` branch tip to `main`, updated the
   repository default, and removed the old remote branch. The local branch now
   tracks `origin/main`, and `origin/HEAD` resolves to `origin/main`.
-- **Required final proof:** local release gates, exact-SHA hosted CI on `main`,
-  the downstream crates workflow's successful 4.0.1 skip, unchanged release
-  tags/assets, and the unaffected production homepage must all be recorded
-  before the migration task closes.
+- **Local proof:** format, warning-denying locked Clippy, 121 library tests, 19
+  integration tests, release build/runtime JSON smoke, exact 39-file package
+  list, locked publish dry-run, RustSec audit over 221 dependencies, cargo-dist
+  six-target/installer plan, actionlint, shellcheck, Bash syntax, diff checks,
+  and protected-input audit all passed. No Rust source, dependency, Cargo
+  metadata, Apple signing input/script, `release.yml`, installer source, tag, or
+  artifact changed.
+- **Hosted branch proof:** migration commit
+  `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed CI run 29557626125 across
+  all 13 blocking Linux/macOS ARM/Windows jobs on `main`. Downstream Crates.io
+  Publish run 29557758673 ran from that exact SHA, found 4.0.1 already
+  published, and skipped every token/check/publish step as designed. A fresh
+  clone checks out `main` at that SHA; GitHub's old `/tree/master` URL redirects
+  to `/tree/main`; the default branch, remote symbolic HEAD, and local upstream
+  all resolve to `main`; no remote `master` or open pull request remains.
+- **Distribution continuity proof:** all four Actions workflows remain active.
+  `v4.0.0` and `v4.0.1` remain at their original SHAs; v4.0.1 remains a public
+  non-draft/non-prerelease 28-asset release with no missing, non-uploaded, or
+  zero-byte asset. Crates.io still serves unyanked 4.0.1 with checksum
+  `55086eb631a3b67c8ab0eaa53b9c3783097044ef77321ec8e6849c30e32275da`.
+  The Apple credential/variable names remain configured, and the original
+  hosted arm64/x86_64 notarization results remain `Accepted`.
+- **Public Mac re-audit:** fresh arm64/x86_64 downloads again matched their
+  sidecars, `sha256.sum`, manifest, and known archive hashes
+  `b2cd1ecbc86d7f86beddb7b15044ac5839d894a4eae781c1bdfb01a305cf3342`
+  and `cbc2800cf4e2dad47d8113db33a8092019c6efeccc0e8ee61cae023fff3cb861`.
+  Both extracted binaries report 4.0.1 and pass strict code-sign verification
+  with identifier `com.qubetx.tr300`, Team ID `M9D5379H93`, hardened runtime,
+  secure timestamp, expected Developer ID authority, correct architecture, and
+  leaf-certificate SHA-1 `739B04530883FF9B665C66BD464F98C622971B32`.
+- **Homepage continuity proof:** homepage commit
+  `d77397479ad2b1189cce86b5402eaf1cc966abdf` remains clean/synchronized on its
+  own `main`; lint and production build pass. Production serves the identical
+  `index-DghJyecZ.js` bundle (SHA-256
+  `edfa6225cdf5d171d68fe3f83f5aab8d395b32a40e9ac8541cce2fa0cfab52ce`),
+  identical index, and byte-identical shell/PowerShell install wrappers.
 
 ### v4.0.1 — 2026-07-15
 

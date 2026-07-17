@@ -11,6 +11,13 @@ Alienware/AMD/Pi evidence remains open and drives forward patches
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
+The branch migration is complete: commit
+`41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed all 13 hosted CI jobs on
+`main` (run 29557626125), and downstream crates run 29557758673 succeeded by
+skipping the already-published 4.0.1 package. Fresh-clone/default/redirect,
+workflow activity, immutable tags, 28 release assets, public Mac signatures,
+crates.io, and the production homepage/install wrappers were re-verified.
+
 ## 1. Read order for the next machine
 
 1. `docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`
