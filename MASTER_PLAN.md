@@ -19,6 +19,9 @@ workflow activity, immutable tags, 28 release assets, public Mac signatures,
 crates.io, and the production homepage/install wrappers were re-verified.
 The branch CI and crates workflows also use `actions/checkout@v6` on its
 supported Node 24 runtime, matching release and supplemental Windows packaging.
+Commit `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee` passed all 13 jobs in CI
+run 29559148638 with zero annotations and no checkout deprecation warning;
+exact-SHA crates run 29559305341 safely skipped already-published 4.0.1.
 
 ## 1. Read order for the next machine
 

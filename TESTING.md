@@ -23,6 +23,11 @@ as passed.
   `actions/checkout@v6` and its supported Node 24 runtime, matching the
   previously proven release and supplemental Windows workflows. This changes
   no product, dependency, package, installer, signing, or artifact input.
+  Follow-up commit `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee`
+  passed CI run 29559148638 across all 13 jobs with zero check annotations and
+  no checkout-v4/Node-20 warning in its logs. Exact-SHA crates run 29559305341
+  used checkout v6, detected already-published 4.0.1, skipped token access and
+  every check/publish step, and emitted no deprecated-checkout warning.
 - **Migration method:** GitHub's atomic branch-rename API moved the unchanged
   `cd3c179540b48770e1c555cbf60c809d702eb999` branch tip to `main`, updated the
   repository default, and removed the old remote branch. The local branch now

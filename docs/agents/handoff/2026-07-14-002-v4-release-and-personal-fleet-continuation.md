@@ -519,7 +519,11 @@ This section records observed hosted state, never expectation.
   `actions/checkout@v6` on Node 24, matching the already-proven release and
   supplemental Windows workflows. This removes checkout v4's Node 20
   deprecation annotation without touching product, dependency, distribution,
-  Apple, installer, tag, or artifact inputs.
+  Apple, installer, tag, or artifact inputs. Follow-up commit
+  `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee` passed all 13 jobs in CI run
+  29559148638 with zero annotations and no checkout-v4/Node-20 log match.
+  Exact-SHA crates run 29559305341 used checkout v6, found 4.0.1 already
+  published, and skipped token/check/publish steps as designed.
 
 ## What's Next
 

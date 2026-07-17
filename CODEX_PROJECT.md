@@ -41,7 +41,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   skipping already-published 4.0.1. Tags, public artifacts, Apple proof, and the
   production homepage were re-audited unchanged. The branch CI and crates
   workflows use `actions/checkout@v6` on Node 24, aligned with the release and
-  supplemental Windows workflows.
+  supplemental Windows workflows. Follow-up commit
+  `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee` passed all 13 jobs in CI run
+  29559148638 with zero annotations; exact-SHA crates run 29559305341 safely
+  skipped already-published 4.0.1 without token or publish access.
 - Release tooling: cargo-dist `0.31.0`
 - Last source/docs verification: 2026-07-15 on a MacBook Pro M2, macOS 26.3.1
   build 25D2128
