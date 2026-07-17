@@ -5,8 +5,8 @@
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
 **Working directory:** `/Users/realemmetts/Downloads/temp_git/qube-machine-report`
-**Default branch:** `master` (the operator's “push to main” means the remote
-default branch; do not create a second `main` branch)
+**Default branch:** `main` (GitHub atomically renamed the former `master`
+branch on 2026-07-17 without changing the source SHA)
 **Release version:** `4.0.1` fix-forward (`v4.0.0` is immutable and failed
 closed before GitHub artifact hosting)
 **Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
@@ -14,7 +14,7 @@ closed before GitHub artifact hosting)
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
 Windows Installers 29392382949
 **Task IDs:** `#v400`, `#core`, `#plat`, `#test`, `#docs`, `#winhw`,
-`#ship`, `#site`
+`#ship`, `#site`, `#brmain`
 
 This is the exhaustive portable continuation record. The richer SHAUGHV task
 board is local and gitignored; a fresh checkout must read this file, `AGENTS.md`,
@@ -423,8 +423,11 @@ upgrade paths.
 
 ### Branch, release, board, and credential context
 
-- Work directly on `master` because it is the remote default branch and the
-  operator explicitly authorized it. Preserve the full local/hosted gate.
+- Work directly on `main`, the remote default branch since 2026-07-17. The
+  rename used GitHub's atomic branch-rename operation after confirming CI and
+  crates publishing already accepted `main`, tag-driven release workflows did
+  not depend on the old name, and no open PR, protection, ruleset, webhook, or
+  deployment policy targeted `master`. Preserve the full local/hosted gate.
 - Release sequence is source commit -> exact-SHA `ci.yml` ->
   exact-SHA `crates-publish.yml` / crates.io -> explicit `v4.0.1` tag ->
   `release.yml` -> `windows-installers.yml` -> public artifact audit ->

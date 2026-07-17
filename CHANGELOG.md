@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Repository development now uses `main` as the actual GitHub default
+  branch.** GitHub's atomic branch rename preserved the existing history while
+  the CI and crates-publishing filters, release skills, agent guidance, project
+  status, testing ledger, and handoff were aligned to `main`. Version tags,
+  crates.io packages, notarized macOS artifacts, Windows installers, and the
+  production homepage are unchanged.
+
 ## [4.0.1] - 2026-07-15
 
 ### Fixed

@@ -14,7 +14,9 @@
 - Operator requirements: a dense sequence of direct decisions covering cross-platform
   accuracy, macOS completion, report persistence, managed-Windows antivirus behavior,
   release timing, Apple notarization, hardware follow-up, task tracking, and handoff.
-- Current repository source and tests: internal implementation artifacts on `master`,
+- Current repository source and tests: internal implementation artifacts on the
+  repository default branch (named `master` during this session and renamed to
+  `main` on 2026-07-17),
   including a previously pushed macOS hardening checkpoint and current uncommitted
   report/update/release changes.
 - Current project guidance: `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, `TESTING.md`,
@@ -50,7 +52,7 @@
 - Both macOS release archives must be Developer ID signed and accepted by Apple
   notarization in GitHub Actions. Missing credentials or rejection must block hosting;
   there is no unsigned fallback.
-- Work is delivered to the repository default branch (`master`) with the full local,
+- Work is delivered to the repository default branch (now `main`) with the full local,
   exact-SHA hosted, crates.io, tag, release-asset, and homepage gates intact.
 
 ---

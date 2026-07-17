@@ -7,7 +7,7 @@ description: TR-300's canonical 7-phase development workflow for any non-trivial
 
 The canonical cadence for any non-trivial change, and the CI gates that guard it. The actual
 release procedure (version bump → tag → GitHub Release → crates.io) is the separate
-[`release`](../release/SKILL.md) skill; this skill stops at "commit + push to master." Summary +
+[`release`](../release/SKILL.md) skill; this skill stops at "commit + push to main." Summary +
 pointers are in [`CLAUDE.md`](../../../CLAUDE.md); the historical ledger is in
 [`MASTER_PLAN.md`](../../../MASTER_PLAN.md).
 
@@ -82,7 +82,7 @@ Mark the parent PR task `completed` in `TaskList`. Move on to the next PR's pare
 
 Three GitHub Actions workflows guard release quality and publication:
 
-- **`.github/workflows/ci.yml`** — runs on every push to master and every pull request. Jobs:
+- **`.github/workflows/ci.yml`** — runs on every push to `main` and every pull request. Jobs:
   - `fmt` — `cargo fmt --check` (Linux only)
   - `clippy` — `cargo clippy --all-targets --workspace -- -D warnings` (Linux only)
   - `test` — `cargo test --workspace --all-targets` on Linux + macOS ARM + Windows
@@ -91,7 +91,7 @@ Three GitHub Actions workflows guard release quality and publication:
   - `audit` — blocking `cargo audit` against RustSec advisories; a finding fails CI
   - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
 - **`.github/workflows/release.yml`** — cargo-dist v0.31.0 release workflow. Triggered by tag push (`vX.Y.Z`). Builds 6 targets and produces shell + PowerShell + MSI installers. It copies `tr300-installer.*` to legacy `tr-300-installer.*` aliases for v3.14.2 updater compatibility and, on both Apple jobs, fail-closed Developer ID-signs/notarizes before upload. `Cargo.toml` sets `allow-dirty = ["ci", "msi"]` for checked-in CI/WiX customizations. After `dist init`, preserve both the alias and Apple trust zones and rerun the Mac gate.
-- **`.github/workflows/crates-publish.yml`** — runs after successful `CI` workflow runs from pushes to `master`/`main`, checks out the exact CI-tested SHA, skips already-published crate versions using a descriptive crates.io data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run with `--locked`, and publishes with the repository Actions secret `CARGO_REGISTRY_TOKEN`.
+- **`.github/workflows/crates-publish.yml`** — runs after successful `CI` workflow runs from pushes to `main`, checks out the exact CI-tested SHA, skips already-published crate versions using a descriptive crates.io data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run with `--locked`, and publishes with the repository Actions secret `CARGO_REGISTRY_TOKEN`.
 
 To reproduce the CI gates locally:
 

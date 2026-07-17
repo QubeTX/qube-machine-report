@@ -331,14 +331,14 @@ The canonical cadence for any non-trivial change. **Full detail — each phase's
 
 Three GitHub Actions workflows guard release quality (full job-by-job detail + local-repro commands: the [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md) skill):
 
-- **`ci.yml`** — every push to master + every PR: `fmt`, locked
+- **`ci.yml`** — every push to `main` + every PR: `fmt`, locked
   `clippy --all-targets -D warnings`, locked `test` (Linux + macOS ARM +
   Windows), locked `build` smoke (+`--version`/`--fast --json`), `speed`
   (5-run median of `tr300 --fast` < 1500 ms), blocking `audit`, and
   `dist-plan`. macOS test/build/speed are hard gates; do not restore the old
   v3.14.5 `continue-on-error` workaround.
 - **`release.yml`** — cargo-dist v0.31.0, tag-triggered (`vX.Y.Z`); 6 targets + shell/PowerShell/MSI installers + legacy `tr-300-installer.*` aliases. It is generated and then intentionally checked in with the alias-copy and fail-closed Apple signing/notarization zones. Do not regenerate or edit across those zones without preserving both and reopening the Mac gate.
-- **`crates-publish.yml`** — after `CI` succeeds on master; checks out the exact tested SHA, re-runs gates `--locked`, publishes to crates.io with `CARGO_REGISTRY_TOKEN`.
+- **`crates-publish.yml`** — after `CI` succeeds on `main`; checks out the exact tested SHA, re-runs gates `--locked`, publishes to crates.io with `CARGO_REGISTRY_TOKEN`.
 
 Reproduce locally: `cargo fmt --all -- --check && cargo clippy --locked
 --all-targets --workspace -- -D warnings && cargo test --locked --workspace
@@ -398,7 +398,7 @@ are green. Windows/Linux evidence alone is insufficient.
 
 ## Release Process
 
-Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → doc-set update → master push → wait for `ci.yml` green → wait for `crates-publish.yml` → tag push → watch `release.yml` → fix-forward loop — is the [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md) § "Release checklist" as the canonical 10-file doc list. Load-bearing invariants:
+Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → doc-set update → `main` push → wait for `ci.yml` green → wait for `crates-publish.yml` → tag push → watch `release.yml` → fix-forward loop — is the [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md) § "Release checklist" as the canonical 10-file doc list. Load-bearing invariants:
 
 **v4.0.1 scope:** personal Alienware/AMD Linux/Pi 4 checks are post-release by
 explicit maintainer decision. They never substitute for or waive the final

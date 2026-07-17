@@ -11,7 +11,7 @@ Companion docs:
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-07-15
+Last verified against source: 2026-07-17
 
 ## Task management system
 
@@ -56,6 +56,8 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Convenience alias installed by `--install`: `report`
 - License: PolyForm-Noncommercial-1.0.0
 - Repo: `https://github.com/QubeTX/qube-machine-report`
+- Default branch: `main` (renamed atomically from `master` on 2026-07-17;
+  `origin/master` no longer exists)
 - Release tooling: cargo-dist `0.31.0`
 
 The crate exposes both:
@@ -736,7 +738,7 @@ Total Windows installer surface area per release: 4 first-class installers + 2 l
 
 The crates.io workflow is intentionally separate from the auto-generated
 `release.yml`. It is triggered by `workflow_run` after `CI` completes on
-`master`/`main`, checks out the exact CI-tested commit SHA, skips when the
+`main`, checks out the exact CI-tested commit SHA, skips when the
 manifest version is already present on crates.io using a descriptive
 data-access `User-Agent`, and runs `cargo publish --locked` only when
 `CARGO_REGISTRY_TOKEN` is configured as a repository Actions secret. It reruns

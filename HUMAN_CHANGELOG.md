@@ -13,6 +13,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The source repository now calls its primary branch `main`.** This matches
+  the rest of Emmett's repositories. The change keeps the same project history
+  and does not replace or alter any published downloads, installers, package,
+  or website content.
+
 ## [4.0.1] - 2026-07-15
 
 ### Fixed

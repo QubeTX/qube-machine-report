@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a TR-300 release end-to-end — from a master commit through GitHub Release + crates.io publication. Use whenever the user asks to ship, release, deploy, cut a release, tag a release, publish a version, push a version bump to crates.io, or watch a release CI run. Also use when fixing a CI or release.yml failure during an in-flight release. Encodes the full ordered workflow: pre-release local gates, version bump in lockstep across the documentation set, master push → wait for ci.yml green → wait for crates-publish.yml → tag push → watch release.yml → fix-forward loop on failure. Trigger on phrases like "ship v3.14.4", "let's release", "cut the release", "deploy this", "tag and release", "release time", or just "deploy" / "ship it" in this repo's context, even when the user doesn't name a version number.
+description: Cut a TR-300 release end-to-end — from a main-branch commit through GitHub Release + crates.io publication. Use whenever the user asks to ship, release, deploy, cut a release, tag a release, publish a version, push a version bump to crates.io, or watch a release CI run. Also use when fixing a CI or release.yml failure during an in-flight release. Encodes the full ordered workflow: pre-release local gates, version bump in lockstep across the documentation set, main push → wait for ci.yml green → wait for crates-publish.yml → tag push → watch release.yml → fix-forward loop on failure. Trigger on phrases like "ship v3.14.4", "let's release", "cut the release", "deploy this", "tag and release", "release time", or just "deploy" / "ship it" in this repo's context, even when the user doesn't name a version number.
 ---
 
 # TR-300 release workflow
@@ -15,7 +15,7 @@ The workflow is twelve ordered steps. Skipping or reordering them tends to fail 
 
 Before starting, confirm:
 
-- Working tree clean on `master` (`git status` returns clean).
+- Working tree clean on `main` (`git status` returns clean).
 - All feature work for the version you're about to cut is already committed.
 - MSRV is unchanged — OR — both `Cargo.toml` `rust-version` and `rust-toolchain.toml` `channel` were bumped in the same earlier commit. This is the MSRV lockstep rule from [`AGENTS.md` § "MSRV policy"](../../../AGENTS.md). Touching one without the other will break either `ci.yml` (rustfmt/clippy missing) or `release.yml` (rustc older than required).
 - `gh` CLI is authenticated for this repo (`gh auth status`).
@@ -111,11 +111,11 @@ Agent tool with subagent_type: "codex:codex-rescue"
 
 For release commits this is usually a self-review of the diff. The full Codex review is more appropriate on feature commits earlier in the cycle. If you want Codex's `gh pr diff` review path, the PR must exist first — open it, then ask Codex to review.
 
-The TR-300 project ships release commits direct to master with no PR (see recent history: `62a2006`, `8ab4aa4`, `25305d8`). Skip this step on routine releases unless something in the diff makes you want a second opinion.
+The TR-300 project ships release commits direct to `main` with no PR (see recent history: `62a2006`, `8ab4aa4`, `25305d8`). Skip this step on routine releases unless something in the diff makes you want a second opinion.
 
 ---
 
-## § 7 Commit and push master
+## § 7 Commit and push main
 
 Commit:
 
@@ -140,7 +140,7 @@ EOF
 Then push:
 
 ```bash
-git push origin master
+git push origin main
 ```
 
 Never `--no-verify`. Never `--amend` after a hook failure (the commit didn't happen, so amend would silently modify the previous commit).
@@ -150,7 +150,7 @@ Never `--no-verify`. Never `--amend` after a hook failure (the commit didn't hap
 ## § 8 Watch `ci.yml` on the exact release commit
 
 ```bash
-gh run list --branch master --limit 5
+gh run list --branch main --limit 5
 # Identify the run for your commit SHA — look at the "DISPLAY TITLE" column
 gh run watch <run-id>
 ```
@@ -170,16 +170,16 @@ If any job fails:
 gh run view <run-id> --log-failed
 ```
 
-Then fix on master (same version — the tag hasn't been pushed yet), commit, push, watch again. See § 13 for the fix-forward loop.
+Then fix on `main` (same version — the tag hasn't been pushed yet), commit, push, watch again. See § 13 for the fix-forward loop.
 
 ---
 
 ## § 9 Wait for `crates-publish.yml`
 
-`.github/workflows/crates-publish.yml` is triggered automatically via `workflow_run` after `ci.yml` succeeds on master. It checks out the exact CI-tested SHA, reruns fmt/clippy/tests/package/dry-run, and publishes to crates.io.
+`.github/workflows/crates-publish.yml` is triggered automatically via `workflow_run` after `ci.yml` succeeds on `main`. It checks out the exact CI-tested SHA, reruns fmt/clippy/tests/package/dry-run, and publishes to crates.io.
 
 ```bash
-gh run list --workflow=crates-publish.yml --branch master --limit 3
+gh run list --workflow=crates-publish.yml --branch main --limit 3
 gh run watch <run-id>
 ```
 
@@ -259,7 +259,7 @@ If `release.yml` fails, you can't re-tag (tags are immutable). See § 13 for the
 ## § 12 Append post-release verification log entries
 
 After the GitHub Release publishes successfully, collect:
-- master CI run ID (from § 8)
+- `main` CI run ID (from § 8)
 - crates-publish run ID (from § 9)
 - release.yml run ID (from § 11)
 - windows-installers.yml run ID
@@ -272,7 +272,7 @@ Then update two files:
 - One-paragraph summary of what shipped
 - Local gates pass note (the cargo commands from § 5)
 - Runtime smoke results
-- "**CI verification** — `master` CI run <id> passed..."
+- "**CI verification** — `main` CI run <id> passed..."
 - "**Crates.io verification** — crates-publish run <id> published `tr300` X.Y.Z..."
 - "**Release verification** — release.yml run <id> passed, both Apple jobs were accepted and signed archives verified, windows-installers.yml run <id> passed, and the GitHub Release published N assets"
 
@@ -288,7 +288,7 @@ Then commit and push these doc updates as a follow-up:
 ```bash
 git add CHANGELOG.md TESTING.md MASTER_PLAN.md   # whichever you touched
 git commit -m "docs: record vX.Y.Z publication status"
-git push origin master
+git push origin main
 ```
 
 This follow-up commit kicks off another `ci.yml` run, but it's doc-only, so it should be green by default. It also kicks off another `crates-publish.yml` run that will SKIP (the version is already published). Both of those are fine.
@@ -306,8 +306,8 @@ Things fail. The recovery path depends on whether the tag has been pushed yet.
 If `ci.yml` or `crates-publish.yml` fails:
 
 1. `gh run view <run-id> --log-failed` to diagnose.
-2. Fix the issue on master with a new commit. **Keep the same version** — the tag hasn't moved yet, so `Cargo.toml` `version` stays as you set it in § 3.
-3. Push the fix: `git push origin master`.
+2. Fix the issue on `main` with a new commit. **Keep the same version** — the tag hasn't moved yet, so `Cargo.toml` `version` stays as you set it in § 3.
+3. Push the fix: `git push origin main`.
 4. Watch CI again from § 8.
 
 Repeat until both `ci.yml` and `crates-publish.yml` are green/skipped, then proceed to § 10.

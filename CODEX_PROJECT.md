@@ -33,7 +33,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   retained; changed record types are now `#[non_exhaustive]` for safer future
   additive fields.
 - MSRV: Rust `1.95`, pinned in both `Cargo.toml` and `rust-toolchain.toml`
-- Default branch: `master`
+- Default branch: `main` (GitHub atomically renamed it from `master` on
+  2026-07-17; new clones and release work must use `main`)
 - Release tooling: cargo-dist `0.31.0`
 - Last source/docs verification: 2026-07-15 on a MacBook Pro M2, macOS 26.3.1
   build 25D2128
@@ -106,7 +107,7 @@ do not have to infer platform semantics.
 2. Run locked fmt, clippy, tests, native/Rosetta release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, and real Mac archive sign/notary/repack proof.
-3. Commit and push `master`; wait for `.github/workflows/ci.yml` to pass on the
+3. Commit and push `main`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
 4. Create and push only tag `v4.0.1` after CI/crates settle. The immutable
    `v4.0.0` tag records the failed-closed first hosting attempt and must not move.

@@ -24,6 +24,7 @@
   - [Enforced Developer ID signing and Apple notarization](#enforced-developer-id-signing-and-apple-notarization)
   - [Post-release personal-hardware evidence boundary](#post-release-personal-hardware-evidence-boundary)
 - [Toolchain & release](#toolchain--release)
+  - [Default branch is `main` (2026-07-17)](#default-branch-is-main-2026-07-17)
   - [MSRV policy (v3.11.1+, addendum v3.13.1)](#msrv-policy-v3111-addendum-v3131)
   - [Self-update auto-rustup (v3.11.1+)](#self-update-auto-rustup-v3111)
   - [Intel macOS coverage policy (v3.11.2+)](#intel-macos-coverage-policy-v3112)
@@ -365,6 +366,28 @@ personal Alienware accuracy test.
 ---
 
 ## Toolchain & release
+
+### Default branch is `main` (2026-07-17)
+
+The repository's actual GitHub default branch is `main`. It was atomically
+renamed from `master` at the unchanged commit
+`cd3c179540b48770e1c555cbf60c809d702eb999` to match the operator's other
+repositories. Development and release-source commits go directly to `main`,
+then `ci.yml` and `crates-publish.yml` must settle on the exact commit before a
+version tag is pushed.
+
+The migration deliberately used GitHub's supported branch-rename operation
+after verifying that CI and crates publishing already accepted `main`, tagged
+cargo-dist releases and the follow-on Windows installer workflow did not depend
+on the old branch name, and the repository had no open pull requests, branch
+protections, rulesets, webhooks, or deployment environments tied to `master`.
+The workflow branch filters are now `main`-only so a later accidental recreation
+of `master` cannot become a second publication path.
+
+Release tags, crates.io versions, GitHub Release assets, Apple credentials, and
+notarized binaries are independent immutable records and were not recreated or
+modified by the branch rename. Historical testing/changelog statements that
+name `master` remain accurate for the runs they describe.
 
 ### MSRV policy (v3.11.1+, addendum v3.13.1)
 

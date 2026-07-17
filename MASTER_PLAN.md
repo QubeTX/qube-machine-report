@@ -4,11 +4,11 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-15 01:20 CDT
+**Last updated:** 2026-07-17 00:24 CDT
 **Release / working manifest:** 4.0.1
 **Release scope:** v4.0.1 and its homepage are deployed; personal
 Alienware/AMD/Pi evidence remains open and drives forward patches
-**Default branch:** `master`
+**Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
 ## 1. Read order for the next machine

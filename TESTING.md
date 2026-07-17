@@ -7,6 +7,25 @@ as passed.
 
 ## Per-version verification log
 
+### Repository default-branch migration — 2026-07-17
+
+- **Scope:** rename the GitHub default branch from `master` to `main` without
+  changing product source, dependencies, release tags, public artifacts,
+  signing/notarization inputs, or the production homepage.
+- **Pre-mutation audit:** `ci.yml` and `crates-publish.yml` already accepted
+  `main`; cargo-dist publication is tag-triggered; supplemental Windows
+  packaging follows the tag-triggered Release workflow; and GitHub reported no
+  open pull requests, branch protection, rulesets, webhooks, deployment
+  environments, or other visible policy tied to `master`.
+- **Migration method:** GitHub's atomic branch-rename API moved the unchanged
+  `cd3c179540b48770e1c555cbf60c809d702eb999` branch tip to `main`, updated the
+  repository default, and removed the old remote branch. The local branch now
+  tracks `origin/main`, and `origin/HEAD` resolves to `origin/main`.
+- **Required final proof:** local release gates, exact-SHA hosted CI on `main`,
+  the downstream crates workflow's successful 4.0.1 skip, unchanged release
+  tags/assets, and the unaffected production homepage must all be recorded
+  before the migration task closes.
+
 ### v4.0.1 — 2026-07-15
 
 - **Fix-forward reason:** immutable tag `v4.0.0` points to
