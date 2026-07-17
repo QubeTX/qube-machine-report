@@ -45,9 +45,13 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee` passed all 13 jobs in CI run
   29559148638 with zero annotations; exact-SHA crates run 29559305341 safely
   skipped already-published 4.0.1 without token or publish access.
+- Architecture ledger: `docs/architecture-decisions.md` is reconciled through
+  2026-07-17. It covers the complete accepted v4/session decision surface and
+  explicitly backfills the one-product/mode/output contracts, Windows advisory
+  consolidation, and exhaustive `main`/checkout-v6 rationale and evidence.
 - Release tooling: cargo-dist `0.31.0`
-- Last source/docs verification: 2026-07-15 on a MacBook Pro M2, macOS 26.3.1
-  build 25D2128
+- Last native source verification: 2026-07-15 on a MacBook Pro M2, macOS 26.3.1
+  build 25D2128. Documentation/workflow state reconciled 2026-07-17.
 
 ### v4.0.0 feature set, released through the v4.0.1 fix-forward
 

@@ -4,7 +4,7 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-17 00:24 CDT
+**Last updated:** 2026-07-17 01:35 CDT
 **Release / working manifest:** 4.0.1
 **Release scope:** v4.0.1 and its homepage are deployed; personal
 Alienware/AMD/Pi evidence remains open and drives forward patches
@@ -22,6 +22,10 @@ supported Node 24 runtime, matching release and supplemental Windows packaging.
 Commit `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee` passed all 13 jobs in CI
 run 29559148638 with zero annotations and no checkout deprecation warning;
 exact-SHA crates run 29559305341 safely skipped already-published 4.0.1.
+The canonical ADR is also reconciled through this state: its coverage index and
+expanded records preserve the one-Rust architecture, collection/output
+contracts, v4 safety/trust/evidence boundaries, Windows consolidation, and the
+full `main`/checkout-v6 decision for the next machine.
 
 ## 1. Read order for the next machine
 

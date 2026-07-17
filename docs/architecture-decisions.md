@@ -9,10 +9,19 @@
 > Each section is dated by the version that introduced (or substantially
 > revised) the decision. Verbatim moves from CLAUDE.md preserved word-for-word
 > so `git blame` history continues to make sense.
+>
+> **Coverage reconciled through 2026-07-17.** This is the repository's
+> canonical ADR ledger: one document organized by decision family rather than
+> one file per decision. Accepted decisions remain binding until a later dated
+> section explicitly supersedes them. Historical failure evidence is retained
+> because it explains why the guardrails exist.
 
 ## Table of contents
 
+- [Decision ledger status (through 2026-07-17)](#decision-ledger-status-through-2026-07-17)
 - [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
+  - [One Rust product, platform adapters, and two collection budgets](#one-rust-product-platform-adapters-and-two-collection-budgets)
+  - [Stable table, JSON, locale, and privacy contracts](#stable-table-json-locale-and-privacy-contracts)
   - [Why this is v4.0.0 rather than v3.18.0](#why-this-is-v400-rather-than-v3180)
   - [Evidence-backed optional values](#evidence-backed-optional-values)
   - [One native macOS snapshot, including Rosetta](#one-native-macos-snapshot-including-rosetta)
@@ -35,6 +44,7 @@
   - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
   - [v3.14.5+ — Windows install error advisor](#v3145--windows-install-error-advisor)
   - [Windows distribution model (v3.15.0+)](#windows-distribution-model-v3150)
+    - [v3.17.0 addendum — advisory one-install consolidation](#v3170-addendum--advisory-one-install-consolidation)
   - [v3.15.1 addendum — Why corporate.wxs lives in `wix-corporate/`, not `wix/`](#v3151-addendum--why-corporatewxs-lives-in-wix-corporate-not-wix)
 - [Install / update safety primitives (v3.15.2+)](#install--update-safety-primitives-v3152)
   - [Atomic rc-file writes](#atomic-rc-file-writes)
@@ -46,11 +56,138 @@
 
 ---
 
+## Decision ledger status (through 2026-07-17)
+
+This reconciliation compared the ledger against current source, all four
+workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
+ledger, technical and human changelogs, agent guides, and the public v4.0.1
+release state. The result is an accepted decision set, not a claim that every
+future hardware row has already been exercised.
+
+| Decision family | Status | Enforcement / source of truth |
+|---|---|---|
+| One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
+| Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
+| Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
+| Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
+| Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
+| Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
+| Developer ID plus Apple `Accepted` before Mac artifact upload | Accepted and release-blocking | signing script and protected cargo-dist workflow step |
+| Frozen Mac surface during personal Windows/Linux/Pi continuation | Accepted | agent guides, current handoff, release workflow, hardware task boundary |
+| Personal hardware remains post-release evidence | Accepted deferral, still open | `#winhw`, `#plat`, `TESTING.md`; hosted jobs do not impersonate physical machines |
+| GitHub default branch `main` and checkout v6/Node 24 | Accepted and hosted-verified | GitHub default metadata, workflow filters/actions, exact-SHA CI/crates runs |
+| Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
+| Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
+| Advisory one-install Windows consolidation | Accepted | hidden `migrate-cleanup`, installer hooks, deletion allowlist and tests |
+
+The following earlier states are **superseded**, not alternative supported
+modes: automatic report saving, `master` as the default branch, non-blocking
+Mac/audit CI gates, ad-hoc-signed public Mac binaries, unsigned Mac release
+fallbacks, path-only Windows installer inference, and any force/direct-running-
+binary updater bypass. Historical sections retain them only as failure context.
+
+---
+
 ## Cross-platform report semantics (v4.0.0)
 
 Substantially revised and released 2026-07-14. Personal Alienware, AMD64 Linux
 laptop, and Raspberry Pi 4 live checks remain explicit post-release evidence
 for patches; their absence must not be rewritten as proof.
+
+### One Rust product, platform adapters, and two collection budgets
+
+TR-300 is one Cargo package, one `tr300` binary, and one Rust library surface.
+macOS, Linux, and Windows are not separate products and must not grow separate
+CLI grammars, report schemas, renderers, or release versions. Shared code owns
+the `SystemInfo` aggregate, collection orchestration, value definitions,
+rendering, JSON, save policy, and error contract. Platform differences live in
+cfg-gated collectors and installers, with native APIs/files used first and
+bounded subprocess fallbacks used only where they add defensible evidence.
+
+`SystemInfo::collect_with_mode` runs the OS, CPU, memory, disk, network,
+session, and platform collectors in scoped parallel work, converts core-thread
+panics into a reportable error, and treats platform enrichment as optional.
+This keeps one semantic assembly point while allowing each OS to use its own
+authoritative sources. A missing tool, denied permission, timeout, malformed
+response, or unsupported fact becomes absence/fallback—not a platform fork and
+not a whole-report failure.
+
+The same product intentionally has two collection budgets:
+
+- **Full** is the normal detailed report. It may run bounded profiler, WMI,
+  resolver, login, encryption, firmware, or health probes.
+- **Fast** is the shell-startup path. It avoids slow subprocess-heavy work and
+  may leave optional rows/JSON values absent, but values it does emit retain the
+  same meaning as full mode. Fast does not substitute guesses for skipped facts.
+
+The install-time auto-run uses `tr300 --fast`; the `report` alias remains a
+normal full invocation. Neither mode saves unless the explicit full-table save
+flag is present. This separation makes startup latency a contract without
+weakening the accuracy contract.
+
+**Rejected alternatives:**
+
+- Separate macOS/Windows/Linux editions: fixes would drift, consumers would
+  receive different schemas, and cross-platform comparisons would stop meaning
+  the same thing.
+- Run every probe in fast mode: shell startup would inherit the slowest WMI,
+  profiler, login, resolver, or encryption command and violate the 1.5-second
+  hosted budget.
+- Give fast mode friendly placeholder values: omission accurately says “not
+  collected under this budget”; a placeholder can be mistaken for measured
+  hardware state.
+- Move platform parsing into the renderer: presentation would become coupled to
+  command output and make table/JSON/Markdown disagree.
+
+**Consequences and revalidation:** a platform-local accuracy fix belongs in its
+cfg-gated collector plus shared fixtures/tests. A change to shared aggregation,
+definitions, schema, renderer, command helper, dependencies, or mode semantics
+is cross-platform and reopens the relevant Linux/Windows/Mac gates; during the
+Alienware continuation it also reopens native arm64 and Rosetta qualification.
+
+### Stable table, JSON, locale, and privacy contracts
+
+The human table and machine JSON are two views of the same collected record,
+not independent implementations. The table remains a compact 51-display-column
+surface with a 12-column label and 32-column value field. Display width is
+measured with `unicode-width`, not scalar/byte count, so wide characters cannot
+break borders. Strings truncate with an ellipsis inside the allotted display
+width. ASCII mode changes only presentation characters, not values.
+
+Encoding setup precedes output. On Unix, locale inspection can select ASCII
+before any box-drawing character is printed. On a Windows terminal, the output
+code page is set to UTF-8 before the report renders. This ordering is
+load-bearing: printing a Unicode banner first would make the fallback too late.
+
+Schema-v1 JSON is constructed as a typed `serde_json::Value` and serialized
+once. Existing keys and types remain stable; v4 additions are nullable/context
+keys. Numeric non-finite values become JSON `null`. CPU, disk, memory, load,
+frequency, route, uptime, and availability fields include enough provenance or
+definition context that consumers do not need to infer platform-specific
+meaning from a label. Table, JSON, and manually saved Markdown must derive from
+the same facts.
+
+Privacy is part of the information contract. Useful model, board, firmware,
+display, battery, session, and network context may be reported; hardware serial
+numbers, platform UUIDs, and similar persistent unique identifiers are not.
+
+**Rejected alternatives:**
+
+- Count `.chars()` for terminal layout: Unicode scalar count is not terminal
+  display width.
+- Hand-build JSON punctuation/escaping: unusual device/user text and non-finite
+  values can produce invalid or ambiguous output.
+- Use different field definitions per renderer: a value that changes meaning
+  between table and JSON is not cross-platform precision.
+- Print Unicode before locale/code-page setup: recovery cannot repair bytes
+  already emitted.
+- Add serials/UUIDs “for completeness”: they add tracking risk without helping
+  the machine-health purpose.
+
+**Consequences and revalidation:** renderer changes require fixed-width ASCII
+and Unicode tests; JSON changes require parse/schema compatibility tests and a
+consumer review; platform information additions require privacy review. A
+shared renderer/schema change also crosses the frozen Mac boundary.
 
 ### Why this is v4.0.0 rather than v3.18.0
 
@@ -369,25 +506,184 @@ personal Alienware accuracy test.
 
 ### Default branch is `main` (2026-07-17)
 
-The repository's actual GitHub default branch is `main`. It was atomically
-renamed from `master` at the unchanged commit
-`cd3c179540b48770e1c555cbf60c809d702eb999` to match the operator's other
-repositories. Development and release-source commits go directly to `main`,
-then `ci.yml` and `crates-publish.yml` must settle on the exact commit before a
-version tag is pushed.
+**Status:** Accepted, implemented, hosted-verified. This supersedes `master` as
+the live default; historical records that name `master` remain factual for the
+runs and commits they describe.
 
-The migration deliberately used GitHub's supported branch-rename operation
-after verifying that CI and crates publishing already accepted `main`, tagged
-cargo-dist releases and the follow-on Windows installer workflow did not depend
-on the old branch name, and the repository had no open pull requests, branch
-protections, rulesets, webhooks, or deployment environments tied to `master`.
-The workflow branch filters are now `main`-only so a later accidental recreation
-of `master` cannot become a second publication path.
+#### Context and forces
 
-Release tags, crates.io versions, GitHub Release assets, Apple credentials, and
-notarized binaries are independent immutable records and were not recreated or
-modified by the branch rename. Historical testing/changelog statements that
-name `master` remain accurate for the runs they describe.
+The operator's other repositories use `main`, and explicitly requested the same
+convention here only if CI, crates publication, cargo-dist releases,
+supplemental Windows packaging, Apple trust enforcement, and public deployment
+could be preserved without ambiguity. A branch rename is therefore a release-
+systems decision, not cosmetic repository housekeeping.
+
+Before mutation, the audit established:
+
+- the unchanged default-branch tip was
+  `cd3c179540b48770e1c555cbf60c809d702eb999`;
+- `ci.yml` and `crates-publish.yml` already accepted `main` during transition;
+- `release.yml` publishes only from version-like tags, not from a default-branch
+  name;
+- `windows-installers.yml` follows a successful named Release workflow through
+  `workflow_run`, not `master`;
+- no open pull request, branch protection, ruleset, webhook, or deployment
+  environment visible through GitHub was bound to `master`;
+- release tags, crates.io records, public assets, Apple credentials, and the
+  homepage were separate records that did not need recreation.
+
+#### Decision
+
+1. Use GitHub's supported branch-rename operation to atomically rename
+   `master` to `main` at the same commit. GitHub's
+   [branch-renaming documentation](https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-branches-in-your-repository/renaming-a-branch)
+   describes the platform-managed redirects and branch metadata behavior this
+   path provides.
+2. Rename the local branch, track `origin/main`, and refresh `origin/HEAD` to
+   `origin/main`. The remote exposes `main` only; do not keep a second live
+   `master` alias.
+3. Narrow live branch filters to `main` only after the atomic rename. A later
+   accidental `master` recreation must not become another CI/crates publication
+   route.
+4. Update canonical release skills, agent guides, project status, testing
+   ledger, handoff, changelogs, and planning documents. Preserve historical
+   `master` references where rewriting them would falsify old evidence.
+5. Keep direct-default-branch delivery subject to the same local and hosted
+   quality gates. Branch naming changes the route, not the standard.
+
+#### Workflow topology and exact-SHA boundary
+
+The preserved release topology is:
+
+```text
+push to main
+  -> CI (13 blocking format/clippy/test/build/speed/audit/dist-plan jobs)
+  -> Crates.io Publish workflow_run checks out the CI-tested head SHA
+       -> existing version: skip before token/check/package/publish access
+       -> new version: rerun locked gates, then publish
+
+explicit vX.Y.Z tag after main CI/crates settle
+  -> cargo-dist Release (six targets, aliases, fail-closed Apple jobs)
+  -> Windows Installers workflow_run (three installers + sidecars)
+```
+
+`crates-publish.yml` checks `github.event.workflow_run.head_repository` and
+event type in addition to success, then checks out
+`github.event.workflow_run.head_sha`. This prevents a successful unrelated or
+fork run from publishing. Its crates.io existence query happens before secret
+use; a documentation-only commit at already-published 4.0.1 therefore proves
+the chain without accessing the registry token or trying to republish.
+
+Tags remain the only binary-release trigger. A branch/workflow/documentation
+change with unchanged `Cargo.toml` does not justify a version bump, retag, or
+artifact replacement. Creating a new tag merely to “deploy” a branch rename
+would manufacture duplicate product artifacts and unnecessarily rerun Apple and
+Windows release machinery.
+
+#### Actions runtime alignment
+
+The first green `main` runs exposed a non-failing annotation: the remaining
+`actions/checkout@v4` steps targeted deprecated Node 20 and GitHub was forcing
+them onto Node 24. `release.yml` and `windows-installers.yml` already used
+checkout v6 successfully, so leaving CI/crates on v4 created needless runtime
+drift and a future failure risk.
+
+All four workflows now use `actions/checkout@v6`. The
+[official checkout documentation](https://github.com/actions/checkout)
+identifies v6 as the Node 24 release and notes the minimum runner version for
+self-hosted use. TR-300 currently uses GitHub-hosted runners; their actual
+Linux, Apple Silicon, and Windows execution is the decisive compatibility
+proof. If a self-hosted runner is introduced later, its runner version becomes
+an explicit prerequisite rather than an assumption.
+
+The checkout upgrade was deliberately limited to `ci.yml` and
+`crates-publish.yml`; the already-proven generated release workflow and
+hand-authored supplemental Windows workflow were not regenerated or otherwise
+changed. That scope avoids reopening the frozen Mac artifact path for a cleanup
+that provided no Mac benefit.
+
+#### Immutable distribution boundary
+
+The branch and checkout changes do not mutate already-published distribution
+records:
+
+- immutable `v4.0.0` remains the historical failed-closed tag;
+- immutable `v4.0.1` remains at release source
+  `b67ad083503d0fff840af8467015d05c659268ea`;
+- crates.io remains unyanked 4.0.1 with its existing checksum;
+- the GitHub Release remains non-draft/non-prerelease with 28 uploaded,
+  nonempty assets;
+- both public Mac archives retain their exact hashes, Developer ID signature,
+  Team ID, identifier, hardened runtime, timestamp, and Apple `Accepted`
+  submissions;
+- the homepage remains deployed from its own `main` commit
+  `d77397479ad2b1189cce86b5402eaf1cc966abdf`.
+
+Repository Apple secret **names** and non-secret variables can be audited;
+their values must never enter this ADR, git, task memory, or logs.
+
+#### Rejected alternatives
+
+- **Create `main`, push it, change default, then delete `master` manually.**
+  Multiple operations create an avoidable split-brain interval and do not gain
+  anything over GitHub's supported atomic rename/redirect behavior.
+- **Keep both `master` and `main` active.** Two default-like branches invite
+  divergent commits and, if filters drift, duplicate CI or publication paths.
+- **Rename first and assume integrations follow.** Workflow filters, policies,
+  open PR bases, webhooks, environments, local upstreams, release triggers, and
+  raw branch URLs all require explicit audit.
+- **Rewrite every historical `master` mention.** That would falsify release
+  ledgers and old run descriptions rather than improve current instructions.
+- **Ignore checkout v4's Node warning because the run is green.** GitHub's
+  compatibility shim is not a stable contract; waiting converts a known,
+  low-risk maintenance change into a future CI outage.
+- **Leave branch CI on v4 while release workflows use v6.** Mixed action
+  runtimes make pre-tag validation less representative of release automation.
+- **Regenerate `release.yml` merely to align action versions.** It already used
+  v6, and regeneration risks losing legacy aliases or the protected Apple gate.
+- **Bump or retag 4.0.1 for repository metadata.** No product/package bytes
+  changed; immutable release records should remain immutable.
+
+#### Consequences and operating invariants
+
+- New clones, PR defaults, direct development, and release-source work use
+  `main`. Existing stale clones may need the normal Git upstream rename steps;
+  they must not recreate `origin/master`.
+- `ci.yml` and `crates-publish.yml` remain `main`-only. Release remains tag-
+  triggered, and supplemental Windows packaging remains Release-workflow-
+  triggered.
+- Every workflow uses checkout v6/Node 24. A future action-major change requires
+  official-source review, `actionlint`, exact-SHA hosted execution on all CI
+  operating systems, and a crates workflow proof.
+- Direct pushes to `main` are authorized for this maintainer but never bypass
+  local gates or exact-SHA hosted verification.
+- Branch-only documentation commits legitimately trigger the crates workflow;
+  already-published versions must exit successfully through the pre-token skip.
+- Any future branch rename, new deployment integration, ruleset, self-hosted
+  runner, changed workflow name, or trigger redesign requires reopening this
+  decision and auditing the complete chain.
+
+#### Verification evidence
+
+- Migration commit `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7`:
+  CI 29557626125 passed all 13 jobs; exact-SHA crates run 29557758673 safely
+  skipped existing 4.0.1.
+- Migration attestation `bc936ad8450cc4c85b07dfadff0dbe5761ebb237`:
+  CI 29558048158 passed all 13 jobs; crates run 29558195163 safely skipped.
+- Checkout-v6 commit `1714d1fc0b90475d5f0aa590b1ec7d93b24d2eee`:
+  CI 29559148638 passed all 13 jobs with zero check annotations and no
+  checkout-v4/Node-20 log match; crates run 29559305341 used v6 and skipped
+  token/check/package/publish access for existing 4.0.1.
+- Tracked final attestation
+  `eb2ce8b362a54b77a8921cd9666e84f69d423b10`: CI 29559379791 passed all
+  13 jobs with zero annotations and no deprecated-checkout log match; crates
+  run 29559541494 repeated the exact-SHA pre-token safe skip.
+- A fresh public clone selected `main` at the final attestation, GitHub's old
+  `/tree/master` URL redirected to `/tree/main`, `origin/HEAD` resolved to
+  `origin/main`, and no remote `master` remained.
+- All four workflows remained active. v4 tags, 28 release assets, crates.io
+  checksum, public Mac signature/notary evidence, and production homepage
+  bundle/wrappers were re-audited unchanged.
 
 ### MSRV policy (v3.11.1+, addendum v3.13.1)
 
@@ -1172,6 +1468,102 @@ References:
 - [cargo-dist MSI installer book](https://opensource.axo.dev/cargo-dist/book/installers/msi.html)
 - [Azure Trusted Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/)
 - [Microsoft Learn — Submit packages to WinGet](https://learn.microsoft.com/en-us/windows/package-manager/package/)
+
+#### v3.17.0 addendum — advisory one-install consolidation
+
+**Status:** Accepted. This decision backfills the load-bearing rationale for
+`src/migrate.rs`, which was already documented in release notes and agent
+guides but was missing from this ADR ledger.
+
+Windows supports Cargo/cargo-dist copies in `~\.cargo\bin`, a Global edition in
+`%ProgramFiles%\tr300\bin`, and a Corporate edition in
+`%LocalAppData%\Programs\tr300\bin`. A user can therefore install a new MSI/EXE
+successfully and still run an older Cargo copy because `.cargo\bin` appears
+earlier on PATH. Global and Corporate editions can also coexist. The updater's
+origin marker prevents guessing the wrong installer for an in-place update, but
+it cannot by itself remove a shadowing executable.
+
+The operator policy is one active TR-300 executable/edition at a time. The four
+Windows installers therefore own an **advisory** post-install consolidation
+step through hidden `tr300 migrate-cleanup`:
+
+- interactive installs expose “remove older Cargo copy” and “remove other
+  edition” tasks, both defaulted on;
+- silent self-updates invoke the same cleanup without a prompt, also defaulted
+  on;
+- `--cargo-copy` targets only `~\.cargo\bin\tr300.exe`;
+- `--other-edition` selects the opposite Global/Corporate binary directory;
+- with neither target flag, the command defaults only to the safer Cargo-copy
+  cleanup;
+- `--dry-run`, `--json`, `--quiet`, `--user-profile`, and `--cargo-home` exist
+  for installer integration, diagnosis, and deterministic resolution;
+- macOS/Linux return a clean no-op because their supported methods converge on
+  the same Cargo-home binary location rather than separate editions.
+
+The command removes a shadowing executable, not an entire toolchain, PATH entry,
+Downloads directory, or Add/Remove Programs registration. A stale installer
+registration can be repaired with that product's normal uninstaller; deleting
+unrelated registry/product state inside a post-install helper would broaden the
+risk substantially.
+
+Hard safety invariants bound every deletion:
+
+1. The filename allowlist contains only `tr300`/`tr300.exe`; `cargo.exe`,
+   `rustup.exe`, sibling tools, directories, and arbitrary files cannot match.
+2. The running executable's canonicalized directory is always excluded. A
+   Cargo-installed process cannot delete itself just because Cargo cleanup was
+   requested.
+3. Candidate paths are computed only from Cargo home/user profile or the two
+   edition roots. No candidate is under Downloads.
+4. The helper never edits PATH and never removes `.cargo\bin` itself.
+5. It never elevates. A per-user process that cannot remove a per-machine copy
+   reports `needs admin`, leaves it intact, and continues.
+6. Empty, absent, partial, or needs-admin cleanup remains exit 0 so advisory
+   consolidation cannot roll back or falsely fail a successful installer. Only
+   a true internal inability to establish the running location is nonzero.
+
+Installer context is part of correctness. WiX custom actions are deferred and
+`Impersonate='yes'` so user-profile cleanup runs as the invoking user, and they
+use `FileKey`/`ExeCommand` without adding `WixUtilExtension`. Inno Corporate can
+pass the user profile directly. Inno Global intentionally relies on process
+environment fallback because it has no reliable pre-elevation user-profile
+constant for this purpose. Cargo-home and user-profile overrides win over the
+helper's environment when available.
+
+The edition directory constants and registry marker strings form one lockstep
+across `src/migrate.rs`, `src/update.rs`, `wix/main.wxs`,
+`wix-corporate/corporate.wxs`, and both Inno scripts. Changing an install path
+in only one surface can make cleanup target the wrong edition or make updater
+origin validation reject a legitimate marker.
+
+**Rejected alternatives:**
+
+- **Let PATH precedence decide forever.** Installation can report success while
+  the user continues running the old binary, which is a false update outcome.
+- **Delete the entire Cargo bin directory or remove it from PATH.** It commonly
+  contains cargo, rustup, and unrelated Rust tools; TR-300 has no authority to
+  mutate them.
+- **Run cleanup automatically on every ordinary report.** Reports are read-only
+  by v4 contract, and deleting another install outside explicit installer
+  context would be surprising and endpoint-policy-hostile.
+- **Make cleanup failure fail the installer.** A Corporate user cannot normally
+  remove a Global per-machine copy. The new working install should survive and
+  report the remaining conflict rather than be rolled back.
+- **Elevate automatically to guarantee removal.** That violates the Corporate
+  no-admin purpose and turns a bounded advisory helper into a privilege path.
+- **Guess MSI versus EXE from the install directory.** Both formats share an
+  edition path; the `InstallSource` marker is required for product identity.
+- **Apply the Windows edition model to macOS/Linux.** Those platforms have no
+  Global/Corporate split; a no-op preserves the single cross-platform CLI
+  contract without inventing foreign paths.
+
+**Consequences and revalidation:** all four installer interactive and silent
+paths must exercise the same target defaults; pure path/allowlist/outcome tests
+must run on every OS, and live deletion/needs-admin/PATH-shadow tests remain
+part of the personal Alienware matrix. Any Windows install path, marker,
+product scope, custom-action impersonation, binary name, or additional shipped
+binary requires a lockstep migration review. The helper must remain hidden,
+advisory, and incapable of deleting the running install.
 
 ### v3.15.1 addendum — Why corporate.wxs lives in `wix-corporate/`, not `wix/`
 

@@ -22,6 +22,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runtime.** This clears a deprecation warning before it can become a future
   build problem; release and Windows packaging workflows already used the same
   supported version.
+- **The project's architecture record now fully explains the recent work.** It
+  connects the cross-platform Rust design, fast versus detailed reports,
+  display/privacy rules, safe Windows install cleanup, Mac release protection,
+  and the `main` migration—including why alternatives were rejected and what a
+  future change must re-test.
 
 ## [4.0.1] - 2026-07-15
 

@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflows now run checkout on its supported Node 24 runtime, matching the
   already-proven release and supplemental Windows workflows and removing the
   hosted Node 20 deprecation annotation.
+- **The architecture decision ledger is reconciled through the v4.0.1 and
+  `main` migration sessions.** The canonical ADR now includes a status/coverage
+  index; the one-Rust-product, fast/full-budget, output/locale/privacy, and
+  Windows one-install decisions; and an exhaustive default-branch/checkout-v6
+  record with context, workflow topology, immutable distribution boundaries,
+  rejected alternatives, consequences, evidence, and revalidation triggers.
 
 ## [4.0.1] - 2026-07-15
 

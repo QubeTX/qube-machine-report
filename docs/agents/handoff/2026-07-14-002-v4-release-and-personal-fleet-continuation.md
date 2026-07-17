@@ -247,7 +247,10 @@ the later Alienware session.
   sequence, and post-release personal-hardware boundary.
 - `CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md`, and
   `docs/architecture-decisions.md` are synchronized with v4 scope and
-  rationale.
+  rationale. The ADR ledger was reconciled again on 2026-07-17 with a coverage
+  index and exhaustive one-product/mode/output, Windows consolidation, and
+  `main`/checkout-v6 decisions, including alternatives, consequences, evidence,
+  and revalidation triggers.
 - `.agents/skills/release/SKILL.md` and
   `.claude/skills/release/SKILL.md` require audit/workflow/script gates,
   both Apple `Accepted` results, signature/checksum verification of both

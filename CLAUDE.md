@@ -2,12 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Companion file:** Long-form rationale for major architectural decisions
-> (Windows accuracy patterns by version, MSRV / `rust-toolchain.toml` policy,
-> auto-rustup self-update reasoning, Intel macOS CI coverage policy, enforced
-> Developer ID/notarization, and install/update safety primitives) lives in
+> **Companion file:** The canonical architecture decision ledger through
+> 2026-07-17 (single-Rust/product/output semantics, v4 manual-save and
+> fail-safe-update behavior, enforced Mac trust/freeze, `main` and Actions
+> runtime, toolchain/release policy, Windows accuracy/distribution/
+> consolidation, and install safety) lives in
 > [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — the
-> **why**: rejected alternatives, prior failure modes, historical context.
+> **why**: context, rejected alternatives, consequences, evidence, revalidation
+> triggers, prior failure modes, and historical context.
 >
 > Forward-looking work tracking (what's shipped, what's pending, who picks up
 > next session) is in [`MASTER_PLAN.md`](./MASTER_PLAN.md). Per-version

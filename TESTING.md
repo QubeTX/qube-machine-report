@@ -7,6 +7,56 @@ as passed.
 
 ## Per-version verification log
 
+### Architecture decision coverage backfill — 2026-07-17
+
+- **Scope:** reconcile the canonical `docs/architecture-decisions.md` against
+  current source, workflows, the v4 thinking record, both Mac/Alienware
+  handoffs, release/testing ledgers, agent guides, and public v4.0.1 state.
+- **Coverage result:** the existing 1,452-line ledger already captured v4
+  SemVer and evidence semantics, macOS collection, disk/memory definitions,
+  bounded commands/JSON/save/update behavior, manual-only persistence,
+  endpoint-policy failure, blocking gates, Apple trust/freeze, personal-
+  hardware deferral, toolchain/release policy, Windows accuracy/distribution,
+  and installer safety. The backfill adds the previously implicit one-Rust-
+  product/collection-budget and terminal/JSON/privacy decisions, the missing
+  v3.17 advisory one-install consolidation rationale, a current status index,
+  and the exhaustive `main`/checkout-v6 decision record.
+- **Evidence rule:** the ADR distinguishes accepted design, observed proof,
+  rejected alternatives, consequences, and future revalidation triggers. It
+  does not convert the open personal Alienware/AMD/Pi rows into passed evidence
+  and contains no credential values.
+- **Change boundary:** documentation only—no Rust source, dependencies, Cargo
+  metadata, toolchain, installer input, Apple script/workflow/input, tag, crate,
+  release asset, or homepage byte is changed.
+- **Structural and source audit:** `git diff --check`, ADR GitHub-anchor
+  validation (48 headings), relative-link validation across all nine changed
+  Markdown files, `cargo fmt --all -- --check`, `actionlint
+  .github/workflows/*.yml`, `shellcheck scripts/*.sh`, `bash -n
+  scripts/sign-notarize-macos.sh`, protected-surface checks, and credential-
+  pattern checks passed. Direct source/installer comparison confirmed every new
+  mode, output, save, migration, marker/path, impersonation, and no-op claim.
+- **Locked local release gate:** `cargo clippy --locked --all-targets
+  --workspace -- -D warnings`; `cargo test --locked --workspace --all-targets`
+  (121 library + 19 integration tests); `cargo package --locked --list` (39
+  files); `cargo publish --dry-run --locked`; `cargo build --locked --release
+  --workspace`; `cargo audit` (1,160 advisories loaded, 221 dependencies
+  scanned, zero findings); and `dist plan --output-format=json` (cargo-dist
+  0.31.0, six targets) all passed.
+- **Compiled runtime smoke:** `tr300 4.0.1`; ordinary full, fast, JSON, and
+  compatibility `--no-save` runs created no Markdown report; full/fast JSON
+  parsed with schema/mode/privacy invariants; 49 ASCII table lines were exactly
+  51 columns; and each of `-r`, `--report`, `-s`, and `--save` created a new,
+  valid Markdown report without overwriting an existing file. All four
+  deliberately created smoke reports were removed afterward. Non-Windows
+  `migrate-cleanup --dry-run --json` returned the documented successful
+  single-location no-op.
+- **Pre-push live-state audit:** every previously cited run ID resolves to its
+  stated SHA and success; GitHub reports `main`, zero open pull requests, and
+  four active workflows; v4.0.0/v4.0.1 tags are unchanged; v4.0.1 remains a
+  non-draft/non-prerelease 28-asset release with zero empty assets; and crates.io
+  still serves unyanked 4.0.1 with checksum
+  `55086eb631a3b67c8ab0eaa53b9c3783097044ef77321ec8e6849c30e32275da`.
+
 ### Repository default-branch migration — 2026-07-17
 
 - **Scope:** rename the GitHub default branch from `master` to `main` without
