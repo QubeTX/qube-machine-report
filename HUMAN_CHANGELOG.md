@@ -30,6 +30,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mac release checks now show why an update probe failed instead of hiding
+  its result.** Hosted Mac tests use their existing read-only GitHub access for
+  the just-published version check and record the updater result before making
+  the job pass or fail. The v4.1.3 Apple Silicon retry repeated the complete
+  install, trust, update, and uninstall flow successfully before the DMG was
+  published.
+
 ## [4.1.2] - 2026-07-18
 
 ### Fixed

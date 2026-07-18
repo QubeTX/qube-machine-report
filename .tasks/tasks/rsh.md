@@ -21,12 +21,12 @@ The exact release commit passes CI/crates; the immutable tag points at that SHA;
 - [x] Clean-tree local release gates pass without `--allow-dirty`
 - [x] v4.1.0 release SHA passed CI/crates and its supplemental DMG failure was retained as immutable evidence
 - [x] Exact v4.1.2 release SHA passed CI/crates and every packaging workflow
-- [ ] Exact v4.1.3 release SHA passes CI and crates publication
-- [ ] Tag `v4.1.3` points at that exact SHA and every release workflow succeeds
+- [x] Exact v4.1.3 release SHA passes CI and crates publication
+- [x] Tag `v4.1.3` points at that exact SHA and every release workflow succeeds
 
 ## Status
 
-Active. Immutable v4.1.2 source `a94645b9f61432c403c129ef055b8ad2d3876d35` passed CI 29643258539, crates 29643384988, cargo-dist 29643419013, Windows packaging 29643558226, and native DMG/PKG 29643558237. Run 29644024006 passed Cargo, PowerShell, and fresh-format jobs and captured exact `STATUS_CONTROL_C_EXIT`/zero-JSON termination for all immutable old native installer clients after same-channel launch. v4.1.3 source now adds native `ShellExecuteExW` elevation, strict Global-only worker validation, Program Files image rename, verify/rollback/elevated cleanup, and a matrix that both narrowly recovers historical termination and directly proves the current worker transaction. No v4.1.3 tag exists.
+Done. Exact v4.1.3 source `c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed CI 29645549130 and crates 29645665879 before tagging. Cargo-dist 29645718537, Windows packaging 29645855695, native Intel/ARM DMG/PKG 29645855688, and ten-job Windows validation 29645963379 all passed. The public immutable release has 30 assets; #rau records the byte audit. The separate Alienware installed transition remains #w413 because it requires a user-approved UAC prompt, not more release publication.
 
 ## Activity
 
@@ -61,3 +61,4 @@ Active. Immutable v4.1.2 source `a94645b9f61432c403c129ef055b8ad2d3876d35` passe
 - 2026-07-18 11:00 — began immutable v4.1.3 fix-forward: Global MSI/EXE now use one native `ShellExecuteExW` runas worker, strict version/channel/sibling validation, elevated rename/install/verify/rollback/cleanup, and parent-owned final JSON. The matrix recognizes only the exact historical termination tuple and separately exercises current Global same-version repair/cleanup. ADR, testing, plan, handoff, and board record the reusable decision (agent: codex)
 - 2026-07-18 12:00 — dirty-tree candidate passed fmt, 158 unit + 19 integration tests, warning-denying all-target/all-feature Clippy, release build/JSON/ASCII/update/save/code-page/performance smokes, WiX 3.14.1 and Inno 6.7.3 source compiles, RustSec audit, six-target dist plan, actionlint, ShellCheck, Bash syntax, PowerShell parser validation, diff checks, and credential-material scan. Clean-tree package/publish gates follow the release commit (agent: codex)
 - 2026-07-18 12:10 — committed candidate `fb27147`; its clean tree passed the 39-file `cargo package --locked --list` gate and full `cargo publish --dry-run --locked` verification without `--allow-dirty`. Documentation-only evidence flush follows, then the exact final SHA repeats the clean-tree gate before push (agent: codex)
+- 2026-07-18 13:20 — exact source `c5a2561` passed CI/crates before annotated v4.1.3; Release, Windows packaging, native Mac, and all ten Windows transition jobs passed. Mac attempt 1's ARM release-edge probe was repeated fully and passed before DMG publication; task complete with all older tags/assets unchanged (agent: codex)

@@ -37,24 +37,25 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.1.2`; working manifest / next release:
-  `4.1.3` (`Cargo.toml`). v4.1.2 passed exact-SHA CI/crates, signed archives,
-  every Windows package, and universal PKG-in-DMG sign/notary/install gates on
-  native Intel and Apple Silicon. Post-release Windows transition evidence then
-  showed immutable Global installer clients can be terminated by Restart
-  Manager before final updater JSON; v4.1.3 fixes that forward with a strict
-  elevated live-image worker without changing v4.1.2. Alienware Windows
-  validation is real evidence;
+- Current published version and working manifest: `4.1.3` (`Cargo.toml`).
+  v4.1.3 passed exact-SHA CI/crates, signed archives, every Windows package and
+  transition job, and universal PKG-in-DMG sign/notary/install/update/uninstall
+  gates on native Intel and Apple Silicon. It fixes the immutable v4.1.2
+  finding that Restart Manager could terminate a Global installer updater
+  before final JSON by using a strict elevated live-image worker. Alienware
+  public-binary functionality/hardware validation is real evidence; its natural
+  Global MSI remains v4.0.1 until the user completes the final UAC ceremony.
   AMD64 Linux laptop and Raspberry Pi 4 live verification remain open. The
   major v4 boundary
   is required because public Rust records gained fields and collector helpers
   changed signature; the CLI and additive schema-v1 JSON stay compatible.
   Changed public records are `#[non_exhaustive]`.
 - Last fully published distribution state: release source
-  `a94645b9f61432c403c129ef055b8ad2d3876d35` passed exact-SHA CI/crates,
-  both signed Apple archive jobs, all Windows packaging, and the native Intel/
-  ARM universal DMG publication workflow. Its final public updater audit is
-  retained as historical evidence while v4.1.3 fixes forward. Homepage commit
+  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed exact-SHA CI/crates,
+  both signed Apple archive jobs, all Windows packaging/transitions, and the
+  native Intel/ARM universal DMG publication workflow. The public release has
+  30 nonempty stable-name assets whose sidecars and versionless `latest`
+  entrypoints were audited against the immutable bytes. Homepage commit
   `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
   `https://reports.qubetx.com/`; exact evidence is in `TESTING.md` and the
   current handoff.

@@ -7,7 +7,7 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.1.2` / `4.1.3` (all prior tags remain immutable)
+**Published / working version:** `4.1.3` / `4.1.3` (all prior tags remain immutable)
 **Prior pushed checkpoint:** `7422b3c68f19e08b22f6ca8495efddd23042aeb9`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
@@ -64,14 +64,51 @@ Every job still requires one target copy/registration, scoped marker, PATH,
 current no-op, markerless unambiguous recovery, and uninstall. Global jobs also
 invoke the new hidden worker as a same-version repair and require its backup to
 be removed, providing current-source transaction proof before a future release
-exists. Keep v4.1.2 immutable and release only from a new exact v4.1.3 SHA after
-clean local gates and exact-SHA CI/crates.
+exists. Exact v4.1.3 source
+`c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed CI 29645549130 and
+crates 29645665879 before tagging. Release 29645718537, Windows packaging
+29645855695, Mac DMG 29645855688, and ten-job Windows validation 29645963379
+all passed. The immutable public release has exactly 30 nonempty stable-name
+assets; sidecars, `sha256.sum`, representative versionless latest endpoints,
+and the fresh crates.io checksum matched. Keep every v4.1.0-v4.1.3 tag and
+asset immutable.
 
-The separate ND-300 physical-Mac acceptance batch is intentionally held. Do
-not spend Mac time on v3.7.1. Wait for the final public v3.7.2 release/run
-details, then perform only the already-bounded old v3.7.0 PKG to final public
-package update plus non-mutating version/fast report/default-route/no-secret
-smoke. Never run ND network fixes or uninstall the active setup.
+The first Apple Silicon attempt in 29645855688 passed the complete DMG/PKG
+trust, install, receipt/file-owner, universal-binary, and report lifecycle, then
+returned 2 at the just-published `/releases/latest` no-op while Intel passed
+seconds later. Attempt 2 repeated the full ARM update/uninstall lifecycle and
+passed before publication. Future Mac validation supplies the read-only job
+token and emits captured updater JSON/exit to stderr before asserting, so Bash
+`errexit` cannot hide the evidence. This workflow-only hardening is on `main`;
+it does not alter v4.1.3 public bytes or the ordinary unauthenticated path.
+
+Alienware public-byte functionality is complete from the release ZIP: table,
+ASCII, fast/full JSON, no-op update JSON, no-write/manual-save cleanup,
+code-page restoration, and performance passed. Hardware reconfirmed Alienware
+m16 R2, BIOS 1.21.0, UEFI, `6P + 10E`, 16 physical/22 logical cores, both GPUs,
+NVMe, 32 GiB/two modules, battery, route, DNS, locale, and session fields;
+BitLocker is unclaimed because the read-only probe requires elevation. The
+natural installed Global MSI remains one v4.0.1 Program Files copy. Its old
+updater selected/downloaded/checksum-verified the exact Global v4.1.3 MSI, then
+UAC timed out/cancelled with MSI 1602 and returned failure JSON while retaining
+the old install. The exact public MSI recovery prompt also timed out without
+mutation. Resume #w413 only when the user can approve UAC, then require v4.1.3,
+one ARP product/path/marker/PATH, no Corporate/Cargo/private backup, and a
+current one-object no-op. Do not substitute portable success for installed-
+origin proof.
+
+The separate ND-300 physical-Mac acceptance batch is queued as #nd372 and must
+not start until TR-300 is complete and the user is on the testing Mac. Baseline
+with the public v3.7.1 universal DMG, require receipt
+`com.qubetx.nd300.pkg` and paired `/usr/local/bin/nd300` + `speedqx` ownership,
+then run `nd300 update --json` through the standard Apple Installer flow to
+public v3.7.2. In a fresh shell prove both paths/versions, the current receipt,
+no Cargo/archive shadow, and exactly one JSON stdout object. Run only
+`--version`, `--fast --json`, and `--fast --ascii` smokes. The final download
+entrypoint is versionless:
+`https://github.com/QubeTX/qube-network-diagnostics/releases/latest/download/nd300-universal-apple-darwin.dmg`.
+Never run ND network fixes, change channels, clean unrelated files, or uninstall
+the active setup; stop on ambiguity.
 
 ## 2026-07-18 immutable v4.1.2 supported-validator fix-forward
 

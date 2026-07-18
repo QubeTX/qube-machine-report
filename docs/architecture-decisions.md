@@ -29,6 +29,7 @@
   - [Supported macOS ownership proof (v4.1.2 addendum)](#supported-macos-ownership-proof-v412-addendum)
   - [Windows transition runner correctness (v4.1.2 addendum)](#windows-transition-runner-correctness-v412-addendum)
   - [Elevated Global Windows live-image transaction (v4.1.3 addendum)](#elevated-global-windows-live-image-transaction-v413-addendum)
+  - [Authenticated and diagnosable hosted updater probes (v4.1.3 closure)](#authenticated-and-diagnosable-hosted-updater-probes-v413-closure)
   - [Machine-readable and failure contract](#machine-readable-and-failure-contract)
   - [Reusable contract for other CLI products](#reusable-contract-for-other-cli-products)
 - [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
@@ -94,6 +95,7 @@ future hardware row has already been exercised.
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS PKG-in-DMG | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel install gates |
 | Hosted package inputs survive source checkout; builder and validation tool syntax stay identical | Accepted and release-blocking | checkout-before-download ordering plus Xcode 16.4 `lipo <file> -verify_arch ...` checks |
+| Hosted updater probes authenticate and expose captured JSON/exit evidence | Accepted | read-only Actions token plus explicit `errexit` boundary in native Mac validation |
 | macOS installed-package ownership uses supported receipt, file-owner, and Developer ID checks | Accepted and release-blocking | `pkgutil --pkg-info/--files/--file-info`, strict `codesign`, native ARM/Intel install gates |
 | Explicit fresh-installer choice supersedes the prior Windows channel | Accepted | WiX/Inno cross-format removal, scoped markers, advisory cross-edition cleanup |
 | Global Program Files updates use one-UAC elevated live-image handoff | Accepted and release-blocking | strict hidden worker, `ShellExecuteExW` process wait, rollback/cleanup, Windows transition matrix |
@@ -665,6 +667,48 @@ future real old-to-new release must exercise the parent `runas` path; a direct
 same-version worker repair proves the current transaction but does not claim a
 future tag existed during pre-release validation.
 
+### Authenticated and diagnosable hosted updater probes (v4.1.3 closure)
+
+**Status:** Accepted. This is a validation-harness rule; it does not relax the
+ordinary user's public, unauthenticated update path or the one-object stdout
+contract.
+
+The first Apple Silicon validation attempt in macOS DMG run 29645855688 proved
+the v4.1.3 DMG checksum, DMG signature/staple/Gatekeeper result, nested PKG
+signature/staple/Gatekeeper result, installation, receipt and file ownership,
+universal architectures, installed Developer ID identity, and report modes.
+It then stopped when `tr300 update --json` returned 2. The identical Intel job
+queried the same newly published release seconds later and passed. Re-running
+only the failed boundary repeated the complete Apple Silicon lifecycle,
+including the updater no-op and uninstall, and passed; the gated publisher then
+attached the two DMG assets. This is release-edge/API evidence, not permission
+to ignore a failed Mac lifecycle.
+
+The first attempt also exposed an observability defect: Bash `set -e` exited on
+`update=$(...)` before the captured JSON could be printed, so the log retained
+the exit status but hid the updater's recovery object. Hosted updater probes
+now receive the job's existing read-only `github.token` through
+`GITHUB_TOKEN`, which `src/update.rs` already consumes only as an Authorization
+header and never prints or persists. The shell temporarily disables `errexit`
+only around the updater assignment, records its status, writes the captured
+object to the Actions log on stderr, restores `errexit`, and independently
+requires exit 0 plus the expected parsed fields. Product stdout is still one
+object; the log copy is test evidence, not a second stdout emission.
+
+**Rejected alternatives:** accepting a single failed architecture because its
+sibling passed; weakening the updater assertion; sleeping for an arbitrary
+release-propagation delay; retrying without preserving the first result; or
+printing a token. A bounded failed-job rerun is acceptable only after all
+artifact/trust evidence shows the payload itself is unchanged and the rerun
+repeats the complete failed architecture lifecycle before publication.
+
+**Revalidation triggers:** changes to release discovery, token environment
+handling, update JSON/exit behavior, GitHub permissions, release publication
+ordering, or the Mac validation shell must re-run actionlint and both native
+Mac install/update/uninstall jobs. A future failure must expose the updater
+status and JSON before anyone classifies it as transport, propagation, origin,
+or product behavior.
+
 ### Machine-readable and failure contract
 
 Update JSON stdout is exactly one object; child installer output and progress
@@ -754,7 +798,10 @@ portable architecture:
    and revalidate after runner/Xcode changes. Bind chained workflows to exact
    upstream SHA/release identity instead of assuming branch/tag context crosses
    event hops. A successful checksum in one step does not prove the input still
-   exists or that a later tool call or downstream job is valid.
+   exists or that a later tool call or downstream job is valid. Hosted updater
+   probes use the job's read-only API token and must log captured JSON plus exit
+   status on stderr before asserting it, so a release-edge failure is
+   diagnosable without weakening product stdout.
 10. **Separate source proof from legacy recovery proof.** Compile and exercise
     current installer/updater source before tagging. Post-release, run a real
     immutable older client: accept either a genuine same-channel update or its

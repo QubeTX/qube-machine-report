@@ -165,6 +165,10 @@ jobs:
 
       - name: Mount, install, and exercise the universal package
         shell: bash
+        env:
+          # The installed updater uses this existing token only for its
+          # read-only /releases/latest probe. It never prints or persists it.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           dmg="$PWD/artifact/tr300-universal-apple-darwin.dmg"
@@ -205,7 +209,15 @@ jobs:
           lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64
           /usr/local/bin/tr300 --fast --json | jq -e '.schema_version == 1'
           /usr/local/bin/tr300 --ascii --fast >/dev/null
+          # Preserve the updater's one-object stdout contract while making a
+          # nonzero result diagnosable in the Actions log. `set -e` otherwise
+          # exits on the assignment and hides the captured recovery JSON.
+          set +e
           update=$(/usr/local/bin/tr300 update --json)
+          update_status=$?
+          set -e
+          printf 'Updater JSON (exit %s): %s\n' "$update_status" "$update" >&2
+          test "$update_status" -eq 0
           jq -e '.success == true and .install_channel == "macos-dmg-pkg" and .requires_user_action == false' <<< "$update"
 
           # Clean-runner uninstall proof for the documented package contents.

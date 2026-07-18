@@ -51,21 +51,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Published version: **4.1.2**. Working manifest / next release: **4.1.3**.
-The v4.1.0-v4.1.2 tags/assets are immutable. v4.1.2 completed supported macOS
-receipt/file-owner/Developer ID validation and the hosted 30-asset workflows;
-v4.1.3 fixes forward the post-publication finding that Restart Manager can
-terminate a Global native-installer updater before its final JSON.
-Alienware Windows validation is now captured; AMD64 Linux laptop and Raspberry
+Published version and working manifest: **4.1.3**. The v4.1.0-v4.1.3
+tags/assets are immutable. v4.1.3 completed exact-SHA CI/crates, supported
+macOS receipt/file-owner/Developer ID validation, the hosted 30-asset release,
+and every disposable Windows transition. Its strict elevated live-image worker
+fixes the v4.1.2 finding that Restart Manager could terminate a Global native-
+installer updater before final JSON. Alienware public-binary functionality and
+hardware validation is captured; the natural Global MSI remains v4.0.1 until
+the user completes the final UAC ceremony. AMD64 Linux laptop and Raspberry
 Pi 4 checks remain continuation work and must not be reported as completed.
 Managed-work antivirus behavior is a separate endpoint-policy case, not
 personal Windows field-accuracy proof.
 
 Observed distribution state: release source
-`a94645b9f61432c403c129ef055b8ad2d3876d35` passed exact-SHA CI/crates,
-signed Apple archives, every Windows package, and native ARM/Intel universal
-DMG publication. Its updater finding is fixed only in the next immutable
-release. Homepage commit
+`c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed exact-SHA CI/crates,
+signed Apple archives, every Windows package/transition, and native ARM/Intel
+universal DMG publication. Public 30-asset, checksum, stable `latest` URL, and
+crates.io audits passed. Homepage commit
 `d77397479ad2b1189cce86b5402eaf1cc966abdf` is deployed at
 `https://reports.qubetx.com/`. Exact run IDs, submissions, and hashes live in
 `TESTING.md` and the current tracked handoff.

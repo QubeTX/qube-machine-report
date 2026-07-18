@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Published / working manifest:** 4.1.2 / 4.1.3
+**Published / working manifest:** 4.1.3 / 4.1.3
 **Release scope:** origin-preserving updates, native PKG-in-DMG, Apple Installer
 credentials, hosted ARM/Intel Mac gates, Windows installer matrix, and real
 Alienware validation. AMD laptop and Pi evidence remain open.
@@ -43,10 +43,10 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.1.3 Global-updater fix-forward release plan
+## 2. v4.1.3 Global-updater fix-forward outcome
 
-The implementation is tracked in git and is intended to release from the
-Alienware. A physical Mac is not a normal requirement: native GitHub
+The implementation and immutable release are tracked in git and were completed
+from the Alienware. A physical Mac is not a normal requirement: native GitHub
 `macos-15` Apple Silicon and `macos-15-intel` runners are the required build,
 sign, notarize, mount, install, update-strategy, report, and uninstall gates.
 Use physical hardware only for an optional visual smoke or a CI-discovered
@@ -127,7 +127,49 @@ worker as a same-version repair.
   Silicon (job 88061567206) and Intel (job 88061567218). Credential issuance
   and hosted identity proof are complete; no physical Mac was required.
 
-### Remaining release gates
+### Immutable release ledger and remaining hardware gates
+
+v4.1.3 exact source `c5a25617b8b6438b1e7589e7518a1c1bd305ed64`
+passed CI 29645549130 and crates publication 29645665879 before annotated tag
+`v4.1.3` was pushed. Cargo-dist Release 29645718537 passed all six targets and
+both protected Developer ID/notary archive jobs; Windows packaging 29645855695
+published all four native installer families. macOS run 29645855688 built one
+universal signed PKG-in-DMG, installed it on native Intel and Apple Silicon,
+proved receipt/file ownership, signatures, notarization/staples, both
+architectures, report modes, update selection, and uninstall, then published
+the DMG and sidecar. Its first Apple Silicon attempt ended only at the newly
+published release API probe while Intel passed seconds later; bounded attempt 2
+repeated the complete ARM lifecycle and passed. Future probes authenticate with
+the job token and expose captured JSON/exit evidence rather than hiding it
+behind Bash `errexit`.
+
+Disposable Windows validation 29645963379 passed all ten jobs: Global and
+Corporate MSI/EXE prior-version updates, same-version worker repair where
+applicable, no-op, marker recovery, uninstall, PowerShell, Cargo, portable safe
+recovery, and both fresh-format choice directions. The public release is
+non-draft/non-prerelease with exactly 30 nonempty stable-name assets. Twelve
+asset sidecars and all eight `sha256.sum` entries matched; the DMG SHA-256 is
+`a4a784a3e088aa30c1445a34846e53e5ffbce12a3520fb12d07c8547011c7d33`.
+Nine representative versionless `latest/download` endpoints redirected to
+v4.1.3 and matched the exact tagged bytes. crates.io serves unyanked 4.1.3 with
+checksum `f6efa276105eb6ed869e733ca35ae1cb0e038a6c2169f54fa541039bff79f6eb`,
+which matched a fresh crate download. Release notes contain versionless public
+commands. Windows installers remain intentionally unsigned under the existing
+documented Authenticode decision; their SHA sidecars detect mismatch but are
+not represented as independent signatures.
+
+On the Alienware, the exact public ZIP binary passed table/ASCII/schema-v1
+fast+full JSON, current no-op JSON, ordinary no-write, manual save/cleanup,
+console code-page restoration, and performance checks (272–293 ms fast;
+5,121 ms full). Hardware remained plausible: Alienware m16 R2, BIOS 1.21.0,
+UEFI, Core Ultra 7 155H, `6P + 10E`, 16 physical/22 logical cores, Intel Arc +
+RTX 4070, Samsung NVMe, 32 GiB RAM, battery/route/DNS/session data. BitLocker
+status requires elevation and remains unclaimed. The natural Global MSI is
+still one v4.0.1 Program Files install: its old updater selected/downloaded/
+checksum-verified the exact Global v4.1.3 MSI, then two UAC ceremonies timed
+out/cancelled with MSI 1602 and no mutation. Finish that one user-approved UAC
+transition, then prove one current registration/marker/PATH and no backup or
+duplicate. AMD64 laptop and Raspberry Pi hardware checks remain open.
 
 v4.1.0 source SHA `5b4e18d5928e602452a0030a9f5b130dc611d3c9`
 passed exact-SHA CI run 29638735899, crates run 29638873747, and signed archive
@@ -185,18 +227,12 @@ native invocation from old-client/Restart Manager termination, so the final
 harness uses a separate `Start-Process` child plus redirected stdout/stderr and
 the process object's exit code before applying the same assertions.
 
-1. Finish the v4.1.3 tracked ADR/docs/handoff and isolated Windows installer matrix.
-2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,
-   dist plan, actionlint, shellcheck, updater fixtures, and Alienware functional
-   modes/save/code-page/performance checks.
-3. Commit/push the v4.1.3 source; require exact-SHA CI and crates publication.
-4. Tag/push only `v4.1.3`; require cargo-dist, Windows installers, and native
-   PKG-in-DMG workflows to pass again.
-5. Run the corrected disposable Windows matrix, then verify crates.io,
-   signatures/notarization, checksums, every installer family,
-   all 30 release assets, update behavior, recovery links, and clean uninstall.
-6. Record exact run IDs/hashes/evidence here, in `TESTING.md`, and in the
-   canonical handoff before marking release complete.
+Release implementation, publication, and public audit are complete. Remaining
+v4.1 work is the user-approved Alienware Global-MSI UAC transition plus the
+separately tracked AMD64 laptop and Raspberry Pi hardware continuation. After
+TR-300 is complete and only when the user is on the testing Mac, #nd372 reserves
+one bounded external ND-300 v3.7.1-to-v3.7.2 PKG-in-DMG acceptance batch; it is
+not a TR-300 release gate and must not start on this Alienware.
 
 ## 3. v4.0.0 Mac and shared outcome (historical baseline)
 

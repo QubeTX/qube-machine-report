@@ -7,7 +7,7 @@ as passed.
 
 ## Per-version verification log
 
-### v4.1.3 — 2026-07-18 (Global Windows updater fix-forward in progress)
+### v4.1.3 — 2026-07-18 (published Global Windows updater fix-forward)
 
 - **Reason:** the fully published v4.1.2 cargo-dist, Windows, and native
   PKG-in-DMG workflows passed, but isolated Windows transition run 29644024006
@@ -21,7 +21,7 @@ as passed.
   workflow-capture failure. Current v4.1.2 user-scoped clients already contain
   the image handoff; current v4.1.2 Global clients do not, so the correction is
   immutable v4.1.3 rather than altered v4.1.2 bytes.
-- **Implementation under test:** Global MSI/EXE parents resolve one exact
+- **Released implementation:** Global MSI/EXE parents resolve one exact
   release and detected channel, then use native `ShellExecuteExW` with `runas`,
   a returned process handle, and one UAC prompt. The hidden worker accepts only
   `msi_global` or `exe_global`, a plain three-part numeric version, the matching
@@ -31,7 +31,7 @@ as passed.
   spawns the new elevated binary to delete the backup after the parent/worker
   release it. UAC cancellation or policy/worker failure returns through the
   normal exit-2/3 strategy path with recovery URLs; no format fallback exists.
-- **Current local evidence:** formatting, 158 unit tests, 19 integration tests,
+- **Local and hosted evidence:** formatting, 158 unit tests, 19 integration tests,
   warning-denying all-target/all-feature Clippy, locked release build, RustSec
   audit (1,166 advisories / 221 locked dependencies), six-target cargo-dist
   plan, actionlint 1.7.12, ShellCheck, Git Bash syntax, and tracked credential-
@@ -52,12 +52,58 @@ as passed.
   only within a bound, and otherwise launches only the exact tagged candidate.
   After one-copy/version/marker/registration/PATH and current no-op proof, the
   Global jobs invoke the new worker for an exact same-version repair and require
-  the private backup to disappear. This is not yet hosted or public proof.
-- **Required proof:** clean local release gates; exact-SHA CI/crates; immutable
-  v4.1.3 tag; all cargo-dist/Windows/native ARM+Intel PKG-in-DMG workflows; the
-  complete Windows transition matrix; public 30-asset/checksum/signature/notary
-  audit; then the Alienware's natural Global MSI update and functional/hardware
-  matrix. Keep v4.1.0–v4.1.2 tags and assets unchanged.
+  the private backup to disappear. Exact source
+  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed CI 29645549130 and
+  crates 29645665879 before tagging. Cargo-dist Release 29645718537, Windows
+  packaging 29645855695, and disposable Windows validation 29645963379 all
+  passed; the latter completed all ten jobs covering every installer family,
+  prior/current update behavior, fresh-format choice, portable recovery, and
+  uninstall.
+- **Native Mac closure:** macOS run 29645855688 built, signed, notarized,
+  stapled, mounted, installed, and exercised the universal PKG-in-DMG on Intel
+  and Apple Silicon. Attempt 1's ARM job passed every artifact/trust/receipt/
+  binary/report check and then returned 2 at the just-published release API
+  no-op probe, while Intel passed seconds later. Attempt 2 repeated the entire
+  ARM lifecycle, including updater no-op and uninstall, and passed before the
+  DMG/sidecar publisher ran. Future jobs pass the read-only Actions token to
+  discovery and log captured updater JSON/exit on stderr before assertion so
+  this boundary is diagnosable rather than hidden by Bash `errexit`.
+- **Fresh public-byte audit:** the non-draft/non-prerelease v4.1.3 release
+  targets the exact SHA and contains 30 nonempty stable-name assets. All 12
+  `.sha256` sidecars and eight `sha256.sum` entries matched fresh downloads;
+  the DMG is
+  `a4a784a3e088aa30c1445a34846e53e5ffbce12a3520fb12d07c8547011c7d33`,
+  Global MSI is
+  `8efbcb5da3281357c26c191b7de029fe475059a15111650afffc28a07e1e48d4`,
+  and Corporate MSI is
+  `808656e5d409f035a00754cc8a265430389314f1668c82cf75ae864676582381`.
+  Nine versionless `latest/download` entrypoints redirected to v4.1.3 and
+  byte-matched their exact tagged assets. Release notes contain nine latest
+  links and no version-pinned public command. A fresh crates.io archive matched
+  the unyanked 4.1.3 API checksum
+  `f6efa276105eb6ed869e733ca35ae1cb0e038a6c2169f54fa541039bff79f6eb`.
+  Windows installers are still intentionally Authenticode-unsigned under the
+  existing ADR; checksum equality is not misrepresented as an independent
+  signature. Apple trust is the protected Developer ID/notary/staple evidence
+  from the exact public-byte workflows.
+- **Alienware public-binary continuation:** the exact public ZIP binary passed
+  table and ASCII (32 lines each), schema-v1 fast/full JSON, a one-object
+  already-current updater no-op, ordinary no-write, a 1,726-byte manual save
+  followed by exact fixture cleanup, and code-page restoration. Three fast
+  runs took 293/272/287 ms; full JSON took 5,121 ms. It reported Windows 11
+  25H2, Alienware m16 R2, BIOS 1.21.0, UEFI, board 01HV0T A00, Core Ultra 7
+  155H, `6P + 10E`, 16 physical/22 logical cores, Intel Arc and RTX 4070,
+  Samsung 1 TB NVMe, two populated memory modules/32 GiB, battery OK, a
+  default Wi-Fi route and one DNS server. BitLocker remained unavailable to
+  the non-elevated probe and is not claimed. The natural installed baseline is
+  still one Global MSI v4.0.1 at `C:\Program Files\tr300\bin\tr300.exe` with
+  one ARP registration, machine PATH, legacy `msi-global`, and no Corporate or
+  Cargo copy. Its updater selected, downloaded, and checksum-verified the exact
+  public v4.1.3 Global MSI, then returned failure JSON and retained v4.0.1 when
+  UAC timed out/cancelled with MSI 1602; an exact-MSI recovery prompt also
+  timed out with no mutation. The remaining physical step is one user-approved
+  UAC followed by installed one-copy/origin/cleanup/no-op proof. Keep all
+  v4.1.0–v4.1.3 tags/assets unchanged.
 
 ### v4.1.2 — 2026-07-18 (immutable fix-forward in progress)
 

@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hosted macOS updater probes are authenticated and diagnosable.** The first
+  v4.1.3 Apple Silicon validation reached the installed updater immediately
+  after release publication and returned 2 while Intel passed seconds later;
+  Bash `errexit` also hid the captured recovery JSON. Future native Mac jobs
+  reuse the read-only Actions token for release discovery and always log the
+  captured one-object updater result and exit status to stderr before asserting
+  success. The bounded v4.1.3 rerun repeated the full Apple Silicon lifecycle
+  and passed before its DMG assets were published.
+
 ## [4.1.2] - 2026-07-18
 
 ### Fixed
