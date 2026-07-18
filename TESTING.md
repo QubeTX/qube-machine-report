@@ -7,7 +7,49 @@ as passed.
 
 ## Per-version verification log
 
-### v4.1.0 — 2026-07-18 (release candidate in progress)
+### v4.1.1 — 2026-07-18 (immutable fix-forward in progress)
+
+- **Reason:** v4.1.0 exact-SHA CI, crates publication, and all signed
+  cargo-dist archives succeeded. Supplemental macOS run 29639135342 then
+  failed before producing a DMG because `actions/checkout` cleaned the
+  architecture archives that the preceding step had downloaded inside the
+  workspace. Separately reproduced Xcode 16.4 evidence showed that both the
+  builder and installed-binary gate used the rejected
+  `lipo -verify_arch ... <file>` order. v4.1.0's tag and assets remain
+  untouched; v4.1.1 checks out first, downloads second, and uses
+  `lipo <file> -verify_arch ...` throughout the artifact lifecycle.
+  Windows packaging run 29639135337 succeeded, but second-hop validation run
+  29639224625 skipped because chained `workflow_run` context reported
+  `head_branch=main`. v4.1.1 resolves exactly one immutable release from the
+  successful upstream run's exact SHA and refuses ambiguous matches.
+- **Required proof:** rerun all local/clean-tree gates, exact-SHA CI and crates,
+  then require Release, Windows Installers, macOS Universal DMG, and disposable
+  Windows Installer Validation to succeed for v4.1.1. Audit 30 immutable public
+  assets only after those workflows settle.
+- **Local candidate gates:** formatting; actionlint 1.7.12 with ShellCheck;
+  direct ShellCheck and Git Bash syntax; warning-denying all-target/all-feature
+  Clippy; 150 library and 19 integration tests; locked release build; RustSec
+  audit; cargo-dist plan; 39-file package list; and publish dry-run passed.
+  The release binary reported `tr300 4.1.1`, emitted schema-v1 fast JSON, kept
+  all 32 ASCII table lines at 51 columns, and emitted one successful updater
+  JSON object without mutating the portable build. CI now statically forbids
+  download-before-checkout and input-last `lipo -verify_arch` regressions. The
+  exact-SHA Windows release resolver was locally replayed against v4.1.0 and
+  selected only `v4.1.0`.
+
+### v4.1.0 — 2026-07-18 (published archives; DMG fixed forward in v4.1.1)
+
+- **Publication boundary:** release SHA
+  `5b4e18d5928e602452a0030a9f5b130dc611d3c9` passed CI run 29638735899,
+  crates run 29638873747, and signed/notarized archive Release run
+  29638940801. crates.io checksum is
+  `900a41ee4f38358448aba287f6238d5f5638ea3bc037b577fc96cbe983404030`.
+  The supplemental DMG never reached packaging or notarization and published
+  no DMG bytes; run 29639135342 failed closed. This is partial release evidence,
+  not a 30-asset or native-installer success claim.
+- **Supplemental Windows packaging:** run 29639135337 successfully built and
+  uploaded Corporate MSI plus Global/Corporate EXE families and sidecars. This
+  remains v4.1.0 historical evidence; v4.1.1 must rerun the same workflow.
 
 - **Scope:** origin-preserving safe updates, versionless public downloads with
   exact-tag internal payloads, universal signed PKG-in-DMG, separate Developer

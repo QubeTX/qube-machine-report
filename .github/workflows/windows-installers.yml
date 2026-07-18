@@ -53,7 +53,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach installers to (e.g. v3.15.1)"
+        description: "Release tag to attach installers to (for example vX.Y.Z)"
         required: true
         type: string
 

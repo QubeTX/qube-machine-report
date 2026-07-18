@@ -7,7 +7,7 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.0.1` / `4.1.0` (`v4.0.0` remains immutable)
+**Published / working version:** `4.1.0` / `4.1.1` (`v4.0.0` remains immutable)
 **Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
@@ -19,7 +19,24 @@ This is the exhaustive portable continuation record. The richer SHAUGHV task
 board is local and gitignored; a fresh checkout must read this file, `AGENTS.md`,
 `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-07-17 Alienware continuation — v4.1.0 active
+## 2026-07-18 immutable v4.1.1 packaging fix-forward
+
+v4.1.0 source `5b4e18d5928e602452a0030a9f5b130dc611d3c9`
+passed exact-SHA CI run 29638735899, crates run 29638873747, and signed archive
+Release run 29638940801. Supplemental macOS run 29639135342 failed closed
+before building a DMG: it downloaded both signed architecture archives and
+verified their sidecars, then the following checkout step removed the
+untracked `upstream/` directory. Cross-project hosted evidence also exposed
+that Xcode 16.4 requires `lipo <input> -verify_arch arm64 x86_64`; TR-300's
+builder and post-install gate both had the input last. v4.1.1 moves checkout
+before download and fixes both architecture checks. Windows packaging run
+29639135337 then succeeded, but chained validation run 29639224625 skipped:
+second-hop `workflow_run` context used `head_branch=main` instead of retaining
+the original tag. v4.1.1 binds that hop to the upstream exact SHA and requires
+one matching immutable release. Never alter the v4.1.0 tag or published bytes;
+complete and audit the 30-asset distribution on v4.1.1.
+
+## 2026-07-17 Alienware continuation — v4.1 origin-preserving work
 
 The maintainer approved implementation and release of origin-preserving
 updates plus a native universal PKG-in-DMG. The channel rule is precise:

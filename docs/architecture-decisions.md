@@ -18,13 +18,14 @@
 
 ## Table of contents
 
-- [Decision ledger status (through v4.1.0)](#decision-ledger-status-through-v410)
+- [Decision ledger status (through v4.1.1)](#decision-ledger-status-through-v411)
 - [Origin-preserving updates and native PKG-in-DMG distribution (v4.1.0)](#origin-preserving-updates-and-native-pkg-in-dmg-distribution-v410)
   - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
   - [Install channel is product state](#install-channel-is-product-state)
   - [Fresh installer intent and legacy consolidation](#fresh-installer-intent-and-legacy-consolidation)
   - [Why the PKG is inside the DMG](#why-the-pkg-is-inside-the-dmg)
   - [Apple credentials and hosted-native proof](#apple-credentials-and-hosted-native-proof)
+  - [Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)](#hosted-packaging-lifecycle-and-tool-syntax-v411-addendum)
   - [Machine-readable and failure contract](#machine-readable-and-failure-contract)
   - [Reusable contract for other CLI products](#reusable-contract-for-other-cli-products)
 - [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
@@ -65,7 +66,7 @@
 
 ---
 
-## Decision ledger status (through v4.1.0)
+## Decision ledger status (through v4.1.1)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
@@ -89,6 +90,7 @@ future hardware row has already been exercised.
 | Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS PKG-in-DMG | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel install gates |
+| Hosted package inputs survive source checkout; builder and validation tool syntax stay identical | Accepted and release-blocking | checkout-before-download ordering plus Xcode 16.4 `lipo <file> -verify_arch ...` checks |
 | Explicit fresh-installer choice supersedes the prior Windows channel | Accepted | WiX/Inno cross-format removal, scoped markers, advisory cross-edition cleanup |
 | Physical Mac requirement | Superseded; optional visual smoke only | GitHub `macos-15` and `macos-15-intel` are the required native gates |
 
@@ -274,6 +276,57 @@ blocking only if CI exposes a GUI-only defect. This avoids a strange
 cross-compilation/signing workaround on Windows without making the maintainer
 rent or borrow hardware for every release.
 
+### Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)
+
+Source checkout is a workspace lifecycle boundary, not a harmless read. The
+checkout action cleans untracked files, so release inputs downloaded into the
+repository workspace before checkout may disappear even after their hashes
+were successfully verified. Supplemental packaging must therefore check out
+the exact immutable tag first and download release assets second (or place the
+assets in an explicitly preserved directory outside the checkout). The job
+must re-check that each expected input exists at the packaging call boundary.
+
+Workflow event identity is likewise not transitive. A workflow triggered from
+another `workflow_run` executes on the default branch; a second workflow chained
+from it receives `head_branch=main`, not the tag that triggered the original
+release. A downstream validator must bind itself to the successful immediate
+upstream run's exact `head_sha`, resolve exactly one immutable GitHub Release
+targeting that SHA, validate the semver tag and required assets, and fail closed
+on zero or multiple matches. Parsing a display title or assuming the tag
+survives another event hop was rejected as ambiguous metadata.
+
+Apple command-line syntax is also part of the release contract. On Xcode 16.4,
+universal-architecture verification requires the input operand first:
+`lipo <file> -verify_arch arm64 x86_64`. The input-last form failed on a hosted
+runner. The universal builder and both post-install architecture gates use the
+same input-first form. This is deliberately recorded as a lifecycle invariant,
+not merely a one-line correction: a package can be assembled correctly while
+a later validation command still rejects the same artifact if the two stages
+drift.
+
+v4.1.0 supplied the failure evidence. Its exact-SHA CI, crates publication,
+and signed/notarized per-architecture archives succeeded, but supplemental run
+29639135342 downloaded and verified both archives, then checkout removed the
+`upstream/` directory before the builder ran. The DMG was never created or
+uploaded. Supplemental Windows packaging run 29639135337 succeeded, but its
+chained validation run 29639224625 skipped because the second-hop
+`head_branch` was `main`. Its tag and existing assets remain immutable; v4.1.1
+fixes forward with checkout-before-download, input-first `lipo` calls, and
+exact-SHA release resolution for the Windows validation hop. This is the same
+immutable-release rule used for checksum, signature, or installer defects.
+
+**Rejected alternatives:** re-downloading inside the signing script hides the
+workflow ownership boundary and introduces a second network transaction;
+disabling checkout cleanup weakens reproducibility; altering or attaching new
+bytes to v4.1.0 would make the historical release mutable. None is acceptable.
+
+**Revalidation triggers:** changing checkout action/version or order, changing
+the workspace/output location, changing Xcode/macOS runner images, changing
+universal-binary tooling, changing a builder/validator command, or adding a
+workflow-event hop requires a native hosted packaging run through mount,
+install, both architecture checks, immutable upload, and every downstream
+validation job.
+
 ### Machine-readable and failure contract
 
 Update JSON stdout is exactly one object; child installer output and progress
@@ -293,7 +346,7 @@ misreported as a complete in-place update.
 
 ### Reusable contract for other CLI products
 
-The v4.1.0 implementation is intended to be copied into other standalone CLI
+The v4.1.1 implementation is intended to be copied into other standalone CLI
 products. Product names, package identifiers, paths, asset names, registry
 keys, and installer GUIDs are parameters; the following invariants are the
 portable architecture:
@@ -347,6 +400,14 @@ portable architecture:
    corrupted downloads, PATH/registration cleanup, uninstall, and the absence
    of duplicate active binaries. Tests deliberately remove markers/receipts so
    recovery behavior is evidence rather than an unexercised branch.
+9. **Treat workflow ordering and validator syntax as product code.** Establish
+   the immutable source checkout before downloading transient release inputs,
+   or preserve those inputs outside the cleaned workspace. Keep every builder
+   and post-install validator invocation in lockstep, including operand order,
+   and revalidate after runner/Xcode changes. Bind chained workflows to exact
+   upstream SHA/release identity instead of assuming branch/tag context crosses
+   event hops. A successful checksum in one step does not prove the input still
+   exists or that a later tool call or downstream job is valid.
 
 These rules are intentionally stricter than “download the newest binary and
 replace the file.” The portable unit is the installation transaction and its

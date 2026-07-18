@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to validate (for example v4.1.0)"
+        description: "Release tag to validate (for example vX.Y.Z)"
         required: true
         type: string
 
@@ -19,8 +19,7 @@ jobs:
     name: Resolve complete release
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       startsWith(github.event.workflow_run.head_branch, 'v'))
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.release.outputs.tag }}
@@ -32,16 +31,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
           if [[ '${{ github.event_name }}' == workflow_dispatch ]]; then
             tag='${{ inputs.tag }}'
           else
-            tag='${{ github.event.workflow_run.head_branch }}'
+            # A workflow_run chained from another workflow_run executes from
+            # the default branch, so head_branch is "main", not the original
+            # release tag. Resolve exactly one immutable release from the
+            # successful upstream packaging run's source SHA instead.
+            sha='${{ github.event.workflow_run.head_sha }}'
+            mapfile -t tags < <(
+              gh api "repos/$repo/releases?per_page=100" \
+                --jq ".[] | select(.target_commitish == \"$sha\") | .tag_name"
+            )
+            if [[ ${#tags[@]} -ne 1 ]]; then
+              echo "expected one release targeting upstream SHA $sha; found ${#tags[@]}" >&2
+              exit 65
+            fi
+            tag=${tags[0]}
           fi
           [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-].*)?$ ]] || {
             echo "invalid release tag: $tag" >&2
             exit 64
           }
-          assets=$(gh release view "$tag" --repo '${{ github.repository }}' \
+          assets=$(gh release view "$tag" --repo "$repo" \
             --json assets --jq '.assets[].name')
           required=(
             tr300-x86_64-pc-windows-msvc.msi

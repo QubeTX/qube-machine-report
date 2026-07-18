@@ -27,7 +27,7 @@ Emmett maintains TR-300 and drives releases with Codex across Windows, hosted ma
 
 | Name | What |
 |------|------|
-| **TR-300 v4.1.0** | Origin-preserving updater, native universal Mac installer, and cross-platform validation release |
+| **TR-300 v4.1.1** | Immutable fix-forward for the origin-preserving updater, native universal Mac installer, and cross-platform validation release |
 
 ## Preferences
 

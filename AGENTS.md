@@ -37,8 +37,10 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.0.1`; working manifest / next release:
-  `4.1.0` (`Cargo.toml`). Alienware Windows validation is now real evidence;
+- Current published version: `4.1.0`; working manifest / next release:
+  `4.1.1` (`Cargo.toml`). v4.1.0 passed CI/crates and the signed archive
+  release, but its supplemental DMG path failed before publishing the DMG;
+  v4.1.1 fixes that lifecycle without changing v4.1.0. Alienware Windows validation is now real evidence;
   AMD64 Linux laptop and Raspberry Pi 4 live verification remain open. The
   major v4 boundary
   is required because public Rust records gained fields and collector helpers
@@ -678,6 +680,15 @@ system-wide `com.qubetx.tr300.pkg`, embeds that PKG and recovery instructions in
 Gatekeeper-checks the nested distribution. A PKG is inside the DMG because the
 PKG owns `/usr/local/bin/tr300` and supplies the stable updater receipt; the DMG
 is the versionless download container, not a GUI app.
+
+Hosted packaging order is load-bearing: check out the exact release tag before
+downloading signed archives into the workspace because checkout cleans
+untracked inputs. Xcode 16.4 architecture verification must use
+`lipo <file> -verify_arch arm64 x86_64` in both the builder and installed-binary
+gate. Do not restore input-last syntax. A validator chained from the
+supplemental Windows `workflow_run` cannot trust `head_branch` to retain the
+original tag; it resolves exactly one immutable release from the immediate
+upstream run's exact SHA and fails closed on ambiguity.
 
 Repository Actions configuration uses these names (values are secrets and must
 never enter git, logs, tasks, handoffs, or docs):

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach the DMG to (for example v4.1.0)"
+        description: "Release tag to attach the DMG to (for example vX.Y.Z)"
         required: false
         default: ""
         type: string
@@ -82,6 +82,12 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout exact release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+
       - name: Verify upstream release and download signed architecture archives
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,12 +114,6 @@ jobs:
             --pattern 'tr300-aarch64-apple-darwin.tar.xz*' \
             --pattern 'tr300-x86_64-apple-darwin.tar.xz*'
           (cd upstream && shasum -a 256 -c ./*.sha256)
-
-      - name: Checkout exact release tag
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ steps.tag.outputs.tag }}
-          persist-credentials: false
 
       - name: Build signed and notarized DMG
         timeout-minutes: 45
@@ -189,7 +189,9 @@ jobs:
           pkgutil --file-info /usr/local/bin/tr300 | grep -F "pkg-version: ${{ needs.build.outputs.version }}"
           pkgutil --verify com.qubetx.tr300.pkg
           test "$(/usr/local/bin/tr300 --version)" = "tr300 ${{ needs.build.outputs.version }}"
-          lipo -verify_arch arm64 x86_64 /usr/local/bin/tr300
+          # Xcode 16.4 requires the input file before -verify_arch. This must
+          # match the builder's lifecycle check.
+          lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64
           /usr/local/bin/tr300 --fast --json | jq -e '.schema_version == 1'
           /usr/local/bin/tr300 --ascii --fast >/dev/null
           update=$(/usr/local/bin/tr300 update --json)

@@ -13,6 +13,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-07-18
+
+### Fixed
+- **The universal Mac installer now completes on current GitHub Macs.** The
+  release job keeps its downloaded signed Mac builds through source checkout
+  and uses the argument order required by current Xcode when proving that the
+  installed command supports both Apple Silicon and Intel. We left v4.1.0's
+  published files untouched and released the correction as v4.1.1.
+- **Windows installer testing now follows the exact release across every
+  automation handoff.** The validation jobs no longer skip when GitHub changes
+  a chained workflow's branch context back to `main`; they recover the one
+  release attached to the exact successful build and stop if it is ambiguous.
+
 ## [4.1.0] - 2026-07-18
 
 ### Added

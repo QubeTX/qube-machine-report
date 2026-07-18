@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Published / working manifest:** 4.0.1 / 4.1.0
+**Published / working manifest:** 4.1.0 / 4.1.1
 **Release scope:** origin-preserving updates, native PKG-in-DMG, Apple Installer
 credentials, hosted ARM/Intel Mac gates, Windows installer matrix, and real
 Alienware validation. AMD laptop and Pi evidence remain open.
@@ -43,7 +43,7 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.1.0 active release plan
+## 2. v4.1.1 fix-forward release plan
 
 The implementation is tracked in git and is intended to release from the
 Alienware. A physical Mac is not a normal requirement: native GitHub
@@ -103,12 +103,25 @@ GUI-only defect.
 
 ### Remaining release gates
 
+v4.1.0 source SHA `5b4e18d5928e602452a0030a9f5b130dc611d3c9`
+passed exact-SHA CI run 29638735899, crates run 29638873747, and signed archive
+Release run 29638940801. The supplemental DMG run 29639135342 failed without
+publishing either DMG asset because checkout cleaned already-downloaded inputs.
+The independent ND-300 hosted path also exposed Xcode 16.4's required
+`lipo <file> -verify_arch ...` order before TR-300 could reach that line.
+Published v4.1.0 bytes and tag remain immutable; v4.1.1 fixes both lifecycle
+defects and is the complete-distribution target. Windows packaging run
+29639135337 succeeded, while downstream validation 29639224625 exposed a third
+orchestration defect: a second-hop `workflow_run` reports `main` rather than the
+original tag. v4.1.1 resolves one release from the upstream exact SHA and fails
+closed on ambiguity.
+
 1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,
    dist plan, actionlint, shellcheck, updater fixtures, and Alienware functional
    modes/save/code-page/performance checks.
 3. Commit/push `main`; wait for exact-SHA CI and crates publication.
-4. Tag/push only `v4.1.0`; wait for cargo-dist, Windows installers, and native
+4. Tag/push only `v4.1.1`; wait for cargo-dist, Windows installers, and native
    PKG-in-DMG workflows.
 5. Verify crates.io, signatures/notarization, checksums, every installer family,
    all 30 release assets, update behavior, recovery links, and clean uninstall.

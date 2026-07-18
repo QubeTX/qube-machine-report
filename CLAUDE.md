@@ -51,7 +51,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Published version: **4.0.1**. Working manifest / next release: **4.1.0**.
+Published version: **4.1.0**. Working manifest / next release: **4.1.1**.
+The v4.1.0 tag and assets are immutable; v4.1.1 fixes the supplemental Mac
+packaging lifecycle before completing the 30-asset distribution.
 Alienware Windows validation is now captured; AMD64 Linux laptop and Raspberry
 Pi 4 checks remain continuation work and must not be reported as completed.
 Managed-work antivirus behavior is a separate endpoint-policy case, not
@@ -365,6 +367,14 @@ job-by-job detail + local-repro commands: the
 - **`macos-installer.yml`** — preflights the Installer identity on native ARM
   and Intel, then builds, notarizes, installs, verifies, and publishes the
   universal PKG-in-DMG after the cargo-dist release.
+
+Workflow sequencing is product logic. In the Mac job, checkout the exact tag
+before downloading signed inputs; checkout cleans untracked workspace files.
+Keep Xcode 16.4 architecture checks input-first as
+`lipo <file> -verify_arch arm64 x86_64` in builder and validator. A second-hop
+`workflow_run` does not retain the original tag in `head_branch`; downstream
+Windows validation must resolve one immutable release from upstream
+`head_sha`, never parse a title or assume tag context is transitive.
 
 Every workflow job that checks out source uses `actions/checkout@v6` on Node
 24. Keep the branch CI and crates workflow aligned with the release and

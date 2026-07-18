@@ -4,7 +4,7 @@
 
 ## To-Do
 
-- [ ] **Audit the public v4.1.0 distribution and close the release ledger** - verify all public bytes, installers, signatures, notarization, update channels, and recovery behavior (needs #rsh) (ms #v41) (owner codex) #rau
+- [ ] **Audit the public v4.1.1 distribution and close the release ledger** - verify all public bytes, installers, signatures, notarization, update channels, and recovery behavior (needs #rsh) (ms #v41) (owner codex) #rau
   - [ ] Verify crates.io and all 30 GitHub Release assets
   - [ ] Verify every Windows installer family and both Apple architectures
   - [ ] Record exact run IDs, hashes, and final evidence in tracked docs
@@ -13,10 +13,11 @@
 
 ## Active
 
-- [ ] **Ship v4.1.0 through exact-SHA hosted gates** - push main, wait for CI/crates, then tag and publish without bypassing a gate (needs #c8r) (ms #v41) (owner codex) #rsh
-  - [ ] Commit and push the reviewed release candidate to main
+- [ ] **Ship v4.1.1 through exact-SHA hosted gates** - preserve v4.1.0, qualify the Mac lifecycle fix, then tag and publish without bypassing a gate (needs #c8r) (ms #v41) (owner codex) #rsh
+  - [x] Publish v4.1.0 CI, crates, and signed archives and record the failed supplemental DMG gate
+  - [ ] Commit and push the v4.1.1 fix-forward to main
   - [ ] Wait for exact-SHA CI and crates.io publication
-  - [ ] Push only tag v4.1.0 and watch every release workflow
+  - [ ] Push only tag v4.1.1 and watch every release workflow
 
 ## Done
 

@@ -6,7 +6,7 @@ TR-300 is a standalone Rust CLI and library that produces compact, fixed-width
 machine reports on macOS, Linux, and Windows. The v4 release line hardens
 cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
-notarization. v4.1.0 adds origin-preserving updates and a native universal
+notarization. v4.1 adds origin-preserving updates and a native universal
 PKG-in-DMG verified on hosted Apple Silicon and Intel. Alienware Windows
 evidence is captured; AMD64 Linux laptop and Raspberry Pi 4 checks remain open.
 
@@ -17,8 +17,11 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Published version: `4.0.1` (2026-07-15); working manifest / next release:
-  `4.1.0`. v4.0.0 published to
+- Published version: `4.1.0` (2026-07-18); working manifest / next release:
+  `4.1.1`. v4.1.0 passed exact-SHA CI, crates publication, and signed archive
+  release, but its supplemental universal DMG workflow failed before creating
+  the DMG and its chained Windows validation skipped on non-transitive tag
+  context. v4.1.1 is the immutable fix-forward. v4.0.0 published to
   crates.io but its immutable tag failed closed before GitHub artifact hosting;
   v4.0.1 is the deployed keychain-search fix-forward. Release source
   `b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates,
@@ -56,7 +59,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
   documentation/workflow state reconciled 2026-07-18.
 
-### v4.1.0 working release
+### v4.1.1 fix-forward release
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG/DMG origin. Unknown/conflicting origins do not
@@ -147,14 +150,14 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.1.0`.
+   synchronized at `4.1.1`.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus PKG-in-DMG
    sign/notary/staple/install proof.
 3. Commit and push `main`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
-4. Create and push only tag `v4.1.0` after CI/crates settle. Existing immutable
+4. Create and push only tag `v4.1.1` after CI/crates settle. Existing immutable
    v4 tags must not move.
 5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
    extracted signatures/checksums from both public Mac archives.
@@ -220,6 +223,7 @@ excluded. The tracked project tree is:
 │   ├── crates-publish.yml
 │   ├── macos-installer.yml
 │   ├── release.yml
+│   ├── windows-installer-validation.yml
 │   └── windows-installers.yml
 ├── .gitignore
 ├── AGENTS.md

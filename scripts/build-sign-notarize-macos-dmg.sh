@@ -113,7 +113,9 @@ fi
 universal="${work_dir}/tr300"
 lipo -create "$arm_binary" "$x86_binary" -output "$universal"
 chmod 755 "$universal"
-lipo -verify_arch arm64 x86_64 "$universal"
+# Xcode 16.4 requires the input file before -verify_arch. Keep this ordering
+# in lockstep with every post-install validation call in the hosted workflow.
+lipo "$universal" -verify_arch arm64 x86_64
 codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
     --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$universal"
 codesign --verify --strict --verbose=4 "$universal"

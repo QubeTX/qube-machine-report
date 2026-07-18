@@ -222,6 +222,29 @@ jobs:
           "$actionlint_bin"
       - name: Validate release shell scripts
         run: shellcheck scripts/*.sh
+      - name: Guard supplemental packaging lifecycle invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/macos-installer.yml
+          builder=scripts/build-sign-notarize-macos-dmg.sh
+          windows_validation=.github/workflows/windows-installer-validation.yml
+          checkout_line=$(grep -nF 'name: Checkout exact release tag' "$workflow" | cut -d: -f1)
+          download_line=$(grep -nF 'name: Verify upstream release and download signed architecture archives' "$workflow" | cut -d: -f1)
+          test -n "$checkout_line"
+          test -n "$download_line"
+          test "$checkout_line" -lt "$download_line"
+          grep -Fqx "lipo \"\$universal\" -verify_arch arm64 x86_64" "$builder"
+          grep -Fqx '          lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64' "$workflow"
+          if grep -Eq '^[[:space:]]*lipo[[:space:]]+-verify_arch' "$builder" "$workflow"; then
+            echo 'input-last lipo -verify_arch invocation is forbidden' >&2
+            exit 1
+          fi
+          grep -Fq 'github.event.workflow_run.head_sha' "$windows_validation"
+          if grep -Fq 'github.event.workflow_run.head_branch' "$windows_validation"; then
+            echo 'second-hop workflow validation must resolve from head_sha, not head_branch' >&2
+            exit 1
+          fi
 
   windows-installer-sources:
     name: Windows installer source gate

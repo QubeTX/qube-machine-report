@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-07-18
+
+### Fixed
+- **Universal Mac packaging now survives checkout and Xcode 16.4.** The hosted
+  PKG-in-DMG job checks out the immutable release tag before downloading the
+  signed architecture archives, so checkout cannot clean those inputs from the
+  workspace. Universal-architecture verification now uses Xcode 16.4's
+  required `lipo <file> -verify_arch ...` operand order in both the builder and
+  post-install validation. v4.1.0 remains immutable: its signed per-architecture
+  archives are valid, but its supplemental DMG workflow failed before building
+  the DMG; v4.1.1 is the fix-forward complete installer release.
+- **Chained Windows installer validation retains exact release identity.** A
+  second-hop `workflow_run` executes from `main` rather than retaining the
+  original release tag. Validation now resolves exactly one immutable release
+  from the successful packaging run's exact source SHA and fails closed on
+  missing or ambiguous matches instead of silently skipping every channel job.
+
 ## [4.1.0] - 2026-07-18
 
 ### Added

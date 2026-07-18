@@ -1,4 +1,4 @@
-TT;DR: Commit and push the completed v4.1.0 release candidate, wait for exact-SHA CI/crates, then push only the immutable v4.1.0 tag and watch all packaging workflows.
+TT;DR: Preserve the partial v4.1.0 release, qualify the hosted Mac packaging lifecycle correction as v4.1.1, then publish and audit the complete immutable distribution.
 
 ## Why
 
@@ -6,7 +6,7 @@ Direct operator order to implement and release the approved plan. The repository
 
 ## Plan
 
-#c8r is complete. Rerun all local gates from a clean committed tree, commit the exact intended files, push main, verify exact-SHA CI and crates workflow, then create/push only `v4.1.0`. Watch cargo-dist, supplemental Windows installers, native Mac PKG-in-DMG, and disposable Windows installer validation. Diagnose and fix forward if any gate fails.
+#c8r is complete. v4.1.0 exact-SHA CI/crates and signed archives succeeded, but supplemental DMG run 29639135342 proved that checkout removed its already-verified inputs before packaging; hosted Xcode 16.4 evidence also proved the input-last `lipo -verify_arch` syntax invalid. Keep v4.1.0 immutable. Rerun local gates from a clean committed tree, push the v4.1.1 workflow/script fix, verify exact-SHA CI and crates, then create/push only `v4.1.1`. Watch cargo-dist, supplemental Windows installers, native Mac PKG-in-DMG, and disposable Windows installer validation.
 
 ## Impact
 
@@ -19,12 +19,13 @@ The exact release commit passes CI/crates; the immutable tag points at that SHA;
 ## Verification
 
 - [x] Clean-tree local release gates pass without `--allow-dirty`
-- [ ] Exact release SHA passes CI and crates publication
-- [ ] Tag `v4.1.0` points at that exact SHA and every release workflow succeeds
+- [x] v4.1.0 release SHA passed CI/crates and its supplemental DMG failure was retained as immutable evidence
+- [ ] Exact v4.1.1 release SHA passes CI and crates publication
+- [ ] Tag `v4.1.1` points at that exact SHA and every release workflow succeeds
 
 ## Status
 
-Active. #c8r's hosted identity proof passed in run 29637224793 on both native architectures. Exact-SHA runs 29638116741 and 29638544600 failed closed before tagging. Their direct fixes now pass all local and clean-tree gates, including cross-platform checksum tests and version-independent shell syntax. Push the new exact SHA. Never tag before CI/crates publication.
+Active. #c8r's hosted identity proof passed in run 29637224793 on both native architectures. v4.1.0 exact source `5b4e18d5928e602452a0030a9f5b130dc611d3c9` passed CI 29638735899, crates 29638873747, and Release 29638940801. Supplemental DMG run 29639135342 failed closed before creating a DMG. The v4.1.1 candidate moves checkout before asset download and uses input-first `lipo` in both builder and installed-binary validation. Never modify v4.1.0 or tag v4.1.1 before its CI/crates publication.
 
 ## Activity
 
@@ -37,3 +38,7 @@ Active. #c8r's hosted identity proof passed in run 29637224793 on both native ar
 - 2026-07-18 04:40 — fix-forward candidate passed release build, audit, cargo-dist plan, 39-file package list, and `cargo publish --locked --dry-run`; the clean-tree package/publish run used no dirty-tree bypass (agent: codex)
 - 2026-07-18 04:50 — exact-SHA run 29638544600 confirmed current actionlint recognized native Intel, then failed on Linux checksum helpers whose tests were Windows-gated and an Ubuntu ShellCheck SC2015; cancelled the already-doomed run, made checksum tests cross-platform, and replaced the notary log boolean chain with explicit control flow (agent: codex)
 - 2026-07-18 05:00 — second fix-forward passed fmt, warning-denying Clippy, 150 + 19 tests, release build, actionlint, ShellCheck, Bash syntax, audit, dist plan, and clean-tree package/publish dry runs (agent: codex)
+- 2026-07-18 05:30 — v4.1.0 exact-SHA CI 29638735899, crates 29638873747, and signed archive Release 29638940801 succeeded; supplemental DMG run 29639135342 failed before packaging because checkout cleaned the downloaded `upstream/` inputs (agent: codex)
+- 2026-07-18 05:35 — cross-project Xcode 16.4 hosted evidence exposed input-last `lipo -verify_arch`; v4.1.1 now places checkout before download and keeps input-first architecture checks in builder/validator lockstep (agent: codex)
+- 2026-07-18 05:50 — v4.1.1 local gates passed: fmt, actionlint/ShellCheck/Bash syntax, warning-denying Clippy, 150 + 19 tests, release build/smokes, audit, dist plan, package list, and publish dry-run. Added a CI semantic guard for checkout/download and `lipo` order (agent: codex)
+- 2026-07-18 05:55 — v4.1.0 Windows packaging run 29639135337 succeeded, but chained validation 29639224625 skipped because second-hop `workflow_run` exposed `head_branch=main`; v4.1.1 now resolves exactly one release from upstream `head_sha`, with the resolver replayed successfully against v4.1.0 (agent: codex)
