@@ -7,7 +7,7 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.1.0` / `4.1.1` (`v4.0.0` remains immutable)
+**Published / working version:** `4.1.1` / `4.1.2` (all prior tags remain immutable)
 **Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
@@ -15,9 +15,39 @@ Windows Installers 29392382949
 **Task IDs:** `#v400`, `#core`, `#plat`, `#test`, `#docs`, `#winhw`,
 `#ship`, `#site`, `#brmain`, `#adrlog`
 
-This is the exhaustive portable continuation record. The richer SHAUGHV task
-board is local and gitignored; a fresh checkout must read this file, `AGENTS.md`,
-`CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+This is the exhaustive portable continuation record. The SHAUGHV board source,
+milestones, and task details under `.tasks/` are Git-tracked; only runtime and
+secure state are ignored. A fresh checkout must read this file, the board,
+`AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+
+## 2026-07-18 immutable v4.1.2 supported-validator fix-forward
+
+v4.1.1 source `09afdc6ae5cbff1a497e6cec07c4cf1b36d2557b`
+passed exact-SHA CI 29639632790, crates 29639731682, signed archive Release
+29639767064, and Windows packaging 29639898355. Mac run 29639898362 proved the
+checkout/lipo corrections and successfully built, signed, notarized, stapled,
+mounted, Gatekeeper-checked, and installed the universal PKG-in-DMG on native
+Apple Silicon and Intel. Both jobs then failed at `pkgutil --verify`, which is
+not a command in current macOS `pkgutil`; publication was skipped. v4.1.2 keeps
+the exact receipt ID/version/root scope, payload, and per-file owner checks and
+adds strict installed Developer ID identifier, Team ID, authority, and version
+proof using supported commands. Root receipt `location:` may be empty (as
+observed on both runners) or `/`, but any non-root location fails closed.
+
+Windows validation 29639998787 proved the exact-SHA downstream resolver and
+five clean channel jobs, then exposed three transition/test problems: launching
+Windows PowerShell from `pwsh` inherited an incompatible module path; the
+already-current portable assertion expected failure when no update existed;
+and both MSI-to-EXE takeovers exited during Inno initialization because the
+preallocated `MsiEnumRelatedProductsW` string buffer was incorrectly passed as
+Pascal Script `var`. v4.1.2 executes cargo-dist in the current `pwsh`, prefers
+`pwsh` for runtime same-channel PowerShell updates, passes the MSI output buffer
+correctly, and upgrades the hosted matrix to install a dynamically resolved
+prior complete release before testing real same-channel update, no-op,
+portable recovery/no-mutation, both takeover directions, and uninstall.
+
+Never modify v4.1.0 or v4.1.1 tags/assets. Complete exact-SHA gates and the
+30-asset public audit only on v4.1.2.
 
 ## 2026-07-18 immutable v4.1.1 packaging fix-forward
 
@@ -34,7 +64,8 @@ before download and fixes both architecture checks. Windows packaging run
 second-hop `workflow_run` context used `head_branch=main` instead of retaining
 the original tag. v4.1.1 binds that hop to the upstream exact SHA and requires
 one matching immutable release. Never alter the v4.1.0 tag or published bytes;
-complete and audit the 30-asset distribution on v4.1.1.
+v4.1.1 was the intended complete target, but its later native-validator failure
+is fixed forward only through v4.1.2 as recorded above.
 
 ## 2026-07-17 Alienware continuation — v4.1 origin-preserving work
 
@@ -58,8 +89,8 @@ Implemented local surfaces:
 - generalized install-channel detection for Global/Corporate MSI and EXE,
   cargo-dist PowerShell/shell receipts and prefixes, Cargo metadata, and macOS
   `com.qubetx.tr300.pkg`; the Mac receipt must match package/version/scope,
-  payload path, per-file owner, and `pkgutil --verify`; scoped Windows markers
-  retain the legacy value;
+  payload path, per-file owner, and installed Developer ID product identity;
+  scoped Windows markers retain the legacy value;
 - one-object update JSON with `install_channel`, `recovery_url`, and
   `requires_user_action`, child progress on stderr, restart/cancellation as
   failure, randomized staging, exact-tag payloads, and no cross-fallback;
@@ -107,7 +138,7 @@ Mac.
 
 The remaining exact sequence is: finish docs/ADR and disposable installer
 fixtures; run every locked local gate; push `main`; wait for exact-SHA CI and
-crates; tag only v4.1.0; wait for cargo-dist, Windows
+crates; tag only v4.1.2; wait for cargo-dist, Windows
 installers, and PKG-in-DMG validation; then audit crates.io, all 30 assets,
 checksums, signatures/notarization, every installer channel, update/recovery,
 and uninstall before closing the release. AMD laptop and Pi 4 hardware evidence

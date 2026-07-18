@@ -35,6 +35,10 @@ const EXE_CORPORATE_ASSET: &str = "tr300-x86_64-pc-windows-msvc-corporate-setup.
 const MAC_DMG_ASSET: &str = "tr300-universal-apple-darwin.dmg";
 #[cfg(any(test, target_os = "macos"))]
 const MAC_PKG_ID: &str = "com.qubetx.tr300.pkg";
+#[cfg(any(test, target_os = "macos"))]
+const MAC_BINARY_ID: &str = "com.qubetx.tr300";
+#[cfg(any(test, target_os = "macos"))]
+const MAC_TEAM_ID: &str = "M9D5379H93";
 
 /// Crate name for cargo install.
 const CRATE_NAME: &str = "tr300";
@@ -706,8 +710,8 @@ fn build_strategy_list(channel: InstallChannel) -> Vec<UpdateStrategy> {
         InstallChannel::ExeCorporate => vec![UpdateStrategy::ExeCorporate],
         InstallChannel::Cargo => vec![UpdateStrategy::Cargo],
         InstallChannel::PowerShellInstaller => vec![
-            UpdateStrategy::InstallerPowerShell,
             UpdateStrategy::InstallerPwsh,
+            UpdateStrategy::InstallerPowerShell,
         ],
         InstallChannel::ShellInstaller => {
             vec![UpdateStrategy::InstallerCurl, UpdateStrategy::InstallerWget]
@@ -1801,8 +1805,11 @@ fn pkg_receipt_metadata_matches(
     let package_id_matches = pkgutil_field(package_info, "package-id") == Some(MAC_PKG_ID);
     let package_version_matches = pkgutil_field(package_info, "version")
         .is_some_and(|version| post_install_version_ok(version, expected_version));
+    // A pkgbuild component installed at `/` reports `location:` as either an
+    // empty value (current macOS 15) or `/` on older releases.
+    let package_location = pkgutil_field(package_info, "location");
     let package_scope_matches = pkgutil_field(package_info, "volume") == Some("/")
-        && pkgutil_field(package_info, "location") == Some("/");
+        && matches!(package_location, Some("") | Some("/"));
 
     let payload_matches = payload_files.lines().any(|line| {
         line.trim().trim_start_matches("./").trim_start_matches('/') == "usr/local/bin/tr300"
@@ -1824,6 +1831,18 @@ fn pkg_receipt_metadata_matches(
         && owner_matches
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn mac_signature_metadata_matches(details: &str) -> bool {
+    let identifier = format!("Identifier={MAC_BINARY_ID}");
+    let team = format!("TeamIdentifier={MAC_TEAM_ID}");
+    details.lines().any(|line| line.trim() == identifier)
+        && details.lines().any(|line| line.trim() == team)
+        && details.lines().any(|line| {
+            line.trim()
+                .starts_with("Authority=Developer ID Application:")
+        })
+}
+
 #[cfg(target_os = "macos")]
 fn pkgutil_text(args: &[&str]) -> Option<String> {
     let output = run_output(
@@ -1835,6 +1854,25 @@ fn pkgutil_text(args: &[&str]) -> Option<String> {
         return None;
     }
     String::from_utf8(output.stdout).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn mac_binary_signature_matches_current_product() -> bool {
+    let path = "/usr/local/bin/tr300";
+    let timeout = CommandTimeout::Custom(std::time::Duration::from_secs(5));
+    let verified = run_output("codesign", ["--verify", "--strict", path], timeout)
+        .is_some_and(|output| output.status.success());
+    if !verified {
+        return false;
+    }
+
+    let Some(display) = run_output("codesign", ["-d", "--verbose=4", path], timeout) else {
+        return false;
+    };
+    display.status.success()
+        && String::from_utf8(display.stderr)
+            .ok()
+            .is_some_and(|details| mac_signature_metadata_matches(&details))
 }
 
 #[cfg(target_os = "macos")]
@@ -1862,12 +1900,10 @@ fn mac_pkg_receipt_matches_current_exe() -> bool {
         return false;
     }
 
-    run_output(
-        "pkgutil",
-        ["--verify", MAC_PKG_ID],
-        CommandTimeout::Custom(std::time::Duration::from_secs(5)),
-    )
-    .is_some_and(|output| output.status.success())
+    // Current macOS no longer exposes pkgutil's historical --verify command.
+    // Receipt/file ownership plus the product's strict Developer ID signature
+    // proves that this running binary belongs to the PKG channel.
+    mac_binary_signature_matches_current_product()
 }
 
 #[cfg(windows)]
@@ -2142,6 +2178,13 @@ mod tests {
             build_strategy_list(InstallChannel::MacPkg),
             vec![UpdateStrategy::MacDmg]
         );
+        assert_eq!(
+            build_strategy_list(InstallChannel::PowerShellInstaller),
+            vec![
+                UpdateStrategy::InstallerPwsh,
+                UpdateStrategy::InstallerPowerShell
+            ]
+        );
         assert!(build_strategy_list(InstallChannel::Unknown).is_empty());
     }
 
@@ -2173,7 +2216,7 @@ mod tests {
 package-id: com.qubetx.tr300.pkg\n\
 version: 4.1.0\n\
 volume: /\n\
-location: /\n";
+location: \n";
         let payload = "usr\nusr/local\nusr/local/bin\nusr/local/bin/tr300\n";
         let file_info = "\
 volume: /\n\
@@ -2183,6 +2226,12 @@ pkg-version: 4.1.0\n";
 
         assert!(pkg_receipt_metadata_matches(
             package_info,
+            payload,
+            file_info,
+            "4.1.0"
+        ));
+        assert!(pkg_receipt_metadata_matches(
+            &package_info.replace("location: ", "location: /"),
             payload,
             file_info,
             "4.1.0"
@@ -2204,6 +2253,30 @@ pkg-version: 4.1.0\n";
             payload,
             &file_info.replace("com.qubetx.tr300.pkg", "com.example.shadow"),
             "4.1.0"
+        ));
+        assert!(!pkg_receipt_metadata_matches(
+            &package_info.replace("location: ", "location: Library"),
+            payload,
+            file_info,
+            "4.1.0"
+        ));
+    }
+
+    #[test]
+    fn mac_pkg_origin_requires_product_developer_id_signature_metadata() {
+        let details = "\
+Identifier=com.qubetx.tr300\n\
+Authority=Developer ID Application: ES Development LLC (M9D5379H93)\n\
+TeamIdentifier=M9D5379H93\n";
+        assert!(mac_signature_metadata_matches(details));
+        assert!(!mac_signature_metadata_matches(
+            &details.replace("com.qubetx.tr300", "com.example.shadow")
+        ));
+        assert!(!mac_signature_metadata_matches(
+            &details.replace("M9D5379H93", "DIFFERENT1")
+        ));
+        assert!(!mac_signature_metadata_matches(
+            &details.replace("Developer ID Application:", "Apple Development:")
         ));
     }
 

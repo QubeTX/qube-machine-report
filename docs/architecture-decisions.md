@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (through v4.1.1)](#decision-ledger-status-through-v411)
+- [Decision ledger status (through v4.1.2)](#decision-ledger-status-through-v412)
 - [Origin-preserving updates and native PKG-in-DMG distribution (v4.1.0)](#origin-preserving-updates-and-native-pkg-in-dmg-distribution-v410)
   - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
   - [Install channel is product state](#install-channel-is-product-state)
@@ -26,6 +26,8 @@
   - [Why the PKG is inside the DMG](#why-the-pkg-is-inside-the-dmg)
   - [Apple credentials and hosted-native proof](#apple-credentials-and-hosted-native-proof)
   - [Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)](#hosted-packaging-lifecycle-and-tool-syntax-v411-addendum)
+  - [Supported macOS ownership proof (v4.1.2 addendum)](#supported-macos-ownership-proof-v412-addendum)
+  - [Windows transition runner correctness (v4.1.2 addendum)](#windows-transition-runner-correctness-v412-addendum)
   - [Machine-readable and failure contract](#machine-readable-and-failure-contract)
   - [Reusable contract for other CLI products](#reusable-contract-for-other-cli-products)
 - [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
@@ -66,7 +68,7 @@
 
 ---
 
-## Decision ledger status (through v4.1.1)
+## Decision ledger status (through v4.1.2)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
@@ -91,6 +93,7 @@ future hardware row has already been exercised.
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS PKG-in-DMG | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel install gates |
 | Hosted package inputs survive source checkout; builder and validation tool syntax stay identical | Accepted and release-blocking | checkout-before-download ordering plus Xcode 16.4 `lipo <file> -verify_arch ...` checks |
+| macOS installed-package ownership uses supported receipt, file-owner, and Developer ID checks | Accepted and release-blocking | `pkgutil --pkg-info/--files/--file-info`, strict `codesign`, native ARM/Intel install gates |
 | Explicit fresh-installer choice supersedes the prior Windows channel | Accepted | WiX/Inno cross-format removal, scoped markers, advisory cross-edition cleanup |
 | Physical Mac requirement | Superseded; optional visual smoke only | GitHub `macos-15` and `macos-15-intel` are the required native gates |
 
@@ -164,9 +167,10 @@ Cargo metadata. cargo-dist uses its versioned receipt and recorded install
 prefix. macOS uses the stable `pkgutil` receipt
 `com.qubetx.tr300.pkg`, but receipt existence alone is not ownership proof. The
 receipt identifier, version, install scope, payload list, per-file owner, and
-`pkgutil --verify` result must all agree with the running
-`/usr/local/bin/tr300`. Path alone cannot distinguish Windows MSI from EXE and
-therefore cannot authorize a mutation.
+installed binary's valid Developer ID Application identifier, Team ID, and
+authority must all agree with the running `/usr/local/bin/tr300`. Path alone
+cannot distinguish Windows MSI from EXE and therefore cannot authorize a
+mutation.
 
 No strategy crosses into another channel after failure. Preserving the old
 working install is more important than “trying something” that creates a
@@ -234,9 +238,10 @@ validates and mounts it read-only, validates the nested `tr300.pkg`, and invokes
 Apple Installer with `open -W`. Success is reported only after Installer
 returns, the receipt exists, and `/usr/local/bin/tr300 --version` matches the
 resolved version. Later update detection revalidates that the receipt claims
-that exact file and version and that its bill of materials still verifies; a
-stale receipt beside a replaced binary fails closed. Cancellation or failure
-leaves the old installation in place and exits 2.
+that exact file and version, `pkgutil --file-info` names the same package as
+owner, and the binary retains TR-300's Developer ID product identity; a stale
+receipt beside a replaced or ad-hoc-signed binary fails closed. Cancellation
+or failure leaves the old installation in place and exits 2.
 
 ### Apple credentials and hosted-native proof
 
@@ -327,6 +332,105 @@ workflow-event hop requires a native hosted packaging run through mount,
 install, both architecture checks, immutable upload, and every downstream
 validation job.
 
+### Supported macOS ownership proof (v4.1.2 addendum)
+
+Native v4.1.1 packaging run 29639898362 successfully downloaded both exact
+archives after checkout, used the input-first Xcode 16.4 `lipo` form, created
+and signed the universal binary and PKG, notarized and stapled the PKG and DMG,
+mounted the DMG, passed Gatekeeper, and installed the package on both Apple
+Silicon and Intel. Both validation jobs then failed at the same legacy call:
+current macOS `pkgutil` rejected `--verify` as an unrecognized option. The
+current Xcode `pkgutil(1)` command set contains `--pkg-info`, `--files`,
+`--file-info`, `--check-signature`, and related receipt operations, but no
+installed-package `--verify` operation. This was a validator defect, not an
+excuse to weaken origin proof, and v4.1.1's published assets remain immutable.
+
+The supported v4.1.2 ownership proof is conjunctive:
+
+1. `pkgutil --pkg-info com.qubetx.tr300.pkg` must report the exact package ID,
+   current executable version, and root volume. A root package may report an
+   empty `location:` or `/`; any non-root location is rejected.
+2. `pkgutil --files com.qubetx.tr300.pkg` must contain exactly the expected
+   relative payload `usr/local/bin/tr300`, and `pkgutil --file-info
+   /usr/local/bin/tr300` must name `com.qubetx.tr300.pkg` as its package owner.
+3. `codesign --verify --strict /usr/local/bin/tr300` must succeed. Its detailed
+   metadata must report identifier `com.qubetx.tr300`, Team ID `M9D5379H93`,
+   and a Developer ID Application authority. The installed executable must
+   then report the receipt/expected version.
+
+Package-container trust remains independently enforced before installation:
+`pkgutil --check-signature` validates the nested PKG signature,
+`spctl -a -t install` performs Gatekeeper assessment, and `stapler validate`
+checks the notarization ticket. These are not substitutes for installed-file
+ownership, just as receipt presence is not a substitute for code identity.
+The runtime updater intentionally invokes only supported public commands; it
+does not parse undocumented receipt database internals or depend on a removed
+compatibility switch.
+
+**Rejected alternatives:** receipt presence alone permits a replaced binary to
+inherit a stale channel; version/path alone permits an unsigned or foreign
+binary to impersonate the package; requiring `location: /` rejects valid root
+receipts observed on current hosted macOS where the value is empty; querying an
+obsolete `pkgutil --verify` command makes every genuine PKG install look
+unknown. All four violate safe origin preservation.
+
+**Revalidation triggers:** macOS/Xcode runner changes, package identifier or
+payload changes, signing identifier/Team/certificate changes, receipt parser
+changes, or updater origin changes require both native architectures to repeat
+DMG checksum/signature/notary checks, mount, PKG trust checks, install, receipt
+and file-owner proof, binary signature/version proof, update selection, and
+uninstall cleanup.
+
+### Windows transition runner correctness (v4.1.2 addendum)
+
+The first fully dispatched v4.1.1 Windows matrix proved the exact-SHA resolver
+and clean install/update-detection/uninstall paths for both MSIs, both EXEs, and
+Cargo. It also exposed three distinct test/transition issues that clean installs
+could not reveal:
+
+- Both EXE-over-MSI takeover jobs exited 1 during Inno initialization. The
+  `MsiEnumRelatedProductsW` ABI requires a preallocated 39-character output
+  buffer. In Inno Pascal Script the buffer string itself is passed to the DLL;
+  declaring that parameter `var` passes the string descriptor by reference and
+  corrupts the expected pointer when a related MSI actually exists. The shared
+  include keeps the buffer preallocated, removes `var`, bounds enumeration to
+  32 products, waits for each `msiexec /x`, accepts only success/already-absent,
+  and stops before writing files on every other outcome.
+- Starting legacy `powershell.exe` as a child of `pwsh` inherits the parent's
+  `PSModulePath`. On current Windows runners that can make Windows PowerShell
+  discover PowerShell 7's incompatible `Microsoft.PowerShell.Security` module
+  and exit before cargo-dist installation. Hosted validation executes the
+  script in its current `pwsh` host; runtime same-channel update prefers `pwsh`
+  when available and retains `powershell.exe` as the same-channel fallback.
+  This changes the interpreter, not the installation channel or prefix.
+- An already-current portable binary is a successful no-op even though its
+  origin remains `unknown`; no mutation is needed. An older portable binary
+  with an available update must instead exit 2, remain byte/version unchanged,
+  require user action, and return the versionless recovery page. Treating those
+  two states as the same assertion either invents a failure or fails to test
+  recovery.
+
+The release validation matrix therefore installs the most recent lower stable
+release that contains every required Windows family, exercises a real
+old-to-new CLI update for each recognized channel, verifies the target version
+and preserved marker/registration/PATH, then invokes update again to prove the
+already-current no-op. Portable uses that same older release to prove safe
+recovery without mutation. Separate jobs still test both directions of
+same-edition MSI/EXE fresh takeover because explicit installer intent is a
+different state machine from CLI update.
+
+**Rejected alternatives:** accepting a clean install as updater proof; invoking
+a different installer family after failure; hard-coding a historical version
+into the workflow; treating every unknown-origin invocation as an error; or
+ignoring a nonzero Inno/PowerShell exit. The matrix resolves immutable releases
+and stable asset names dynamically and fails before claiming convergence.
+
+**Revalidation triggers:** changes to the PowerShell cargo-dist template or
+launcher order, MSI UpgradeCodes/product scope, Inno DLL declarations or
+takeover code, marker/ARP recovery, update JSON semantics, portable behavior,
+or Windows runner/PowerShell images require the full prior-version update,
+current-version no-op, cross-format takeover, and uninstall matrix.
+
 ### Machine-readable and failure contract
 
 Update JSON stdout is exactly one object; child installer output and progress
@@ -346,7 +450,7 @@ misreported as a complete in-place update.
 
 ### Reusable contract for other CLI products
 
-The v4.1.1 implementation is intended to be copied into other standalone CLI
+The v4.1.2 implementation is intended to be copied into other standalone CLI
 products. Product names, package identifiers, paths, asset names, registry
 keys, and installer GUIDs are parameters; the following invariants are the
 portable architecture:
@@ -364,8 +468,12 @@ portable architecture:
    equal, stale, or conflicting evidence becomes unknown.
 3. **Prove receipt ownership, not receipt presence.** For a native package,
    require the package ID, recorded payload path, installed file owner,
-   receipt/package version, running executable path, and package verification
-   to agree. Apply the equivalent identity/registration checks on Windows and
+   receipt/package version, running executable path, and installed binary's
+   native signing identity to agree. Validate the package container's signature,
+   notarization, and platform trust separately before installation. Use only
+   commands supported by the current platform; an obsolete verification switch
+   that always fails is not conservative because it hides every legitimate
+   origin. Apply equivalent identity/registration checks on Windows and
    package-manager metadata checks elsewhere.
 4. **Resolve mutable discovery once.** Public filenames, download commands, and
    recovery pages remain versionless. The updater resolves `latest` once, then

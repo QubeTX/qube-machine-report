@@ -13,6 +13,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-07-18
+
+### Fixed
+- **Mac update ownership now uses checks supported by current macOS.** The
+  installed command must match the exact Apple package receipt and also retain
+  TR-300's valid Developer ID signature and Team ID. This replaces a package
+  verification switch removed from current macOS, while preserving the rule
+  that a leftover receipt alone cannot claim a different binary. v4.1.1's
+  published files were left untouched and the correction moves to v4.1.2.
+- **Switching between MSI and EXE no longer trips over the old registration.**
+  The fresh Windows installer now reads the previous MSI identity correctly,
+  removes only the matching edition, and stops safely before changing files if
+  Windows cannot complete that removal.
+- **PowerShell installs and updates use the compatible PowerShell host.** This
+  avoids a module-loading conflict seen on clean GitHub Windows machines while
+  keeping the same script-install channel and folder.
+- **Windows release tests now perform real old-to-new updates.** Disposable
+  machines install the previous complete release, update each recognized
+  installer family in place, prove the second update is a harmless no-op, and
+  prove an older portable copy stays untouched while directing the user to the
+  fresh versionless download.
+
 ## [4.1.1] - 2026-07-18
 
 ### Fixed
@@ -44,7 +66,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Global MSI, Corporate EXE remains Corporate EXE, Cargo remains Cargo, a
   script install stays in its recorded folder, and the Mac DMG reopens Apple
   Installer. On Mac, the receipt must actually claim the running file and
-  version and still verify—a leftover receipt cannot hijack an update. When
+  version and the command must retain TR-300's signed product identity—a
+  leftover receipt cannot hijack an update. When
   Cargo and the script installer share a folder, the most
   recently written install record wins; a tie is treated as unknown. TR-300
   never guesses across installer types. If the origin is

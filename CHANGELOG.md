@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-07-18
+
+### Fixed
+- **macOS package ownership uses supported current APIs.** macOS 15 no longer
+  accepts the historical `pkgutil --verify` command, so v4.1.1 built, signed,
+  notarized, and installed its universal package but failed both native
+  validators before publication. PKG update-origin detection now combines the
+  exact receipt ID/version/root scope/payload/per-file ownership with strict
+  Developer ID verification of the installed `com.qubetx.tr300` binary and
+  Team ID. It also accepts macOS 15's empty receipt `location:` as the root
+  location. The workflow performs the same signature checks before exercising
+  updater selection. v4.1.1 remains immutable; v4.1.2 is the fix-forward.
+- **Windows fresh-format takeover passes the MSI product buffer correctly.**
+  The Inno Setup bridge now supplies `MsiEnumRelatedProductsW` its required
+  preallocated output string rather than a Pascal Script `var` reference, which
+  made Setup exit during MSI-to-EXE transitions. Removal remains bounded,
+  synchronous, same-edition-only, and fail-closed before any new files are
+  written.
+- **PowerShell installer validation uses a compatible host.** The cargo-dist
+  script runs in the current `pwsh` process instead of launching legacy Windows
+  PowerShell with PowerShell 7's inherited module path. Runtime updates prefer
+  `pwsh` and retain Windows PowerShell as a same-channel fallback.
+- **Hosted Windows validation exercises real version transitions.** Each
+  recognized channel installs the most recent lower complete stable release,
+  updates in place to the candidate through the same channel, then verifies a
+  current-version no-op and clean uninstall. The older portable case proves
+  exit-2 recovery without mutation; fresh MSI/EXE takeover remains separately
+  bidirectional.
+
 ## [4.1.1] - 2026-07-18
 
 ### Fixed

@@ -229,6 +229,8 @@ jobs:
           workflow=.github/workflows/macos-installer.yml
           builder=scripts/build-sign-notarize-macos-dmg.sh
           windows_validation=.github/workflows/windows-installer-validation.yml
+          updater=src/update.rs
+          inno_msi_bridge=inno/remove-conflicting-msi.pas
           checkout_line=$(grep -nF 'name: Checkout exact release tag' "$workflow" | cut -d: -f1)
           download_line=$(grep -nF 'name: Verify upstream release and download signed architecture archives' "$workflow" | cut -d: -f1)
           test -n "$checkout_line"
@@ -240,9 +242,26 @@ jobs:
             echo 'input-last lipo -verify_arch invocation is forbidden' >&2
             exit 1
           fi
+          if grep -Fq 'pkgutil --verify' "$workflow" "$updater"; then
+            echo 'removed pkgutil --verify must not return to runtime or hosted validation' >&2
+            exit 1
+          fi
+          grep -Fq 'pkgutil --file-info /usr/local/bin/tr300' "$workflow"
+          grep -Fq 'codesign --verify --strict --verbose=4 /usr/local/bin/tr300' "$workflow"
+          grep -Fq 'TeamIdentifier=${{ vars.APPLE_TEAM_ID }}' "$workflow"
           grep -Fq 'github.event.workflow_run.head_sha' "$windows_validation"
           if grep -Fq 'github.event.workflow_run.head_branch' "$windows_validation"; then
             echo 'second-hop workflow validation must resolve from head_sha, not head_branch' >&2
+            exit 1
+          fi
+          grep -Fq 'previous_tag' "$windows_validation"
+          grep -Fq 'previous_version' "$windows_validation"
+          if grep -Fq 'Start-Process powershell.exe' "$windows_validation"; then
+            echo 'pwsh-hosted cargo-dist validation must not inherit modules into Windows PowerShell' >&2
+            exit 1
+          fi
+          if grep -Eq 'var[[:space:]]+ProductCode:[[:space:]]*string' "$inno_msi_bridge"; then
+            echo 'MsiEnumRelatedProductsW output buffer must not use Pascal Script var' >&2
             exit 1
           fi
 

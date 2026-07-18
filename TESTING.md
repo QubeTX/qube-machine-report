@@ -7,7 +7,45 @@ as passed.
 
 ## Per-version verification log
 
-### v4.1.1 — 2026-07-18 (immutable fix-forward in progress)
+### v4.1.2 — 2026-07-18 (immutable fix-forward in progress)
+
+- **Reason:** v4.1.1 completed checkout-safe universal construction and used
+  the corrected Xcode 16.4 `lipo <file> -verify_arch ...` form. Native run
+  29639898362 then proved the universal binary, PKG, and DMG were signed,
+  notarized, stapled, mounted, Gatekeeper-accepted, and installed on both
+  Apple Silicon and Intel, but current macOS rejected the legacy
+  `pkgutil --verify` option in both validation jobs. No DMG asset published.
+  v4.1.2 retains exact receipt ID/version/root scope, expected payload, and
+  `pkgutil --file-info` ownership checks, and adds strict installed-binary
+  Developer ID identifier/Team/authority proof with supported commands.
+- **Windows transition correction:** v4.1.1 Windows validation run 29639998787
+  proved the exact-SHA second-hop resolver and clean Global MSI, Corporate MSI,
+  Global EXE, Corporate EXE, and Cargo flows. It exposed (1) Windows PowerShell
+  inheriting an incompatible PowerShell 7 module path, (2) a test incorrectly
+  expecting an already-current portable binary to fail, and (3) an Inno
+  `MsiEnumRelatedProductsW` output buffer declared with Pascal Script `var`,
+  which made both MSI-to-EXE transitions exit during Setup initialization.
+  v4.1.2 runs the cargo-dist script in the current `pwsh`, prefers `pwsh` for
+  same-channel updates, passes the preallocated MSI buffer correctly, and makes
+  the hosted matrix install a prior complete stable release before exercising
+  real same-channel update, current no-op, older-portable recovery, takeover,
+  and uninstall behavior.
+- **Current local evidence:** formatting, actionlint 1.7.12, ShellCheck 0.11.0,
+  Git Bash syntax, warning-denying all-target/all-feature Clippy, 151 unit
+  tests, 19 integration tests, locked release build, RustSec audit (221 locked
+  dependencies), cargo-dist 0.31.0 plan, 39-file package list, and publish
+  dry-run pass. The release binary reports `tr300 4.1.2`; fast schema-v1 JSON,
+  all 32 fixed-width ASCII rows, and one-object updater no-op JSON pass. The
+  Windows PowerShell child-host failure was reproduced in an isolated temporary
+  Cargo/LocalAppData home; direct `pwsh` execution installed v4.1.1 and wrote
+  its versioned receipt successfully. Credential-material scan found no private
+  key, certificate block, or long base64 payload in tracked source.
+- **Required proof:** finish every clean-tree release gate, exact-SHA CI/crates,
+  then require signed archives, all Windows installers/transitions, and native
+  ARM/Intel PKG-in-DMG validation to pass before auditing 30 immutable v4.1.2
+  assets. v4.1.0 and v4.1.1 tags/assets remain unchanged.
+
+### v4.1.1 — 2026-07-18 (published archives; DMG fixed forward in v4.1.2)
 
 - **Reason:** v4.1.0 exact-SHA CI, crates publication, and all signed
   cargo-dist archives succeeded. Supplemental macOS run 29639135342 then
@@ -22,10 +60,15 @@ as passed.
   29639224625 skipped because chained `workflow_run` context reported
   `head_branch=main`. v4.1.1 resolves exactly one immutable release from the
   successful upstream run's exact SHA and refuses ambiguous matches.
-- **Required proof:** rerun all local/clean-tree gates, exact-SHA CI and crates,
-  then require Release, Windows Installers, macOS Universal DMG, and disposable
-  Windows Installer Validation to succeed for v4.1.1. Audit 30 immutable public
-  assets only after those workflows settle.
+- **Publication boundary:** exact source
+  `09afdc6ae5cbff1a497e6cec07c4cf1b36d2557b` passed CI 29639632790, crates
+  29639731682, signed archive Release 29639767064, and Windows packaging
+  29639898355. crates.io checksum is
+  `a5b406416192bcf6c0592bd2b300141f20e01abe2a17385a24d85696e8f8acdd`.
+  DMG run 29639898362 failed closed after successful construction/trust/install
+  because the removed `pkgutil --verify` option rejected both native validators;
+  publish was skipped. Windows matrix 29639998787 was partial as documented in
+  the v4.1.2 entry. This is not a 30-asset complete-distribution claim.
 - **Local candidate gates:** formatting; actionlint 1.7.12 with ShellCheck;
   direct ShellCheck and Git Bash syntax; warning-denying all-target/all-feature
   Clippy; 150 library and 19 integration tests; locked release build; RustSec

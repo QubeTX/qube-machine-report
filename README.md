@@ -119,8 +119,9 @@ Download [tr300-universal-apple-darwin.dmg](https://github.com/QubeTX/qube-machi
 open `tr300.pkg`, and follow Apple Installer. The universal package supports
 Apple Silicon and Intel, installs `/usr/local/bin/tr300` system-wide, and records
 the stable `com.qubetx.tr300.pkg` receipt used by `tr300 update`. The updater
-also requires that receipt's version, payload path, per-file ownership, and
-package verification to match the running binary; a stale receipt is not enough.
+also requires that receipt's version, payload path, per-file ownership, and the
+installed binary's Developer ID product identity to match; a stale receipt is
+not enough.
 
 The binary, PKG, and DMG are Developer ID signed. GitHub's native Apple Silicon
 and Intel runners require Apple Notary Service acceptance, staple the PKG/DMG,

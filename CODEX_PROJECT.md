@@ -17,11 +17,12 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Published version: `4.1.0` (2026-07-18); working manifest / next release:
-  `4.1.1`. v4.1.0 passed exact-SHA CI, crates publication, and signed archive
-  release, but its supplemental universal DMG workflow failed before creating
-  the DMG and its chained Windows validation skipped on non-transitive tag
-  context. v4.1.1 is the immutable fix-forward. v4.0.0 published to
+- Published version: `4.1.1` (2026-07-18); working manifest / next release:
+  `4.1.2`. v4.1.1 fixed checkout, Xcode `lipo`, and chained release identity,
+  then passed exact-SHA CI/crates, signed archives, Windows packaging, and DMG
+  build/notarization. Its native install gates exposed the removed macOS
+  `pkgutil --verify` switch before DMG publication; v4.1.2 is the immutable
+  fix-forward. v4.0.0 published to
   crates.io but its immutable tag failed closed before GitHub artifact hosting;
   v4.0.1 is the deployed keychain-search fix-forward. Release source
   `b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates,
@@ -59,7 +60,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
   documentation/workflow state reconciled 2026-07-18.
 
-### v4.1.1 fix-forward release
+### v4.1.2 fix-forward release
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG/DMG origin. Unknown/conflicting origins do not
@@ -77,7 +78,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - The native macOS artifact is a universal signed `tr300.pkg` inside a signed,
   notarized, stapled DMG. The PKG owns `/usr/local/bin/tr300` and the stable
   `com.qubetx.tr300.pkg` receipt used by future updates; receipt ID/version,
-  payload path, per-file owner, scope, and `pkgutil --verify` must all agree.
+  payload path, per-file owner, scope, and installed Developer ID product
+  identity must all agree.
 - Native GitHub `macos-15` and `macos-15-intel` runners are release gates; a
   physical Mac is optional visual smoke testing unless CI exposes a GUI-only
   defect. Installer-identity preflight run 29637224793 signed and verified a
@@ -150,14 +152,14 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.1.1`.
+   synchronized at `4.1.2`.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus PKG-in-DMG
    sign/notary/staple/install proof.
 3. Commit and push `main`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
-4. Create and push only tag `v4.1.1` after CI/crates settle. Existing immutable
+4. Create and push only tag `v4.1.2` after CI/crates settle. Existing immutable
    v4 tags must not move.
 5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
    extracted signatures/checksums from both public Mac archives.

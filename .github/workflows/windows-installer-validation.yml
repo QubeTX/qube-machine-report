@@ -24,6 +24,8 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
+      previous_tag: ${{ steps.release.outputs.previous_tag }}
+      previous_version: ${{ steps.release.outputs.previous_version }}
     steps:
       - name: Resolve tag and require every Windows family
         id: release
@@ -71,8 +73,37 @@ jobs:
               exit 1
             }
           done
+          previous_tag=''
+          mapfile -t candidates < <(
+            gh api "repos/$repo/releases?per_page=100" --jq \
+              ".[] | select(.draft == false and .prerelease == false and .tag_name != \"$tag\") | .tag_name"
+          )
+          for candidate in "${candidates[@]}"; do
+            [[ $candidate =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            highest=$(printf '%s\n%s\n' "${candidate#v}" "${tag#v}" | sort -V | tail -n 1)
+            [[ $highest == "${tag#v}" ]] || continue
+            candidate_assets=$(gh release view "$candidate" --repo "$repo" \
+              --json assets --jq '.assets[].name')
+            complete=true
+            for asset in "${required[@]}"; do
+              if ! grep -Fqx "$asset" <<< "$candidate_assets"; then
+                complete=false
+                break
+              fi
+            done
+            if [[ $complete == true ]]; then
+              previous_tag=$candidate
+              break
+            fi
+          done
+          if [[ -z $previous_tag ]]; then
+            echo "no earlier complete Windows release is available for update testing" >&2
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          echo "previous_version=${previous_tag#v}" >> "$GITHUB_OUTPUT"
 
   channels:
     name: ${{ matrix.name }} install / update / uninstall
@@ -111,12 +142,12 @@ jobs:
             asset: tr300-x86_64-pc-windows-msvc.zip
             channel: unknown
     steps:
-      - name: Download exact tagged input
+      - name: Download prior same-channel input
         if: matrix.asset != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ${{ matrix.asset }}
-          TAG: ${{ needs.resolve.outputs.tag }}
+          TAG: ${{ needs.resolve.outputs.previous_tag }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force assets | Out-Null
@@ -126,12 +157,12 @@ jobs:
             throw "missing downloaded asset $env:ASSET"
           }
 
-      - name: Verify release checksum when published
+      - name: Verify prior release checksum when published
         if: matrix.asset != '' && matrix.kind != 'powershell'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ${{ matrix.asset }}
-          TAG: ${{ needs.resolve.outputs.tag }}
+          TAG: ${{ needs.resolve.outputs.previous_tag }}
         shell: pwsh
         run: |
           gh release download $env:TAG --repo '${{ github.repository }}' `
@@ -146,7 +177,7 @@ jobs:
         env:
           KIND: ${{ matrix.kind }}
           ASSET: ${{ matrix.asset }}
-          VERSION: ${{ needs.resolve.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.previous_version }}
         shell: pwsh
         run: |
           $asset = if ($env:ASSET) { Join-Path $PWD "assets\$env:ASSET" } else { $null }
@@ -162,18 +193,30 @@ jobs:
               $exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
             }
             'exe-global' {
-              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
-              if ($p.ExitCode -ne 0) { throw "Global EXE failed: $($p.ExitCode)" }
+              $log = Join-Path $env:RUNNER_TEMP 'tr300-global-exe-install.log'
+              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+              if ($p.ExitCode -ne 0) {
+                Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+                throw "Global EXE failed: $($p.ExitCode)"
+              }
               $exe = "$env:ProgramFiles\tr300\bin\tr300.exe"
             }
             'exe-corporate' {
-              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
-              if ($p.ExitCode -ne 0) { throw "Corporate EXE failed: $($p.ExitCode)" }
+              $log = Join-Path $env:RUNNER_TEMP 'tr300-corporate-exe-install.log'
+              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+              if ($p.ExitCode -ne 0) {
+                Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+                throw "Corporate EXE failed: $($p.ExitCode)"
+              }
               $exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
             }
             'powershell' {
-              $p = Start-Process powershell.exe -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $asset)
-              if ($p.ExitCode -ne 0) { throw "PowerShell installer failed: $($p.ExitCode)" }
+              # Run in the current pwsh host. Starting Windows PowerShell from
+              # pwsh inherits PSModulePath and can make Windows PowerShell load
+              # PowerShell 7's incompatible Microsoft.PowerShell.Security
+              # module before the cargo-dist script reaches its real work.
+              & $asset
+              if (-not $?) { throw "PowerShell installer failed" }
               $exe = "$HOME\.cargo\bin\tr300.exe"
             }
             'cargo' {
@@ -193,12 +236,13 @@ jobs:
         env:
           KIND: ${{ matrix.kind }}
           EXPECTED_CHANNEL: ${{ matrix.channel }}
+          INSTALLED_VERSION: ${{ needs.resolve.outputs.previous_version }}
           EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
           EXE: ${{ steps.install.outputs.exe }}
         shell: pwsh
         run: |
           $reported = (& $env:EXE --version).Trim()
-          if ($reported -ne "tr300 $env:EXPECTED_VERSION") { throw "unexpected version: $reported" }
+          if ($reported -ne "tr300 $env:INSTALLED_VERSION") { throw "unexpected prior version: $reported" }
           (& $env:EXE --fast --json | ConvertFrom-Json) | Out-Null
           & $env:EXE --fast --ascii | Out-Null
 
@@ -211,18 +255,54 @@ jobs:
           if ($update.install_channel -ne $env:EXPECTED_CHANNEL) {
             throw "expected channel $env:EXPECTED_CHANNEL, got $($update.install_channel)"
           }
+          if ($update.latest_version -ne $env:EXPECTED_VERSION -or $update.update_available -ne $true) {
+            throw "updater did not resolve the intended target version"
+          }
           if ($env:KIND -eq 'portable') {
             if ($exit -ne 2 -or $update.success -ne $false -or $update.requires_user_action -ne $true) {
-              throw "portable update did not fail safely"
+              throw "older portable update did not fail safely"
             }
             if ($update.recovery_url -ne 'https://github.com/QubeTX/qube-machine-report/releases/latest') {
               throw "portable recovery URL is not versionless latest"
             }
+            $retained = (& $env:EXE --version).Trim()
+            if ($retained -ne "tr300 $env:INSTALLED_VERSION") {
+              throw "portable failure mutated the existing binary: $retained"
+            }
           } else {
-            if ($exit -ne 0 -or $update.success -ne $true -or $update.update_available -ne $false) {
+            if ($exit -ne 0 -or $update.success -ne $true) {
+              throw "same-channel update failed"
+            }
+            $expectedStrategies = switch ($env:KIND) {
+              'msi-global' { @('msi_global') }
+              'msi-corporate' { @('msi_corporate') }
+              'exe-global' { @('exe_global') }
+              'exe-corporate' { @('exe_corporate') }
+              'powershell' { @('installer_powershell', 'installer_pwsh') }
+              'cargo' { @('cargo') }
+            }
+            if ($expectedStrategies -notcontains $update.strategy) {
+              throw "update crossed or misreported strategy: $($update.strategy)"
+            }
+            if ($update.requires_user_action -ne $false) { throw "successful update unexpectedly requires user action" }
+            $updated = (& $env:EXE --version).Trim()
+            if ($updated -ne "tr300 $env:EXPECTED_VERSION") {
+              throw "same-channel update did not install target version: $updated"
+            }
+
+            # The second call proves an already-current install is a graceful
+            # no-op and still reports exactly one JSON object.
+            $currentStdout = & $env:EXE update --json 2> $stderr
+            $currentExit = $LASTEXITCODE
+            $currentLines = @($currentStdout)
+            if ($currentLines.Count -ne 1) { throw "no-op stdout was not exactly one JSON object" }
+            $current = $currentLines[0] | ConvertFrom-Json
+            if ($currentExit -ne 0 -or $current.success -ne $true -or $current.update_available -ne $false) {
               throw "installed channel no-op update failed"
             }
-            if ($update.requires_user_action -ne $false) { throw "no-op unexpectedly requires user action" }
+            if ($current.install_channel -ne $env:EXPECTED_CHANNEL -or $current.requires_user_action -ne $false) {
+              throw "no-op lost channel identity or unexpectedly requires user action"
+            }
           }
 
           $global = "$env:ProgramFiles\tr300\bin\tr300.exe"
@@ -369,8 +449,12 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
           }
           function Install-Exe {
-            $p = Start-Process (Join-Path $PWD "assets\$env:EXE") -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
-            if ($p.ExitCode -ne 0) { throw "EXE install failed: $($p.ExitCode)" }
+            $log = Join-Path $env:RUNNER_TEMP 'tr300-format-takeover.log'
+            $p = Start-Process (Join-Path $PWD "assets\$env:EXE") -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+            if ($p.ExitCode -ne 0) {
+              Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+              throw "EXE install failed: $($p.ExitCode)"
+            }
           }
           function Remove-Current {
             $entry = @(Entries)[0]

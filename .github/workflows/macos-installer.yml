@@ -182,13 +182,24 @@ jobs:
           spctl --assess --type install --verbose=4 "$mount/tr300.pkg"
           sudo installer -pkg "$mount/tr300.pkg" -target /
 
-          pkgutil --pkg-info com.qubetx.tr300.pkg
-          pkgutil --pkg-info com.qubetx.tr300.pkg | grep -F "version: ${{ needs.build.outputs.version }}"
+          package_info=$(pkgutil --pkg-info com.qubetx.tr300.pkg)
+          grep -Fqx 'package-id: com.qubetx.tr300.pkg' <<< "$package_info"
+          grep -Fqx "version: ${{ needs.build.outputs.version }}" <<< "$package_info"
+          grep -Fqx 'volume: /' <<< "$package_info"
+          package_location=$(sed -n 's/^location:[[:space:]]*//p' <<< "$package_info")
+          [[ -z "$package_location" || "$package_location" == / ]]
           pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/tr300'
-          pkgutil --file-info /usr/local/bin/tr300 | grep -Fq 'pkgid: com.qubetx.tr300.pkg'
-          pkgutil --file-info /usr/local/bin/tr300 | grep -F "pkg-version: ${{ needs.build.outputs.version }}"
-          pkgutil --verify com.qubetx.tr300.pkg
+          file_info=$(pkgutil --file-info /usr/local/bin/tr300)
+          grep -Fqx 'path: /usr/local/bin/tr300' <<< "$file_info"
+          grep -Fqx 'volume: /' <<< "$file_info"
+          grep -Fqx 'pkgid: com.qubetx.tr300.pkg' <<< "$file_info"
+          grep -Fqx "pkg-version: ${{ needs.build.outputs.version }}" <<< "$file_info"
           test "$(/usr/local/bin/tr300 --version)" = "tr300 ${{ needs.build.outputs.version }}"
+          codesign --verify --strict --verbose=4 /usr/local/bin/tr300
+          installed_details=$(codesign -d --verbose=4 /usr/local/bin/tr300 2>&1)
+          grep -Fqx 'Identifier=com.qubetx.tr300' <<< "$installed_details"
+          grep -Fqx 'TeamIdentifier=${{ vars.APPLE_TEAM_ID }}' <<< "$installed_details"
+          grep -Fq 'Authority=Developer ID Application:' <<< "$installed_details"
           # Xcode 16.4 requires the input file before -verify_arch. This must
           # match the builder's lifecycle check.
           lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64

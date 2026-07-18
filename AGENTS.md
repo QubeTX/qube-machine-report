@@ -37,10 +37,12 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.1.0`; working manifest / next release:
-  `4.1.1` (`Cargo.toml`). v4.1.0 passed CI/crates and the signed archive
-  release, but its supplemental DMG path failed before publishing the DMG;
-  v4.1.1 fixes that lifecycle without changing v4.1.0. Alienware Windows validation is now real evidence;
+- Current published version: `4.1.1`; working manifest / next release:
+  `4.1.2` (`Cargo.toml`). v4.1.1 passed CI/crates, signed archives, Windows
+  packaging, and universal DMG construction/notarization, but both native Mac
+  install jobs rejected the removed `pkgutil --verify` switch before the DMG
+  could publish. v4.1.2 uses supported receipt/file-owner/code-signature proof
+  without changing v4.1.1. Alienware Windows validation is now real evidence;
   AMD64 Linux laptop and Raspberry Pi 4 live verification remain open. The
   major v4 boundary
   is required because public Rust records gained fields and collector helpers
@@ -595,7 +597,7 @@ Behavior:
     best-effort `rustup update stable` first when rustup exists.
   - **macOS PKG/DMG:** `/usr/local/bin/tr300` plus the
     `com.qubetx.tr300.pkg` receipt whose ID/version/scope, payload path,
-    per-file owner, and `pkgutil --verify` result match the running binary;
+    per-file owner, and Developer ID product identity match the running binary;
     verifies the DMG/sidecar, mounts read-only, validates the nested PKG, and
     waits for Apple Installer.
   - **unknown, conflicting, or portable:** no mutation; exact recovery guidance

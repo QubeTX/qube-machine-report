@@ -12,8 +12,13 @@ const
 
 function MsiEnumRelatedProducts(
   UpgradeCode: string; Reserved: Cardinal; ProductIndex: Cardinal;
-  var ProductCode: string): Cardinal;
+  ProductCode: string): Cardinal;
   external 'MsiEnumRelatedProductsW@msi.dll stdcall';
+
+{ ProductCode intentionally is not declared `var`. Pascal Script passes the
+  preallocated string buffer itself to this Win32 output parameter; `var`
+  passes a reference to the string descriptor instead and can make Setup fail
+  during initialization as soon as a related MSI exists. }
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var

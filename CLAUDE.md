@@ -51,9 +51,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Published version: **4.1.0**. Working manifest / next release: **4.1.1**.
-The v4.1.0 tag and assets are immutable; v4.1.1 fixes the supplemental Mac
-packaging lifecycle before completing the 30-asset distribution.
+Published version: **4.1.1**. Working manifest / next release: **4.1.2**.
+The v4.1.0 and v4.1.1 tags/assets are immutable; v4.1.2 replaces the removed
+macOS `pkgutil --verify` switch with supported receipt, file-owner, and
+Developer ID identity checks before completing the 30-asset distribution.
 Alienware Windows validation is now captured; AMD64 Linux laptop and Raspberry
 Pi 4 checks remain continuation work and must not be reported as completed.
 Managed-work antivirus behavior is a separate endpoint-policy case, not
@@ -238,7 +239,7 @@ These three are the most frequently touched; their full rules are in the matchin
   scope matches the running path. A missing marker is recovered only from one
   unambiguous ARP registration. Cargo/cargo-dist/macOS PKG use their own
   metadata/receipt; the Mac package ID/version/scope, payload path, per-file
-  owner, and `pkgutil --verify` result must match the running binary. Path or
+  owner, and Developer ID product identity must match the running binary. Path or
   receipt presence alone never authorizes a cross-format update.
 - Fresh MSI launches use WiX `AllowDowngrades='yes'`, so v4.1.0-and-newer
   packages replace same-edition older, newer, or same-version MSI products.

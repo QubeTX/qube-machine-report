@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Published / working manifest:** 4.1.0 / 4.1.1
+**Published / working manifest:** 4.1.1 / 4.1.2
 **Release scope:** origin-preserving updates, native PKG-in-DMG, Apple Installer
 credentials, hosted ARM/Intel Mac gates, Windows installer matrix, and real
 Alienware validation. AMD laptop and Pi evidence remain open.
@@ -43,7 +43,7 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.1.1 fix-forward release plan
+## 2. v4.1.2 fix-forward release plan
 
 The implementation is tracked in git and is intended to release from the
 Alienware. A physical Mac is not a normal requirement: native GitHub
@@ -72,8 +72,9 @@ GUI-only defect.
   `com.qubetx.tr300.pkg` inside
   `tr300-universal-apple-darwin.dmg`. Both containers are notarized/stapled;
   future updates trust the PKG only when its identifier, version, payload,
-  per-file owner, install path, and `pkgutil --verify` result all match the
-  running binary.
+  per-file owner, install path, and installed Developer ID product identity all
+  match the running binary. This uses current `pkgutil` receipt/file-owner
+  commands plus strict `codesign`, not the removed `pkgutil --verify` switch.
 - CI includes native Apple Silicon, native Intel, Linux AMD64/ARM64, Windows,
   actionlint, and shellcheck. The DMG publishes only after native install gates.
 - The Alienware's natural Global MSI v3.17.0 → v4.0.1 update preserved the
@@ -109,19 +110,33 @@ Release run 29638940801. The supplemental DMG run 29639135342 failed without
 publishing either DMG asset because checkout cleaned already-downloaded inputs.
 The independent ND-300 hosted path also exposed Xcode 16.4's required
 `lipo <file> -verify_arch ...` order before TR-300 could reach that line.
-Published v4.1.0 bytes and tag remain immutable; v4.1.1 fixes both lifecycle
-defects and is the complete-distribution target. Windows packaging run
+Published v4.1.0 bytes and tag remain immutable; v4.1.1 fixed both lifecycle
+defects. Windows packaging run
 29639135337 succeeded, while downstream validation 29639224625 exposed a third
 orchestration defect: a second-hop `workflow_run` reports `main` rather than the
 original tag. v4.1.1 resolves one release from the upstream exact SHA and fails
 closed on ambiguity.
+
+v4.1.1 source SHA `09afdc6ae5cbff1a497e6cec07c4cf1b36d2557b`
+passed exact-SHA CI 29639632790, crates 29639731682, signed archive Release
+29639767064, and Windows packaging 29639898355. Supplemental Mac run
+29639898362 successfully built, signed, notarized, stapled, mounted, and
+installed the universal PKG-in-DMG on both native architectures, then failed
+closed because current macOS rejects the obsolete `pkgutil --verify` option;
+the DMG assets were not published. Windows validation 29639998787 proved the
+exact-SHA second hop and five clean channel flows, while exposing a PowerShell
+host mismatch, an incorrect already-current portable assertion, and an Inno
+MSI-enumeration buffer declaration in the fresh-format transitions. v4.1.2
+replaces those unsupported/incorrect checks, adds real prior-version
+same-channel updates and portable recovery to the disposable matrix, and is the
+complete 30-asset distribution target. v4.1.0 and v4.1.1 remain untouched.
 
 1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,
    dist plan, actionlint, shellcheck, updater fixtures, and Alienware functional
    modes/save/code-page/performance checks.
 3. Commit/push `main`; wait for exact-SHA CI and crates publication.
-4. Tag/push only `v4.1.1`; wait for cargo-dist, Windows installers, and native
+4. Tag/push only `v4.1.2`; wait for cargo-dist, Windows installers, and native
    PKG-in-DMG workflows.
 5. Verify crates.io, signatures/notarization, checksums, every installer family,
    all 30 release assets, update behavior, recovery links, and clean uninstall.
