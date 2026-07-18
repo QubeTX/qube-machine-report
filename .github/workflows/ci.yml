@@ -254,6 +254,8 @@ jobs:
           grep -Fq 'pkgutil --file-info /usr/local/bin/tr300' "$workflow"
           grep -Fq 'codesign --verify --strict --verbose=4 /usr/local/bin/tr300' "$workflow"
           grep -Fq 'tr300-universal-apple-darwin.pkg.sha256' "$workflow"
+          # Require the literal nested/direct package comparison command.
+          # shellcheck disable=SC2016
           grep -Fq 'cmp "$pkg" "$mount/tr300.pkg"' "$workflow"
           grep -Fq 'name: Validate v4.1.x DMG bridge' "$workflow"
           grep -Fq 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer' "$shell_wrapper"

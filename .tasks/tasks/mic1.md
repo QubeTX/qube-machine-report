@@ -32,6 +32,12 @@ documentation reconciliation, and immutable release proof remain open.
   trailing prose suffix after `disable=SC2016`. Moved each explanation to its
   own preceding comment and retained the narrowly scoped directive; the final
   exact-SHA matrix still must pass as a whole (agent: codex)
+- 2026-07-18 — third exact-SHA CI run 29662168432 again passed every product,
+  native Apple, Windows/Linux, performance, audit, and Windows installer source
+  job. Hosted actionlint then identified the one remaining intentional literal
+  dollar expression in the lifecycle guard (`cmp "$pkg" "$mount/tr300.pkg"`).
+  Added the exact SC2016 annotation and locally linted the extracted complete
+  guard block before another full exact-SHA run (agent: codex)
 
 ## Intent
 

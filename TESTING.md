@@ -97,6 +97,14 @@ as passed.
   after `disable=SC2016`. The fix-forward places the explanation on a separate
   comment and keeps the narrow directive. No tag, crate publish, or v4.2.0
   release was produced from this SHA.
+- **Third exact-SHA hosted attempt:** source
+  `5d799fc1112a4aa98ecd39840f1a46148614f789` again passed every native
+  Apple/Windows/Linux product, performance, audit, and real Windows installer
+  source job. CI run 29662168432 stopped only on the remaining intentional
+  literal-dollar lifecycle guard `cmp "$pkg" "$mount/tr300.pkg"`. The exact
+  SC2016 annotation was added and the complete extracted guard block was linted
+  locally before repeating the full matrix. No tag, crate, or release was
+  produced from this SHA.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast
