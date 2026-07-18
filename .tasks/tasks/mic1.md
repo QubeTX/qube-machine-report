@@ -18,6 +18,14 @@ documentation reconciliation, and immutable release proof remain open.
   published Linux smoke to prove its default persistent PATH setup from a clean
   home and fresh shell. Clean-tree and hosted release evidence remain open
   (agent: codex)
+- 2026-07-18 — first exact-SHA CI run 29661664992 stopped before tagging:
+  native Intel/ARM Mac rejected one unused Mac-only staging helper under
+  `-D warnings`, and hosted Linux actionlint exposed six embedded-shell findings
+  that Windows actionlint had not evaluated without ShellCheck on PATH. Removed
+  the unused API, made literal-string suppressions explicit, and replaced two
+  `! command`/`errexit` checks with ordinary fail-closed conditionals. Windows
+  installer source/transition/rollback gates passed in that run; the complete
+  exact-SHA matrix must now repeat on the fix-forward commit (agent: codex)
 
 ## Intent
 

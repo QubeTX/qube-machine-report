@@ -221,7 +221,10 @@ jobs:
           test "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" = "$managed_hash"
           test "$(cat "$HOME/.config/tr300/tr300-receipt.json")" = "$invalid_receipt"
           test ! -e /usr/local/bin/tr300
-          ! pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1
+          if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+            echo 'rejected package left a receipt behind' >&2
+            exit 1
+          fi
 
           # Restore a legitimate managed state through the same exact-tag
           # wrapper, then prove the successful native takeover.
@@ -270,7 +273,10 @@ jobs:
           # ceremony removes the PKG payload and receipt.
           curl --proto '=https' --tlsv1.2 -fLsS "$managed_url" | sh
           test ! -e /usr/local/bin/tr300
-          ! pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1
+          if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+            echo 'managed takeover left the package receipt behind' >&2
+            exit 1
+          fi
           test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 ${{ needs.build.outputs.version }}"
           shell_update=$("$HOME/.cargo/bin/tr300" update --json)
           jq -e '.success == true and .update_available == false and .install_channel == "shell-installer" and .requires_user_action == false' <<< "$shell_update"

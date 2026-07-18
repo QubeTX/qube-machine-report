@@ -319,6 +319,7 @@ jobs:
             exit 1
           fi
           grep -Fq "releases/download/${RELEASE_TAG}/tr300-dist-installer.sh" artifacts/tr300-installer.sh
+          # shellcheck disable=SC2016 -- the PowerShell variable is literal wrapper content
           grep -Fq 'releases/download/$Tr300Tag/tr300-dist-installer.ps1' artifacts/tr300-installer.ps1
       - name: Add legacy installer aliases
         shell: bash
@@ -381,6 +382,7 @@ jobs:
             .modify_path == true
           ' "$XDG_CONFIG_HOME/tr300/tr300-receipt.json"
           test -f "$CARGO_HOME/env"
+          # shellcheck disable=SC2016 -- the profile intentionally retains a late-bound HOME
           grep -Fq '. "$HOME/.cargo/env"' "$HOME/.profile"
           fresh_path=$(PATH=/usr/bin:/bin sh -c '. "$HOME/.profile"; command -v tr300')
           test "$fresh_path" = "$CARGO_HOME/bin/tr300"

@@ -79,6 +79,16 @@ as passed.
   WiX 3.14.1 compiles both MSIs with only the intentional `AllowDowngrades`
   ICE61; Inno Setup 6.7.3 compiles both EXEs. The clean committed-tree package
   gate and all hosted/public evidence remain deliberately open.
+- **First exact-SHA hosted attempt:** source `590031dbe8cf4b89d8e9308900ea9c8ed3f80cca`
+  passed the real Windows installer source/transition/rollback job, plus Windows
+  and Linux Rust jobs, but CI run 29661664992 failed before tagging. Native
+  Intel/ARM Mac correctly rejected an unused Mac-only `StagedInstaller::dir`
+  method under `-D warnings`; hosted Linux actionlint also found four intentional
+  literal-dollar SC2016 sites without annotations and two `! pkgutil` SC2251
+  checks whose `errexit` semantics were needlessly implicit. The fix-forward
+  removes the unused API, annotates only the exact literal fixtures, and uses
+  explicit receipt-present conditionals. No v4.2.0 tag or public artifact was
+  created from the failed SHA.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast

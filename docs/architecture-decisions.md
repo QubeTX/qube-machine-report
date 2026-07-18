@@ -209,6 +209,17 @@ checksum, atomic-copy, PATH, and receipt behavior while giving the product a
 safe cross-channel convergence layer. It adds two release assets, so the
 v4.2.0 complete-distribution target is 34.
 
+Pre-tag validation must compile with warnings denied on native Windows, Linux,
+Intel Mac, and Apple Silicon; a helper hidden by host `cfg` is not considered
+used merely because another platform builds. Workflow validation must run
+official actionlint with ShellCheck discoverable on the hosted Linux runner so
+embedded `run:` scripts receive the same analysis as standalone scripts. A
+Windows actionlint invocation without ShellCheck on PATH remains a useful YAML
+check but is not equivalent evidence. Intentional literal-dollar fixtures use
+tightly scoped SC2016 annotations, while negative package assertions use
+explicit `if command; then ...; exit 1; fi` control flow so Bash `errexit`
+behavior is never the assertion mechanism.
+
 ### Latest discovery, immutable installation
 
 Public commands, links, and asset filenames are versionless. Users download

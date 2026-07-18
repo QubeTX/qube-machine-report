@@ -1786,11 +1786,6 @@ impl StagedInstaller {
         &self.path
     }
 
-    #[cfg(target_os = "macos")]
-    fn dir(&self) -> &std::path::Path {
-        self.dir.path()
-    }
-
     fn close(self) -> std::io::Result<()> {
         self.dir.close()
     }
