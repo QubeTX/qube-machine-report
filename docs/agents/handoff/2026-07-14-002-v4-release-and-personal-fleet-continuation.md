@@ -7,8 +7,8 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.1.2` / `4.1.2` (all prior tags remain immutable)
-**Prior pushed checkpoint:** `a94645b9f61432c403c129ef055b8ad2d3876d35`
+**Published / working version:** `4.1.2` / `4.1.3` (all prior tags remain immutable)
+**Prior pushed checkpoint:** `7422b3c68f19e08b22f6ca8495efddd23042aeb9`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
 Windows Installers 29392382949
@@ -19,6 +19,59 @@ This is the exhaustive portable continuation record. The SHAUGHV board source,
 milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+
+## 2026-07-18 v4.1.3 Global Windows live-image fix-forward
+
+v4.1.2 exact source `a94645b9f61432c403c129ef055b8ad2d3876d35`
+passed CI 29643258539, crates 29643384988, cargo-dist 29643419013,
+supplemental Windows packaging 29643558226, and universal Mac run 29643558237.
+The Mac workflow built, signed, notarized, stapled, mounted, installed, and
+validated the PKG-in-DMG on native Intel and Apple Silicon and published its
+two assets. A physical Mac remains non-blocking for TR-300.
+
+Post-release Windows run 29644024006 finally captured the product boundary the
+earlier harness failures had hidden. Cargo and PowerShell completed prior-to-
+current update, no-op, and uninstall; both fresh Global/Corporate format-choice
+jobs passed. All four immutable v4.1.1 native installer clients downloaded and
+verified their correct same-channel v4.1.2 asset and printed their exact
+Windows Installer/Inno launch line, then the updater process exited
+`-1073741510` (`0xC000013A`, `STATUS_CONTROL_C_EXIT`) with zero JSON stdout.
+Windows Installer 4+ integrates Restart Manager and may shut down console apps
+locking files it must replace. This is not a checksum, origin, or JSON encoder
+failure and cannot be repaired in published v4.1.1/v4.1.2 binaries.
+
+v4.1.3 fixes forward. User-scoped Cargo, PowerShell, Corporate MSI, and
+Corporate EXE keep their existing no-UAC sibling-image transaction. Global MSI
+and EXE now resolve the exact tag/channel in the non-elevated parent, create a
+strict unused sibling backup plan, and call native `ShellExecuteExW` with the
+`runas`, `SEE_MASK_NOCLOSEPROCESS`, and `SEE_MASK_NOASYNC` contract. One UAC
+prompt starts the installed binary as a hidden worker. The worker accepts only
+`msi_global`/`exe_global`, a three-part numeric release, matching durable origin
+evidence, and an absolute same-parent numeric private backup. Elevated, it
+renames the live Program Files image, runs only that pinned native installer,
+verifies the replacement version, restores the old image on any strategy
+failure, or starts the verified new binary's elevated delayed cleanup. The
+non-elevated parent waits on the returned process handle, verifies again, and
+alone emits the final human/one-object JSON result. UAC cancellation happens
+before rename; no worker path can select Corporate or cross MSI/EXE.
+
+The post-release matrix treats the old termination as a narrow historical
+case, not valid current JSON: only exact `0xC000013A`, zero stdout, a native
+installer channel, and its matching launch diagnostic allow the harness to
+wait for the already-started transaction. If it does not converge, only the
+exact tagged same-channel candidate is launched; MSI 1618 retries are bounded.
+Every job still requires one target copy/registration, scoped marker, PATH,
+current no-op, markerless unambiguous recovery, and uninstall. Global jobs also
+invoke the new hidden worker as a same-version repair and require its backup to
+be removed, providing current-source transaction proof before a future release
+exists. Keep v4.1.2 immutable and release only from a new exact v4.1.3 SHA after
+clean local gates and exact-SHA CI/crates.
+
+The separate ND-300 physical-Mac acceptance batch is intentionally held. Do
+not spend Mac time on v3.7.1. Wait for the final public v3.7.2 release/run
+details, then perform only the already-bounded old v3.7.0 PKG to final public
+package update plus non-mutating version/fast report/default-route/no-secret
+smoke. Never run ND network fixes or uninstall the active setup.
 
 ## 2026-07-18 immutable v4.1.2 supported-validator fix-forward
 

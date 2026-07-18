@@ -7,6 +7,55 @@ as passed.
 
 ## Per-version verification log
 
+### v4.1.3 — 2026-07-18 (Global Windows updater fix-forward in progress)
+
+- **Reason:** the fully published v4.1.2 cargo-dist, Windows, and native
+  PKG-in-DMG workflows passed, but isolated Windows transition run 29644024006
+  proved a remaining Global updater defect. The old v4.1.1 Global MSI, Global
+  EXE, Corporate MSI, and Corporate EXE clients each downloaded and verified
+  the correct v4.1.2 asset, reached the matching installer-launch diagnostic,
+  then exited `-1073741510` (`0xC000013A`, `STATUS_CONTROL_C_EXIT`) with zero
+  stdout lines. Cargo and PowerShell completed their same-channel update/no-op/
+  uninstall flows; both fresh-format jobs passed. This distinguishes native
+  installer Restart Manager termination from download, checksum, origin, or
+  workflow-capture failure. Current v4.1.2 user-scoped clients already contain
+  the image handoff; current v4.1.2 Global clients do not, so the correction is
+  immutable v4.1.3 rather than altered v4.1.2 bytes.
+- **Implementation under test:** Global MSI/EXE parents resolve one exact
+  release and detected channel, then use native `ShellExecuteExW` with `runas`,
+  a returned process handle, and one UAC prompt. The hidden worker accepts only
+  `msi_global` or `exe_global`, a plain three-part numeric version, the matching
+  installed origin, and an unused absolute private sibling backup. Elevated,
+  it renames Program Files `tr300.exe`, runs only the pinned matching installer,
+  verifies the original path's version, restores the old image on failure, and
+  spawns the new elevated binary to delete the backup after the parent/worker
+  release it. UAC cancellation or policy/worker failure returns through the
+  normal exit-2/3 strategy path with recovery URLs; no format fallback exists.
+- **Current local evidence:** formatting, 158 unit tests, 19 integration tests,
+  warning-denying all-target/all-feature Clippy, locked release build, RustSec
+  audit (1,166 advisories / 221 locked dependencies), six-target cargo-dist
+  plan, actionlint 1.7.12, ShellCheck, Git Bash syntax, and tracked credential-
+  material scan pass on the Alienware. WiX 3.14.1 compiled both MSI sources
+  (only the intentional `AllowDowngrades` ICE61 warning); Inno Setup 6.7.3
+  compiled both EXE sources. The release binary reports `tr300 4.1.3`; fast
+  schema-v1 JSON completed in 255 ms, full JSON in 5,113 ms, fast ASCII and
+  console-code-page restoration passed, and update JSON was one no-op object
+  against public v4.1.2. Manual Markdown save produced a nonempty 1,725-byte
+  Downloads report and the test fixture was removed. New unit coverage
+  rejects injected/prerelease worker versions and proves Windows command-line
+  quoting. The hosted matrix now recognizes the immutable legacy termination
+  only from exact native status + zero stdout + matching same-channel launch
+  text, waits up to 90 seconds for that transaction, retries MSI error 1618
+  only within a bound, and otherwise launches only the exact tagged candidate.
+  After one-copy/version/marker/registration/PATH and current no-op proof, the
+  Global jobs invoke the new worker for an exact same-version repair and require
+  the private backup to disappear. This is not yet hosted or public proof.
+- **Required proof:** clean local release gates; exact-SHA CI/crates; immutable
+  v4.1.3 tag; all cargo-dist/Windows/native ARM+Intel PKG-in-DMG workflows; the
+  complete Windows transition matrix; public 30-asset/checksum/signature/notary
+  audit; then the Alienware's natural Global MSI update and functional/hardware
+  matrix. Keep v4.1.0–v4.1.2 tags and assets unchanged.
+
 ### v4.1.2 — 2026-07-18 (immutable fix-forward in progress)
 
 - **Reason:** v4.1.1 completed checkout-safe universal construction and used
@@ -104,6 +153,15 @@ as passed.
   uses `Start-Process` with redirected stdout/stderr and the returned process
   exit code, isolating runner control flow from an old updater or Windows
   Installer/Restart Manager while retaining every result assertion.
+  Final replay 29644024006 completed: Cargo, PowerShell, older-portable
+  no-mutation/recovery, and both fresh-format-choice jobs passed. The four
+  native old-client jobs supplied the exact `0xC000013A` product finding now
+  fixed forward in v4.1.3. Public release metadata independently reports a
+  non-draft/non-prerelease `v4.1.2` targeting `a94645b...` with exactly 30
+  stable-name assets, including both DMG files and all four Windows families;
+  release-note inspection found no version-pinned public download/install
+  command. Those bytes remain immutable and are historical evidence, not the
+  final v4.1.3 updater qualification.
 
 ### v4.1.1 — 2026-07-18 (published archives; DMG fixed forward in v4.1.2)
 

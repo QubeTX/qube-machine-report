@@ -1,4 +1,4 @@
-TT;DR: Preserve the partial v4.1.0/v4.1.1 releases, qualify supported Mac ownership proof and real Windows update transitions as v4.1.2, then publish and audit the complete immutable distribution.
+TT;DR: Preserve v4.1.0-v4.1.2, fix the Global Windows live-image defect forward as v4.1.3, then publish and audit the complete immutable distribution.
 
 ## Why
 
@@ -6,7 +6,7 @@ Direct operator order to implement and release the approved plan. The repository
 
 ## Plan
 
-#c8r is complete. v4.1.1 fixed checkout, Xcode `lipo`, and second-hop SHA identity and passed exact-SHA CI/crates, signed archives, and Windows packaging. Native DMG run 29639898362 built/notarized/installed both architectures, then failed on unsupported `pkgutil --verify`; Windows run 29639998787 exposed PowerShell host, already-current portable, and Inno MSI buffer transition defects. Keep v4.1.0/v4.1.1 immutable. Rerun local gates from a clean committed tree, push the v4.1.2 supported-validator/transition fix, verify exact-SHA CI and crates, then create/push only `v4.1.2`. Watch cargo-dist, supplemental Windows installers, native Mac PKG-in-DMG, and disposable Windows installer validation.
+#c8r is complete. v4.1.2 passed exact-SHA CI/crates, cargo-dist, Windows packaging, and native ARM/Intel PKG-in-DMG publication. Post-release run 29644024006 then proved immutable native installer clients can be killed with `0xC000013A` after launching their exact replacement, before final JSON. Keep v4.1.0-v4.1.2 immutable. Qualify the strict one-UAC elevated Global worker and narrow legacy recovery matrix, rerun clean local gates, push v4.1.3, verify exact-SHA CI/crates, then create/push only `v4.1.3`. Watch every cargo-dist, Windows, native Mac, and disposable Windows validation job.
 
 ## Impact
 
@@ -20,12 +20,13 @@ The exact release commit passes CI/crates; the immutable tag points at that SHA;
 
 - [x] Clean-tree local release gates pass without `--allow-dirty`
 - [x] v4.1.0 release SHA passed CI/crates and its supplemental DMG failure was retained as immutable evidence
-- [x] Exact v4.1.2 release SHA passes CI and crates publication
-- [ ] Tag `v4.1.2` points at that exact SHA and every release workflow succeeds
+- [x] Exact v4.1.2 release SHA passed CI/crates and every packaging workflow
+- [ ] Exact v4.1.3 release SHA passes CI and crates publication
+- [ ] Tag `v4.1.3` points at that exact SHA and every release workflow succeeds
 
 ## Status
 
-Active. #c8r's hosted identity proof passed in run 29637224793 on both native architectures. v4.1.0 exact source `5b4e18d5928e602452a0030a9f5b130dc611d3c9` and v4.1.1 exact source `09afdc6ae5cbff1a497e6cec07c4cf1b36d2557b` remain immutable. Initial v4.1.2 SHA `2152809` failed pre-tag on an actionlint output-grouping finding; manual Windows replay 29640785777 passed older-portable recovery, proved the direct Inno/Windows-Installer DLL boundary still access-violated, and exposed hidden recognized-channel diagnostics plus multiple Cargo registrations. CI 29641305931 then passed 18/19 and found only an interpolated semantic grep. Immutable-v4.1.1 replay 29641313782 reproduced the old EXE defect and isolated Cargo's running-image lock. Current source removes the ABI, adds transactional user-scoped live-image handoff/rollback/cleanup, separates pre-tag source takeover proof from post-release legacy safe recovery, and keeps the prior-version no-op/recovery/takeover/uninstall matrix mandatory.
+Active. Immutable v4.1.2 source `a94645b9f61432c403c129ef055b8ad2d3876d35` passed CI 29643258539, crates 29643384988, cargo-dist 29643419013, Windows packaging 29643558226, and native DMG/PKG 29643558237. Run 29644024006 passed Cargo, PowerShell, and fresh-format jobs and captured exact `STATUS_CONTROL_C_EXIT`/zero-JSON termination for all immutable old native installer clients after same-channel launch. v4.1.3 source now adds native `ShellExecuteExW` elevation, strict Global-only worker validation, Program Files image rename, verify/rollback/elevated cleanup, and a matrix that both narrowly recovers historical termination and directly proves the current worker transaction. No v4.1.3 tag exists.
 
 ## Activity
 
@@ -56,3 +57,6 @@ Active. #c8r's hosted identity proof passed in run 29637224793 on both native ar
 - 2026-07-18 09:45 — exact source `a94645b9f61432c403c129ef055b8ad2d3876d35` passed CI 29643258539 and crates publication 29643384988; immutable tag `v4.1.2` points at that SHA, cargo-dist 29643419013 passed, Windows packaging 29643558226 passed, and native DMG/PKG run 29643558237 passed build/sign/notary/staple/install/validation/publication on both architectures (agent: codex)
 - 2026-07-18 10:05 — Windows matrix 29643664099 resolved the complete release and passed fresh-format choice, but its channel jobs stopped before their intentional exit-2 recovery assertions because GitHub's `pwsh` host promoted native nonzero exits under stop-on-error. The validation step now disables only native-command promotion and still asserts the captured exit/JSON/retained binary before exact same-channel recovery; immutable v4.1.2 assets are unchanged (agent: codex)
 - 2026-07-18 10:15 — replay 29643849174 proved disabling native-command promotion alone did not make direct `& tr300 update --json` observable: MSI jobs again ended before the first runtime diagnostic. The harness now starts each updater as an isolated child with redirected files and reads the process object's exit code/JSON/stderr, so Restart Manager or old-client termination cannot kill the assertion control flow (agent: codex)
+- 2026-07-18 10:30 — isolated replay 29644024006 passed Cargo, PowerShell, and both fresh-format jobs; all four immutable native installer updaters downloaded/verified the exact channel asset, reached its launch diagnostic, then exited `-1073741510` (`0xC000013A`) with zero JSON. This is a product live-image defect, not a harness exception (agent: codex)
+- 2026-07-18 11:00 — began immutable v4.1.3 fix-forward: Global MSI/EXE now use one native `ShellExecuteExW` runas worker, strict version/channel/sibling validation, elevated rename/install/verify/rollback/cleanup, and parent-owned final JSON. The matrix recognizes only the exact historical termination tuple and separately exercises current Global same-version repair/cleanup. ADR, testing, plan, handoff, and board record the reusable decision (agent: codex)
+- 2026-07-18 12:00 — dirty-tree candidate passed fmt, 158 unit + 19 integration tests, warning-denying all-target/all-feature Clippy, release build/JSON/ASCII/update/save/code-page/performance smokes, WiX 3.14.1 and Inno 6.7.3 source compiles, RustSec audit, six-target dist plan, actionlint, ShellCheck, Bash syntax, PowerShell parser validation, diff checks, and credential-material scan. Clean-tree package/publish gates follow the release commit (agent: codex)

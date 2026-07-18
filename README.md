@@ -344,11 +344,14 @@ install or update to fail.
 | PowerShell installer | Downloads the exact-tag PowerShell installer into the recorded prefix | No |
 | `cargo install` | Runs exact `cargo install --version … --force --locked` | No |
 
-Cargo, PowerShell, and Corporate installer updates use a transactional
-running-image handoff on Windows: the old command is kept under a private
-sibling name while the preserved channel installs and verifies the replacement,
-then the new command removes that backup after the updater exits. A failed
-replacement restores the old executable before returning exit code 2.
+All recognized Windows channels use a transactional running-image handoff: the
+old command is kept under a private sibling name while the preserved channel
+installs and verifies the replacement, then the new command removes that backup
+after the updater exits. Global MSI/EXE perform only that transaction inside a
+strict elevated worker, so you receive one normal UAC prompt and the ordinary
+parent remains alive to return the final result. A failed replacement restores
+the old executable before returning exit code 2; UAC cancellation happens
+before the Program Files command is renamed.
 
 Detection prefers separate Global/Corporate registry markers while preserving
 the legacy `HKCU\Software\TR300\InstallSource` value. A missing marker is
@@ -358,10 +361,11 @@ the two `~\.cargo\bin` channels. Conflicting, portable, or unknown origins do
 not mutate the machine; they fail safely with the fresh installer link.
 
 **Download integrity:** every downloaded MSI / EXE / DMG is checked against
-its published `.sha256` sidecar before launching. A network MITM (corporate
-TLS-inspection proxy with trusted root CA, hostile public WiFi, captive
-portal) that swaps the installer bytes is now caught and refused with a
-clear error.
+its published `.sha256` sidecar before launching. This catches truncation,
+cache corruption, and payload/sidecar mismatch. Because both files use the
+same HTTPS release transport, the checksum is not an independent signature;
+Windows installer signing, Apple Developer ID/Gatekeeper, and the official
+GitHub release channel provide the platform trust boundary.
 
 **Post-install verification (v3.15.2+):** after the installer reports success,
 `tr300 update` re-execs the on-disk binary's `--version` and confirms the
@@ -392,7 +396,7 @@ untouched and receive recovery links.
 
 **Manual fallback (any platform):** if `tr300 update` fails, you can always
 re-download the installer for your platform from the
-[Releases page](https://github.com/QubeTX/qube-machine-report/releases) and
+[latest release page](https://github.com/QubeTX/qube-machine-report/releases/latest) and
 re-run it — WiX `MajorUpgrade` (MSI) and Inno Setup's AppId-based upgrade
 detection (EXE) handle in-place replacement cleanly. An explicitly launched
 older or same-version installer also wins, because a fresh install attempt is

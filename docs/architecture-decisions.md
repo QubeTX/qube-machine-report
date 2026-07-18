@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (through v4.1.2)](#decision-ledger-status-through-v412)
+- [Decision ledger status (through v4.1.3)](#decision-ledger-status-through-v413)
 - [Origin-preserving updates and native PKG-in-DMG distribution (v4.1.0)](#origin-preserving-updates-and-native-pkg-in-dmg-distribution-v410)
   - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
   - [Install channel is product state](#install-channel-is-product-state)
@@ -28,6 +28,7 @@
   - [Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)](#hosted-packaging-lifecycle-and-tool-syntax-v411-addendum)
   - [Supported macOS ownership proof (v4.1.2 addendum)](#supported-macos-ownership-proof-v412-addendum)
   - [Windows transition runner correctness (v4.1.2 addendum)](#windows-transition-runner-correctness-v412-addendum)
+  - [Elevated Global Windows live-image transaction (v4.1.3 addendum)](#elevated-global-windows-live-image-transaction-v413-addendum)
   - [Machine-readable and failure contract](#machine-readable-and-failure-contract)
   - [Reusable contract for other CLI products](#reusable-contract-for-other-cli-products)
 - [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
@@ -68,7 +69,7 @@
 
 ---
 
-## Decision ledger status (through v4.1.2)
+## Decision ledger status (through v4.1.3)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
@@ -95,6 +96,7 @@ future hardware row has already been exercised.
 | Hosted package inputs survive source checkout; builder and validation tool syntax stay identical | Accepted and release-blocking | checkout-before-download ordering plus Xcode 16.4 `lipo <file> -verify_arch ...` checks |
 | macOS installed-package ownership uses supported receipt, file-owner, and Developer ID checks | Accepted and release-blocking | `pkgutil --pkg-info/--files/--file-info`, strict `codesign`, native ARM/Intel install gates |
 | Explicit fresh-installer choice supersedes the prior Windows channel | Accepted | WiX/Inno cross-format removal, scoped markers, advisory cross-edition cleanup |
+| Global Program Files updates use one-UAC elevated live-image handoff | Accepted and release-blocking | strict hidden worker, `ShellExecuteExW` process wait, rollback/cleanup, Windows transition matrix |
 | Physical Mac requirement | Superseded; optional visual smoke only | GitHub `macos-15` and `macos-15-intel` are the required native gates |
 
 The following earlier states are **superseded**, not alternative supported
@@ -461,9 +463,12 @@ image back; success starts the verified new binary's hidden cleanup action,
 which accepts only an absolute same-directory
 `.tr300-update-backup-<pid>-<nonce>.exe` path and waits for the old process to
 release it. A later update also removes a stale private backup left by an
-interrupted cleanup helper. Global MSI/EXE continue through their native
-elevated installer and Restart Manager transaction; a reboot requirement or
-UAC/policy failure is not reclassified as success.
+interrupted cleanup helper; the elevated Global worker performs the same
+strictly named sweep before its transaction. The earlier rule that Global
+MSI/EXE could rely on
+Restart Manager to preserve their updater is superseded by the v4.1.3 addendum
+below. A reboot requirement or UAC/policy failure remains non-success on every
+channel.
 
 This handoff is intentionally runtime-owned rather than a Cargo build-script
 trick. Cargo build scripts are package builds and are constrained to their
@@ -528,6 +533,138 @@ authentication, or Windows runner/PowerShell images require the compiled-source
 takeover gate plus the full prior-version update/recovery, current-version
 no-op, registration convergence, cross-format takeover, and uninstall matrix.
 
+### Elevated Global Windows live-image transaction (v4.1.3 addendum)
+
+**Status:** Accepted and release-blocking. This supersedes the assumption that
+launching a native per-machine installer from the running Program Files binary
+is sufficient for graceful updater completion.
+
+#### Context and decisive evidence
+
+Isolated post-publication run 29644024006 installed immutable v4.1.1 clients
+and captured each updater as a separate process with independent stdout and
+stderr files. Global MSI, Corporate MSI, Global EXE, and Corporate EXE all
+resolved v4.1.2, selected the correct origin-preserving strategy, downloaded
+the correct stable-name asset from the exact tag, verified its sidecar, and
+printed the matching Windows Installer or Inno launch message. Each updater
+then ended with signed process exit `-1073741510`, Windows status
+`0xC000013A` (`STATUS_CONTROL_C_EXIT`), and zero stdout objects. Cargo and
+PowerShell completed the same transition and no-op gates, and both fresh-format
+choice jobs passed. That combination rules out discovery, checksum, channel
+selection, package availability, and harness native-error promotion.
+
+Windows Installer 4 and later integrates
+[Restart Manager](https://learn.microsoft.com/windows/win32/rstmgr/about-restart-manager).
+When a file to be replaced is held by a running console application, the
+installer may shut down that application. The same externally visible outcome
+occurs when Inno invokes its native replacement lifecycle against the live
+product image. A child
+installer can therefore continue after terminating the parent that was waiting
+to verify it. The install may converge, but the CLI cannot emit its promised
+one-object JSON result, distinguish cancellation/failure, or schedule its own
+cleanup. Treating this as success would make machine-readable automation depend
+on installer timing and would erase the post-install verification boundary.
+
+#### Decision
+
+All Windows channels use the same logical live-image transaction, with
+privilege placement determined by install scope:
+
+1. The ordinary updater resolves GitHub `latest` once, validates a plain
+   release version, proves exactly one install channel, and constructs the
+   exact tagged stable-name asset and checksum. It never delegates discovery or
+   channel choice to an elevated process.
+2. User-scoped Cargo, PowerShell, Corporate MSI, and Corporate EXE rename the
+   running image directly because the user owns its directory. Global MSI and
+   Global EXE instead create only an unused private sibling *plan* and call the
+   installed binary through native
+   [`ShellExecuteExW`](https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-shellexecuteexw)
+   with verb `runas`,
+   `SEE_MASK_NOCLOSEPROCESS`, and `SEE_MASK_NOASYNC`. This is one UAC ceremony;
+   the elevated native installer inherits the worker token and must not prompt
+   a second time.
+3. The hidden worker accepts only `msi_global` or `exe_global`; a three-part
+   numeric version no longer than the bounded input; current durable origin
+   evidence matching that exact format/edition/scope; and an absolute,
+   same-parent, not-already-existing
+   `.tr300-update-backup-<pid>-<nonce>.exe` path beside a running file named
+   `tr300.exe`. It cannot select Corporate, Cargo, another asset, another path,
+   or an arbitrary command. Windows command-line arguments are quoted with the
+   documented backslash/quote rules before the wide-character API call.
+4. Only after those checks does the elevated worker rename the executing
+   Program Files image. Windows permits renaming a running image; the parent and
+   worker retain handles to the private sibling, while the installed path is
+   free for the original MSI/Inno engine. The worker downloads/verifies the
+   pinned asset using the ordinary bounded private staging code, waits for the
+   installer, and re-executes the original path's `--version`.
+5. Strategy failure removes any partial original-path replacement and renames
+   the private old image back before returning nonzero. Success starts the new
+   original-path binary's strict cleanup action. Because it is a child of the
+   elevated worker, it retains permission to delete the Program Files sibling
+   and polls only that validated path until both old processes release it.
+6. The non-elevated parent waits on the process handle returned by
+   `ShellExecuteExW`, closes the handle on every completed wait path, verifies
+   the installed version again, and is the only process that emits the final
+   human or JSON outcome. UAC cancellation occurs before rename and returns the
+   normal failed-strategy recovery contract. Worker policy failure uses a
+   distinct internal exit solely so the parent can retain `PolicyBlocked`
+   semantics; it does not change the public exit-2 contract.
+
+This is an update-in-place transaction, not an alternate installer. It
+preserves Global MSI versus Global EXE, edition, machine scope, Program Files
+path, product registration, marker, and PATH. The worker is allowed to reinstall
+the same exact version only as an internal validation/repair primitive; the
+public updater remains latest-only and returns a no-op when already current. A
+manually launched fresh installer remains authoritative and may choose another
+format or an older/same version under the separate fresh-install intent rule.
+
+#### Failure and recovery boundaries
+
+No filesystem transaction can make an arbitrary power loss between rename and
+rollback impossible. The durable safety boundary is narrower: returned
+failures attempt rollback before the worker exits; UAC cancellation mutates
+nothing; a crash may leave the sole old image under a product-private sibling
+that is never placed on PATH and is named in diagnostics; a verified success
+has a complete original-path replacement before cleanup begins. The updater
+never directly overwrites a running image, deletes the only known-good copy as
+a fallback, switches installer families, or reports success before two version
+checks.
+
+Immutable clients that predate this decision cannot be taught the handoff.
+Release validation may recognize their historical termination only when all
+four facts agree: native MSI/EXE channel, exact `0xC000013A` exit, zero stdout,
+and the matching same-channel installer-launch diagnostic. The harness first
+waits a bounded period for that already-launched transaction. If it has not
+converged, it invokes only the exact tagged same-channel candidate; MSI
+`ERROR_INSTALL_ALREADY_RUNNING` (1618) is retried within a bound. It then
+requires one target binary/registration, correct marker and PATH, successful
+current no-op JSON, markerless unambiguous recovery, and uninstall. This is
+legacy recovery evidence, never a substitute for testing current code. Current
+Global jobs separately invoke the strict worker as a same-version repair and
+require the private backup to disappear.
+
+**Rejected alternatives:** relying on Restart Manager to preserve/rename the
+updater after it demonstrably terminated it; invoking `powershell Start-Process
+-Verb RunAs` and inheriting another interpreter/quoting/module boundary; asking
+the native installer to launch a second updater without a parent-verifiable
+result; elevating the entire public update before resolving origin; disabling
+Restart Manager globally; copying into a different active PATH directory;
+direct overwrite/delete; treating zero-JSON termination as successful current
+behavior; or falling back from MSI to EXE/Cargo. Native `ShellExecuteExW` keeps
+the elevation mechanism at the OS boundary and returns the exact process handle
+needed for the parent contract.
+
+**Revalidation triggers:** changes to `ShellExecuteExW` flags, command-line
+quoting, hidden action parsing, version/origin/backup validation, Program Files
+layout, backup naming, worker exit mapping, cleanup token/lifetime, MSI/Inno
+launch flags, Restart Manager policy, Windows runner image, or update JSON
+ownership require Windows unit/Clippy gates plus prior-version transition,
+same-version Global worker repair, rollback/failure recovery, one-copy
+registration/PATH proof, no-op JSON, and uninstall on disposable Windows. A
+future real old-to-new release must exercise the parent `runas` path; a direct
+same-version worker repair proves the current transaction but does not claim a
+future tag existed during pre-release validation.
+
 ### Machine-readable and failure contract
 
 Update JSON stdout is exactly one object; child installer output and progress
@@ -547,7 +684,7 @@ misreported as a complete in-place update.
 
 ### Reusable contract for other CLI products
 
-The v4.1.2 implementation is intended to be copied into other standalone CLI
+The v4.1.3 implementation is intended to be copied into other standalone CLI
 products. Product names, package identifiers, paths, asset names, registry
 keys, and installer GUIDs are parameters; the following invariants are the
 portable architecture:
@@ -584,9 +721,12 @@ portable architecture:
    checks, and the original installer engine. Never delete or directly
    overwrite the sole working copy as a fallback. If a platform locks a running
    image, move it only through a same-directory, product-private transaction
-   with validated delayed cleanup and rollback of a failed replacement. Report
-   success only after the installer exits successfully, durable ownership
-   metadata matches, and the intended executable reports the resolved version.
+   with validated delayed cleanup and rollback of a failed replacement. When
+   the directory requires elevation, resolve channel/version in the ordinary
+   parent and elevate only a strict native worker; keep the parent alive on a
+   returned process handle so it owns final JSON. Report success only after the
+   installer exits successfully, durable ownership metadata matches, and the
+   intended executable reports the resolved version.
 6. **Converge fresh installs before claiming ownership.** An official installer
    removes or upgrades recognized conflicting registrations for the selected
    product before it writes shared-path files. If privilege is insufficient,

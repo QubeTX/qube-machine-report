@@ -11,6 +11,23 @@ file is the user-facing summary.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.3] - 2026-07-18
+
+### Fixed
+- **Global Windows updates no longer let the installer close the updater before
+  it can report the result.** TR-300 now uses one normal UAC prompt to preserve
+  the old Program Files command under a private name, reinstall only the same
+  MSI or EXE channel, verify the new command, and then remove the backup. A
+  failed or cancelled update retains or restores the working old installation
+  and prints the matching recovery path instead of switching formats or leaving
+  two active copies. v4.1.2's published files remain untouched; the correction
+  ships forward in v4.1.3.
+- **Release tests cover both the historical failure and the new transaction.**
+  The Windows matrix recognizes only the exact old Restart Manager termination,
+  waits for the matching installer it already launched, and still requires a
+  single correct install. It separately reruns the new Global worker and proves
+  the temporary backup is removed.
+
 ## [Unreleased]
 
 ## [4.1.2] - 2026-07-18

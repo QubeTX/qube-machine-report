@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.3] - 2026-07-18
+
+### Fixed
+- **Global Windows updates preserve the updater process before native installer
+  replacement.** Hosted v4.1.2 validation proved that Windows Installer Restart
+  Manager and Inno Setup could terminate an older Global updater with
+  `STATUS_CONTROL_C_EXIT` (`0xC000013A`) after it downloaded, verified, and
+  launched the exact matching installer, leaving no final JSON result. Global
+  MSI and Global EXE updates now request one UAC elevation through native
+  `ShellExecuteExW`, restrict the hidden worker to the detected format and exact
+  numeric release, rename the locked Program Files image to a private sibling,
+  install and verify at the original path, restore the prior image on failure,
+  and let the verified replacement remove the backup after both old processes
+  exit. User-scoped channels retain their existing no-UAC transaction.
+- **Windows release validation distinguishes immutable legacy termination from
+  safe current behavior.** Only the exact native-installer status, zero stdout,
+  and same-channel launch diagnostic permit the harness to wait for the already
+  launched transaction and, if needed, retry the exact tagged candidate. It
+  then requires one target registration/copy, current-version no-op JSON, and a
+  same-version Global worker repair with backup cleanup. Other failures still
+  fail closed. v4.1.2 remains immutable; v4.1.3 is the fix-forward. (task #rsh)
+
 ## [Unreleased]
 
 ## [4.1.2] - 2026-07-18

@@ -301,12 +301,24 @@ jobs:
             $asset = if ($env:ASSET) { Join-Path $PWD "candidate\$env:ASSET" } else { $null }
             switch ($env:KIND) {
               'msi-global' {
-                $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
-                if ($p.ExitCode -ne 0) { throw "candidate Global MSI failed: $($p.ExitCode)" }
+                for ($attempt = 1; $attempt -le 18; $attempt++) {
+                  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                  if ($p.ExitCode -eq 0) { break }
+                  if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
+                    throw "candidate Global MSI failed: $($p.ExitCode)"
+                  }
+                  Start-Sleep -Seconds 5
+                }
               }
               'msi-corporate' {
-                $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
-                if ($p.ExitCode -ne 0) { throw "candidate Corporate MSI failed: $($p.ExitCode)" }
+                for ($attempt = 1; $attempt -le 18; $attempt++) {
+                  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                  if ($p.ExitCode -eq 0) { break }
+                  if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
+                    throw "candidate Corporate MSI failed: $($p.ExitCode)"
+                  }
+                  Start-Sleep -Seconds 5
+                }
               }
               'exe-global' {
                 $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-global-exe.log'
@@ -329,6 +341,48 @@ jobs:
             }
           }
 
+          function Test-TargetVersion {
+            if (-not (Test-Path $env:EXE)) { return $false }
+            try {
+              return ((& $env:EXE --version).Trim() -eq "tr300 $env:EXPECTED_VERSION")
+            } catch {
+              return $false
+            }
+          }
+
+          function Test-NativeConvergence {
+            if (-not (Test-TargetVersion)) { return $false }
+            $markerName = if ($env:KIND -like '*-global') {
+              'InstallSourceGlobal'
+            } else {
+              'InstallSourceCorporate'
+            }
+            try {
+              $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$markerName].Value
+            } catch {
+              return $false
+            }
+            if ($marker -ne $env:EXPECTED_CHANNEL) { return $false }
+            $display = if ($env:KIND -like '*-corporate') {
+              'tr300 (Corporate Edition)'
+            } else {
+              'tr300'
+            }
+            $entries = @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object DisplayName -EQ $display
+            return (@($entries).Count -eq 1 -and $entries[0].DisplayVersion -eq $env:EXPECTED_VERSION)
+          }
+
+          function Wait-ForLegacyInstaller {
+            for ($attempt = 1; $attempt -le 90; $attempt++) {
+              if (Test-NativeConvergence) { return $true }
+              Start-Sleep -Seconds 1
+            }
+            return $false
+          }
+
           $reported = (& $env:EXE --version).Trim()
           if ($reported -ne "tr300 $env:INSTALLED_VERSION") { throw "unexpected prior version: $reported" }
           (& $env:EXE --fast --json | ConvertFrom-Json) | Out-Null
@@ -341,13 +395,38 @@ jobs:
           $lines | ForEach-Object { Write-Host "update-json: $_" }
           Get-Content -LiteralPath $updateRun.StderrPath -ErrorAction SilentlyContinue |
             ForEach-Object { Write-Host "update-stderr: $_" }
-          if ($lines.Count -ne 1) { throw "update stdout was not exactly one line/object" }
-          $update = $lines[0] | ConvertFrom-Json
-          if ($update.install_channel -ne $env:EXPECTED_CHANNEL) {
-            throw "expected channel $env:EXPECTED_CHANNEL, got $($update.install_channel)"
-          }
-          if ($update.latest_version -ne $env:EXPECTED_VERSION -or $update.update_available -ne $true) {
-            throw "updater did not resolve the intended target version"
+          $legacyForcedTermination = (
+            $env:KIND -match '^(msi|exe)-' -and
+            $exit -eq -1073741510 -and
+            $lines.Count -eq 0
+          )
+          if ($legacyForcedTermination) {
+            $stderrText = Get-Content -LiteralPath $updateRun.StderrPath -Raw -ErrorAction SilentlyContinue
+            $expectedLaunch = if ($env:KIND -like 'msi-*') {
+              'Launching Windows Installer'
+            } else {
+              'Launching Inno Setup installer'
+            }
+            if ($stderrText -notmatch [regex]::Escape($expectedLaunch)) {
+              throw "legacy client termination lacked exact same-channel installer launch evidence"
+            }
+            Write-Warning 'Immutable legacy updater was terminated by Restart Manager after launching its exact same-channel installer (0xC000013A); waiting for that transaction before tagged recovery.'
+            if (-not (Wait-ForLegacyInstaller)) {
+              Install-Candidate
+            }
+            if (-not (Test-NativeConvergence)) {
+              throw 'legacy forced-termination recovery did not converge to the candidate version'
+            }
+            $update = $null
+          } else {
+            if ($lines.Count -ne 1) { throw "update stdout was not exactly one line/object" }
+            $update = $lines[0] | ConvertFrom-Json
+            if ($update.install_channel -ne $env:EXPECTED_CHANNEL) {
+              throw "expected channel $env:EXPECTED_CHANNEL, got $($update.install_channel)"
+            }
+            if ($update.latest_version -ne $env:EXPECTED_VERSION -or $update.update_available -ne $true) {
+              throw "updater did not resolve the intended target version"
+            }
           }
           if ($env:KIND -eq 'portable') {
             if ($exit -ne 2 -or $update.success -ne $false -or $update.requires_user_action -ne $true) {
@@ -361,8 +440,8 @@ jobs:
               throw "portable failure mutated the existing binary: $retained"
             }
           } else {
-            $legacyFallback = $false
-            if ($exit -ne 0 -or $update.success -ne $true) {
+            $legacyFallback = $legacyForcedTermination
+            if (-not $legacyFallback -and ($exit -ne 0 -or $update.success -ne $true)) {
               if ($exit -ne 2 -or $update.success -ne $false -or $update.requires_user_action -ne $true) {
                 throw "legacy updater neither succeeded nor failed safely"
               }
@@ -447,6 +526,30 @@ jobs:
               Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
             ) | Where-Object DisplayName -EQ $display
             if (@($entries).Count -ne 1) { throw "expected one $display registration" }
+
+            # Exercise the new Global live-image worker as a same-version
+            # repair. A normal updater correctly no-ops when already current,
+            # so this strict hidden action is the release gate that proves the
+            # rename/install/verify/cleanup transaction before a future tag is
+            # available. It cannot select Corporate or cross formats.
+            if ($env:KIND -in @('msi-global', 'exe-global')) {
+              $strategy = if ($env:KIND -eq 'msi-global') { 'msi_global' } else { 'exe_global' }
+              $nonce = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+              $backup = Join-Path (Split-Path $env:EXE -Parent) ".tr300-update-backup-$PID-$nonce.exe"
+              $worker = Start-Process -FilePath $env:EXE -Wait -PassThru -ArgumentList @(
+                'update-worker', '--update-strategy', $strategy,
+                '--update-version', $env:EXPECTED_VERSION,
+                '--update-backup', ('"{0}"' -f $backup)
+              )
+              if ($worker.ExitCode -ne 0) {
+                throw "Global live-image worker failed same-version repair: $($worker.ExitCode)"
+              }
+              for ($attempt = 1; $attempt -le 100 -and (Test-Path $backup); $attempt++) {
+                Start-Sleep -Milliseconds 100
+              }
+              if (Test-Path $backup) { throw "Global live-image backup was not cleaned: $backup" }
+              if (-not (Test-TargetVersion)) { throw 'Global live-image repair lost the target version' }
+            }
 
             # Prove the documented legacy recovery path: a very old or damaged
             # install may have its executable/ARP identity but no marker. Delete

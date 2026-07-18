@@ -3,11 +3,12 @@
 // Checks the GitHub releases API for a newer version and dispatches to an
 // installer strategy that matches how this binary was installed. On Windows
 // (v3.15.0+), the four first-class installers (MSI Global, MSI Corporate,
-// EXE Global, EXE Corporate) write a HKCU\Software\TR300\InstallSource
-// registry marker, which `detect_install_origin()` reads to pick the matching
-// MSI/EXE for in-place upgrade. Cargo, cargo-dist, and macOS PKG installs use
-// their own durable metadata/receipt. Ambiguous or portable origins do not
-// mutate the machine.
+// EXE Global, EXE Corporate) write scoped HKCU\Software\TR300
+// InstallSourceGlobal/InstallSourceCorporate markers plus the legacy
+// InstallSource value, which `detect_install_origin()` reads to pick the
+// matching MSI/EXE for in-place upgrade. Cargo, cargo-dist, and macOS PKG
+// installs use their own durable metadata/receipt. Ambiguous or portable
+// origins do not mutate the machine.
 
 use crate::config::{Config, OutputFormat};
 use crate::VERSION;
@@ -134,6 +135,15 @@ impl UpdateStrategy {
             "installer"
         }
     }
+
+    #[cfg(windows)]
+    fn from_global_worker_id(value: &str) -> Option<Self> {
+        match value {
+            "msi_global" => Some(Self::MsiGlobal),
+            "exe_global" => Some(Self::ExeGlobal),
+            _ => None,
+        }
+    }
 }
 
 /// Precise, cross-platform installation channel. An update never crosses from
@@ -234,6 +244,14 @@ impl StrategyError {
             Self::Preflight(message) => Self::Preflight(format!("{message}; {detail}")),
             Self::Runtime(message) => Self::Runtime(format!("{message}; {detail}")),
             Self::PolicyBlocked(message) => Self::PolicyBlocked(format!("{message}; {detail}")),
+        }
+    }
+
+    fn message(&self) -> &str {
+        match self {
+            Self::Preflight(message) | Self::Runtime(message) | Self::PolicyBlocked(message) => {
+                message
+            }
         }
     }
 }
@@ -820,6 +838,14 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
     #[cfg(windows)]
     if matches!(
         strategy,
+        UpdateStrategy::MsiGlobal | UpdateStrategy::ExeGlobal
+    ) {
+        return with_elevated_windows_live_image_handoff(strategy, latest);
+    }
+
+    #[cfg(windows)]
+    if matches!(
+        strategy,
         UpdateStrategy::Cargo
             | UpdateStrategy::InstallerPowerShell
             | UpdateStrategy::InstallerPwsh
@@ -901,9 +927,280 @@ where
     handoff.finish(attempt())
 }
 
+/// A Global MSI/EXE lives under Program Files, so the ordinary updater cannot
+/// rename its own locked image before replacement. Resolve the exact release
+/// and channel in the unelevated parent, then request one UAC elevation for a
+/// tightly-scoped worker. The parent remains alive to emit the single JSON
+/// result; the worker performs the same rename/install/verify/rollback
+/// transaction with an elevated token and never changes installer channels.
+#[cfg(windows)]
+fn with_elevated_windows_live_image_handoff(
+    strategy: UpdateStrategy,
+    latest: &str,
+) -> Result<(), StrategyError> {
+    let handoff = WindowsLiveImageHandoff::plan()?;
+    let exit_code = launch_elevated_windows_update_worker(strategy, latest, &handoff.backup)?;
+    match exit_code {
+        0 => verify_post_install(latest).map_err(StrategyError::Runtime),
+        3 => Err(StrategyError::PolicyBlocked(format!(
+            "the elevated {} update worker was blocked by Windows or endpoint policy. Its safe transaction attempts to retain or restore the old executable; verify `tr300 --version` before retrying",
+            strategy.label()
+        ))),
+        code => Err(StrategyError::Runtime(format!(
+            "the elevated {} update worker exited with code {code}, so the transaction was not accepted as successful. It attempts to retain or restore the old executable; verify `tr300 --version` and use the matching tagged installer if the failure persists",
+            strategy.label()
+        ))),
+    }
+}
+
+/// Hidden elevated-worker entry point. Only the two Global strategies are
+/// accepted; the version must be a plain numeric release, the current product
+/// registration must prove the same channel, and the backup must be a strict
+/// private sibling of the running Program Files image.
+#[cfg(windows)]
+pub fn run_windows_update_worker(strategy_id: &str, latest: &str, backup: &std::path::Path) -> i32 {
+    JSON_UPDATE_MODE.store(true, Ordering::Relaxed);
+    let Some(strategy) = UpdateStrategy::from_global_worker_id(strategy_id) else {
+        return 2;
+    };
+    if !is_worker_release_version(latest) {
+        return 2;
+    }
+    let expected_origin = match strategy {
+        UpdateStrategy::MsiGlobal => InstallOrigin::MsiGlobal,
+        UpdateStrategy::ExeGlobal => InstallOrigin::ExeGlobal,
+        _ => return 2,
+    };
+    if detect_install_origin() != expected_origin {
+        eprintln!(
+            "  · elevated update worker refused a channel or registration mismatch; the installation was not changed"
+        );
+        return 2;
+    }
+
+    // The worker is elevated for Global channels, so this is also the safe
+    // opportunity to remove a product-private backup whose prior detached
+    // cleanup was interrupted. Locked/live files simply remain for the normal
+    // transaction and are never treated as arbitrary cleanup targets.
+    cleanup_stale_windows_update_backups();
+    let handoff = match WindowsLiveImageHandoff::begin_with_backup(backup) {
+        Ok(handoff) => handoff,
+        Err(error) => {
+            eprintln!(
+                "  · elevated update worker could not start safe handoff: {}",
+                error.message()
+            );
+            return strategy_error_exit_code(&error);
+        }
+    };
+    match handoff.finish(try_strategy_inner(strategy, latest)) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("  · elevated update worker failed: {}", error.message());
+            strategy_error_exit_code(&error)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn run_windows_update_worker(
+    _strategy_id: &str,
+    _latest: &str,
+    _backup: &std::path::Path,
+) -> i32 {
+    2
+}
+
+#[cfg(windows)]
+fn strategy_error_exit_code(error: &StrategyError) -> i32 {
+    if matches!(error, StrategyError::PolicyBlocked(_)) {
+        3
+    } else {
+        2
+    }
+}
+
+#[cfg(any(windows, test))]
+fn is_worker_release_version(version: &str) -> bool {
+    version.len() <= 64
+        && version.split('.').count() == 3
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+#[cfg(windows)]
+fn launch_elevated_windows_update_worker(
+    strategy: UpdateStrategy,
+    latest: &str,
+    backup: &std::path::Path,
+) -> Result<u32, StrategyError> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::{null, null_mut};
+    use winapi::um::errhandlingapi::GetLastError;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::GetExitCodeProcess;
+    use winapi::um::shellapi::{
+        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
+    use winapi::um::synchapi::WaitForSingleObject;
+    use winapi::um::winbase::{INFINITE, WAIT_OBJECT_0};
+    use winapi::um::winuser::SW_HIDE;
+
+    if !matches!(
+        strategy,
+        UpdateStrategy::MsiGlobal | UpdateStrategy::ExeGlobal
+    ) || !is_worker_release_version(latest)
+    {
+        return Err(StrategyError::Preflight(
+            "refused an invalid elevated Global update request".to_string(),
+        ));
+    }
+    let current = std::env::current_exe().map_err(|error| {
+        StrategyError::Preflight(format!(
+            "could not resolve the Global executable before requesting UAC: {error}"
+        ))
+    })?;
+    validate_windows_update_backup(&current, backup)?;
+
+    let backup_text = backup.to_str().ok_or_else(|| {
+        StrategyError::Preflight(
+            "the Global update path cannot be represented safely in the worker command line"
+                .to_string(),
+        )
+    })?;
+    let parameters = format!(
+        "update-worker --update-strategy {} --update-version {} --update-backup {}",
+        strategy.json_id(),
+        latest,
+        windows_quote_command_arg(backup_text)
+    );
+    let verb: Vec<u16> = std::ffi::OsStr::new("runas")
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let file: Vec<u16> = current.as_os_str().encode_wide().chain(Some(0)).collect();
+    let parameters: Vec<u16> = std::ffi::OsStr::new(&parameters)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    info.hwnd = null_mut();
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = file.as_ptr();
+    info.lpParameters = parameters.as_ptr();
+    info.lpDirectory = null();
+    info.nShow = SW_HIDE;
+
+    let launched = unsafe { ShellExecuteExW(&mut info) };
+    if launched == 0 {
+        let code = unsafe { GetLastError() };
+        let error = std::io::Error::from_raw_os_error(code as i32);
+        let message = if code == 1223 {
+            "UAC was cancelled; the Global installation was not changed".to_string()
+        } else {
+            format!(
+                "could not start the elevated same-channel update worker (Windows error {code}: {error}); the Global installation was not changed"
+            )
+        };
+        return if likely_endpoint_policy_error(&error) {
+            Err(StrategyError::PolicyBlocked(message))
+        } else {
+            Err(StrategyError::Runtime(message))
+        };
+    }
+    if info.hProcess.is_null() {
+        return Err(StrategyError::Runtime(
+            "Windows started the elevation request without returning a worker process handle; the update could not be verified".to_string(),
+        ));
+    }
+
+    let wait = unsafe { WaitForSingleObject(info.hProcess, INFINITE) };
+    if wait != WAIT_OBJECT_0 {
+        unsafe { CloseHandle(info.hProcess) };
+        return Err(StrategyError::Runtime(format!(
+            "waiting for the elevated update worker failed (wait result {wait}); verify the retained installation before retrying"
+        )));
+    }
+    let mut exit_code = 0u32;
+    let got_exit = unsafe { GetExitCodeProcess(info.hProcess, &mut exit_code) };
+    unsafe { CloseHandle(info.hProcess) };
+    if got_exit == 0 {
+        return Err(StrategyError::Runtime(
+            "the elevated update worker finished but Windows did not return its exit code; the update could not be verified".to_string(),
+        ));
+    }
+    Ok(exit_code)
+}
+
+#[cfg(any(windows, test))]
+fn windows_quote_command_arg(value: &str) -> String {
+    if !value.is_empty() && !value.chars().any(|ch| ch.is_whitespace() || ch == '"') {
+        return value.to_string();
+    }
+
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0usize;
+    for ch in value.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+        } else if ch == '"' {
+            quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+            quoted.push('"');
+            backslashes = 0;
+        } else {
+            quoted.push_str(&"\\".repeat(backslashes));
+            backslashes = 0;
+            quoted.push(ch);
+        }
+    }
+    quoted.push_str(&"\\".repeat(backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(windows)]
+fn validate_windows_update_backup(
+    original: &std::path::Path,
+    backup: &std::path::Path,
+) -> Result<(), StrategyError> {
+    let original_is_product = original
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"));
+    let same_parent =
+        original
+            .parent()
+            .zip(backup.parent())
+            .is_some_and(|(original_parent, backup_parent)| {
+                original_parent
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&backup_parent.to_string_lossy())
+            });
+    let valid_name = backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(is_windows_update_backup_name);
+    if !original.is_absolute()
+        || !backup.is_absolute()
+        || !original_is_product
+        || !same_parent
+        || !valid_name
+        || std::fs::symlink_metadata(backup).is_ok()
+    {
+        return Err(StrategyError::Preflight(
+            "refused an invalid or pre-existing Windows update backup path".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Best-effort maintenance for a prior successful update whose detached
-/// cleanup helper was interrupted. This runs only when another update of a
-/// user-scoped channel begins, and only removes product-private sibling names.
+/// cleanup helper was interrupted. This runs before another user-scoped
+/// transaction or inside the elevated Global worker, and removes only strict
+/// product-private sibling names.
 #[cfg(windows)]
 fn cleanup_stale_windows_update_backups() {
     let Ok(current) = std::env::current_exe() else {
@@ -941,7 +1238,7 @@ struct WindowsLiveImageHandoff {
 
 #[cfg(windows)]
 impl WindowsLiveImageHandoff {
-    fn begin() -> Result<Self, StrategyError> {
+    fn plan() -> Result<Self, StrategyError> {
         let original = std::env::current_exe().map_err(|error| {
             StrategyError::Preflight(format!(
                 "could not resolve the running executable for safe handoff: {error}"
@@ -960,11 +1257,34 @@ impl WindowsLiveImageHandoff {
             ".tr300-update-backup-{}-{nonce}.exe",
             std::process::id()
         ));
-        std::fs::rename(&original, &backup).map_err(|error| {
+        validate_windows_update_backup(&original, &backup)?;
+        Ok(Self { original, backup })
+    }
+
+    fn begin() -> Result<Self, StrategyError> {
+        Self::plan()?.rename_live_image()
+    }
+
+    fn begin_with_backup(backup: &std::path::Path) -> Result<Self, StrategyError> {
+        let original = std::env::current_exe().map_err(|error| {
+            StrategyError::Preflight(format!(
+                "could not resolve the elevated worker executable: {error}"
+            ))
+        })?;
+        validate_windows_update_backup(&original, backup)?;
+        Self {
+            original,
+            backup: backup.to_path_buf(),
+        }
+        .rename_live_image()
+    }
+
+    fn rename_live_image(self) -> Result<Self, StrategyError> {
+        std::fs::rename(&self.original, &self.backup).map_err(|error| {
             let message = format!(
                 "could not rename the running executable from {} to {} before the same-channel update: {error}. The old installation was left unchanged",
-                original.display(),
-                backup.display()
+                self.original.display(),
+                self.backup.display()
             );
             if likely_endpoint_policy_error(&error) {
                 StrategyError::PolicyBlocked(message)
@@ -972,7 +1292,7 @@ impl WindowsLiveImageHandoff {
                 StrategyError::Runtime(message)
             }
         })?;
-        Ok(Self { original, backup })
+        Ok(self)
     }
 
     fn finish(self, result: Result<(), StrategyError>) -> Result<(), StrategyError> {
@@ -1624,11 +1944,10 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
 /// `--version` to confirm the file replacement actually took effect.
 ///
 /// WiX `MajorUpgrade` in `wix/main.wxs` and `wix-corporate/corporate.wxs`
-/// handles the uninstall-old-then-install-new step atomically. Windows
-/// Installer's Restart Manager handles the "binary in use" case by
-/// renaming the locked file (the running tr300 process keeps its open
-/// file handle to the OLD inode); if RM falls back to delete-on-reboot,
-/// msiexec returns 3010 and we surface that without claiming success.
+/// handles the uninstall-old-then-install-new step. The caller has already
+/// moved the live image to a private sibling, so Restart Manager does not need
+/// to terminate the updater to release the installed path. A deferred
+/// delete/reboot still surfaces as 3010/1641 without claiming success.
 #[cfg(windows)]
 fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("msi").map_err(|error| {
@@ -3053,5 +3372,76 @@ TeamIdentifier=M9D5379H93\n";
         assert!(!is_windows_update_backup_name(
             ".tr300-update-backup-123-other.exe"
         ));
+    }
+
+    #[test]
+    fn elevated_worker_accepts_only_plain_three_part_release_versions() {
+        assert!(is_worker_release_version("4.1.3"));
+        assert!(is_worker_release_version("10.20.300"));
+        assert!(!is_worker_release_version("4.1"));
+        assert!(!is_worker_release_version("v4.1.3"));
+        assert!(!is_worker_release_version("4.1.3-rc.1"));
+        assert!(!is_worker_release_version(
+            "4.1.3 --update-strategy exe_global"
+        ));
+    }
+
+    #[test]
+    fn elevated_worker_quotes_windows_paths_without_changing_argument_boundaries() {
+        assert_eq!(
+            windows_quote_command_arg(r"C:\Program Files\tr300\bin\.tr300-update-backup-12-34.exe"),
+            r#""C:\Program Files\tr300\bin\.tr300-update-backup-12-34.exe""#
+        );
+        assert_eq!(windows_quote_command_arg("msi_global"), "msi_global");
+        assert_eq!(windows_quote_command_arg(""), r#""""#);
+        assert_eq!(windows_quote_command_arg(r#"a\"b"#), r#""a\\\"b""#);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn elevated_worker_accepts_only_global_strategy_ids() {
+        assert_eq!(
+            UpdateStrategy::from_global_worker_id("msi_global"),
+            Some(UpdateStrategy::MsiGlobal)
+        );
+        assert_eq!(
+            UpdateStrategy::from_global_worker_id("exe_global"),
+            Some(UpdateStrategy::ExeGlobal)
+        );
+        assert_eq!(UpdateStrategy::from_global_worker_id("msi_corporate"), None);
+        assert_eq!(UpdateStrategy::from_global_worker_id("cargo"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn elevated_worker_backup_must_be_unused_private_absolute_sibling() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "tr300-worker-path-tests-{}-{nonce}",
+            std::process::id()
+        ));
+        let other = dir.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let original = dir.join("tr300.exe");
+        std::fs::write(&original, b"fixture").unwrap();
+        let valid = dir.join(".tr300-update-backup-123-456.exe");
+        assert!(validate_windows_update_backup(&original, &valid).is_ok());
+        assert!(validate_windows_update_backup(
+            &original,
+            std::path::Path::new(".tr300-update-backup-123-456.exe")
+        )
+        .is_err());
+        assert!(validate_windows_update_backup(&original, &dir.join("arbitrary.exe")).is_err());
+        assert!(validate_windows_update_backup(
+            &original,
+            &other.join(".tr300-update-backup-123-456.exe")
+        )
+        .is_err());
+        std::fs::write(&valid, b"occupied").unwrap();
+        assert!(validate_windows_update_backup(&original, &valid).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

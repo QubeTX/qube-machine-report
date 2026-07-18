@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Published / working manifest:** 4.1.1 / 4.1.2
+**Published / working manifest:** 4.1.2 / 4.1.3
 **Release scope:** origin-preserving updates, native PKG-in-DMG, Apple Installer
 credentials, hosted ARM/Intel Mac gates, Windows installer matrix, and real
 Alienware validation. AMD laptop and Pi evidence remain open.
@@ -43,7 +43,7 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.1.2 fix-forward release plan
+## 2. v4.1.3 Global-updater fix-forward release plan
 
 The implementation is tracked in git and is intended to release from the
 Alienware. A physical Mac is not a normal requirement: native GitHub
@@ -51,6 +51,21 @@ Alienware. A physical Mac is not a normal requirement: native GitHub
 sign, notarize, mount, install, update-strategy, report, and uninstall gates.
 Use physical hardware only for an optional visual smoke or a CI-discovered
 GUI-only defect.
+
+v4.1.2 is a complete 30-asset hosted distribution, but post-publication
+Windows transition run 29644024006 found one product defect rather than a
+harness defect: every immutable v4.1.1 native MSI/EXE updater downloaded and
+verified its exact same-channel installer, printed the matching launch
+diagnostic, and was then terminated with Windows status `0xC000013A` before it
+could return JSON. Cargo and PowerShell passed, and the clean Global/Corporate
+format-choice jobs passed. v4.1.2 remains immutable. v4.1.3 fixes forward with
+one native `ShellExecuteExW`/`runas` elevation for Global channels, a strict
+same-channel worker, transactional Program Files image rename, rollback,
+version verification, and elevated delayed cleanup. The release matrix accepts
+the historical termination only from the exact status + zero stdout + matching
+launch evidence, waits for the old installer, recovers with the exact tagged
+same-channel asset only if needed, and independently exercises the new Global
+worker as a same-version repair.
 
 ### Implemented locally
 
@@ -71,10 +86,13 @@ GUI-only defect.
 - Windows Cargo, PowerShell, Corporate MSI, and Corporate EXE updates perform a
   transactional live-image handoff: rename the executing binary, update and
   verify the same channel at the original path, restore on failure, and let the
-  verified new binary delete the backup after the caller exits. Immutable older
-  updaters may safely exit 2 when they cannot replace themselves; the exact
-  fresh same-channel installer is then authoritative and must converge to one
-  registration/binary before the current-version no-op is accepted.
+  verified new binary delete the backup after the caller exits. Global MSI and
+  EXE use the same transaction inside a one-UAC elevated worker because the
+  non-elevated parent cannot rename Program Files. The parent stays alive to
+  emit one JSON result. Immutable older clients may instead be terminated by
+  Restart Manager after launch; that exact legacy boundary is recovered only
+  with the matching tagged asset and must converge to one registration/binary
+  before the current-version no-op is accepted.
 - The universal macOS binary is packaged in a signed
   `com.qubetx.tr300.pkg` inside
   `tr300-universal-apple-darwin.dmg`. Both containers are notarized/stapled;
@@ -167,14 +185,14 @@ native invocation from old-client/Restart Manager termination, so the final
 harness uses a separate `Start-Process` child plus redirected stdout/stderr and
 the process object's exit code before applying the same assertions.
 
-1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
+1. Finish the v4.1.3 tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,
    dist plan, actionlint, shellcheck, updater fixtures, and Alienware functional
    modes/save/code-page/performance checks.
-3. ✓ Commit/push `main`; exact-SHA CI and crates publication passed.
-4. ✓ Tag/push only `v4.1.2`; cargo-dist, Windows installers, and native
-   PKG-in-DMG workflows passed.
-5. Replay the corrected disposable Windows matrix, then verify crates.io,
+3. Commit/push the v4.1.3 source; require exact-SHA CI and crates publication.
+4. Tag/push only `v4.1.3`; require cargo-dist, Windows installers, and native
+   PKG-in-DMG workflows to pass again.
+5. Run the corrected disposable Windows matrix, then verify crates.io,
    signatures/notarization, checksums, every installer family,
    all 30 release assets, update behavior, recovery links, and clean uninstall.
 6. Record exact run IDs/hashes/evidence here, in `TESTING.md`, and in the

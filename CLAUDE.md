@@ -51,19 +51,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Published version: **4.1.1**. Working manifest / next release: **4.1.2**.
-The v4.1.0 and v4.1.1 tags/assets are immutable; v4.1.2 replaces the removed
-macOS `pkgutil --verify` switch with supported receipt, file-owner, and
-Developer ID identity checks before completing the 30-asset distribution.
+Published version: **4.1.2**. Working manifest / next release: **4.1.3**.
+The v4.1.0-v4.1.2 tags/assets are immutable. v4.1.2 completed supported macOS
+receipt/file-owner/Developer ID validation and the hosted 30-asset workflows;
+v4.1.3 fixes forward the post-publication finding that Restart Manager can
+terminate a Global native-installer updater before its final JSON.
 Alienware Windows validation is now captured; AMD64 Linux laptop and Raspberry
 Pi 4 checks remain continuation work and must not be reported as completed.
 Managed-work antivirus behavior is a separate endpoint-policy case, not
 personal Windows field-accuracy proof.
 
 Observed distribution state: release source
-`b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates, both
-hosted Apple notarization jobs, the 28-asset public audit, and supplemental
-Windows packaging. Homepage commit
+`a94645b9f61432c403c129ef055b8ad2d3876d35` passed exact-SHA CI/crates,
+signed Apple archives, every Windows package, and native ARM/Intel universal
+DMG publication. Its updater finding is fixed only in the next immutable
+release. Homepage commit
 `d77397479ad2b1189cce86b5402eaf1cc966abdf` is deployed at
 `https://reports.qubetx.com/`. Exact run IDs, submissions, and hashes live in
 `TESTING.md` and the current tracked handoff.
@@ -263,6 +265,16 @@ These three are the most frequently touched; their full rules are in the matchin
   a direct overwrite, an arbitrary elevated helper, or cross-channel fallback.
   Hosted release discovery may reuse `GITHUB_TOKEN`/`GH_TOKEN`, but the value
   must never enter output or persistent state.
+- Windows Global MSI/EXE use the same transaction inside a strict elevated
+  worker: the ordinary parent resolves the exact channel/version, then native
+  [`ShellExecuteExW`](https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-shellexecuteexw)
+  `runas` starts only `msi_global`/`exe_global` with one UAC
+  prompt and a validated same-parent Program Files backup. The parent waits on
+  the process handle and alone emits final JSON; the worker cannot rediscover
+  or switch channels. Preserve its rename/verify/rollback/elevated-cleanup
+  boundary and do not substitute PowerShell elevation or rely on
+  [Restart Manager](https://learn.microsoft.com/windows/win32/rstmgr/about-restart-manager)
+  to preserve the updater.
 - Likely antivirus/Group Policy/filesystem blocks during staged create/write/
   sync/launch become `PolicyBlocked`: stop the channel, retain the current
   install, return exit 2 with official manual-release guidance, and never offer

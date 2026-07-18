@@ -71,6 +71,22 @@ fn main() -> Result<()> {
         std::process::exit(exit_code);
     }
 
+    if action == Some(Action::UpdateWorker) {
+        let exit_code = match (
+            cli.update_strategy.as_deref(),
+            cli.update_version.as_deref(),
+            cli.update_backup.as_deref(),
+        ) {
+            (Some(strategy), Some(version), Some(backup)) => {
+                update::run_windows_update_worker(strategy, version, backup)
+            }
+            _ => 2,
+        };
+        #[cfg(windows)]
+        drop(_cp_guard);
+        std::process::exit(exit_code);
+    }
+
     if cli.update || action == Some(Action::Update) {
         let exit_code = update::run(&config);
         #[cfg(windows)]

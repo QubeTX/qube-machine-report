@@ -29,6 +29,11 @@ pub enum Action {
     /// the replacement at the original path.
     #[value(hide = true)]
     UpdateCleanup,
+    /// Perform an elevated, same-channel Global Windows update after the
+    /// non-elevated parent has resolved and pinned the release. HIDDEN — the
+    /// parent invokes this through ShellExecuteExW with the `runas` verb.
+    #[value(hide = true)]
+    UpdateWorker,
 }
 
 /// TR-300: Cross-platform system information report
@@ -140,6 +145,14 @@ pub struct Cli {
     /// Exact sibling backup created by the Windows live-image handoff.
     #[arg(long = "update-backup", value_name = "PATH", hide = true)]
     pub update_backup: Option<std::path::PathBuf>,
+
+    /// Exact Global Windows strategy selected by the non-elevated parent.
+    #[arg(long = "update-strategy", value_name = "STRATEGY", hide = true)]
+    pub update_strategy: Option<String>,
+
+    /// Exact immutable release version selected by the non-elevated parent.
+    #[arg(long = "update-version", value_name = "VERSION", hide = true)]
+    pub update_version: Option<String>,
 }
 
 #[cfg(test)]
@@ -202,6 +215,24 @@ mod tests {
                 r"C:\Users\example\.cargo\bin\.tr300-update-backup-123-456.exe"
             ))
         );
+    }
+
+    #[test]
+    fn parses_hidden_windows_update_worker_action() {
+        let cli = Cli::try_parse_from([
+            "tr300",
+            "update-worker",
+            "--update-strategy",
+            "msi_global",
+            "--update-version",
+            "4.1.3",
+            "--update-backup",
+            r"C:\Program Files\tr300\bin\.tr300-update-backup-123-456.exe",
+        ])
+        .expect("internal update worker action should parse");
+        assert_eq!(cli.action, Some(Action::UpdateWorker));
+        assert_eq!(cli.update_strategy.as_deref(), Some("msi_global"));
+        assert_eq!(cli.update_version.as_deref(), Some("4.1.3"));
     }
 
     #[test]

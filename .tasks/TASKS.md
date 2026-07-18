@@ -4,21 +4,26 @@
 
 ## To-Do
 
-- [ ] **Audit the public v4.1.2 distribution and close the release ledger** - verify all public bytes, installers, signatures, notarization, update channels, and recovery behavior (needs #rsh) (ms #v41) (owner codex) #rau
+- [ ] **Audit the public v4.1.3 distribution and close the release ledger** - verify all public bytes, installers, signatures, notarization, update channels, and recovery behavior (needs #rsh) (ms #v41) (owner codex) #rau
   - [ ] Verify crates.io and all 30 GitHub Release assets
   - [ ] Verify every Windows installer family and both Apple architectures
   - [ ] Record exact run IDs, hashes, and final evidence in tracked docs
+- [ ] **Validate the public v4.1.3 Global MSI on the Alienware** - update the natural 4.0.1 installation, then re-run functionality, origin, cleanup, PATH, hardware, code-page, save, and performance evidence (needs #rsh) (ms #v41) (owner codex) #w413
+  - [ ] Complete the one-UAC Global MSI update and capture JSON/exit evidence
+  - [ ] Prove one Program Files binary/registration/marker/PATH and no backup/duplicate
+  - [ ] Re-run report modes, save/no-write, code-page, performance, and hardware checks
 - [ ] **Validate TR-300 on the AMD64 Linux laptop** - full/fast reports, shell/Cargo update preservation, permissions, networking, and graceful optional probes (ms #hw4) #amd
 - [ ] **Validate TR-300 on Raspberry Pi 4 ARM64** - native ARM asset, full/fast reports, shell/Cargo updates, permissions, networking, and graceful optional probes (ms #hw4) #pi4
 
 ## Active
 
-- [ ] **Ship v4.1.2 through exact-SHA hosted gates** - preserve v4.1.0/v4.1.1, qualify supported Mac ownership proof and Windows transitions, then tag and publish without bypassing a gate (needs #c8r) (ms #v41) (owner codex) #rsh
+- [ ] **Ship v4.1.3 through exact-SHA hosted gates** - preserve v4.1.0-v4.1.2, qualify supported Mac ownership proof and every Windows transition including Global live-image repair, then tag and publish without bypassing a gate (needs #c8r) (ms #v41) (owner codex) #rsh
   - [x] Publish v4.1.0 CI, crates, and signed archives and record the failed supplemental DMG gate
   - [x] Publish v4.1.1 CI/crates/archives/Windows assets and retain its failed DMG/partial Windows evidence
-  - [x] Commit and push the v4.1.2 fix-forward to main
-  - [x] Wait for exact-SHA CI and crates.io publication
-  - [ ] Push only tag v4.1.2 and watch every release workflow
+  - [x] Commit, push, tag, and publish the immutable v4.1.2 hosted distribution
+  - [ ] Commit and push the v4.1.3 Global updater fix-forward to main
+  - [ ] Wait for exact-SHA v4.1.3 CI and crates.io publication
+  - [ ] Push only tag v4.1.3 and watch every release workflow
 
 ## Done
 

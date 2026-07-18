@@ -37,21 +37,24 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.1.1`; working manifest / next release:
-  `4.1.2` (`Cargo.toml`). v4.1.1 passed CI/crates, signed archives, Windows
-  packaging, and universal DMG construction/notarization, but both native Mac
-  install jobs rejected the removed `pkgutil --verify` switch before the DMG
-  could publish. v4.1.2 uses supported receipt/file-owner/code-signature proof
-  without changing v4.1.1. Alienware Windows validation is now real evidence;
+- Current published version: `4.1.2`; working manifest / next release:
+  `4.1.3` (`Cargo.toml`). v4.1.2 passed exact-SHA CI/crates, signed archives,
+  every Windows package, and universal PKG-in-DMG sign/notary/install gates on
+  native Intel and Apple Silicon. Post-release Windows transition evidence then
+  showed immutable Global installer clients can be terminated by Restart
+  Manager before final updater JSON; v4.1.3 fixes that forward with a strict
+  elevated live-image worker without changing v4.1.2. Alienware Windows
+  validation is real evidence;
   AMD64 Linux laptop and Raspberry Pi 4 live verification remain open. The
   major v4 boundary
   is required because public Rust records gained fields and collector helpers
   changed signature; the CLI and additive schema-v1 JSON stay compatible.
   Changed public records are `#[non_exhaustive]`.
 - Last fully published distribution state: release source
-  `b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates,
-  both hosted Apple notarization jobs, the 28-asset public audit, and the
-  supplemental Windows workflow. Homepage commit
+  `a94645b9f61432c403c129ef055b8ad2d3876d35` passed exact-SHA CI/crates,
+  both signed Apple archive jobs, all Windows packaging, and the native Intel/
+  ARM universal DMG publication workflow. Its final public updater audit is
+  retained as historical evidence while v4.1.3 fixes forward. Homepage commit
   `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
   `https://reports.qubetx.com/`; exact evidence is in `TESTING.md` and the
   current handoff.
@@ -625,6 +628,14 @@ Behavior:
   delete the backup after the old process exits. The hidden cleanup action
   accepts only an absolute same-parent numeric private name; another update
   best-effort removes a stale backup left by an interrupted helper.
+- on Windows Global MSI/EXE, the non-elevated parent resolves and pins the
+  exact channel/version, then uses native `ShellExecuteExW` `runas` with a
+  returned process handle for one UAC prompt. The hidden worker accepts only
+  `msi_global`/`exe_global`, a plain three-part version, matching origin, and a
+  strict unused Program Files sibling; elevated, it performs the same rename,
+  install, verify, rollback, and delayed-cleanup transaction. The parent stays
+  alive and alone emits final JSON. Never replace this with a PowerShell
+  elevation/quoting boundary or let the worker rediscover/switch channels.
 - **Fresh-installer intent:** a manually launched Windows installer is the
   user's newest channel choice. WiX removes the same-edition Inno product
   before MSI file installation; Inno enumerates/removes the same-edition MSI
