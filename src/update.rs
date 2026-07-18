@@ -2644,7 +2644,6 @@ pkg-version: 4.1.0\n";
         assert!(!is_newer("3.15.2+nightly.41", "3.15.2+nightly.42"));
     }
 
-    #[cfg(windows)]
     #[test]
     fn parse_sha256_sidecar_accepts_cargo_dist_format() {
         // cargo-dist publishes lines like:
@@ -2658,7 +2657,6 @@ pkg-version: 4.1.0\n";
         );
     }
 
-    #[cfg(windows)]
     #[test]
     fn parse_sha256_sidecar_accepts_no_asterisk_variant() {
         // Some sha256sum invocations omit the asterisk binary-mode
@@ -2670,7 +2668,6 @@ pkg-version: 4.1.0\n";
         );
     }
 
-    #[cfg(windows)]
     #[test]
     fn parse_sha256_sidecar_normalizes_to_lowercase() {
         let line = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789  *foo.msi";
@@ -2680,7 +2677,6 @@ pkg-version: 4.1.0\n";
         );
     }
 
-    #[cfg(windows)]
     #[test]
     fn parse_sha256_sidecar_rejects_wrong_length() {
         // Too short.
@@ -2692,7 +2688,6 @@ pkg-version: 4.1.0\n";
         assert_eq!(parse_sha256_sidecar(""), None);
     }
 
-    #[cfg(windows)]
     #[test]
     fn parse_sha256_sidecar_rejects_non_hex_chars() {
         // 64 chars but `g` is not a hex digit.
@@ -2700,7 +2695,6 @@ pkg-version: 4.1.0\n";
         assert_eq!(parse_sha256_sidecar(&bad), None);
     }
 
-    #[cfg(windows)]
     #[test]
     fn compute_sha256_matches_known_value() {
         // Empty file → known SHA256 of the empty input.

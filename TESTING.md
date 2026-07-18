@@ -104,6 +104,14 @@ as passed.
   now pins official actionlint 1.7.12 and its shell snippets pass actionlint
   1.7.12 plus ShellCheck 0.11.0 locally. A new clean exact SHA must reprove every
   hosted cell; the failed SHA will never be tagged.
+- **Second exact-SHA CI feedback:** run 29638544600 on candidate `83354b3`
+  confirmed the actionlint 1.7.12 runner-label fix, then was cancelled after
+  completed jobs made success impossible. Linux showed that checksum parser/hash
+  tests were still Windows-gated even though the same helpers now serve macOS;
+  those tests are cross-platform rather than hidden behind a dead-code allowance.
+  Ubuntu's older ShellCheck also rejected an `A && B || C` notary-log idiom that
+  ShellCheck 0.11.0 accepted, so the script now uses an explicit `if`. No tag was
+  created; a new exact SHA must pass every cell from scratch.
 
 ### Architecture decision coverage backfill — 2026-07-17
 

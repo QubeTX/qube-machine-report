@@ -24,7 +24,7 @@ The exact release commit passes CI/crates; the immutable tag points at that SHA;
 
 ## Status
 
-Active. #c8r's hosted identity proof passed in run 29637224793 on both native architectures. First exact-SHA CI run 29638116741 failed closed on cross-target dead-code warnings and workflow lint; no tag exists. The fix-forward candidate passes the full local suite, actionlint 1.7.12, ShellCheck 0.11.0, and clean-tree package/publish gates. Push the new exact SHA and never tag before CI/crates publication.
+Active. #c8r's hosted identity proof passed in run 29637224793 on both native architectures. Exact-SHA runs 29638116741 and 29638544600 failed closed before tagging. Their direct fixes now pass all local and clean-tree gates, including cross-platform checksum tests and version-independent shell syntax. Push the new exact SHA. Never tag before CI/crates publication.
 
 ## Activity
 
@@ -35,3 +35,5 @@ Active. #c8r's hosted identity proof passed in run 29637224793 on both native ar
 - 2026-07-18 04:20 — pushed `eb5d212`; exact-SHA CI run 29638116741 failed before tagging on Unix/macOS dead-code warnings plus actionlint 1.7.7 runner-label/shell findings. Retained the full channel taxonomy with explicit lint boundaries, target-gated download constants, upgraded actionlint to 1.7.12, and locally passed actionlint 1.7.12 + ShellCheck 0.11.0 (agent: codex)
 - 2026-07-18 04:30 — isolated the Windows pipe-drain test's busy-host PowerShell cold-start flake; gave only the test a 10-second custom budget while retaining all production budgets/caps. Three isolated repetitions and the full 150 + 19 suite passed (agent: codex)
 - 2026-07-18 04:40 — fix-forward candidate passed release build, audit, cargo-dist plan, 39-file package list, and `cargo publish --locked --dry-run`; the clean-tree package/publish run used no dirty-tree bypass (agent: codex)
+- 2026-07-18 04:50 — exact-SHA run 29638544600 confirmed current actionlint recognized native Intel, then failed on Linux checksum helpers whose tests were Windows-gated and an Ubuntu ShellCheck SC2015; cancelled the already-doomed run, made checksum tests cross-platform, and replaced the notary log boolean chain with explicit control flow (agent: codex)
+- 2026-07-18 05:00 — second fix-forward passed fmt, warning-denying Clippy, 150 + 19 tests, release build, actionlint, ShellCheck, Bash syntax, audit, dist plan, and clean-tree package/publish dry runs (agent: codex)
