@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Complete GitHub distribution / crates.io / working manifest:** 4.1.3 / 4.2.0 / 4.2.1 candidate
+**Complete GitHub distribution / crates.io and incomplete release / working manifest:** 4.1.3 / 4.2.1 / 4.2.2 candidate
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
@@ -44,7 +44,7 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.2.1 managed installation and direct-PKG fix-forward candidate
+## 2. v4.2.2 managed installation and direct-PKG fix-forward candidate
 
 The v4.2 implementation is complete. Exact source
 `b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed v4.2.0 exact-SHA CI and
@@ -52,8 +52,14 @@ crates publication, and the tag workflow signed/notarized both Apple archives.
 Release hosting then failed before GitHub Release creation because guards
 expected fully expanded wrapper URLs even though both wrappers correctly
 compose a pinned tag/base and asset suffix; the shell guard failed first. The
-tag and crate remain immutable; v4.2.1 fixes the assertion and adds a pre-tag
-synthetic render of both wrappers. The normative contract is
+tag and crate remain immutable. v4.2.1 fixed the assertion and its exact source
+`b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed CI/crates, all release
+targets, Apple archive trust, release hosting, and Windows packaging. Native
+Intel/ARM validation then showed its malformed-receipt proof occurred after
+the PKG payload landed, and the Windows transition resolver required a v4.2-
+only internal script from its v4.1.3 baseline. The 30-asset release/tag/crate
+remain immutable; v4.2.2 moves strict Mac proof into a signed preinstall dry
+run and separates current/historical Windows asset contracts. The normative contract is
 ADR **MIC-1**: public documentation recommends the stable managed CLI wrapper,
 `tr300 update` preserves the one proven current channel, and a deliberately
 launched fresh installer is the user's newest channel choice. The release gate
@@ -101,14 +107,16 @@ as sufficient.
 
 ### Candidate gate and publication boundary
 
-The v4.2.0 source passed CI run 29662326024 and crates run 29662484965;
-crates.io serves its immutable package. Release run 29662526880 built all six
-targets and signed/notarized both Apple archives, then stopped at the wrapper
-host assertion before creating a GitHub Release. v4.2.1 now passes the complete
-dirty-tree local gate set, including rendered-wrapper lifecycle execution and
-both WiX/Inno source families. It still requires the clean committed-tree
-package/publish dry run, exact-SHA CI and crates publication, then tag only
-`v4.2.1`. Require every disposable Windows
+v4.2.1 passed CI 29663392937, crates 29663494252, release 29663533999, and
+Windows packaging 29663678096. macOS run 29663678097 signed/notarized the
+universal package but both native validators failed safely before attaching
+four assets. Windows transition run 29663781604 failed at legacy baseline
+selection before installation. v4.2.2 now passes the full local Rust, audit,
+cargo-dist, workflow/script, extracted PKG lifecycle, wrapper rollback,
+Windows source-package, resolver, and Alienware candidate-functionality gate
+set. It must still pass the clean committed-tree package/publish dry run,
+exact-SHA CI and crates publication,
+then tag only `v4.2.2`. Require every disposable Windows
 managed/native transition plus both native Apple package lifecycles; audit all
 34 public assets, checksums, Apple trust evidence, updater/recovery behavior,
 crates.io, and only then update the production homepage. Until those facts are
@@ -508,7 +516,7 @@ The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
   release assets/self-update discovery are verified.
 - The homepage accurately reflects the deployed release and is live.
 
-The v4.2.1 fix-forward candidate is active. The v4.2.0 crate/tag are immutable
-and have no GitHub Release because hosting stopped before creation. The broader
+The v4.2.2 fix-forward candidate is active. The v4.2.0 crate/tag and v4.2.1
+30-asset incomplete release/tag/crate are immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release.

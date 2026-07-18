@@ -59,7 +59,7 @@ jobs:
           }
           assets=$(gh release view "$tag" --repo "$repo" \
             --json assets --jq '.assets[].name')
-          required=(
+          current_required=(
             tr300-x86_64-pc-windows-msvc.msi
             tr300-x86_64-pc-windows-msvc-corporate.msi
             tr300-x86_64-pc-windows-msvc-setup.exe
@@ -68,7 +68,15 @@ jobs:
             tr300-dist-installer.ps1
             tr300-x86_64-pc-windows-msvc.zip
           )
-          for asset in "${required[@]}"; do
+          previous_required=(
+            tr300-x86_64-pc-windows-msvc.msi
+            tr300-x86_64-pc-windows-msvc-corporate.msi
+            tr300-x86_64-pc-windows-msvc-setup.exe
+            tr300-x86_64-pc-windows-msvc-corporate-setup.exe
+            tr300-installer.ps1
+            tr300-x86_64-pc-windows-msvc.zip
+          )
+          for asset in "${current_required[@]}"; do
             grep -Fqx "$asset" <<< "$assets" || {
               echo "release is incomplete; missing $asset" >&2
               exit 1
@@ -86,7 +94,7 @@ jobs:
             candidate_assets=$(gh release view "$candidate" --repo "$repo" \
               --json assets --jq '.assets[].name')
             complete=true
-            for asset in "${required[@]}"; do
+            for asset in "${previous_required[@]}"; do
               if ! grep -Fqx "$asset" <<< "$candidate_assets"; then
                 complete=false
                 break

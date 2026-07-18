@@ -18,8 +18,8 @@
 
 ## Table of contents
 
-- [Decision ledger status (through v4.2.1)](#decision-ledger-status-through-v421)
-- [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.0 addendum)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v420-addendum)
+- [Decision ledger status (through v4.2.2)](#decision-ledger-status-through-v422)
+- [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
   - [Install channel is product state](#install-channel-is-product-state)
@@ -71,7 +71,7 @@
 
 ---
 
-## Decision ledger status (through v4.2.1)
+## Decision ledger status (through v4.2.2)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
@@ -113,7 +113,7 @@ only as failure context.
 
 ---
 
-## Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.0 addendum)
+## Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)
 
 **Status:** Accepted. This section supersedes the older updater fallback,
 Intel-runner, bare-binary packaging, and same-edition coexistence decisions
@@ -232,6 +232,35 @@ unexpanded placeholder, and verifies each pinned tag, tag-bearing base, and
 exact internal asset reference independently. A release-
 host assertion must test the program's real composition model and must have an
 equivalent pre-tag fixture whenever it can prevent first publication.
+
+The immutable v4.2.1 release supplied a second boundary. Exact source
+`b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed CI, crates publication,
+all six cargo-dist targets, both signed/notarized Apple archives, public-wrapper
+rendering, and Windows packaging. Native Intel and Apple Silicon package jobs
+then independently proved that rejecting ambiguous ownership from PKG
+`postinstall` is too late: Apple Installer may already have placed the new
+payload before that script fails. A failed package script is not evidence that
+the payload or receipt rolled back. The workflow withheld all four Mac assets,
+so the 30-asset release, tag, and crate remain immutable while v4.2.2 fixes
+forward.
+
+The reusable package rule is therefore transactional and phase-aware. A native
+package that may retire another installation channel must carry an exact copy
+of its candidate executable and run the bounded ownership check from
+`preinstall` in strict, non-mutating mode. Ambiguous or malformed state must
+stop before payload installation. Only `postinstall`, after the native owner
+exists, may commit the allowlisted cleanup and exercise its rollback. Hosted
+negative tests must name and check the old binary, old receipt, rejected
+payload, and rejected native receipt separately; a silent `test` behind shell
+`errexit` is not sufficient evidence.
+
+The same immutable-release principle applies to transition-fixture discovery.
+A previous complete release is evaluated against the asset contract that
+existed for that release, not the current release's newly added internal
+assets. Otherwise a legitimate historical baseline becomes impossible merely
+because the new release expands its artifact family. Current publication still
+uses the complete current contract. v4.2.2 encodes those two distinct lists and
+keeps the selected previous tag and SHA immutable for the transition job.
 
 ### Latest discovery, immutable installation
 

@@ -37,15 +37,17 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current complete GitHub distribution: `4.1.3`; current crates.io package:
-  `4.2.0`; working manifest: `4.2.1` candidate (`Cargo.toml`). Exact source
-  `b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed CI and crates publication
-  for v4.2.0, and its release workflow signed/notarized both Apple archives,
-  but release-host assertions expected fully expanded wrapper URLs even though
-  both wrappers deliberately compose a pinned tag/base and asset suffix; the
-  first shell assertion stopped the job before GitHub Release creation. The
-  tag and crate stay immutable;
-  v4.2.1 fixes forward and renders/asserts both wrappers before tagging.
+- Current complete GitHub distribution: `4.1.3`; current crates.io package and
+  latest incomplete GitHub Release: `4.2.1`; working manifest: `4.2.2`
+  candidate (`Cargo.toml`). Exact v4.2.1 source
+  `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed CI/crates, all six release
+  targets, both Apple archive sign/notary jobs, release hosting, and Windows
+  packaging. Its native Intel/ARM package gate then proved the malformed-
+  receipt check ran after the PKG payload had landed, so it withheld all four
+  Mac assets. The Windows transition resolver also required a v4.2-only
+  internal script from its v4.1.3 baseline. The 30-asset release/tag/crate stay
+  immutable; v4.2.2 moves strict Mac ownership proof into a signed preinstall
+  dry run and separates current versus historical Windows asset contracts.
   v4.1.3 passed exact-SHA CI/crates, signed archives, every
   Windows package and transition job, and universal PKG-in-DMG
   sign/notary/install/update/uninstall

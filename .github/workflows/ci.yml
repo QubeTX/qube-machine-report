@@ -261,10 +261,17 @@ jobs:
           grep -Fq 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer' "$shell_wrapper"
           grep -Fq 'tr300_restore_managed_state' "$shell_wrapper"
           grep -Fq 'migrate-cleanup --quiet --strict --cargo-copy --user-profile' "$builder"
+          grep -Fq 'tr300-migration-probe' "$builder"
+          grep -Fq 'migrate-cleanup --quiet --strict --dry-run' "$builder"
           grep -Fq '.config/tr300/tr300-receipt.json' "$builder"
           grep -Fq 'rollback_managed' "$builder"
           render_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/tr300-wrapper-render.XXXXXXXX")
           trap 'rm -rf "$render_dir"' EXIT
+          sed -n "/<<'PREINSTALL'/,/^PREINSTALL$/p" "$builder" | sed '1d;$d' > "$render_dir/pkg-preinstall.sh"
+          sed -n "/<<'POSTINSTALL'/,/^POSTINSTALL$/p" "$builder" | sed '1d;$d' > "$render_dir/pkg-postinstall.sh"
+          test -s "$render_dir/pkg-preinstall.sh"
+          test -s "$render_dir/pkg-postinstall.sh"
+          shellcheck "$render_dir/pkg-preinstall.sh" "$render_dir/pkg-postinstall.sh"
           render_tag=v0.0.0-ci
           render_version=0.0.0
           sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
@@ -315,6 +322,8 @@ jobs:
           fi
           grep -Fq 'previous_tag' "$windows_validation"
           grep -Fq 'previous_version' "$windows_validation"
+          grep -Fq 'current_required=(' "$windows_validation"
+          grep -Fq 'previous_required=(' "$windows_validation"
           if grep -Fq 'Start-Process powershell.exe' "$windows_validation"; then
             echo 'pwsh-hosted cargo-dist validation must not inherit modules into Windows PowerShell' >&2
             exit 1

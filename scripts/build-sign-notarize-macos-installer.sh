@@ -172,6 +172,55 @@ install -d -m 755 "${payload}/usr/local/bin"
 install -m 755 "$universal" "${payload}/usr/local/bin/tr300"
 pkg_scripts="${work_dir}/pkg-scripts"
 mkdir -m 755 "$pkg_scripts"
+install -m 755 "$universal" "${pkg_scripts}/tr300-migration-probe"
+cat > "${pkg_scripts}/preinstall" <<'PREINSTALL'
+#!/bin/sh
+# Fail closed before Installer lays down the PKG payload when an existing
+# managed-shell/Cargo owner cannot be proven safe to converge. The embedded
+# probe is the exact signed universal binary that the package will install.
+set -u
+
+console_user=$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)
+case "$console_user" in
+    ''|root|loginwindow|_mbsetupuser)
+        if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != root ]; then
+            console_user=$SUDO_USER
+        else
+            candidates=''
+            for home in /Users/*; do
+                if [ ! -e "${home}/.cargo/bin/tr300" ] && \
+                    [ ! -e "${home}/.config/tr300/tr300-receipt.json" ]; then
+                    continue
+                fi
+                candidates="${candidates}${home}\n"
+            done
+            candidate_count=$(printf '%b' "$candidates" | /usr/bin/grep -c '^/Users/' || true)
+            [ "$candidate_count" -ne 0 ] || exit 0
+            if [ "$candidate_count" -ne 1 ]; then
+                echo "TR-300: multiple per-user CLI owners exist and no console user identifies the intended one; preserving them and rejecting PKG takeover before payload installation." >&2
+                exit 1
+            fi
+            user_home=$(printf '%b' "$candidates" | /usr/bin/sed -n '1p')
+            console_user=${user_home##*/}
+        fi
+        ;;
+esac
+
+if [ -z "${user_home:-}" ]; then
+    user_home=$(/usr/bin/dscl . -read "/Users/${console_user}" NFSHomeDirectory 2>/dev/null \
+        | /usr/bin/awk '{print $2}')
+fi
+if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
+    echo "TR-300: could not resolve the active user's home; rejecting PKG takeover before payload installation." >&2
+    exit 1
+fi
+
+script_dir=$(/usr/bin/dirname -- "$0") || exit 1
+script_dir=$(unset CDPATH; cd -- "$script_dir" && pwd -P) || exit 1
+"${script_dir}/tr300-migration-probe" migrate-cleanup --quiet --strict --dry-run \
+    --cargo-copy --user-profile "$user_home"
+PREINSTALL
+chmod 755 "${pkg_scripts}/preinstall"
 cat > "${pkg_scripts}/postinstall" <<'POSTINSTALL'
 #!/bin/sh
 # A deliberately launched PKG is the user's newest install-channel choice.
@@ -225,6 +274,8 @@ rollback_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/tr300-pkg-takeover.XXXXXXXX")
 managed_binary_existed=0
 managed_receipt_existed=0
 takeover_committed=0
+# Invoked indirectly by the EXIT/HUP/INT/TERM trap below.
+# shellcheck disable=SC2329
 rollback_managed() {
     if [ "$takeover_committed" -eq 0 ]; then
         if [ "$managed_binary_existed" -eq 1 ]; then

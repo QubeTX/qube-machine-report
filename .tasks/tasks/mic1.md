@@ -52,6 +52,23 @@ documentation reconciliation, and immutable release proof remain open.
   executable synthetic-render lifecycle guard, and WiX 3.14.1/Inno 6.7.3
   Global/Corporate source compiles successfully; clean committed-tree package
   and hosted evidence remain (agent: codex)
+- 2026-07-18 — exact v4.2.1 source `b45ec00` passed CI 29663392937,
+  crates 29663494252, Release 29663533999, both signed/notarized Apple archive
+  jobs, and Windows packaging 29663678096. Native Intel and ARM run 29663678097
+  then proved PKG `postinstall` ambiguity rejection occurs after payload
+  installation, so all four Mac assets were withheld. Windows transition run
+  29663781604 separately proved that selecting a historical baseline against
+  the new release's future-only internal script is invalid. v4.2.1 remains an
+  immutable 30-asset release; v4.2.2 moves strict dry-run ownership proof into
+  PKG `preinstall`, retains transactional cleanup in `postinstall`, makes every
+  negative-state assertion explicit, and separates historical/current asset
+  contracts (agent: codex)
+- 2026-07-18 — v4.2.2 passes local locked fmt/Clippy/164 unit/19 integration/
+  release build, RustSec, cargo-dist, workflow/script/parser, extracted Mac
+  lifecycle ShellCheck, managed rollback, executable guard, WiX/Inno source,
+  historical-baseline resolver, and Alienware candidate functionality gates.
+  Clean committed-tree package/publish proof and exact-SHA hosted publication
+  remain (agent: codex)
 
 ## Intent
 
@@ -71,8 +88,9 @@ hook.
   exact MSI UpgradeCodes and two exact Inno AppIds and invoking real
   uninstallers.
 - macOS shell takeover requires exact receipt, payload owner, and Developer ID
-  proof. PKG postinstall performs the reverse allowlisted Cargo binary/receipt
-  cleanup.
+  proof. PKG `preinstall` uses its embedded exact candidate for strict dry-run
+  ownership proof before payload mutation; `postinstall` performs the reverse
+  allowlisted Cargo binary/receipt cleanup.
 - Cross-edition native Windows packages stop before mutation when the other
   scope is registered or its exact native binary remains; same-edition format
   changes remain automatic only after a strict non-mutating managed-ownership
@@ -95,6 +113,9 @@ hook.
   then reconfirms the transaction after its own registration exists. Hosted
   malformed-receipt gates require all four Windows packages and the Mac PKG to
   preserve prior bytes/receipt and leave no rejected native owner.
+- Historical transition discovery evaluates old releases against their own
+  established artifact family; only the current release must contain newly
+  introduced internal wrapper assets.
 
 ## Verification
 
@@ -109,6 +130,9 @@ hook.
 - [x] Full local locked Rust gates, RustSec, cargo-dist plan/generate-check,
   actionlint/ShellCheck, wrapper fixtures, and Alienware candidate
   functionality/hardware validation pass.
+- [x] Extracted PKG lifecycle scripts lint independently, and the Windows
+  release resolver selects v4.1.3 under the historical contract without
+  weakening the v4.2.2 current contract.
 - [ ] Hosted Windows exact-release jobs prove all four native-to-IRM takeovers.
 - [ ] Native Intel/ARM jobs prove shell-to-PKG and PKG-to-shell takeovers.
 - [ ] Published AMD64 Linux wrapper installs, receipts, and no-op-updates.
@@ -116,7 +140,7 @@ hook.
 
 ## Resume
 
-Run the full clean-tree release sequence only after local fmt/clippy/tests/build,
+Run the v4.2.2 full clean-tree release sequence only after local fmt/clippy/tests/build,
 package/publish dry runs, audit, actionlint/shellcheck, WiX, and Inno gates pass.
 Do not use the Alienware's active Global MSI as a takeover fixture; disposable
 hosted Windows runners own that destructive matrix.

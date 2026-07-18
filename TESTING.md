@@ -7,7 +7,7 @@ as passed.
 
 ## Per-version verification log
 
-### v4.2.1 — 2026-07-18 (candidate release-host fix-forward)
+### v4.2.2 — 2026-07-18 (candidate package-transaction fix-forward)
 
 - **Decision under test:** ADR MIC-1 makes the managed CLI installers the
   recommended public path while preserving every proven origin for
@@ -59,7 +59,10 @@ as passed.
   binary byte-for-byte while returning a strict failure. Hosted package jobs
   now inject that malformed state before every MSI/EXE and PKG attempt and must
   prove byte-for-byte retention plus no rejected native registration/payload,
-  then prove normal PATH/registration and duplicate convergence.
+  then prove normal PATH/registration and duplicate convergence. On macOS the
+  exact signed universal binary is embedded as a strict dry-run `preinstall`
+  probe, so ambiguity fails before Installer copies `/usr/local/bin/tr300`;
+  `postinstall` performs the actual bounded convergence only after preflight.
 - **Mac distribution candidate:** the v4.2 series adds a direct universal
   `tr300-universal-apple-darwin.pkg` plus SHA-256 sidecar. It is signed with
   Developer ID Installer, notarized, stapled, and Gatekeeper-assessed. The DMG
@@ -67,7 +70,7 @@ as passed.
   contain a byte-identical copy of the direct PKG. Native Intel and Apple
   Silicon jobs install/verify the direct package and replay the real v4.1.3 DMG
   updater bridge; only the visible Installer prompt is substituted in CI. The
-  first future v4.2.x release remains the required real direct-PKG old-to-new
+  first complete v4.2.x release remains the required real direct-PKG old-to-new
   updater proof.
 - **Local code/package evidence:** locked formatting and Clippy pass with
   warnings denied; 164 all-feature unit tests and 19 integration tests pass;
@@ -128,6 +131,34 @@ as passed.
   Global and Corporate 4.2.1 MSIs with only the intentional downgrade-capable
   ICE61 warning; Inno Setup 6.7.3 compiles both 4.2.1 EXEs. These are local
   package-source results, not hosted install/update evidence.
+- **Immutable v4.2.1 boundary and v4.2.2 reason:** exact source
+  `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed CI run 29663392937,
+  crates run 29663494252, Release run 29663533999, and Windows packaging run
+  29663678096. crates.io serves 4.2.1 with checksum
+  `1daa1ad4b630e37626b37b2e6a0d09fd7e205fcfeb3df59f6cfd5080a450f3f6`.
+  The release host rendered both wrappers, created the release, and passed its
+  clean-home managed Linux smoke. macOS run 29663678097 built, Developer ID-
+  signed, notarized, and stapled the direct PKG plus bridge DMG; both native
+  validators then rejected the malformed managed-receipt case because the
+  `postinstall` check occurred after the PKG payload landed. All four Mac assets
+  were withheld, leaving an immutable 30-asset incomplete release. Windows
+  transition run 29663781604 stopped before installation because prior-release
+  selection incorrectly required v4.1.3 to contain the new v4.2-only internal
+  raw PowerShell script. v4.2.2 moves the signed strict probe into `preinstall`,
+  makes every rollback assertion diagnostic, and separates current-release
+  requirements from the historical baseline family.
+- **v4.2.2 local fix-forward evidence:** locked fmt, warnings-denied Clippy,
+  164 unit tests, 19 integration tests, optimized build, RustSec audit of 221
+  locked dependencies, cargo-dist plan/generate-check, actionlint, direct and
+  embedded ShellCheck, extracted PKG `preinstall`/`postinstall` ShellCheck,
+  PowerShell parsing, Git Bash syntax, both managed rollback fixtures, and the
+  complete executable lifecycle guard pass. The public-release resolver proves
+  v4.2.1 satisfies the current Windows contract and v4.1.3 satisfies the
+  historical baseline contract. WiX 3.14.1 and Inno Setup 6.7.3 compile both
+  4.2.2 editions. The Alienware candidate passes full table, fast ASCII,
+  full/fast JSON, ordinary no-write, explicit-save/cleanup, console-encoding,
+  and 16-physical/22-logical topology checks. These are local source/binary
+  results, not native Mac or installed-public-update evidence.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast
@@ -136,7 +167,7 @@ as passed.
   logical processors, Intel Arc + RTX 4070 Laptop GPUs, about 32 GB memory, NTFS
   C:, Wi-Fi source 10.1.0.51 with DNS/gateway 10.1.0.1, en-US, and a plugged-in
   battery. The installed v4.1.3 MSI and candidate agree on those fields; this
-  does not substitute for the post-publication v4.1.3-to-v4.2.1 UAC update.
+  does not substitute for the post-publication v4.1.3-to-v4.2.2 UAC update.
 - **Release target:** 34 nonempty stable-name assets: the prior 30, direct PKG
   and sidecar, plus internal raw `tr300-dist-installer.ps1` and
   `tr300-dist-installer.sh`. Public commands and filenames remain versionless;

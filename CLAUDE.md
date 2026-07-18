@@ -51,14 +51,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete GitHub distribution: **4.1.3**; crates.io package: **4.2.0**; working
-manifest: **4.2.1 candidate**. Exact v4.2.0 source
-`b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed exact-SHA CI/crates and its
-release workflow signed/notarized both Apple archives, but host assertions
-expected fully expanded wrapper URLs even though both wrappers deliberately
-compose a pinned tag/base and asset suffix. The first shell assertion stopped
-the job before GitHub Release creation. Keep that tag/crate immutable; v4.2.1
-is the fix-forward and must render/assert both public wrappers before tagging.
+Complete GitHub distribution: **4.1.3**; crates.io package and latest incomplete
+GitHub Release: **4.2.1**; working manifest: **4.2.2 candidate**. Exact v4.2.1
+source `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed exact-SHA CI/crates,
+all six release targets, Apple archive signing/notarization, release hosting,
+and Windows packaging. Native Intel/ARM package validation then proved the
+strict malformed-receipt check happened after the PKG payload had landed, so
+all four Mac assets were withheld. Windows transition selection also required
+a v4.2-only internal script from the v4.1.3 baseline. Keep the 30-asset release,
+tag, and crate immutable; v4.2.2 moves Mac proof before payload mutation and
+separates current from historical Windows asset contracts.
 The v4.1.0-v4.1.3
 tags/assets are immutable. v4.1.3 completed exact-SHA CI/crates, supported
 macOS receipt/file-owner/Developer ID validation, the hosted 30-asset release,
@@ -78,7 +80,7 @@ as optional native choices and raw Cargo as advanced/unmanaged. `tr300 update`
 preserves the proven channel, while a deliberately launched fresh installer is
 authoritative channel intent. The direct signed/notarized/stapled universal PKG
 is the current Mac native artifact; the DMG remains only as an immutable-v4.1
-updater bridge. The v4.2.1 candidate target is 34 stable-name assets. None of
+updater bridge. The v4.2.2 candidate target is 34 stable-name assets. None of
 the complete distribution is published evidence until its own exact-SHA and
 hosted package matrices pass.
 
@@ -501,7 +503,7 @@ and release-asset gates.
   must sign and receive Notary `Accepted` before hosting; then
   `windows-installers.yml` and `macos-installer.yml` must finish. The latter
   requires native Intel and Apple Silicon direct-PKG/DMG-bridge validation.
-  Verify all 34 assets before updating the homepage for v4.2.1.
+  Verify all 34 assets before updating the homepage for v4.2.2.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
 workflow use `cargo publish --locked`. `allow-dirty = ["ci", "msi"]` is

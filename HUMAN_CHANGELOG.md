@@ -13,6 +13,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-07-18
+
+### Fixed
+- **The Mac package now checks whether it can safely take ownership before it
+  installs its command.** v4.2.1 correctly refused a deliberately broken
+  managed-install receipt, but the check happened after macOS had already put
+  the new command in `/usr/local/bin`. Intel and Apple Silicon testing caught
+  that unsafe ordering and withheld all Mac installer downloads. v4.2.2 runs
+  the same signed TR-300 ownership check before macOS copies the package
+  payload, then performs the real cleanup only after the check succeeds.
+- **Windows old-to-new testing now compares an older release against the files
+  that existed in that release.** A new internal v4.2 installer helper is still
+  mandatory in a current release, but no longer disqualifies v4.1.3 from being
+  the older MSI/EXE/PowerShell update baseline.
+
 ## [4.2.1] - 2026-07-18
 
 ### Fixed

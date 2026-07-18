@@ -217,10 +217,22 @@ jobs:
           sudo installer -pkg "$pkg" -target /
           invalid_status=$?
           set -e
-          test "$invalid_status" -ne 0
-          test "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" = "$managed_hash"
-          test "$(cat "$HOME/.config/tr300/tr300-receipt.json")" = "$invalid_receipt"
-          test ! -e /usr/local/bin/tr300
+          if [ "$invalid_status" -eq 0 ]; then
+            echo 'malformed managed receipt was incorrectly accepted' >&2
+            exit 1
+          fi
+          if [ "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" != "$managed_hash" ]; then
+            echo 'rejected package changed the managed binary' >&2
+            exit 1
+          fi
+          if [ "$(cat "$HOME/.config/tr300/tr300-receipt.json")" != "$invalid_receipt" ]; then
+            echo 'rejected package changed the managed receipt' >&2
+            exit 1
+          fi
+          if [ -e /usr/local/bin/tr300 ]; then
+            echo 'rejected package left its payload behind' >&2
+            exit 1
+          fi
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'rejected package left a receipt behind' >&2
             exit 1

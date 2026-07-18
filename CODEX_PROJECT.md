@@ -20,19 +20,20 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Complete GitHub distribution: `4.1.3` (2026-07-18); crates.io package:
-  `4.2.0`; working manifest / candidate: `4.2.1`. v4.1.3 passed exact-SHA
+- Complete GitHub distribution: `4.1.3` (2026-07-18); crates.io package and
+  latest incomplete GitHub Release: `4.2.1`; working manifest / candidate:
+  `4.2.2`. v4.1.3 passed exact-SHA
   CI/crates, signed archives, all Windows
   package/transition jobs, the native Intel/ARM PKG-in-DMG lifecycle, a
   30-asset public audit, and the Alienware's real Global MSI v4.0.1→v4.1.3 UAC
   transition. Its release source is
-  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64`. Exact v4.2.0 source
-  `b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed exact-SHA CI/crates and
-  produced signed/notarized Apple archives, but its release host failed before
-  creating a GitHub Release because its assertions expected fully expanded
-  wrapper URLs rather than each wrapper's pinned tag/base plus asset suffix.
-  Its tag/crate remain immutable; v4.2.1 fixes forward and
-  must earn its own exact-SHA and hosted package evidence.
+  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64`. Exact v4.2.1 source
+  `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed exact-SHA CI/crates,
+  release hosting, Apple archive trust, and Windows packaging. Both native Mac
+  validators then rejected post-payload malformed-receipt handling and withheld
+  four assets; the Windows transition resolver separately rejected v4.1.3 for
+  lacking a future-only internal script. Its 30-asset release/tag/crate remain
+  immutable; v4.2.2 fixes forward and must earn complete hosted evidence.
 - Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
   `https://reports.qubetx.com/` with the v4.0.1 persistence, accuracy,
   update-failure, and Mac trust contract.
@@ -66,7 +67,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
   documentation/workflow state reconciled 2026-07-18.
 
-### v4.2.1 managed-install/direct-PKG fix-forward candidate
+### v4.2.2 managed-install/direct-PKG fix-forward candidate
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
@@ -106,9 +107,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Alienware validation confirmed the existing Global MSI v3.17.0 upgraded in
   place through v4.0.1 to v4.1.3 at the same Program Files path/registration;
   corrected hybrid topology reports `6P + 10E`, 16 physical, 22 logical cores.
-- The v4.2.1 target is 34 stable-name assets. The full dirty-tree local gate
-  set passes; required pending evidence is the clean committed-tree package/
-  publish gate, exact-SHA CI/crates, disposable Windows managed/
+- The v4.2.2 target is 34 stable-name assets. Required pending evidence is the
+  full local and clean committed-tree gate set, exact-SHA CI/crates,
+  disposable Windows managed/
   native matrices, both Apple-native direct-PKG/bridge lifecycles, public-byte
   audit, and homepage update.
 
@@ -176,14 +177,14 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.2.1` while clearly labeling it a candidate.
+   synchronized at `4.2.2` while clearly labeling it a candidate.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
    sign/notary/staple/install proof.
 3. Commit and push `main`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
-4. Create and push only tag `v4.2.1` after CI/crates settle. Existing immutable
+4. Create and push only tag `v4.2.2` after CI/crates settle. Existing immutable
    v4 tags must not move.
 5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
    extracted signatures/checksums from both public Mac archives.

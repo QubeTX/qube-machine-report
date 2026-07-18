@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-07-18
+
+### Fixed
+- **Native Mac takeover now rejects conflicting managed ownership before the
+  PKG payload is installed.** v4.2.1 correctly failed a malformed managed
+  receipt, but its strict probe ran from `postinstall`, after Installer had
+  already copied `/usr/local/bin/tr300`; hosted Intel and Apple Silicon jobs
+  proved that a failed package script is not sufficient evidence of payload
+  rollback. The PKG now embeds the exact signed universal binary as a
+  `preinstall` dry-run probe. Ambiguous state fails before payload mutation,
+  while the existing postinstall transaction performs actual convergence only
+  after that proof. Failure assertions name any changed binary, receipt,
+  payload, or package registration. (task #pkg42)
+- **Windows transition validation uses distinct current and legacy asset
+  contracts.** The v4.2 managed channel adds the internal
+  `tr300-dist-installer.ps1`, but an older update baseline cannot be required to
+  contain a future-only asset. Current releases still require every v4.2
+  Windows family; prior-version selection requires the complete historical
+  family it could actually publish. (task #mic1)
+
 ## [4.2.1] - 2026-07-18
 
 ### Fixed
