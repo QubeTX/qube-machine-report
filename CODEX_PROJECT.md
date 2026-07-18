@@ -6,9 +6,12 @@ TR-300 is a standalone Rust CLI and library that produces compact, fixed-width
 machine reports on macOS, Linux, and Windows. The v4 release line hardens
 cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
-notarization. v4.1 adds origin-preserving updates and a native universal
-PKG-in-DMG verified on hosted Apple Silicon and Intel. Alienware Windows
-evidence is captured; AMD64 Linux laptop and Raspberry Pi 4 checks remain open.
+notarization. v4.1 added origin-preserving updates and a native universal
+package verified on hosted Apple Silicon and Intel. v4.2 is the MIC-1 candidate:
+managed CLI installers are the recommended default, fresh installer intent is
+authoritative, and the Mac native artifact is a direct PKG with a compatibility-
+only DMG bridge. Alienware Windows evidence is captured; AMD64 Linux laptop and
+Raspberry Pi 4 checks remain open.
 
 Start the next session with
 [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md),
@@ -17,17 +20,13 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Published version: `4.1.1` (2026-07-18); working manifest / next release:
-  `4.1.2`. v4.1.1 fixed checkout, Xcode `lipo`, and chained release identity,
-  then passed exact-SHA CI/crates, signed archives, Windows packaging, and DMG
-  build/notarization. Its native install gates exposed the removed macOS
-  `pkgutil --verify` switch before DMG publication; v4.1.2 is the immutable
-  fix-forward. v4.0.0 published to
-  crates.io but its immutable tag failed closed before GitHub artifact hosting;
-  v4.0.1 is the deployed keychain-search fix-forward. Release source
-  `b67ad083503d0fff840af8467015d05c659268ea` passed exact-SHA CI/crates,
-  both hosted Apple jobs, the 28-asset public audit, and supplemental Windows
-  packaging.
+- Published version: `4.1.3` (2026-07-18); working manifest / candidate:
+  `4.2.0`. v4.1.3 passed exact-SHA CI/crates, signed archives, all Windows
+  package/transition jobs, the native Intel/ARM PKG-in-DMG lifecycle, a
+  30-asset public audit, and the Alienware's real Global MSI v4.0.1→v4.1.3 UAC
+  transition. Its release source is
+  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64`. v4.2.0 is not published and
+  must not inherit that evidence without its own exact-SHA gates.
 - Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
   `https://reports.qubetx.com/` with the v4.0.1 persistence, accuracy,
   update-failure, and Mac trust contract.
@@ -53,22 +52,29 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   skipped already-published 4.0.1 without token or publish access.
 - Architecture ledger: `docs/architecture-decisions.md` is reconciled through
   2026-07-18. It covers the complete accepted v4/session decision surface and
-  explicitly backfills the one-product/mode/output contracts, Windows advisory
-  consolidation, and exhaustive `main`/checkout-v6 rationale and evidence.
+  explicitly backfills the one-product/mode/output contracts, the historical
+  Windows advisory cleanup and MIC-1's strict superseding behavior, plus the
+  exhaustive `main`/checkout-v6 rationale and evidence.
 - Release tooling: cargo-dist `0.31.0`
 - Last physical-Mac source verification: 2026-07-15 on a MacBook Pro M2,
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
   documentation/workflow state reconciled 2026-07-18.
 
-### v4.1.2 fix-forward release
+### v4.2.0 managed-install/direct-PKG candidate
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
-  shell/PowerShell, or macOS PKG/DMG origin. Unknown/conflicting origins do not
+  shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
   mutate the machine.
 - Public commands/assets remain versionless; the updater resolves latest once
   and pins every payload, sidecar, installer script, and Cargo version to that
   immutable tag. Generated GitHub release notes are normalized to public
   `latest` links immediately before the release is created.
+- MIC-1 recommends `irm .../tr300-installer.ps1 | iex` on Windows and
+  `curl .../tr300-installer.sh | sh` on macOS/Linux. The rendered wrappers use
+  one exact tag, invoke internal `tr300-dist-installer.*` cargo-dist scripts,
+  verify the managed receipt/binary, and converge only exact recognized native
+  ownership. Raw Cargo remains advanced/unmanaged because it cannot run a
+  TR-300 post-install hook.
 - Update JSON stays one stdout object and adds `install_channel`,
   `recovery_url`, and `requires_user_action` without removing existing fields;
   known-channel failures also expose the immutable `exact_installer_url`.
@@ -77,26 +83,27 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   and use the new binary for delayed backup cleanup. Legacy updater failure is
   valid only when it retains the old binary and returns recovery; a fresh exact
   same-channel install must then converge to one current registration.
-- A fresh v4.1.0-or-newer MSI can replace a same-edition older, newer, or
-  same-version MSI; automatic updates remain latest-only. Explicit MSI/Inno
-  format changes remove the same-edition competing registration first. Inno
-  uses supported registry enumeration with exact scope/name/publisher/native-
-  installer/GUID evidence; it does not call the Windows Installer DLL from
-  Pascal Script. The reverse MSI takeover reads the exact Inno AppId's full
-  registered `UninstallString`; a relative uninstaller name is invalid for a
-  Windows Installer Type 34 action.
-- The native macOS artifact is a universal signed `tr300.pkg` inside a signed,
-  notarized, stapled DMG. The PKG owns `/usr/local/bin/tr300` and the stable
-  `com.qubetx.tr300.pkg` receipt used by future updates; receipt ID/version,
-  payload path, per-file owner, scope, and installed Developer ID product
-  identity must all agree.
+- A deliberately launched fresh installer is the user's newest channel intent,
+  including same-version or downgrade repair; automatic updates remain latest-
+  only. Same-edition MSI/Inno format changes remove the exact competing product.
+  Opposite-edition native packages stop before mutation and point to the managed
+  PowerShell path, which can request UAC for exact cross-scope convergence.
+- The native macOS artifact is the direct universal signed, notarized, stapled
+  `tr300-universal-apple-darwin.pkg`. It owns `/usr/local/bin/tr300` and the
+  `com.qubetx.tr300.pkg` receipt. The DMG remains only for immutable v4.1.x
+  clients and contains a byte-identical PKG. Current updaters download the
+  direct exact-tag PKG/sidecar and wait for Apple Installer.
 - Native GitHub `macos-15` and `macos-15-intel` runners are release gates; a
   physical Mac is optional visual smoke testing unless CI exposes a GUI-only
   defect. Installer-identity preflight run 29637224793 signed and verified a
   disposable PKG successfully on both architectures.
 - Alienware validation confirmed the existing Global MSI v3.17.0 upgraded in
-  place to v4.0.1 at the same Program Files path/registration and corrected
-  hybrid topology now reports `6P + 10E`, 16 physical, 22 logical cores.
+  place through v4.0.1 to v4.1.3 at the same Program Files path/registration;
+  corrected hybrid topology reports `6P + 10E`, 16 physical, 22 logical cores.
+- The v4.2.0 target is 34 stable-name assets. Required pending evidence is the
+  full locked local gate set, exact-SHA CI/crates, disposable Windows managed/
+  native matrices, both Apple-native direct-PKG/bridge lifecycles, public-byte
+  audit, and homepage update.
 
 ### v4.0.0 feature set, released through the v4.0.1 fix-forward
 
@@ -162,20 +169,20 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.1.2`.
+   synchronized at `4.2.0` while clearly labeling it a candidate.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
-   shellcheck, Windows installer fixtures, and archive plus PKG-in-DMG
+   shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
    sign/notary/staple/install proof.
 3. Commit and push `main`; wait for `.github/workflows/ci.yml` to pass on the
    exact commit and for `crates-publish.yml` to publish that same SHA.
-4. Create and push only tag `v4.1.2` after CI/crates settle. Existing immutable
+4. Create and push only tag `v4.2.0` after CI/crates settle. Existing immutable
    v4 tags must not move.
 5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
    extracted signatures/checksums from both public Mac archives.
 6. Verify cargo-dist's GitHub Release, both supplemental installer workflows,
-   all four Windows installers, legacy aliases, universal DMG/PKG, and expected
-   30 assets.
+   all four Windows installers, managed/legacy wrappers, direct PKG, bridge DMG,
+   and expected 34 assets.
 7. Only then update, test, commit, and push the homepage repository.
 8. Keep AMD/Pi tasks open and patch forward from real findings.
 
@@ -264,7 +271,10 @@ excluded. The tracked project tree is:
 ├── man/tr300.1
 ├── rust-toolchain.toml
 ├── scripts
-│   ├── build-sign-notarize-macos-dmg.sh
+│   ├── build-sign-notarize-macos-installer.sh
+│   ├── managed-installers
+│   │   ├── tr300-installer.ps1
+│   │   └── tr300-installer.sh
 │   └── sign-notarize-macos.sh
 ├── src
 │   ├── cli.rs

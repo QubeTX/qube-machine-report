@@ -49,8 +49,8 @@ DisableDirPage=auto
 ; the choice to elevate (we deliberately install per-user only).
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64os
+ArchitecturesInstallIn64BitMode=x64os
 OutputBaseFilename=tr300-x86_64-pc-windows-msvc-corporate-setup
 OutputDir=Output
 Compression=lzma
@@ -69,14 +69,10 @@ CloseApplications=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
-[Tasks]
-; Both default-checked (one install at a time). Under /SILENT the default-checked
-; tasks fire automatically, so the silent self-update path runs both cleanups.
-Name: "cleancargo"; Description: "Remove an older Cargo-installed copy of tr300 (recommended - keeps one version on PATH)"; GroupDescription: "Consolidate installs:"
-Name: "cleanotheredition"; Description: "Remove the other edition (Global per-machine) if present (recommended - one edition at a time)"; GroupDescription: "Consolidate installs:"
-
 [Files]
-Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion
+; PrepareToInstall temporarily extracts this same compiled payload for the
+; non-mutating strict ownership preflight.
+Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion noencryption
 
 [Registry]
 ; Install-source marker. tr300 update reads HKCU\Software\TR300\InstallSource
@@ -86,22 +82,57 @@ Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSour
 Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSourceCorporate"; ValueData: "exe-corporate"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\TR300"; Flags: uninsdeletekeyifempty
 
-[Run]
-; Post-install consolidation. Deletion logic lives in the binary
-; (`tr300 migrate-cleanup`) - it only ever removes tr300.exe, never cargo/rustup,
-; the Cargo bin PATH entry, the running install, or anything else; always exits 0.
-; perUser Corporate EXE runs AS THE USER (no UAC), so the process environment
-; already points at the right Cargo bin and LocalAppData - no user-profile override
-; needed. The "other edition" here is the Global per-machine copy in Program Files;
-; a perUser process can't delete it, so migrate-cleanup reports "needs admin" and
-; exits 0 (graceful skip).
-Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --cargo-copy"; Flags: runhidden waituntilterminated; Tasks: cleancargo; StatusMsg: "Removing older Cargo-installed copy..."
-Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
-
 [Code]
 #define ConflictingMsiDisplayName MyAppFullName
 #define ConflictingMsiPublisher MyAppPublisher
+#define OtherEditionDisplayName "tr300"
+#define OtherEditionInnoAppId "{AB14223F-2693-4EC2-824F-BF53CC32D061}"
+#define OtherEditionBinaryPath "{commonpf}\tr300\bin\tr300.exe"
+
+function PreflightManagedTakeover(): String;
+var
+  ExitCode: Integer;
+  Binary: String;
+begin
+  Result := '';
+  ExtractTemporaryFile('{#MyAppExeName}');
+  Binary := ExpandConstant('{tmp}\{#MyAppExeName}');
+  if not Exec(Binary, 'migrate-cleanup --quiet --strict --dry-run --cargo-copy',
+      ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+  begin
+    Result := 'Could not start the TR-300 managed/Cargo ownership preflight. ' +
+      'Setup stopped before changing the existing installation.';
+    exit;
+  end;
+  if ExitCode <> 0 then
+    Result := 'The existing TR-300 managed/Cargo ownership evidence is ' +
+      'ambiguous. Setup stopped before changing anything. Use ' +
+      'https://github.com/QubeTX/qube-machine-report/releases/latest';
+end;
+
 #include "remove-conflicting-msi.pas"
+
+procedure RunStrictMigration(Args: String; LabelText: String);
+var
+  ExitCode: Integer;
+  Binary: String;
+begin
+  Binary := ExpandConstant('{app}\bin\{#MyAppExeName}');
+  if not Exec(Binary, 'migrate-cleanup --quiet --strict ' + Args,
+      ExpandConstant('{app}\bin'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Could not start TR-300 ' + LabelText + ' cleanup. Setup stopped safely.');
+  if ExitCode <> 0 then
+    RaiseException('TR-300 ' + LabelText + ' cleanup did not converge (exit ' +
+      IntToStr(ExitCode) + '). Setup cannot claim one active install. Use ' +
+      'https://github.com/QubeTX/qube-machine-report/releases/latest');
+end;
+
+procedure ConsolidatePriorCli;
+begin
+  { PrepareToInstall rejected both registered and orphaned Global binaries and
+    dry-ran this exact managed/Cargo ownership transaction before mutation. }
+  RunStrictMigration('--cargo-copy', 'managed/Cargo');
+end;
 
 {
   PATH management — user PATH (HKCU\Environment\Path) for the Corporate
@@ -164,8 +195,12 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  if CurStep = ssPostInstall then begin
+    { The non-mutating preflight already proved exact ownership. Final strict
+      convergence runs before PATH advertises the new channel. }
+    ConsolidatePriorCli;
     EnvAddPath(ExpandConstant('{app}') + '\bin');
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

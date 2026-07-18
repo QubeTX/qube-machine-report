@@ -1,4 +1,4 @@
-name: macOS Universal DMG
+name: macOS Universal Package
 
 on:
   workflow_run:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach the DMG to (for example vX.Y.Z)"
+        description: "Release tag to attach the PKG and compatibility DMG to (for example vX.Y.Z)"
         required: false
         default: ""
         type: string
@@ -53,7 +53,7 @@ jobs:
         run: scripts/verify-apple-installer-identity.sh
 
   build:
-    name: Build, sign, and notarize universal PKG-in-DMG
+    name: Build, sign, and notarize universal PKG
     needs: credential-preflight
     runs-on: macos-15-intel
     if: |
@@ -115,7 +115,7 @@ jobs:
             --pattern 'tr300-x86_64-apple-darwin.tar.xz*'
           (cd upstream && shasum -a 256 -c ./*.sha256)
 
-      - name: Build signed and notarized DMG
+      - name: Build direct PKG and legacy DMG bridge
         timeout-minutes: 45
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -130,23 +130,25 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         shell: bash
         run: |
-          scripts/build-sign-notarize-macos-dmg.sh \
+          scripts/build-sign-notarize-macos-installer.sh \
             '${{ steps.tag.outputs.version }}' \
             upstream/tr300-aarch64-apple-darwin.tar.xz \
             upstream/tr300-x86_64-apple-darwin.tar.xz \
             output
 
-      - name: Upload DMG for native validation
+      - name: Upload macOS installers for native validation
         uses: actions/upload-artifact@v6
         with:
-          name: tr300-universal-macos-dmg
+          name: tr300-universal-macos-installer
           if-no-files-found: error
           path: |
+            output/tr300-universal-apple-darwin.pkg
+            output/tr300-universal-apple-darwin.pkg.sha256
             output/tr300-universal-apple-darwin.dmg
             output/tr300-universal-apple-darwin.dmg.sha256
 
   validate:
-    name: Validate DMG / PKG (${{ matrix.name }})
+    name: Validate direct PKG (${{ matrix.name }})
     needs: build
     strategy:
       fail-fast: false
@@ -160,10 +162,10 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: tr300-universal-macos-dmg
+          name: tr300-universal-macos-installer
           path: artifact
 
-      - name: Mount, install, and exercise the universal package
+      - name: Validate, install, and exercise the universal package
         shell: bash
         env:
           # The installed updater uses this existing token only for its
@@ -171,6 +173,19 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          pkg="$PWD/artifact/tr300-universal-apple-darwin.pkg"
+          (cd artifact && shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256)
+          package_signature=$(pkgutil --check-signature "$pkg" 2>&1)
+          printf '%s\n' "$package_signature"
+          grep -Fq 'Status: signed by a developer certificate' <<< "$package_signature"
+          grep -Fq '${{ vars.APPLE_INSTALLER_SIGNING_IDENTITY }}' <<< "$package_signature"
+          grep -Fq '(${{ vars.APPLE_TEAM_ID }})' <<< "$package_signature"
+          xcrun stapler validate "$pkg"
+          spctl --assess --type install --verbose=4 "$pkg"
+
+          # Immutable v4.1.x updaters require the legacy DMG filename. Prove
+          # the bridge is trusted and contains this exact direct-PKG byte set,
+          # but install from the direct package used by all current clients.
           dmg="$PWD/artifact/tr300-universal-apple-darwin.dmg"
           (cd artifact && shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
           codesign --verify --deep --strict --verbose=4 "$dmg"
@@ -181,10 +196,40 @@ jobs:
           mkdir "$mount"
           hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
           trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true' EXIT
-          pkgutil --check-signature "$mount/tr300.pkg"
-          xcrun stapler validate "$mount/tr300.pkg"
-          spctl --assess --type install --verbose=4 "$mount/tr300.pkg"
-          sudo installer -pkg "$mount/tr300.pkg" -target /
+          cmp "$pkg" "$mount/tr300.pkg"
+
+          # Managed CLI is the advertised default. First install that exact-tag
+          # channel, then prove a deliberately launched PKG removes its binary
+          # and matching cargo-dist receipt before claiming native ownership.
+          managed_url='https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag }}/tr300-installer.sh'
+          curl --proto '=https' --tlsv1.2 -fLsS "$managed_url" | sh
+          test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 ${{ needs.build.outputs.version }}"
+          test -f "$HOME/.config/tr300/tr300-receipt.json"
+
+          # A foreign/malformed receipt is conflicting ownership, not license
+          # to delete a working CLI copy. Require the PKG transaction to fail,
+          # restore the pair byte-for-byte, and roll back its payload/receipt.
+          managed_hash=$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')
+          printf '%s' '{"provider":{"source":"foreign"},"source":{"app_name":"tr300"},"install_prefix":"/ambiguous"}' \
+            > "$HOME/.config/tr300/tr300-receipt.json"
+          invalid_receipt=$(cat "$HOME/.config/tr300/tr300-receipt.json")
+          set +e
+          sudo installer -pkg "$pkg" -target /
+          invalid_status=$?
+          set -e
+          test "$invalid_status" -ne 0
+          test "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" = "$managed_hash"
+          test "$(cat "$HOME/.config/tr300/tr300-receipt.json")" = "$invalid_receipt"
+          test ! -e /usr/local/bin/tr300
+          ! pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1
+
+          # Restore a legitimate managed state through the same exact-tag
+          # wrapper, then prove the successful native takeover.
+          rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
+          curl --proto '=https' --tlsv1.2 -fLsS "$managed_url" | sh
+          sudo installer -pkg "$pkg" -target /
+          test ! -e "$HOME/.cargo/bin/tr300"
+          test ! -e "$HOME/.config/tr300/tr300-receipt.json"
 
           package_info=$(pkgutil --pkg-info com.qubetx.tr300.pkg)
           grep -Fqx 'package-id: com.qubetx.tr300.pkg' <<< "$package_info"
@@ -220,13 +265,19 @@ jobs:
           test "$update_status" -eq 0
           jq -e '.success == true and .install_channel == "macos-dmg-pkg" and .requires_user_action == false' <<< "$update"
 
-          # Clean-runner uninstall proof for the documented package contents.
-          sudo rm -f /usr/local/bin/tr300
-          sudo pkgutil --forget com.qubetx.tr300.pkg
+          # A fresh managed shell install is equally authoritative. Its wrapper
+          # verifies exact receipt/payload/signature evidence before one sudo
+          # ceremony removes the PKG payload and receipt.
+          curl --proto '=https' --tlsv1.2 -fLsS "$managed_url" | sh
           test ! -e /usr/local/bin/tr300
+          ! pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1
+          test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 ${{ needs.build.outputs.version }}"
+          shell_update=$("$HOME/.cargo/bin/tr300" update --json)
+          jq -e '.success == true and .update_available == false and .install_channel == "shell-installer" and .requires_user_action == false' <<< "$shell_update"
+          rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
 
   publish:
-    name: Attach validated DMG to GitHub Release
+    name: Attach validated macOS installers to GitHub Release
     needs: [build, validate]
     runs-on: ubuntu-latest
     permissions:
@@ -234,9 +285,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: tr300-universal-macos-dmg
+          name: tr300-universal-macos-installer
           path: artifact
-      - name: Upload versionless DMG assets
+      - name: Upload versionless PKG and compatibility DMG assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -244,6 +295,104 @@ jobs:
           # Never replace bytes on an existing tag. A partial/colliding upload
           # is a release failure and must be fixed forward under a new version.
           gh release upload '${{ needs.build.outputs.tag }}' \
+            artifact/tr300-universal-apple-darwin.pkg \
+            artifact/tr300-universal-apple-darwin.pkg.sha256 \
             artifact/tr300-universal-apple-darwin.dmg \
             artifact/tr300-universal-apple-darwin.dmg.sha256 \
             --repo '${{ github.repository }}'
+
+  legacy-bridge:
+    name: Validate v4.1.x DMG bridge (${{ matrix.name }})
+    needs: [build, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-15
+          - name: Intel
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Install immutable v4.1.3 package baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir baseline
+          gh release download v4.1.3 --repo '${{ github.repository }}' \
+            --dir baseline \
+            --pattern 'tr300-universal-apple-darwin.dmg' \
+            --pattern 'tr300-universal-apple-darwin.dmg.sha256'
+          (cd baseline && shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
+          mount="$RUNNER_TEMP/tr300-v413-mount"
+          mkdir "$mount"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" \
+            baseline/tr300-universal-apple-darwin.dmg
+          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true' EXIT
+          sudo installer -pkg "$mount/tr300.pkg" -target /
+          test "$(/usr/local/bin/tr300 --version)" = 'tr300 4.1.3'
+          grep -Fqx 'package-id: com.qubetx.tr300.pkg' \
+            < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
+
+      - name: Update the immutable client through its compatibility DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_tag='${{ needs.build.outputs.tag }}'
+          expected_version='${{ needs.build.outputs.version }}'
+          for attempt in {1..12}; do
+            latest=$(gh api 'repos/${{ github.repository }}/releases/latest' --jq .tag_name)
+            [[ $latest == "$expected_tag" ]] && break
+            if [[ $attempt -eq 12 ]]; then
+              echo "latest release is $latest, expected $expected_tag" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          # The immutable updater correctly opens Apple Installer, whose visible
+          # prompts cannot be driven on a clean hosted runner. Replace only the
+          # `open` launcher with a fixture that runs the exact already-verified
+          # nested PKG through Apple's command-line installer. All old-client
+          # release discovery, DMG download/checksum/trust/mount, receipt, and
+          # post-install verification code remains real.
+          fake_bin="$RUNNER_TEMP/tr300-fake-open"
+          mkdir "$fake_bin"
+          cat > "$fake_bin/open" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          pkg=${!#}
+          exec sudo installer -pkg "$pkg" -target /
+          EOF
+          chmod 755 "$fake_bin/open"
+
+          set +e
+          update=$(PATH="$fake_bin:$PATH" /usr/local/bin/tr300 update --json)
+          update_status=$?
+          set -e
+          printf 'Legacy updater JSON (exit %s): %s\n' "$update_status" "$update" >&2
+          test "$update_status" -eq 0
+          jq -e --arg version "$expected_version" '
+            .success == true and
+            .latest_version == $version and
+            .strategy == "mac_dmg_pkg" and
+            .install_channel == "macos-dmg-pkg" and
+            .requires_user_action == false
+          ' <<< "$update"
+          test "$(/usr/local/bin/tr300 --version)" = "tr300 $expected_version"
+          package_info=$(pkgutil --pkg-info com.qubetx.tr300.pkg)
+          grep -Fqx "version: $expected_version" <<< "$package_info"
+          test "$(command -v tr300)" = /usr/local/bin/tr300
+          test ! -e "$HOME/.cargo/bin/tr300"
+
+      - name: Remove the validation package
+        shell: bash
+        run: |
+          sudo rm -f /usr/local/bin/tr300
+          sudo pkgutil --forget com.qubetx.tr300.pkg
+          test ! -e /usr/local/bin/tr300

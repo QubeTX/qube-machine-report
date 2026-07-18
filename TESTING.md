@@ -7,6 +7,95 @@ as passed.
 
 ## Per-version verification log
 
+### v4.2.0 — 2026-07-18 (candidate; not published)
+
+- **Decision under test:** ADR MIC-1 makes the managed CLI installers the
+  recommended public path while preserving every proven origin for
+  `tr300 update`. A fresh managed/native installer is authoritative user intent,
+  including same-version or downgrade repair, but may declare success only
+  after the final binary, durable receipt/marker, registration, PATH, and
+  absence of a shadowing recognized copy agree. Unknown or conflicting evidence
+  fails closed with the stable release recovery URL.
+- **Windows candidate:** the public `tr300-installer.ps1` wrapper is rendered
+  with one immutable release tag, invokes the internal exact-tag cargo-dist
+  script, verifies the new managed receipt/binary, enumerates only TR-300's
+  fixed MSI UpgradeCodes and Inno AppIds, and removes those registered products.
+  Machine-wide removal uses native UAC; Corporate/user products remain
+  unelevated. Exact read-only enumeration on the Alienware found the one natural
+  Global MSI product `{E6B1EA35-697A-498B-9CB3-D1D8FB3A3917}` and no competing
+  product; the active installation was not changed by this source audit.
+  Opposite-edition native MSI/EXE attempts now stop on registration or the exact
+  native path before mutation and point to the managed path. Both formats run
+  the extracted/embedded candidate's strict dry-run before removing a same-
+  edition native product. Hosted disposable jobs must prove all four native-to-managed
+  takeovers, both cross-edition safe stops, same-edition format changes, normal
+  preserved-channel updates, cleanup, and one-object JSON.
+- **Unix candidate:** the public `tr300-installer.sh` wrapper invokes the
+  internal exact-tag cargo-dist script and verifies its version/receipt. On
+  macOS it removes a native package only after the fixed receipt, root payload,
+  per-file package owner, `/usr/local/bin/tr300`, and Developer ID identity all
+  agree. The reciprocal PKG postinstall uses the bounded migration action to
+  remove an exact managed-shell/Cargo binary and matching receipt. Linux keeps
+  the managed-shell channel; raw Cargo remains advanced/unmanaged because Cargo
+  has no package post-install hook. Inspection of the generated cargo-dist
+  0.31.0 installer confirms that the default path creates the shared
+  `~/.cargo/env` guard and wires POSIX/bash/zsh/fish startup files idempotently.
+  The published Linux smoke now uses a clean home with PATH modification enabled
+  and requires a fresh shell sourcing `.profile` to resolve only the managed
+  binary; `--no-modify-path` remains an explicit opt-out, not the release test.
+- **Fresh-takeover rollback:** both wrappers snapshot the intended/prior
+  managed paths and cargo-dist receipt before mutation. Isolated Linux-shell and
+  Windows-PowerShell fixtures replace/delete those files, invoke rollback, and
+  require both old binaries plus exact receipt contents to return. Native
+  registration is never counterfeited; a partial real native uninstall remains
+  visible in failure diagnostics. If a native uninstaller or Mac receipt
+  retirement already commits, the verified new managed owner is retained so a
+  failed recovery cannot deliberately produce zero working copies.
+- **Strict native convergence:** v4.2+ MSI, EXE, and PKG integrations always use
+  hidden `migrate-cleanup --strict`; interactive task/checkbox opt-outs were
+  removed. An exact cargo-dist receipt is validated before its binary moves.
+  Focused fixtures prove a valid binary/receipt pair is removed together with no
+  private staging leak and a foreign/malformed receipt preserves the prior
+  binary byte-for-byte while returning a strict failure. Hosted package jobs
+  now inject that malformed state before every MSI/EXE and PKG attempt and must
+  prove byte-for-byte retention plus no rejected native registration/payload,
+  then prove normal PATH/registration and duplicate convergence.
+- **Mac distribution candidate:** v4.2.0 adds a direct universal
+  `tr300-universal-apple-darwin.pkg` plus SHA-256 sidecar. It is signed with
+  Developer ID Installer, notarized, stapled, and Gatekeeper-assessed. The DMG
+  and sidecar remain compatibility assets only for immutable v4.1.x clients and
+  contain a byte-identical copy of the direct PKG. Native Intel and Apple
+  Silicon jobs install/verify the direct package and replay the real v4.1.3 DMG
+  updater bridge; only the visible Installer prompt is substituted in CI. The
+  first future v4.2.x release remains the required real direct-PKG old-to-new
+  updater proof.
+- **Local code/package evidence:** locked formatting and Clippy pass with
+  warnings denied; 164 all-feature unit tests and 19 integration tests pass;
+  the optimized 4.2.0 build succeeds; RustSec scanned 221 locked dependencies
+  with no vulnerability finding; cargo-dist 0.31.0 plan/generate-check pass; and
+  dirty-tree preliminary package-list/publish dry runs package 39 source files
+  and compile successfully. PowerShell parsing, actionlint 1.7.12, ShellCheck
+  0.11.0, Git Bash syntax, and both managed rollback/unknown-PATH fixtures pass.
+  WiX 3.14.1 compiles both MSIs with only the intentional `AllowDowngrades`
+  ICE61; Inno Setup 6.7.3 compiles both EXEs. The clean committed-tree package
+  gate and all hosted/public evidence remain deliberately open.
+- **Alienware candidate functionality/hardware:** the uninstalled release
+  binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
+  Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast
+  measured 5.374s/0.748s. It reports Windows 11 Home, Alienware m16 R2,
+  motherboard 01HV0T A00, BIOS 1.21.0, UEFI, `6P + 10E`, 16 physical / 22
+  logical processors, Intel Arc + RTX 4070 Laptop GPUs, about 32 GB memory, NTFS
+  C:, Wi-Fi source 10.1.0.51 with DNS/gateway 10.1.0.1, en-US, and a plugged-in
+  battery. The installed v4.1.3 MSI and candidate agree on those fields; this
+  does not substitute for the post-publication v4.1.3-to-v4.2.0 UAC update.
+- **Release target:** 34 nonempty stable-name assets: the prior 30, direct PKG
+  and sidecar, plus internal raw `tr300-dist-installer.ps1` and
+  `tr300-dist-installer.sh`. Public commands and filenames remain versionless;
+  rendered wrappers and updaters pin the immutable tag only after resolving one
+  release. The homepage must not change until exact-SHA CI/crates, all Windows
+  jobs, both Apple-native package lifecycles, public-byte/checksum/trust audit,
+  and crates.io verification pass.
+
 ### v4.1.3 — 2026-07-18 (published Global Windows updater fix-forward)
 
 - **Reason:** the fully published v4.1.2 cargo-dist, Windows, and native
@@ -117,7 +206,7 @@ as passed.
   registration, executable, PATH entry, or duplicate install. Keep all
   v4.1.0–v4.1.3 tags/assets unchanged.
 
-### v4.1.2 — 2026-07-18 (immutable fix-forward in progress)
+### v4.1.2 — 2026-07-18 (published; fixed forward by v4.1.3)
 
 - **Reason:** v4.1.1 completed checkout-safe universal construction and used
   the corrected Xcode 16.4 `lipo <file> -verify_arch ...` form. Native run
@@ -333,10 +422,13 @@ as passed.
   intentional no-maximum-version downgrade policy. Inno Setup 6.7.3 compiled
   both Global and Corporate EXEs, including the loop-bounded same-edition MSI
   removal include. Hosted disposable installs remain the runtime authority.
-- **macOS implementation:** `scripts/build-sign-notarize-macos-dmg.sh` builds one
-  universal Mach-O, signed `com.qubetx.tr300.pkg`, and versionless signed DMG;
-  it requires Apple `Accepted`, staples/checks both containers, and emits a
-  sidecar. `.github/workflows/macos-installer.yml` validates mount, nested PKG,
+- **macOS implementation:** `scripts/build-sign-notarize-macos-installer.sh`
+  builds one universal Mach-O and signed `com.qubetx.tr300.pkg` as the normal
+  versionless installer, plus a byte-identical PKG-in-DMG compatibility bridge
+  for immutable older clients. It requires Apple `Accepted`, staples/checks
+  both containers, and emits both sidecars.
+  `.github/workflows/macos-installer.yml` validates the direct PKG lifecycle,
+  the mounted compatibility copy,
   receipt identity/payload/file ownership, package verification, binary
   architecture/version, table/JSON/update selection, and clean package-content
   removal independently on `macos-15` and

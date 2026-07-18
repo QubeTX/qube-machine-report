@@ -23,7 +23,9 @@
 #   ↓ (workflow_run trigger on Release completion)
 #   windows-installers.yml (this file) → uploads the remaining 6 assets
 #       (Corporate MSI + 2 EXEs + their .sha256 sidecars).
-# The native macOS workflow later adds its DMG + sidecar. Final release: 30.
+# The native macOS workflow later adds the direct PKG + sidecar and a DMG +
+# sidecar retained solely for v4.1.x updater compatibility. The cargo-dist
+# release also carries two internal raw installer assets. Final release: 34.
 #
 # If install paths or registry-marker values change in wix/*.wxs,
 # wix-corporate/*.wxs, or inno/*.iss, update

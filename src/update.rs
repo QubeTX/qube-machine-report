@@ -33,7 +33,7 @@ const MSI_GLOBAL_ASSET: &str = "tr300-x86_64-pc-windows-msvc.msi";
 const MSI_CORPORATE_ASSET: &str = "tr300-x86_64-pc-windows-msvc-corporate.msi";
 const EXE_GLOBAL_ASSET: &str = "tr300-x86_64-pc-windows-msvc-setup.exe";
 const EXE_CORPORATE_ASSET: &str = "tr300-x86_64-pc-windows-msvc-corporate-setup.exe";
-const MAC_DMG_ASSET: &str = "tr300-universal-apple-darwin.dmg";
+const MAC_PKG_ASSET: &str = "tr300-universal-apple-darwin.pkg";
 #[cfg(any(test, target_os = "macos"))]
 const MAC_PKG_ID: &str = "com.qubetx.tr300.pkg";
 #[cfg(any(test, target_os = "macos"))]
@@ -87,8 +87,8 @@ enum UpdateStrategy {
     ExeGlobal,
     /// Re-runs the Corporate perUser Inno Setup EXE (no UAC required).
     ExeCorporate,
-    /// Reopens the signed universal DMG and waits for Apple Installer.
-    MacDmg,
+    /// Opens the signed universal PKG directly and waits for Apple Installer.
+    MacPkg,
 }
 
 impl UpdateStrategy {
@@ -103,7 +103,7 @@ impl UpdateStrategy {
             UpdateStrategy::MsiCorporate => "Corporate MSI installer",
             UpdateStrategy::ExeGlobal => "Global EXE installer",
             UpdateStrategy::ExeCorporate => "Corporate EXE installer",
-            UpdateStrategy::MacDmg => "macOS DMG / PKG installer",
+            UpdateStrategy::MacPkg => "macOS PKG installer",
         }
     }
 
@@ -118,7 +118,7 @@ impl UpdateStrategy {
             UpdateStrategy::MsiCorporate => "msi_corporate",
             UpdateStrategy::ExeGlobal => "exe_global",
             UpdateStrategy::ExeCorporate => "exe_corporate",
-            UpdateStrategy::MacDmg => "mac_dmg_pkg",
+            UpdateStrategy::MacPkg => "mac_pkg",
         }
     }
 
@@ -175,6 +175,9 @@ impl InstallChannel {
             Self::PowerShellInstaller => "powershell-installer",
             Self::ShellInstaller => "shell-installer",
             Self::Cargo => "cargo",
+            // Preserve the v4.1.x public channel ID. The durable channel is the
+            // com.qubetx.tr300.pkg receipt; v4.2.0 removes the DMG only from
+            // the normal launch path, not from that installation identity.
             Self::MacPkg => "macos-dmg-pkg",
             Self::Unknown => "unknown",
         }
@@ -760,7 +763,7 @@ fn build_strategy_list(channel: InstallChannel) -> Vec<UpdateStrategy> {
         InstallChannel::ShellInstaller => {
             vec![UpdateStrategy::InstallerCurl, UpdateStrategy::InstallerWget]
         }
-        InstallChannel::MacPkg => vec![UpdateStrategy::MacDmg],
+        InstallChannel::MacPkg => vec![UpdateStrategy::MacPkg],
         InstallChannel::Unknown => Vec::new(),
     }
 }
@@ -906,7 +909,7 @@ fn try_strategy_inner(strategy: UpdateStrategy, latest: &str) -> Result<(), Stra
         UpdateStrategy::ExeCorporate => {
             try_exe_install(&release_asset_url(latest, EXE_CORPORATE_ASSET), latest)
         }
-        UpdateStrategy::MacDmg => try_macos_dmg_install(latest),
+        UpdateStrategy::MacPkg => try_macos_pkg_install(latest),
     }
 }
 
@@ -1410,7 +1413,7 @@ fn recovery_asset_for_channel(channel: InstallChannel) -> Option<&'static str> {
         InstallChannel::ExeCorporate => Some(EXE_CORPORATE_ASSET),
         InstallChannel::PowerShellInstaller => Some(PS_INSTALLER_ASSET),
         InstallChannel::ShellInstaller => Some(SHELL_INSTALLER_ASSET),
-        InstallChannel::MacPkg => Some(MAC_DMG_ASSET),
+        InstallChannel::MacPkg => Some(MAC_PKG_ASSET),
         InstallChannel::Cargo | InstallChannel::Unknown => None,
     }
 }
@@ -2079,9 +2082,9 @@ fn suppress_stdout_for_json(command: &mut Command) {
 }
 
 #[cfg(target_os = "macos")]
-fn try_macos_dmg_install(latest: &str) -> Result<(), StrategyError> {
-    let url = release_asset_url(latest, MAC_DMG_ASSET);
-    let staged = StagedInstaller::new("dmg").map_err(|error| {
+fn try_macos_pkg_install(latest: &str) -> Result<(), StrategyError> {
+    let url = release_asset_url(latest, MAC_PKG_ASSET);
+    let staged = StagedInstaller::new("pkg").map_err(|error| {
         prelaunch_installer_io_error(
             "creating a private update staging directory",
             &std::env::temp_dir(),
@@ -2089,110 +2092,43 @@ fn try_macos_dmg_install(latest: &str) -> Result<(), StrategyError> {
             error,
         )
     })?;
-    let dmg_path = staged.path().to_path_buf();
-    let mount_path = staged.dir().join("mounted");
+    let pkg_path = staged.path().to_path_buf();
 
     let result = (|| -> Result<(), StrategyError> {
-        std::fs::create_dir(&mount_path).map_err(|error| {
-            prelaunch_installer_io_error(
-                "creating the private DMG mount point",
-                &mount_path,
-                &url,
-                error,
-            )
-        })?;
-
-        eprintln!("  Downloading signed macOS DMG...");
-        download_to_file(&url, &dmg_path)?;
-        verify_checksum(&dmg_path, &url)?;
-        run_command_status(
-            "codesign",
-            &[
-                "--verify",
-                "--deep",
-                "--strict",
-                &dmg_path.to_string_lossy(),
-            ],
-        )?;
+        eprintln!("  Downloading signed macOS PKG...");
+        download_to_file(&url, &pkg_path)?;
+        verify_checksum(&pkg_path, &url)?;
+        verify_macos_pkg_signature(&pkg_path)?;
         run_command_status(
             "xcrun",
-            &["stapler", "validate", &dmg_path.to_string_lossy()],
+            &["stapler", "validate", &pkg_path.to_string_lossy()],
         )?;
         run_command_status(
             "spctl",
             &[
                 "--assess",
                 "--type",
-                "open",
-                "--context",
-                "context:primary-signature",
+                "install",
                 "--verbose=4",
-                &dmg_path.to_string_lossy(),
+                &pkg_path.to_string_lossy(),
             ],
         )?;
+        eprintln!("  Opening Apple Installer; complete or cancel the prompts there...");
         run_command_status(
-            "hdiutil",
-            &[
-                "attach",
-                "-nobrowse",
-                "-readonly",
-                "-mountpoint",
-                &mount_path.to_string_lossy(),
-                &dmg_path.to_string_lossy(),
-            ],
+            "open",
+            &["-W", "-a", "Installer", &pkg_path.to_string_lossy()],
         )?;
-
-        let pkg_path = mount_path.join("tr300.pkg");
-        let install_result = (|| -> Result<(), StrategyError> {
-            if !pkg_path.is_file() {
-                return Err(StrategyError::Runtime(format!(
-                    "The verified DMG did not contain the expected {} package",
-                    pkg_path.display()
-                )));
-            }
-            run_command_status(
-                "pkgutil",
-                &["--check-signature", &pkg_path.to_string_lossy()],
-            )?;
-            run_command_status(
-                "xcrun",
-                &["stapler", "validate", &pkg_path.to_string_lossy()],
-            )?;
-            run_command_status(
-                "spctl",
-                &[
-                    "--assess",
-                    "--type",
-                    "install",
-                    "--verbose=4",
-                    &pkg_path.to_string_lossy(),
-                ],
-            )?;
-            eprintln!("  Opening Apple Installer; complete or cancel the prompts there...");
-            run_command_status(
-                "open",
-                &["-W", "-a", "Installer", &pkg_path.to_string_lossy()],
-            )?;
-            run_command_status("pkgutil", &["--pkg-info", MAC_PKG_ID])?;
-            verify_installer_post_install(latest, "macOS DMG / PKG installer")
-        })();
-
-        let detach_result =
-            run_command_status("hdiutil", &["detach", &mount_path.to_string_lossy()]);
-        match (install_result, detach_result) {
-            (Err(error), _) => Err(error),
-            (Ok(()), Err(error)) => Err(error),
-            (Ok(()), Ok(())) => Ok(()),
-        }
+        run_command_status("pkgutil", &["--pkg-info", MAC_PKG_ID])?;
+        verify_installer_post_install(latest, "macOS PKG installer")
     })();
 
     finish_staged_attempt(staged, result)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn try_macos_dmg_install(_latest: &str) -> Result<(), StrategyError> {
+fn try_macos_pkg_install(_latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
-        "DMG / PKG installer is macOS-only".into(),
+        "PKG installer is macOS-only".into(),
     ))
 }
 
@@ -2412,6 +2348,41 @@ fn mac_signature_metadata_matches(details: &str) -> bool {
             line.trim()
                 .starts_with("Authority=Developer ID Application:")
         })
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn mac_pkg_signature_metadata_matches(details: &str) -> bool {
+    let team = format!("({MAC_TEAM_ID})");
+    details.lines().any(|line| {
+        let line = line.trim();
+        line.contains("Developer ID Installer:") && line.contains(&team)
+    }) && details.lines().any(|line| {
+        line.trim()
+            .starts_with("Status: signed by a developer certificate")
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_pkg_signature(path: &std::path::Path) -> Result<(), StrategyError> {
+    let output = run_output(
+        "pkgutil",
+        ["--check-signature", &path.to_string_lossy()],
+        CommandTimeout::Custom(std::time::Duration::from_secs(10)),
+    )
+    .ok_or_else(|| StrategyError::Preflight("pkgutil is unavailable or timed out".into()))?;
+    if !output.status.success() {
+        return Err(StrategyError::Runtime(
+            "pkgutil rejected the downloaded installer signature".into(),
+        ));
+    }
+    let mut details = String::from_utf8_lossy(&output.stdout).into_owned();
+    details.push_str(&String::from_utf8_lossy(&output.stderr));
+    if !mac_pkg_signature_metadata_matches(&details) {
+        return Err(StrategyError::Runtime(format!(
+            "downloaded PKG is not signed by the expected TR-300 Developer ID Installer team {MAC_TEAM_ID}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -2747,7 +2718,7 @@ mod tests {
         );
         assert_eq!(
             build_strategy_list(InstallChannel::MacPkg),
-            vec![UpdateStrategy::MacDmg]
+            vec![UpdateStrategy::MacPkg]
         );
         assert_eq!(
             build_strategy_list(InstallChannel::PowerShellInstaller),
@@ -2907,6 +2878,40 @@ TeamIdentifier=M9D5379H93\n";
         assert_eq!(UpdateStrategy::MsiCorporate.json_id(), "msi_corporate");
         assert_eq!(UpdateStrategy::ExeGlobal.json_id(), "exe_global");
         assert_eq!(UpdateStrategy::ExeCorporate.json_id(), "exe_corporate");
+        assert_eq!(UpdateStrategy::MacPkg.json_id(), "mac_pkg");
+        // The receipt-backed channel does not change when the transport
+        // wrapper disappears from the normal update path.
+        assert_eq!(InstallChannel::MacPkg.json_id(), "macos-dmg-pkg");
+    }
+
+    #[test]
+    fn mac_pkg_recovery_uses_the_direct_versionless_filename() {
+        assert_eq!(
+            recovery_asset_for_channel(InstallChannel::MacPkg),
+            Some("tr300-universal-apple-darwin.pkg")
+        );
+        assert_eq!(
+            release_asset_url("4.2.0", MAC_PKG_ASSET),
+            "https://github.com/QubeTX/qube-machine-report/releases/download/v4.2.0/tr300-universal-apple-darwin.pkg"
+        );
+        assert!(!MAC_PKG_ASSET.contains("4.2.0"));
+    }
+
+    #[test]
+    fn mac_pkg_signature_requires_installer_identity_and_expected_team() {
+        let valid = "Package fixture:\n   Status: signed by a developer certificate issued by Apple for distribution\n   Certificate Chain:\n    1. Developer ID Installer: Emmett Shanahan (M9D5379H93)\n";
+        assert!(mac_pkg_signature_metadata_matches(valid));
+        assert!(!mac_pkg_signature_metadata_matches(
+            &valid.replace("M9D5379H93", "OTHERTEAM1")
+        ));
+        assert!(!mac_pkg_signature_metadata_matches(&valid.replace(
+            "Developer ID Installer:",
+            "Developer ID Application:"
+        )));
+        assert!(!mac_pkg_signature_metadata_matches(&valid.replace(
+            "Status: signed by a developer certificate issued by Apple for distribution",
+            "Status: no signature"
+        )));
     }
 
     #[test]
@@ -2924,7 +2929,7 @@ TeamIdentifier=M9D5379H93\n";
             UpdateStrategy::InstallerPwsh.label(),
             UpdateStrategy::InstallerCurl.label(),
             UpdateStrategy::InstallerWget.label(),
-            UpdateStrategy::MacDmg.label(),
+            UpdateStrategy::MacPkg.label(),
         ];
         let unique: std::collections::HashSet<_> = labels.iter().collect();
         assert_eq!(

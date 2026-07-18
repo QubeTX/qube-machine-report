@@ -292,6 +292,34 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
+      - name: Wrap managed CLI installers
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version=${RELEASE_TAG#v}
+          test -f artifacts/tr300-installer.sh
+          test -f artifacts/tr300-installer.ps1
+          mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh
+          mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1
+          sed \
+            -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
+            -e "s/@TR300_VERSION@/${version}/g" \
+            scripts/managed-installers/tr300-installer.sh \
+            > artifacts/tr300-installer.sh
+          sed \
+            -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
+            -e "s/@TR300_VERSION@/${version}/g" \
+            scripts/managed-installers/tr300-installer.ps1 \
+            > artifacts/tr300-installer.ps1
+          chmod 755 artifacts/tr300-installer.sh
+          if grep -R -F '@TR300_' artifacts/tr300-installer.sh artifacts/tr300-installer.ps1; then
+            echo 'managed installer placeholder was not rendered' >&2
+            exit 1
+          fi
+          grep -Fq "releases/download/${RELEASE_TAG}/tr300-dist-installer.sh" artifacts/tr300-installer.sh
+          grep -Fq 'releases/download/$Tr300Tag/tr300-dist-installer.ps1' artifacts/tr300-installer.ps1
       - name: Add legacy installer aliases
         shell: bash
         run: |
@@ -327,6 +355,52 @@ jobs:
             prerelease_args+=("$PRERELEASE_FLAG")
           fi
           gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" "${prerelease_args[@]}" --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+      - name: Smoke the published managed Linux installer
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          TR300_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_home=$(mktemp -d "$RUNNER_TEMP/tr300-managed-linux.XXXXXXXX")
+          trap 'rm -rf "$smoke_home"' EXIT
+          export HOME="$smoke_home"
+          export CARGO_HOME="$smoke_home/.cargo"
+          export XDG_CONFIG_HOME="$smoke_home/.config"
+          # Exercise the advertised clean-machine default, including cargo-dist's
+          # durable shell-PATH setup. The public wrapper intentionally delegates
+          # profile ownership to that generated installer instead of maintaining
+          # a second implementation that could drift.
+          sh artifacts/tr300-installer.sh
+          test "$("$CARGO_HOME/bin/tr300" --version)" = "tr300 ${RELEASE_TAG#v}"
+          jq -e --arg version "${RELEASE_TAG#v}" '
+            .provider.source == "cargo-dist" and
+            .source.app_name == "tr300" and
+            .version == $version and
+            .modify_path == true
+          ' "$XDG_CONFIG_HOME/tr300/tr300-receipt.json"
+          test -f "$CARGO_HOME/env"
+          grep -Fq '. "$HOME/.cargo/env"' "$HOME/.profile"
+          fresh_path=$(PATH=/usr/bin:/bin sh -c '. "$HOME/.profile"; command -v tr300')
+          test "$fresh_path" = "$CARGO_HOME/bin/tr300"
+          for attempt in {1..12}; do
+            latest=$(gh api 'repos/${{ github.repository }}/releases/latest' --jq .tag_name)
+            [[ $latest == "$RELEASE_TAG" ]] && break
+            if [[ $attempt -eq 12 ]]; then
+              echo "latest release is $latest, expected $RELEASE_TAG" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          update=$("$CARGO_HOME/bin/tr300" update --json)
+          test "$(printf '%s\n' "$update" | wc -l | tr -d ' ')" -eq 1
+          jq -e '
+            .success == true and
+            .update_available == false and
+            .install_channel == "shell-installer" and
+            .requires_user_action == false
+          ' <<< "$update"
 
   announce:
     needs:

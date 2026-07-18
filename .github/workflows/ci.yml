@@ -221,13 +221,18 @@ jobs:
           actionlint_bin="$(go env GOPATH)/bin/actionlint"
           "$actionlint_bin"
       - name: Validate release shell scripts
-        run: shellcheck scripts/*.sh
+        run: shellcheck -x scripts/*.sh scripts/managed-installers/*.sh
+      - name: Validate managed shell transaction rollback
+        run: scripts/test-managed-installer-transaction.sh
       - name: Guard supplemental packaging lifecycle invariants
         shell: bash
         run: |
           set -euo pipefail
           workflow=.github/workflows/macos-installer.yml
-          builder=scripts/build-sign-notarize-macos-dmg.sh
+          builder=scripts/build-sign-notarize-macos-installer.sh
+          release=.github/workflows/release.yml
+          shell_wrapper=scripts/managed-installers/tr300-installer.sh
+          powershell_wrapper=scripts/managed-installers/tr300-installer.ps1
           windows_validation=.github/workflows/windows-installer-validation.yml
           updater=src/update.rs
           inno_msi_bridge=inno/remove-conflicting-msi.pas
@@ -248,6 +253,35 @@ jobs:
           fi
           grep -Fq 'pkgutil --file-info /usr/local/bin/tr300' "$workflow"
           grep -Fq 'codesign --verify --strict --verbose=4 /usr/local/bin/tr300' "$workflow"
+          grep -Fq 'tr300-universal-apple-darwin.pkg.sha256' "$workflow"
+          grep -Fq 'cmp "$pkg" "$mount/tr300.pkg"' "$workflow"
+          grep -Fq 'name: Validate v4.1.x DMG bridge' "$workflow"
+          grep -Fq 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer' "$shell_wrapper"
+          grep -Fq 'tr300_restore_managed_state' "$shell_wrapper"
+          grep -Fq 'migrate-cleanup --quiet --strict --cargo-copy --user-profile' "$builder"
+          grep -Fq '.config/tr300/tr300-receipt.json' "$builder"
+          grep -Fq 'rollback_managed' "$builder"
+          grep -Fq 'mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh' "$release"
+          grep -Fq 'mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1' "$release"
+          grep -Fq 'Switching TR-300 ownership from $($Product.Channel) to powershell-installer' "$powershell_wrapper"
+          grep -Fq 'Restore-Tr300ManagedState' "$powershell_wrapper"
+          grep -Fq "ExeCommand='migrate-cleanup --quiet --strict --cargo-copy'" wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq "ExeCommand='migrate-cleanup --quiet --strict --dry-run --cargo-copy'" wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq "BinaryKey='MigrationProbe'" wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq 'OTHEREDITIONBINARY' wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq "Return='check'" wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq "migrate-cleanup --quiet --strict" inno/global.iss inno/corporate.iss
+          if grep -Eq 'CLEANCARGO|CLEANOTHEREDITION|ConsolidateDlg|Tasks:[[:space:]]*clean' wix/main.wxs wix-corporate/corporate.wxs inno/global.iss inno/corporate.iss; then
+            echo 'fresh native installer convergence must be mandatory, not task/checkbox controlled' >&2
+            exit 1
+          fi
+          grep -Fq '.strategy == "mac_dmg_pkg"' "$workflow"
+          grep -Fq 'MAC_PKG_ASSET: &str = "tr300-universal-apple-darwin.pkg"' "$updater"
+          grep -Fq '["-W", "-a", "Installer", &pkg_path.to_string_lossy()]' "$updater"
+          if grep -Fq 'hdiutil' "$updater"; then
+            echo 'current updater must open the direct PKG without mounting a DMG' >&2
+            exit 1
+          fi
           grep -Fq 'TeamIdentifier=$' "$workflow"
           grep -Fq 'vars.APPLE_TEAM_ID' "$workflow"
           grep -Fq 'github.event.workflow_run.head_sha' "$windows_validation"
@@ -281,6 +315,23 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Parse the managed PowerShell installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts\managed-installers\tr300-installer.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | Format-List | Out-String | Write-Host
+            throw 'managed PowerShell installer has parser errors'
+          }
+      - name: Validate managed PowerShell transaction rollback
+        shell: pwsh
+        run: scripts/test-managed-installer-transaction.ps1
       - name: Build release binary
         shell: pwsh
         run: cargo build --locked --release --bin tr300
@@ -437,3 +488,119 @@ jobs:
             if ($marker -notlike 'msi-*') { throw "current MSI marker did not win: $marker" }
             Remove-Entry $entries[0]
           }
+      - name: Prove cross-edition native choices fail before mutation
+        shell: pwsh
+        run: |
+          $globalMsi = (Resolve-Path 'target\wix-ci\global-current.msi').Path
+          $corporateMsi = (Resolve-Path 'target\wix-ci\corporate-current.msi').Path
+          $globalExe = (Resolve-Path 'inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe').Path
+          $corporateExe = (Resolve-Path 'inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe').Path
+          $globalBinary = "$env:ProgramFiles\tr300\bin\tr300.exe"
+          $corporateBinary = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
+
+          function Install-Msi([string]$path) {
+            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $path, '/qn', '/norestart')
+            if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
+          }
+          function Install-Exe([string]$path) {
+            $p = Start-Process $path -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            if ($p.ExitCode -ne 0) { throw "EXE install failed: $($p.ExitCode)" }
+          }
+          function Expect-MsiBlocked([string]$path) {
+            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $path, '/qn', '/norestart')
+            if ($p.ExitCode -eq 0) { throw 'cross-edition MSI unexpectedly mutated the machine' }
+          }
+          function Expect-ExeBlocked([string]$path) {
+            $p = Start-Process $path -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            if ($p.ExitCode -eq 0) { throw 'cross-edition EXE unexpectedly mutated the machine' }
+          }
+          function Entries([string]$display) {
+            @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object DisplayName -EQ $display
+          }
+          function Remove-Edition([string]$display) {
+            $entry = @(Entries $display)[0]
+            if ($entry.WindowsInstaller -eq 1) {
+              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+            } else {
+              if ($entry.UninstallString -notmatch '^"([^"]+)"$') { throw 'unexpected Inno uninstall command' }
+              $p = Start-Process $Matches[1] -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            }
+            if ($p.ExitCode -ne 0) { throw "cleanup failed: $($p.ExitCode)" }
+          }
+
+          foreach ($incumbent in @('global-msi', 'global-exe')) {
+            if ($incumbent -eq 'global-msi') { Install-Msi $globalMsi } else { Install-Exe $globalExe }
+            Expect-MsiBlocked $corporateMsi
+            Expect-ExeBlocked $corporateExe
+            if (-not (Test-Path $globalBinary) -or (Test-Path $corporateBinary)) {
+              throw "cross-edition safe stop failed with $incumbent incumbent"
+            }
+            if (@(Entries 'tr300').Count -ne 1 -or @(Entries 'tr300 (Corporate Edition)').Count -ne 0) {
+              throw "cross-edition registration changed with $incumbent incumbent"
+            }
+            Remove-Edition 'tr300'
+          }
+
+          foreach ($incumbent in @('corporate-msi', 'corporate-exe')) {
+            if ($incumbent -eq 'corporate-msi') { Install-Msi $corporateMsi } else { Install-Exe $corporateExe }
+            Expect-MsiBlocked $globalMsi
+            Expect-ExeBlocked $globalExe
+            if (-not (Test-Path $corporateBinary) -or (Test-Path $globalBinary)) {
+              throw "cross-edition safe stop failed with $incumbent incumbent"
+            }
+            if (@(Entries 'tr300 (Corporate Edition)').Count -ne 1 -or @(Entries 'tr300').Count -ne 0) {
+              throw "cross-edition registration changed with $incumbent incumbent"
+            }
+            Remove-Edition 'tr300 (Corporate Edition)'
+          }
+      - name: Prove ambiguous managed ownership blocks native packages before mutation
+        shell: pwsh
+        run: |
+          $cargoBinary = "$HOME\.cargo\bin\tr300.exe"
+          $receipt = "$env:LOCALAPPDATA\tr300\tr300-receipt.json"
+          New-Item -ItemType Directory -Force (Split-Path -Parent $cargoBinary), (Split-Path -Parent $receipt) | Out-Null
+          Copy-Item -LiteralPath 'target\release\tr300.exe' -Destination $cargoBinary -Force
+          $invalidReceipt = '{"provider":{"source":"foreign"},"source":{"app_name":"tr300"},"install_prefix":"C:\\ambiguous"}'
+          [IO.File]::WriteAllText($receipt, $invalidReceipt)
+          $binaryHash = (Get-FileHash -LiteralPath $cargoBinary -Algorithm SHA256).Hash
+
+          $cases = @(
+            @{ Name = 'global-msi'; Kind = 'msi'; Path = 'target\wix-ci\global-current.msi' },
+            @{ Name = 'corporate-msi'; Kind = 'msi'; Path = 'target\wix-ci\corporate-current.msi' },
+            @{ Name = 'global-exe'; Kind = 'exe'; Path = 'inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe' },
+            @{ Name = 'corporate-exe'; Kind = 'exe'; Path = 'inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe' }
+          )
+          foreach ($case in $cases) {
+            $path = (Resolve-Path $case.Path).Path
+            if ($case.Kind -eq 'msi') {
+              $process = Start-Process msiexec.exe -Wait -PassThru `
+                -ArgumentList @('/i', $path, '/qn', '/norestart')
+            } else {
+              $log = Join-Path $env:RUNNER_TEMP "tr300-$($case.Name)-ambiguous.log"
+              $process = Start-Process $path -Wait -PassThru `
+                -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+            }
+            if ($process.ExitCode -eq 0) {
+              throw "$($case.Name) accepted ambiguous managed ownership"
+            }
+            if (-not (Test-Path -LiteralPath $cargoBinary) -or
+                (Get-FileHash -LiteralPath $cargoBinary -Algorithm SHA256).Hash -ne $binaryHash -or
+                (Get-Content -LiteralPath $receipt -Raw) -ne $invalidReceipt) {
+              throw "$($case.Name) changed the existing managed pair on failure"
+            }
+            if ((Test-Path "$env:ProgramFiles\tr300\bin\tr300.exe") -or
+                (Test-Path "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe")) {
+              throw "$($case.Name) left a native binary after safe-stop/rollback"
+            }
+            $entries = @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object { $_.DisplayName -in @('tr300', 'tr300 (Corporate Edition)') }
+            if (@($entries).Count -ne 0) {
+              throw "$($case.Name) left native registration after safe-stop/rollback"
+            }
+          }
+          Remove-Item -LiteralPath $cargoBinary, $receipt -Force

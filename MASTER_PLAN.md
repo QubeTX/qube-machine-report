@@ -5,10 +5,11 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Published / working manifest:** 4.1.3 / 4.1.3
-**Release scope:** origin-preserving updates, native PKG-in-DMG, Apple Installer
-credentials, hosted ARM/Intel Mac gates, Windows installer matrix, and real
-Alienware validation. AMD laptop and Pi evidence remain open.
+**Published / working manifest:** 4.1.3 / 4.2.0 candidate
+**Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
+takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
+hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
+validation. AMD laptop and Pi evidence remain open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
@@ -43,7 +44,68 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.1.3 Global-updater fix-forward outcome
+## 2. v4.2.0 managed installation and direct-PKG candidate
+
+v4.2.0 is implemented locally but is not published. The normative contract is
+ADR **MIC-1**: public documentation recommends the stable managed CLI wrapper,
+`tr300 update` preserves the one proven current channel, and a deliberately
+launched fresh installer is the user's newest channel choice. The release gate
+must prove observed final ownership rather than treating a child process exit
+as sufficient.
+
+### Candidate implementation
+
+- Windows recommends the versionless `tr300-installer.ps1` `irm` command. The
+  rendered wrapper pins one resolved tag, invokes the renamed raw cargo-dist
+  installer, validates its receipt/binary, then removes only exact registered
+  TR-300 MSI/Inno products. It requests UAC only for machine-wide products and
+  succeeds only when the managed PowerShell channel is the sole recognized
+  owner. Raw `cargo install` remains an explicit advanced/unmanaged choice
+  because Cargo supplies no project post-install hook.
+- macOS and Linux recommend the versionless `tr300-installer.sh` command. On
+  macOS it validates an exact TR-300 package receipt, payload owner, install
+  path, and Developer ID identity before removing that native owner and
+  retaining the verified managed-shell install. The reciprocal PKG
+  `postinstall` invokes the bounded migration helper to remove an exact managed
+  shell/Cargo copy and matching receipt. Linux retains the managed-shell
+  channel without inventing a native package owner.
+- A fresh Windows MSI/EXE still authoritatively changes format within the same
+  edition. Opposite-edition or cross-scope native installers now detect the
+  conflict before mutation and direct the user to the managed PowerShell path;
+  that path is allowed to perform the exact elevated convergence. Automatic
+  updates never cross a channel. Current native MSI/EXE/PKG packages expose no
+  cleanup opt-out: their mandatory strict helper validates an exact managed
+  receipt before quarantining its binary and restores the pair if convergence
+  cannot commit. Legacy direct helper calls remain advisory for compatibility.
+- The normal Mac artifact and v4.2 updater payload are the directly downloadable
+  Developer ID Installer-signed, notarized, stapled
+  `tr300-universal-apple-darwin.pkg` and sidecar. The DMG is retained only as a
+  byte-identical compatibility carrier for immutable v4.1.x updaters. Native
+  Intel and Apple Silicon gates validate both the direct package and the legacy
+  bridge. A future v4.2.x release must supply the first real direct-PKG
+  old-to-new updater proof.
+- cargo-dist's raw scripts are published under stable internal names while the
+  four public/legacy names are rendered MIC-1 wrappers. With the direct PKG,
+  its sidecar, and the two internal raw scripts, the candidate distribution is
+  exactly 34 stable-name assets.
+- Update stdout remains exactly one JSON object. The durable Mac channel string
+  stays `macos-dmg-pkg` for existing consumers even though the current strategy
+  is `mac_pkg`; changing a transport does not rewrite installation identity.
+
+### Candidate gate and publication boundary
+
+Local fmt/Clippy/all-target tests/release build, RustSec, cargo-dist plan and
+generate-check, actionlint/ShellCheck, wrapper transactions, and both WiX/Inno
+source compiles pass. The Alienware candidate report/hardware suite also passes
+without changing its installed MSI. The remaining local boundary is the clean
+committed-tree package/publish dry run. Then push `main`, require exact-SHA CI
+and crates publication, tag only `v4.2.0`, and require every disposable Windows
+managed/native transition plus both native Apple package lifecycles. Audit all
+34 public assets, checksums, Apple trust evidence, updater/recovery behavior,
+crates.io, and only then update the production homepage. Until those facts are
+recorded in `TESTING.md`, the published version remains 4.1.3.
+
+## 3. v4.1.3 Global-updater fix-forward outcome
 
 The implementation and immutable release are tracked in git and were completed
 from the Alienware. A physical Mac is not a normal requirement: native GitHub
@@ -233,12 +295,13 @@ the process object's exit code before applying the same assertions.
 
 Release implementation, publication, public audit, and the Alienware Global-MSI
 UAC transition are complete. The separately tracked AMD64 laptop and Raspberry
-Pi checks remain personal-hardware continuation. Only when the user is on the
-testing Mac, #nd372 reserves
-one bounded external ND-300 v3.7.1-to-v3.7.2 PKG-in-DMG acceptance batch; it is
-not a TR-300 release gate and must not start on this Alienware.
+Pi checks remain personal-hardware continuation. After v4.2 closure, #nd372
+reserves an idle-installer handoff for ND-300 v3.7.3's Alienware UAC lane and,
+only when the user is on the testing Mac, one bounded external
+legacy-DMG-to-direct-PKG acceptance batch. Neither is a TR-300 release gate;
+the ND repository remains owned by its separate task.
 
-## 3. v4.0.0 Mac and shared outcome (historical baseline)
+## 4. v4.0.0 Mac and shared outcome (historical baseline)
 
 macOS collection work is complete for v4.0.0. Shared report/update changes and
 the new release-trust path passed comprehensive native arm64, Rosetta x86_64,
@@ -291,7 +354,7 @@ Host: MacBook Pro M2 (`Mac14,7`), macOS 26.3.1 build 25D2128.
 - final five-run medians: native full 0.51s, native fast 0.23s, Rosetta full
   0.72s, Rosetta fast 0.36s; fast budget is 1.5s
 
-## 4. Shared hardening already implemented
+## 5. Shared hardening already implemented
 
 These changes are cross-platform Rust and compile-tested, but platform-specific
 runtime claims remain gated by the hardware matrix below.
@@ -321,7 +384,7 @@ runtime claims remain gated by the hardware matrix below.
 - Windows-specific code passes xwin clippy with `-D warnings`; v4.1.0 also has
   live Alienware validation described below.
 
-## 5. Personal hardware continuation
+## 6. Personal hardware continuation
 
 ### A. Personal Alienware / Windows
 
@@ -359,7 +422,7 @@ endpoint-policy case.
 - battery absence, missing desktop/tool fallbacks, fast runtime budget
 - installer/update path on the actual distribution
 
-## 6. v4.0.1 fix-forward release outcome — complete
+## 7. v4.0.1 fix-forward release outcome — complete
 
 The maintainer explicitly approved sections 4A–4C after release, accepting
 forward patches. Every Mac/local/hosted gate still passed before publication.
@@ -390,7 +453,7 @@ patch fix-forward.
   embedded-certificate checks. Canonical/legacy installer aliases match, and
   every supplemental Windows installer matches its sidecar.
 
-## 7. Homepage deployment — complete
+## 8. Homepage deployment — complete
 
 - Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is pushed to its
   default branch and production at `https://reports.qubetx.com/` serves its
@@ -404,7 +467,7 @@ patch fix-forward.
 - SD-300 and Shaughv OS remain intentionally WIP-delisted and must not be
   re-linked until their separate work is ready.
 
-## 8. Non-negotiable contracts
+## 9. Non-negotiable contracts
 
 - Keep one shared Rust architecture and preserve both binary and library APIs.
 - Optional probe failure yields `None`/fallback, never a fabricated claim or a
@@ -420,11 +483,12 @@ patch fix-forward.
 - Windows installer GUIDs and `InstallSource` marker strings are permanent and
   must remain in lockstep across WiX, Inno, updater, and migration code.
 - Shared/macOS/release changes require native Apple Silicon and native Intel
-  hosted validation. PKG-in-DMG changes also require sign/notary/staple/mount/
-  install/update/uninstall proof on both architectures. A physical Mac is
-  optional unless those runners expose a GUI-only defect.
+  hosted validation. Direct-PKG or compatibility-DMG changes also require
+  sign/notary/staple/Gatekeeper/install/update/uninstall proof on both
+  architectures. A physical Mac is optional unless those runners expose a
+  GUI-only defect.
 
-## 9. Completion state
+## 10. Completion state
 
 The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
 
@@ -435,5 +499,6 @@ The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
   release assets/self-update discovery are verified.
 - The homepage accurately reflects the deployed release and is live.
 
-The v4.1.0 release remains active. The broader personal-hardware milestone stays
-open for AMD Linux and Pi 4 evidence after this release.
+The v4.2.0 release candidate is active and not yet published. The broader
+personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
+this release.

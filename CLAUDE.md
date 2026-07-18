@@ -51,8 +51,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Published version and working manifest: **4.1.3**. The v4.1.0-v4.1.3
-tags/assets are immutable. v4.1.3 completed exact-SHA CI/crates, supported
+Published version: **4.1.3**; working manifest: **4.2.0 candidate**. The
+v4.1.0-v4.1.3 tags/assets are immutable. v4.1.3 completed exact-SHA CI/crates, supported
 macOS receipt/file-owner/Developer ID validation, the hosted 30-asset release,
 and every disposable Windows transition. Its strict elevated live-image worker
 fixes the v4.1.2 finding that Restart Manager could terminate a Global native-
@@ -63,6 +63,15 @@ copy/registration/PATH. AMD64 Linux laptop and Raspberry
 Pi 4 checks remain continuation work and must not be reported as completed.
 Managed-work antivirus behavior is a separate endpoint-policy case, not
 personal Windows field-accuracy proof.
+
+v4.2.0 implements ADR MIC-1. Recommend the versionless managed PowerShell
+wrapper on Windows and managed shell wrapper on macOS/Linux; keep MSI/EXE/PKG
+as optional native choices and raw Cargo as advanced/unmanaged. `tr300 update`
+preserves the proven channel, while a deliberately launched fresh installer is
+authoritative channel intent. The direct signed/notarized/stapled universal PKG
+is the current Mac native artifact; the DMG remains only as an immutable-v4.1
+updater bridge. The candidate target is 34 stable-name assets. None of this is
+published evidence until exact-SHA and hosted package matrices pass.
 
 Observed distribution state: release source
 `c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed exact-SHA CI/crates,
@@ -286,7 +295,7 @@ These three are the most frequently touched; their full rules are in the matchin
   includes `manual_install_url`; a known installer channel also includes
   `exact_installer_url`; blocked JSON additionally includes
   `official_releases_url`.
-- **Cross-method consolidation (`tr300 migrate-cleanup`, v3.17.0+):** hidden subcommand (`src/migrate.rs`; `#[value(hide=true)]` `Action::MigrateCleanup` + hidden flags in `cli.rs`) invoked by all four installers — interactive checkboxes AND silent self-update, **both default ON** — to keep ONE install at a time: removes a shadowing `~\.cargo\bin` copy and/or the *other* edition. Only ever deletes `tr300.exe` (allowlist); never cargo/rustup, the `.cargo\bin` PATH entry, `~/Downloads`, or the running install; needs-admin → skip + exit 0; advisory (never fails an install). Reuses `detect_install_origin`/`InstallOrigin` (now `pub(crate)`). **Edition paths + marker strings are in the SAME lockstep** as the installers / `update.rs`. WiX uses a deferred `Impersonate='yes'` `FileKey` CA (no `WixUtilExtension`); the Inno Global EXE does NOT pass `--user-profile` (no reliable Inno pre-elevation constant) and relies on the process-env fallback. Update preserves edition/scope: Corporate→Corporate (perUser), Global→Global (perMachine).
+- **Cross-method convergence (`tr300 migrate-cleanup`):** hidden subcommand (`src/migrate.rs`; hidden flags in `cli.rs`) bounded to the allowlisted TR-300 binary and exact cargo-dist receipt. Legacy direct calls without `--strict` retain v3.17 advisory semantics; every v4.2+ native MSI/EXE/PKG passes `--strict`, exposes no checkbox/task opt-out, and must fail visibly when requested ownership cannot converge. Strict Cargo/receipt cleanup prevalidates the pair and quarantines/restores the prior binary transactionally. It never deletes cargo/rustup, the shared Cargo PATH entry, Downloads, unrelated receipts, or the running image. Registered or exact-path orphaned opposite-scope Windows products stop before mutation; the managed PowerShell wrapper is the supported cross-scope path. WiX uses deferred `Impersonate='yes'` `FileKey`, `Return='check'` actions. Inno extracts the candidate for a strict non-mutating `PrepareToInstall` preflight before MSI removal/files and reconfirms after registration; Global Inno uses `ExecAsOriginalUser`. The PKG postinstall snapshots/restores the managed pair. **Edition paths, marker strings, product identities, and receipt paths stay in lockstep** with installers and `update.rs`.
 
 ## Output & Runtime Contracts
 
@@ -381,7 +390,7 @@ job-by-job detail + local-repro commands: the
   (5-run median of `tr300 --fast` < 1500 ms), blocking `audit`, and
   `dist-plan`. macOS test/build/speed are hard gates; do not restore the old
   v3.14.5 `continue-on-error` workaround.
-- **`release.yml`** — cargo-dist v0.31.0, tag-triggered (`vX.Y.Z`); 6 targets + shell/PowerShell/MSI installers + legacy `tr-300-installer.*` aliases. It is generated and then intentionally checked in with the alias-copy, public latest-link normalization, and fail-closed Apple signing/notarization zones. Do not regenerate or edit across those zones without preserving all three and reopening the Mac gate.
+- **`release.yml`** — cargo-dist v0.31.0, tag-triggered (`vX.Y.Z`); 6 targets + shell/PowerShell/MSI installers. Raw cargo-dist scripts are renamed to internal `tr300-dist-installer.*`; public `tr300-installer.*` plus legacy `tr-300-installer.*` are rendered MIC-1 wrappers. It is generated and then intentionally checked in with the wrapper-render, public latest-link normalization, and fail-closed Apple signing/notarization zones. Do not regenerate or edit across those zones without preserving all three and reopening the Mac gate.
 - **`crates-publish.yml`** — after `CI` succeeds on `main`; checks out the exact tested SHA, re-runs gates `--locked`, publishes to crates.io with `CARGO_REGISTRY_TOKEN`.
 - **`windows-installers.yml`** — after the cargo-dist release, builds and signs
   the Corporate MSI plus both Global/Corporate Inno EXEs.
@@ -390,7 +399,7 @@ job-by-job detail + local-repro commands: the
   MSI/Inno takeover.
 - **`macos-installer.yml`** — preflights the Installer identity on native ARM
   and Intel, then builds, notarizes, installs, verifies, and publishes the
-  universal PKG-in-DMG after the cargo-dist release.
+  universal direct PKG plus compatibility DMG after the cargo-dist release.
 
 Workflow sequencing is product logic. In the Mac job, checkout the exact tag
 before downloading signed inputs; checkout cleans untracked workspace files.
@@ -438,8 +447,9 @@ blocks hosting; never add an unsigned fallback.
 The cargo-dist archives still contain a bare standalone CLI and therefore use
 Apple acceptance plus `codesign --verify --strict`; a bare-binary
 `spctl --type execute` message that the code is valid but not an app is expected.
-The installer-first path is a signed PKG inside a signed DMG, so both containers
-must additionally be notarized, stapled, and Gatekeeper-assessed.
+The native installer path is a directly distributed signed PKG. It must be
+notarized, stapled, and Gatekeeper-assessed. The compatibility DMG contains the
+byte-identical PKG and must independently pass the same container trust gates.
 
 Secret names (values never enter git/docs/logs/tasks/handoffs):
 `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
@@ -459,14 +469,15 @@ string `-`), and rerun the disposable-PKG preflight after any P12/password/
 upload change. Any shared, macOS, dependency, workflow, or
 Apple-artifact change invalidates older proof until native `macos-15` Apple
 Silicon and `macos-15-intel` tests are green. Installer changes additionally
-require signed/notarized/stapled PKG-in-DMG install gates on both architectures.
+require signed/notarized/stapled direct-PKG and compatibility-DMG gates on both
+architectures.
 A physical Mac is optional unless CI exposes a GUI-only defect.
 
 ## Release Process
 
 Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → doc-set update → `main` push → wait for `ci.yml` green → wait for `crates-publish.yml` → tag push → watch `release.yml` → fix-forward loop — is the [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md) § "Release checklist" as the canonical 10-file doc list. Load-bearing invariants:
 
-**v4.1.0 scope:** Alienware Windows evidence is part of this release. AMD
+**Current scope:** Alienware Windows evidence is part of the release line. AMD
 Linux/Pi 4 checks remain open. They never substitute for or waive native
 Apple-Silicon/Intel, package/security, exact-SHA CI/crates, Apple notarization,
 and release-asset gates.
@@ -475,20 +486,21 @@ and release-asset gates.
 - Commit `release: vX.Y.Z - <summary>`; push and wait for `ci.yml` green on that exact commit.
 - Confirm `crates-publish.yml` published (or skipped) from that SHA.
 - **Tag only after `ci.yml` is green AND `crates-publish.yml` has resolved.** Create `git tag vX.Y.Z` and push the single tag explicitly (`git push origin vX.Y.Z`) — **never** `git push --tags`.
-- The tag push triggers `release.yml` (6 targets + installers, incl. canonical
-  `tr300-installer.*` and legacy `tr-300-installer.*` aliases). Both Apple jobs
+- The tag push triggers `release.yml` (6 targets + installers, internal raw
+  scripts, canonical managed `tr300-installer.*`, and legacy wrapper aliases).
+  Both Apple jobs
   must sign and receive Notary `Accepted` before hosting; then
   `windows-installers.yml` and `macos-installer.yml` must finish. The latter
-  requires native Intel and Apple Silicon PKG-in-DMG install validation. Verify
-  all 30 assets before updating the homepage.
+  requires native Intel and Apple Silicon direct-PKG/DMG-bridge validation.
+  Verify all 34 assets before updating the homepage for v4.2.0.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
 workflow use `cargo publish --locked`. `allow-dirty = ["ci", "msi"]` is
 intentional for the checked-in release customization and WiX source. After
 changing `[workspace.metadata.dist]`, regenerate with `dist init` (the binary is
 `dist`, not `cargo dist`) and preserve the legacy installer-alias step, the
-public latest-link release-note normalization, and the fail-closed Apple
-signing/notarization step.
+  managed-wrapper rendering, public latest-link release-note normalization,
+  and the fail-closed Apple signing/notarization step.
 
 ## HUMAN_CHANGELOG.md (companion changelog)
 

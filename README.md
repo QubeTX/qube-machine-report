@@ -9,10 +9,10 @@ Cross-platform system information report with Unicode box-drawing tables.
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
 Current release: [latest](https://github.com/QubeTX/qube-machine-report/releases/latest).
-Windows users get four installer options — Global / Corporate Editions, each
-in MSI and EXE formats — and macOS uses a universal PKG-in-DMG. None requires
-Rust on the install machine. Linux and alternate per-user macOS installs use
-the cargo-dist shell installer. The crates.io package is
+The recommended install is the managed CLI command: PowerShell on Windows and
+the shell installer on macOS/Linux. Optional Global/Corporate MSI/EXE packages
+and a direct universal macOS PKG remain first-class, origin-preserving channels.
+None requires Rust on the install machine. The crates.io package is
 [`tr300`](https://crates.io/crates/tr300).
 
 v4 is a major release for Rust-library SemVer only: public
@@ -48,7 +48,7 @@ The high-level collection/report APIs remain available.
 - Fast mode (`--fast`) for sub-second auto-run startup
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Origin-preserving self-update: MSI, EXE, Cargo, shell/PowerShell, and macOS
-  DMG/PKG installs update through the same channel and never silently create a
+  PKG installs update through the same channel and never silently create a
   second installer family
 - Endpoint-policy-aware update failure: antivirus/Group Policy write or launch
   blocks retain the current install, stop additional write-heavy fallbacks, and
@@ -58,11 +58,52 @@ The high-level collection/report APIs remain available.
 
 ## Installation
 
-TR-300 ships **prebuilt binaries** — no Rust toolchain required to install or
-run. Pick the installer that matches your operating system and (on Windows)
-whether you have admin rights on the machine.
+TR-300 ships **prebuilt binaries**—no Rust toolchain is required. The managed
+CLI installers are the recommended default because they are per-user, work the
+same way across products, and retain a receipt that `tr300 update` can follow.
 
-### Windows — Global Edition (recommended for personal machines)
+### Recommended: managed CLI install
+
+**Windows (PowerShell):**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1 | iex"
+```
+
+This installs to `%USERPROFILE%\.cargo\bin\tr300.exe`, prepends that directory
+to your user PATH, and records the `powershell-installer` channel. Rust is not
+required. If an exact TR-300 MSI or EXE product is already registered, the
+  fresh command verifies its new binary/receipt first, then uses that product's
+  real uninstaller (with normal UAC only for machine-wide products) so the
+  PowerShell channel becomes the only active owner. If authorization or cleanup
+  fails, it restores the prior managed/Cargo binary and receipt and reports the
+  native owner that remains.
+
+**macOS or Linux:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh | sh
+```
+
+This installs to `~/.cargo/bin/tr300`, configures your shell PATH, and records
+the `shell-installer` channel. On macOS, a fresh shell install can supersede an
+  existing TR-300 PKG only after its exact receipt, payload ownership, and
+  Developer ID identity agree; it then requests normal administrator approval to
+  remove that system package. A cancelled or failed takeover restores the prior
+  managed/Cargo binary and receipt. Linux has no competing native package
+  channel.
+
+These public commands and asset names never contain a version. Each downloaded
+wrapper is nevertheless bound to its immutable release tag and downloads the
+exact cargo-dist installer and archive from that tag.
+
+### Optional native installers
+
+Use a native package when system-wide deployment, MDM, managed-installer policy,
+or a graphical installer is the better fit. A later `tr300 update` stays on the
+native format, edition, and scope you chose.
+
+#### Windows — Global Edition
 
 Installs to `C:\Program Files\tr300\bin\tr300.exe` and adds it to **system PATH**
 so every terminal on the machine can find it. **Requires admin (UAC prompt).**
@@ -73,7 +114,7 @@ is treated as your newest choice and removes the competing registration first.
 
 | Format | Direct download | When to pick |
 |---|---|---|
-| MSI | [tr300-x86_64-pc-windows-msvc.msi](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc.msi) | IT-managed deployment (Intune, SCCM, Group Policy) and most personal installs. The default. |
+| MSI | [tr300-x86_64-pc-windows-msvc.msi](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc.msi) | IT-managed deployment (Intune, SCCM, Group Policy) and the usual native-package choice. |
 | EXE | [tr300-x86_64-pc-windows-msvc-setup.exe](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-setup.exe) | If you prefer a familiar `setup.exe`. Same outcome as the MSI. |
 
 After install, open a new terminal and run `tr300`. The binary is unsigned, so
@@ -82,7 +123,7 @@ click **More info → Run anyway**. (Code signing is on the roadmap;
 see [Releases](https://github.com/QubeTX/qube-machine-report/releases) for
 status.)
 
-### Windows — Corporate Edition (recommended for locked-down work machines)
+#### Windows — Corporate Edition
 
 Installs to `%LocalAppData%\Programs\tr300\bin\tr300.exe` and adds it to your
 **user PATH** only — no admin, no UAC, no system-wide changes. Use this on
@@ -98,7 +139,9 @@ Same channel-choice rule as the Global Edition. If WDAC / AppLocker blocks
 both, your only options are the bare-EXE path below or asking IT to allowlist
 one of these installers.
 
-### Choosing between Global and Corporate Edition
+#### Choosing between Global and Corporate Edition
+
+If you are deliberately choosing a native Windows package:
 
 | You're on… | Pick |
 |---|---|
@@ -108,26 +151,31 @@ one of these installers.
 | A locked-down machine that blocks `C:\Program Files` writes | **Corporate** |
 | A server, ARM Windows, or anything else | Use the bare EXE / shell installer below |
 
-The v3.17.0+ installers offer to remove an older Cargo copy and the other
-edition (both cleanup choices are on by default), keeping one active install.
-You can opt out during an interactive install when side-by-side copies are
-intentional.
+Current native installers treat an explicit fresh launch as your newest channel
+choice. They strictly retire an exact older managed/Cargo copy and refuse to
+claim success when ownership is ambiguous or another edition cannot be retired
+safely. There is no cleanup opt-out: use a portable archive if you intentionally
+want an unmanaged side-by-side copy.
 
-### macOS (recommended installer-first path)
+#### macOS universal PKG
 
-Download [tr300-universal-apple-darwin.dmg](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-universal-apple-darwin.dmg),
-open `tr300.pkg`, and follow Apple Installer. The universal package supports
+Download [tr300-universal-apple-darwin.pkg](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-universal-apple-darwin.pkg),
+open it, and follow Apple Installer. The universal package supports
 Apple Silicon and Intel, installs `/usr/local/bin/tr300` system-wide, and records
 the stable `com.qubetx.tr300.pkg` receipt used by `tr300 update`. The updater
 also requires that receipt's version, payload path, per-file ownership, and the
 installed binary's Developer ID product identity to match; a stale receipt is
 not enough.
 
-The binary, PKG, and DMG are Developer ID signed. GitHub's native Apple Silicon
-and Intel runners require Apple Notary Service acceptance, staple the PKG/DMG,
-mount and Gatekeeper-check them, install the package, run report/update smokes,
-and verify uninstall contents before the two versionless DMG assets are added to
-the release. A physical Mac is optional visual testing, not a release gate.
+The binary and PKG are Developer ID signed. GitHub's native Apple Silicon and
+Intel runners require Apple Notary Service acceptance, staple and Gatekeeper-
+check the PKG, install it directly, run report/update smokes, and verify
+uninstall contents before publication. A physical Mac is optional visual
+testing, not a release gate.
+
+Releases also retain a signed compatibility DMG containing the byte-identical
+PKG because immutable v4.1.x updaters require that exact legacy filename. New
+installs and v4.2.0+ self-updates never mount it.
 
 To remove the system package and its receipt:
 
@@ -139,33 +187,7 @@ sudo pkgutil --forget com.qubetx.tr300.pkg
 The PKG contains only that versionless command. The hosted uninstall gate
 checks the same inventory after every release.
 
-### Linux (and alternate per-user macOS install)
-
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh | sh
-```
-
-Installs to `~/.cargo/bin/tr300` and modifies your shell's PATH. **Does not
-require Rust** — downloads the prebuilt binary from the GitHub Release.
-
-The script writes a cargo-dist receipt containing its exact install prefix.
-Future CLI updates reuse that prefix and channel; they do not switch to Cargo or
-the system-wide macOS package.
-
 ### Alternative install methods
-
-<details>
-<summary>Windows PowerShell one-liner (downloads the prebuilt binary, no Rust)</summary>
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1 | iex"
-```
-
-Installs to `%USERPROFILE%\.cargo\bin\tr300.exe` (the directory is created
-automatically — Rust is not required). Modifies user PATH only. Fails if
-PowerShell `ExecutionPolicy` is `Restricted` and not overridden; the MSI /
-EXE installers above don't have that limitation.
-</details>
 
 <details>
 <summary>Windows — bare EXE (no installer, no PATH modification)</summary>
@@ -324,14 +346,22 @@ tr300 --update
 installer for an **in-place upgrade**. It preserves installer format, edition,
 scope, and recorded directory: Corporate MSI stays Corporate MSI, Global EXE
 stays Global EXE, Cargo stays Cargo, shell/PowerShell stays at its receipt
-prefix, and a macOS PKG reopens the verified universal DMG in Apple Installer.
+prefix, and a macOS PKG opens the verified universal PKG in Apple Installer.
 
-**Single install at a time (v3.17.0+):** the Windows installers — and silent
-self-updates — consolidate to one version/edition: they remove an older
-`cargo install` copy and/or the *other* edition if present (two checkboxes, both on
-by default; untick to keep). The cleanup only ever removes `tr300` itself — never
-your Rust toolchain, your Downloads, or the running copy — and can never cause an
-install or update to fail.
+**Fresh install and update are different operations.** A CLI update is
+latest-only and preserves its proven channel. A fresh managed CLI/native
+installer is the user's newest channel choice, including a same-version or
+downgrade reinstall. It first establishes the chosen copy, then retires only
+recognized prior TR-300 ownership. Ambiguous evidence or failed authorization
+returns a visible failure and recovery link; it never silently declares that a
+duplicate/conflicting state converged.
+
+The bounded consolidation code deletes only the allowlisted `tr300` binary and
+an exactly matching cargo-dist receipt—never Cargo/rustup, the Cargo PATH entry,
+Downloads, or the running copy. Current native installers have no cleanup
+checkbox or silent opt-out: an exact managed/Cargo owner converges, while an
+ambiguous receipt or registered/exact-path opposite edition stops before native
+mutation and points to the managed recovery command.
 
 **On Windows (v3.15.0+):**
 
@@ -343,6 +373,11 @@ install or update to fail.
 | Corporate EXE | Downloads the new Corporate EXE installer, runs `/SILENT` | No |
 | PowerShell installer | Downloads the exact-tag PowerShell installer into the recorded prefix | No |
 | `cargo install` | Runs exact `cargo install --version … --force --locked` | No |
+
+The PowerShell row refers to the managed `irm` installer shown above. A raw
+`cargo install tr300 --force` has no post-install hook, so it cannot retire an
+MSI/EXE registration at install time. It remains an advanced, unmanaged fresh
+install path; once unambiguously running as Cargo, its CLI updater stays Cargo.
 
 All recognized Windows channels use a transactional running-image handoff: the
 old command is kept under a private sibling name while the preserved channel
@@ -360,7 +395,8 @@ unambiguous MSI or Inno product. Cargo metadata and cargo-dist receipts separate
 the two `~\.cargo\bin` channels. Conflicting, portable, or unknown origins do
 not mutate the machine; they fail safely with the fresh installer link.
 
-**Download integrity:** every downloaded MSI / EXE / DMG is checked against
+**Download integrity:** every downloaded MSI / EXE / PKG (and the legacy DMG)
+is checked against
 its published `.sha256` sidecar before launching. This catches truncation,
 cache corruption, and payload/sidecar mismatch. Because both files use the
 same HTTPS release transport, the checksum is not an independent signature;
@@ -386,8 +422,8 @@ replacement path.
 **On macOS / Linux:**
 
 TR-300 first resolves the latest GitHub release once, then preserves the
-detected install channel. A macOS PKG receipt selects the verified universal
-DMG and Apple Installer. A cargo-dist receipt selects the exact-tag shell
+detected install channel. A macOS PKG receipt selects the verified direct
+universal PKG and Apple Installer. A cargo-dist receipt selects the exact-tag shell
 installer and its recorded prefix. Cargo metadata selects
 `cargo install tr300 --version <resolved-version> --force --locked`; a
 best-effort `rustup update stable` runs first when available. No Unix channel
@@ -395,13 +431,11 @@ falls through into another channel. Unknown or conflicting origins are left
 untouched and receive recovery links.
 
 **Manual fallback (any platform):** if `tr300 update` fails, you can always
-re-download the installer for your platform from the
-[latest release page](https://github.com/QubeTX/qube-machine-report/releases/latest) and
-re-run it — WiX `MajorUpgrade` (MSI) and Inno Setup's AppId-based upgrade
-detection (EXE) handle in-place replacement cleanly. An explicitly launched
-older or same-version installer also wins, because a fresh install attempt is
-treated as the user's latest instruction; the automatic updater still only
-selects the newest resolved release.
+rerun the recommended versionless CLI install command or choose a package from
+the [latest release page](https://github.com/QubeTX/qube-machine-report/releases/latest).
+An explicitly launched older or same-version managed/native installer still
+represents the user's latest instruction; the automatic updater remains
+latest-only and never changes channels.
 
 In `--json` mode, stdout is always exactly one JSON object; installer progress
 is kept on stderr. Every response includes `install_channel`, `recovery_url`,
@@ -433,17 +467,21 @@ GitHub Actions handles both release assets and crates.io publishing:
   it builds the cross-platform archives and installers. Before
   upload, both Apple targets must pass Developer ID signing and Apple
   notarization; the job fails closed if any credential or Apple gate fails. New
-  installer assets use `tr300-installer.*`; the workflow also publishes
-  `tr-300-installer.*` compatibility aliases so v3.14.2 binaries can
-  self-update after the old package name was removed. The cargo-dist config
+  public managed installer assets use `tr300-installer.*`; their exact-tag
+  internal cargo-dist transactions use `tr300-dist-installer.*`. The workflow
+  also publishes `tr-300-installer.*` compatibility aliases so v3.14.2 binaries
+  can self-update after the old package name was removed. The cargo-dist config
   permits checked-in workflow/MSI customizations with
   `allow-dirty = ["ci", "msi"]`.
-- `macOS Universal DMG` consumes those exact tagged Apple archives on a native
-  Intel runner, creates the universal Developer ID signed binary and signed
-  `com.qubetx.tr300.pkg`, notarizes and staples the PKG and DMG, then installs
-  and exercises them independently on native Apple Silicon and Intel runners.
-  Only after both gates pass does it attach the versionless DMG and SHA-256
-  sidecar, bringing a complete release to 30 assets. A physical Mac is an
+- `macOS Universal Package` consumes those exact tagged Apple archives on a
+  native Intel runner, creates the universal Developer ID signed binary and
+  signed `com.qubetx.tr300.pkg`, notarizes/staples it, then installs and
+  exercises the direct package independently on native Apple Silicon and Intel
+  runners. It also proves the compatibility DMG contains the byte-identical
+  package and replays an immutable v4.1.3 update through that bridge. After all
+  gates pass, the workflow attaches the versionless PKG/sidecar plus the legacy
+  DMG/sidecar. Together with the two internal managed-installer transactions,
+  this brings a complete release to 34 assets. A physical Mac is an
   optional visual smoke test, not a release dependency.
 
 `Cargo.lock` is tracked so the crates.io publish workflow uses the same resolved

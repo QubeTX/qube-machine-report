@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [4.2.0] - 2026-07-18
+
+### Changed
+- **Managed CLI installers are now the recommended cross-platform entrypoint.**
+  Stable public `tr300-installer.ps1` / `.sh` wrappers are rendered with one
+  immutable release tag and delegate cargo-dist's checksum/atomic-copy/PATH/
+  receipt transaction to stable internal `tr300-dist-installer.*` assets.
+  Windows fresh IRM installs verify the new PowerShell binary/receipt and then
+  retire exact MSI/Inno products through their real uninstallers; macOS shell
+  installs require exact PKG receipt/file/signature evidence before removing
+  the system package, and the PKG postinstall performs the reverse allowlisted
+  Cargo-path/receipt cleanup. CLI updates remain latest-only and preserve the
+  proven channel; fresh wrappers support explicit same-version/downgrade
+  intent. Raw `cargo install` remains advanced/unmanaged because Cargo has no
+  post-install hook. Both wrappers snapshot the prior managed/Cargo binary and
+  receipt and restore it when native convergence is cancelled or fails, so a
+  failed fresh takeover does not strand its newly written managed copy beside
+  the preserved native owner. Once a real native uninstall or Mac receipt
+  retirement commits and has no supported inverse, recovery instead retains
+  the already-verified managed owner—never zero copies—and reports the partial
+  native state. Hosted Windows and native ARM/Intel Mac
+  transitions plus a published Linux wrapper smoke are release gates. (task
+  #mic1)
+- **Fresh native cleanup is now mandatory and transactional.** v4.2+ MSI, EXE,
+  and PKG packages invoke the bounded cleanup helper with `--strict` and no
+  task/checkbox opt-out. A present cargo-dist receipt is validated before its
+  binary moves; the exact pair is quarantined and restored if cleanup cannot
+  commit. WiX uses a checked transaction; Inno extracts the candidate for a
+  strict non-mutating `PrepareToInstall` ownership preflight before any native
+  change and reconfirms at `ssPostInstall`; PKG postinstall snapshots/restores
+  the managed pair inside Apple's package transaction. Package-level malformed-
+  receipt gates require the prior bytes/receipt to remain exact and no native
+  registration or payload to survive a rejected takeover. Legacy helper calls
+  without `--strict` retain the historical v3.17 advisory contract. (task #mic1)
+- **macOS fresh installs and current self-updates now open the universal PKG
+  directly.** The stable, versionless public artifact is
+  `tr300-universal-apple-darwin.pkg`; an update resolves GitHub latest once,
+  pins that exact tag, verifies the PKG sidecar, Developer ID Installer Team ID,
+  stapled notarization ticket, and Gatekeeper install policy, then opens the
+  package with Apple Installer and verifies the receipt/on-disk version before
+  reporting success. The durable `com.qubetx.tr300.pkg` receipt and legacy
+  `macos-dmg-pkg` channel ID remain unchanged; successful new transactions use
+  the precise `mac_pkg` strategy. (task #pkg42)
+- **The DMG is now a compatibility bridge, not the primary Mac installer.**
+  Immutable v4.1.x clients require the exact-tag DMG filename, so each release
+  temporarily retains a signed/notarized/stapled DMG containing the byte-exact
+  direct PKG. Public documentation links only to the PKG. Releases therefore
+  contain 34 assets (including the two internal managed-installer transactions)
+  while this old-updater guarantee is supported. Native Intel
+  and Apple Silicon gates validate the direct package and replay a real v4.1.3
+  update through the bridge before release closure. (task #pkg42)
+
+### Fixed
+- **Cross-edition Windows native installs no longer leave an orphaned product
+  registration.** MSI UpgradeCode, Inno AppId/ARP, and exact opposite-scope
+  binary checks stop before mutation when the other Global/Corporate scope is
+  still present, explain the exact recovery path, and preserve its bytes and
+  registration. Both MSI and Inno also run a non-mutating strict managed-
+  ownership preflight before removing a same-edition native format. The
+  recommended managed PowerShell installer can perform the authorized UAC
+  takeover when a direct package transaction cannot. Same-edition MSI/EXE
+  format switches remain automatic. (task #mic1)
+- **Hosted macOS updater probes are authenticated and diagnosable.** Native Mac
+  jobs reuse their read-only Actions token for release discovery and log the
+  captured one-object updater result and exit status to stderr before asserting
+  success, so Bash `errexit` cannot hide the recovery evidence.
+
 ## [4.1.3] - 2026-07-18
 
 ### Fixed
@@ -26,19 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then requires one target registration/copy, current-version no-op JSON, and a
   same-version Global worker repair with backup cleanup. Other failures still
   fail closed. v4.1.2 remains immutable; v4.1.3 is the fix-forward. (task #rsh)
-
-## [Unreleased]
-
-### Fixed
-
-- **Hosted macOS updater probes are authenticated and diagnosable.** The first
-  v4.1.3 Apple Silicon validation reached the installed updater immediately
-  after release publication and returned 2 while Intel passed seconds later;
-  Bash `errexit` also hid the captured recovery JSON. Future native Mac jobs
-  reuse the read-only Actions token for release discovery and always log the
-  captured one-object updater result and exit status to stderr before asserting
-  success. The bounded v4.1.3 rerun repeated the full Apple Silicon lifecycle
-  and passed before its DMG assets were published.
 
 ## [4.1.2] - 2026-07-18
 

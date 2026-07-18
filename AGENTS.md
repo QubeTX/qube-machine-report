@@ -37,9 +37,10 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version and working manifest: `4.1.3` (`Cargo.toml`).
-  v4.1.3 passed exact-SHA CI/crates, signed archives, every Windows package and
-  transition job, and universal PKG-in-DMG sign/notary/install/update/uninstall
+- Current published version: `4.1.3`; working manifest: `4.2.0` candidate
+  (`Cargo.toml`). v4.1.3 passed exact-SHA CI/crates, signed archives, every
+  Windows package and transition job, and universal PKG-in-DMG
+  sign/notary/install/update/uninstall
   gates on native Intel and Apple Silicon. It fixes the immutable v4.1.2
   finding that Restart Manager could terminate a Global installer updater
   before final JSON by using a strict elevated live-image worker. Alienware
@@ -577,6 +578,34 @@ Behavior:
   the same marker-balance/backup/atomic-write pipeline as Unix
 - complete uninstall deletes the binary and attempts to remove an empty parent directory when path contains `tr300`
 
+### Managed installer contract (MIC-1)
+
+Public installation guidance recommends the versionless managed wrappers:
+
+- Windows: `irm .../tr300-installer.ps1 | iex`
+- macOS/Linux: `curl .../tr300-installer.sh | sh`
+
+The release workflow renders each wrapper with one exact tag/version and keeps
+cargo-dist's raw scripts under the internal stable `tr300-dist-installer.*`
+names. A wrapper first establishes and verifies its own managed install, then
+converges only exact recognized prior ownership. Windows enumerates the fixed
+TR-300 MSI UpgradeCodes/Inno AppIds and uses UAC only for machine-wide removal.
+macOS removes a PKG only after receipt, root payload, per-file owner, path, and
+Developer ID identity all agree. The direct PKG performs the reciprocal bounded
+cleanup of an exact managed-shell/Cargo copy and matching receipt. Before
+cargo-dist mutates the managed path, each wrapper snapshots any prior
+managed/Cargo binary and receipt; a failed native convergence restores that
+snapshot and reports the surviving native owner.
+
+`tr300 update` is latest-only and preserves the proven channel. A deliberately
+launched fresh managed/native installer is authoritative user intent even for a
+same-version or downgrade repair. Opposite-edition native Windows installers
+stop before mutation and direct users to the managed PowerShell convergence
+path; they do not cross scope behind Windows Installer. Raw `cargo install` is
+advanced/unmanaged because Cargo has no TR-300 post-install hook. Ambiguous
+evidence never causes deletion, and success requires the final binary and
+durable ownership state to agree with no recognized shadowing copy.
+
 ## Self-Update System
 
 `--update` is implemented in `src/update.rs`.
@@ -603,11 +632,12 @@ Behavior:
   - **Cargo:** current executable plus Cargo metadata; runs
     `cargo install tr300 --version <resolved> --force --locked`, with
     best-effort `rustup update stable` first when rustup exists.
-  - **macOS PKG/DMG:** `/usr/local/bin/tr300` plus the
+  - **macOS PKG:** `/usr/local/bin/tr300` plus the
     `com.qubetx.tr300.pkg` receipt whose ID/version/scope, payload path,
     per-file owner, and Developer ID product identity match the running binary;
-    verifies the DMG/sidecar, mounts read-only, validates the nested PKG, and
-    waits for Apple Installer.
+    verifies the direct PKG/sidecar, signature, notarization staple, and
+    Gatekeeper install assessment, then waits for Apple Installer. Immutable
+    v4.1.x clients still use the compatibility DMG; v4.2+ clients do not.
   - **unknown, conflicting, or portable:** no mutation; exact recovery guidance
     only
 - records skipped/failed/blocked attempts but does not cross-fallback between
@@ -638,13 +668,19 @@ Behavior:
   install, verify, rollback, and delayed-cleanup transaction. The parent stays
   alive and alone emits final JSON. Never replace this with a PowerShell
   elevation/quoting boundary or let the worker rediscover/switch channels.
-- **Fresh-installer intent:** a manually launched Windows installer is the
-  user's newest channel choice. WiX removes the same-edition Inno product
-  before MSI file installation; Inno enumerates/removes the same-edition MSI
-  before Setup proceeds. Ordinary MSI UpgradeCode/Inno AppId upgrades stay
-  within format. The hidden advisory `migrate-cleanup` still removes a
-  shadowing Cargo executable and/or opposite-edition executable without ever
-  deleting the running install, toolchain, Cargo PATH, or Downloads.
+- **Fresh-installer intent:** a manually launched installer is the user's newest
+  channel choice. WiX removes the same-edition Inno product before MSI file
+  installation; Inno enumerates/removes the same-edition MSI before Setup
+  proceeds. Ordinary MSI UpgradeCode/Inno AppId upgrades stay within format.
+  Cross-edition native Windows attempts stop before mutation. The managed
+  wrappers provide the supported cross-scope/native convergence path. On Mac,
+  managed shell and direct PKG can replace each other only after exact ownership
+  proof. The hidden bounded `migrate-cleanup` never deletes the running install,
+  toolchain, shared Cargo PATH, or Downloads. Current native packages always use
+  its mandatory `--strict` mode with no cleanup opt-out; a present cargo-dist
+  receipt is validated before its binary is quarantined, and the prior pair is
+  restored if strict cleanup cannot commit. Legacy direct calls without
+  `--strict` retain the historical advisory behavior only for compatibility.
 
 JSON mode:
 - `tr300 update --json`, `tr300 --json update`, and `tr300 --update --json`
@@ -656,7 +692,7 @@ JSON mode:
 - successful updates include legacy `"method"` plus precise `"strategy"`
   (`msi_global`, `msi_corporate`, `exe_global`, `exe_corporate`, `cargo`,
   `installer_powershell`, `installer_pwsh`, `installer_curl`,
-  `installer_wget`, or `mac_dmg_pkg`); `install_channel` is the stable
+  `installer_wget`, or `mac_pkg`); `install_channel` is the stable
   launcher-independent channel identity
 - failed updates include an `"attempts"` array with per-strategy diagnostics;
   `result` is `skipped`, `failed`, or `blocked`; every failed JSON response
@@ -674,7 +710,7 @@ Exit codes:
 
 Release automation uses cargo-dist and GitHub Actions.
 
-### Enforced macOS archive signing and native PKG-in-DMG
+### Enforced macOS archive signing and direct native PKG
 
 v4.0.0 makes the Mac trust path explicit and fail-closed. In each publishing
 Apple matrix job, `.github/workflows/release.yml` runs
@@ -697,14 +733,15 @@ Post-build/upload. The script:
    deletes the keychain and decoded credentials on every exit path.
 
 The bare cargo-dist archives retain that Developer ID/notary contract. The
-installer-first path is `.github/workflows/macos-installer.yml` plus
-`scripts/build-sign-notarize-macos-dmg.sh`: it combines the two exact tagged
-archives into one universal Mach-O, signs/notarizes it, builds the signed
-system-wide `com.qubetx.tr300.pkg`, embeds that PKG and recovery instructions in
-`tr300-universal-apple-darwin.dmg`, then signs, notarizes, staples, mounts, and
-Gatekeeper-checks the nested distribution. A PKG is inside the DMG because the
-PKG owns `/usr/local/bin/tr300` and supplies the stable updater receipt; the DMG
-is the versionless download container, not a GUI app.
+native installer path is `.github/workflows/macos-installer.yml` plus
+`scripts/build-sign-notarize-macos-installer.sh`: it combines the two exact
+tagged archives into one universal Mach-O, signs/notarizes it, and builds the
+signed, notarized, stapled system-wide `com.qubetx.tr300.pkg`. The direct PKG is
+the recommended native download and the v4.2+ updater payload because the PKG,
+not a DMG, owns `/usr/local/bin/tr300`, supplies the stable receipt, and provides
+the privileged transaction. A signed/notarized/stapled DMG containing the
+byte-identical PKG is still published only so immutable v4.1.x updaters can cross
+the transition; current clients never use that bridge.
 
 Hosted packaging order is load-bearing: check out the exact release tag before
 downloading signed archives into the workspace because checkout cleans
@@ -736,8 +773,9 @@ on both hosted architectures. Never print, commit, or place secret values in
 tasks/docs/browser fields.
 
 Native `macos-15` Apple Silicon and `macos-15-intel` jobs are blocking for every
-shared/macOS release change. The DMG workflow additionally installs and
-exercises the universal package on both architectures before publication. A
+shared/macOS release change. The package workflow additionally installs and
+exercises the direct PKG and verifies the compatibility DMG on both
+architectures before publication. A
 physical Mac is optional visual smoke testing and becomes required only for a
 GUI-only defect the hosted runners cannot expose. Windows alone cannot execute
 Apple signing tools, but it can author the workflow and conduct the credential
@@ -780,11 +818,13 @@ Triggers:
 ### Installer outputs
 
 cargo-dist publishes via `release.yml`:
-- Shell installer (`tr300-installer.sh`) for macOS/Linux
-- PowerShell installer (`tr300-installer.ps1`) for Windows
-- Legacy shell/PowerShell aliases (`tr-300-installer.sh`,
-  `tr-300-installer.ps1`) are copied into GitHub Releases for v3.14.2 updater
-  compatibility after the crate name was canonicalized to `tr300`
+- the raw generated shell/PowerShell installers under internal stable names
+  `tr300-dist-installer.sh` and `tr300-dist-installer.ps1`;
+- rendered MIC-1 managed wrappers as the recommended public
+  `tr300-installer.sh` and `tr300-installer.ps1` entrypoints;
+- legacy wrapper aliases `tr-300-installer.sh` and
+  `tr-300-installer.ps1` for v3.14.2 updater compatibility after the crate name
+  was canonicalized to `tr300`;
 - Global MSI installer for Windows (`tr300-x86_64-pc-windows-msvc.msi`)
 
 `windows-installers.yml` (v3.15.0+) publishes three additional Windows assets after `release.yml` finishes:
@@ -793,14 +833,17 @@ cargo-dist publishes via `release.yml`:
 - Corporate EXE installer (`tr300-x86_64-pc-windows-msvc-corporate-setup.exe`) — Inno Setup, perUser, same install path as Corporate MSI (built from `inno/corporate.iss`)
 
 `macos-installer.yml` runs after a successful tagged `release.yml`, builds the
-universal signed PKG-in-DMG on native Intel, validates install/update/uninstall
-on native Intel and Apple Silicon, and publishes:
+universal direct PKG plus compatibility DMG on native Intel, validates trust,
+install/update/uninstall and channel takeover on native Intel and Apple
+Silicon, and publishes:
+- `tr300-universal-apple-darwin.pkg`
+- `tr300-universal-apple-darwin.pkg.sha256`
 - `tr300-universal-apple-darwin.dmg`
 - `tr300-universal-apple-darwin.dmg.sha256`
 
-Total Windows installer surface area per release: 4 first-class installers + 2
-legacy installer scripts. Complete release asset count: 30 (28 existing assets
-plus DMG and sidecar).
+Total Windows native installer surface area per release remains four packages.
+Complete v4.2 candidate release asset count: 34 (the v4.1 set of 30, direct PKG
+and sidecar, plus two internal raw cargo-dist installer scripts).
 
 ### crates.io publishing (`.github/workflows/crates-publish.yml`)
 
@@ -889,8 +932,8 @@ Mac/local/hosted gate below remains blocking for future releases.
    - `cargo publish --dry-run --locked`
    - `actionlint .github/workflows/*.yml` and `shellcheck` on changed shell scripts
    - after shared/Mac/release changes: native Apple Silicon + native Intel tests
-     and smokes; after Apple-input changes, real archive and PKG-in-DMG
-     sign/notary/staple/install/checksum round-trips
+     and smokes; after Apple-input changes, real archive, direct-PKG, and
+     compatibility-DMG sign/notary/staple/install/checksum round-trips
 4. Commit with message `release: vX.Y.Z - <summary>`.
 5. Push the default branch, **wait for `ci.yml` to go green on the exact
    commit**, then confirm `crates-publish.yml` either published the new

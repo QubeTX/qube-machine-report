@@ -7,18 +7,88 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.1.3` / `4.1.3` (all prior tags remain immutable)
+**Published / working version:** `4.1.3` / `4.2.0` candidate (all prior tags remain immutable)
 **Prior pushed checkpoint:** `7422b3c68f19e08b22f6ca8495efddd23042aeb9`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
 Windows Installers 29392382949
-**Task IDs:** `#v400`, `#core`, `#plat`, `#test`, `#docs`, `#winhw`,
-`#ship`, `#site`, `#brmain`, `#adrlog`
+**Task IDs:** `#mic1`, `#pkg42`, `#v42`, `#v400`, `#core`, `#plat`,
+`#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`, `#adrlog`
 
 This is the exhaustive portable continuation record. The SHAUGHV board source,
 milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+
+## 2026-07-18 v4.2.0 MIC-1 and direct-PKG candidate
+
+v4.2.0 is implemented in the working tree and remains unpublished. The
+copyable cross-product contract is ADR **MIC-1**:
+
+- advertise the stable managed CLI wrapper first (`irm` on Windows, `curl` on
+  macOS/Linux), with MSI/EXE/PKG retained as visible optional choices;
+- make `update` latest-only and preserve the one proven durable channel;
+- treat a deliberately launched fresh installer as the user's newest channel
+  intent, including same-version or downgrade repair;
+- converge recognized prior ownership only through exact product identities and
+  receipts, never path shape, display-name fuzziness, or broad deletion;
+- fail closed on ambiguity/cancellation/policy and show immutable exact-asset
+  plus stable latest-release recovery; and
+- report success only after binary version, durable ownership, registration,
+  PATH, and duplicate checks describe one coherent install.
+
+The Windows public wrapper is rendered with one exact tag and drives the raw
+cargo-dist installer now published internally as
+`tr300-dist-installer.ps1`. It verifies the managed receipt/binary, enumerates
+the fixed Global/Corporate MSI UpgradeCodes and Inno AppIds, then invokes only
+those registered uninstallers. Global removal requests UAC; user-scoped removal
+does not. Opposite-edition native MSI/EXE packages stop before mutation and
+redirect to this managed convergence path because a per-user transaction cannot
+safely remove a machine-wide product. Raw `cargo install` remains
+advanced/unmanaged: Cargo has no project post-install hook, so it cannot express
+fresh-channel cleanup by itself.
+
+The Unix public wrapper similarly drives internal
+`tr300-dist-installer.sh`. On macOS it will surrender an existing PKG only when
+the fixed receipt, root payload, per-file package owner, install path, and
+Developer ID identity all agree. The reciprocal native PKG postinstall invokes
+the bounded migration helper to remove an exact managed-shell/Cargo copy and
+matching cargo-dist receipt. Linux stays on the managed-shell channel.
+
+All current native packages use the hidden helper's mandatory `--strict` mode;
+the v3.17 interactive cleanup tasks/checkboxes are gone. A present cargo-dist
+receipt must exactly match provider, app, prefix, and platform path semantics
+before its binary moves. The pair is quarantined transactionally and restored
+if cleanup cannot commit. WiX checks the deferred impersonated action. Inno
+extracts the candidate and requires a strict non-mutating
+`PrepareToInstall` ownership preflight before same-edition MSI removal/files,
+then reconfirms from `ssPostInstall` after registry/ARP ownership exists (Global
+uses the original user's token). MSI performs the same embedded-candidate
+preflight before any same-edition Inno uninstall; both Windows formats reject
+registered or exact-path opposite-scope state. PKG postinstall
+snapshots/restores the managed pair inside Apple's package transaction.
+Legacy no-`--strict` calls
+remain advisory only so immutable integrations and diagnostics keep working.
+
+The preferred Mac download is now the direct signed/notarized/stapled universal
+PKG. It owns `/usr/local/bin/tr300` and receipt `com.qubetx.tr300.pkg`; the DMG
+adds no ownership semantics. The DMG remains published only as a byte-identical
+compatibility carrier because immutable v4.1.x updaters request that exact
+filename. Current updaters use exact-tag PKG/sidecar bytes directly and launch
+Apple Installer with `open -W`. The durable JSON channel remains
+`macos-dmg-pkg` for consumer compatibility; the current strategy is `mac_pkg`.
+
+The candidate release target is 34 stable-name assets: the prior 30, direct PKG
+plus sidecar, and two internal raw cargo-dist scripts. Native Intel and Apple
+Silicon jobs must validate direct-PKG trust/install/report/update selection/
+uninstall, byte equality with the DMG bridge, and a real immutable v4.1.3
+DMG-client transition. A future v4.2.x release must provide the first true
+direct-PKG old-to-new updater execution. Local locked fmt/Clippy/all-target
+tests/release build, RustSec, cargo-dist plan/generate-check, actionlint,
+ShellCheck, wrapper transaction fixtures, WiX/Inno compiles, and Alienware
+candidate report/hardware checks pass. The clean committed-tree package gate,
+exact-SHA CI/crates, tag workflows, public asset audit, and homepage update are
+still pending and must not be described as released evidence.
 
 ## 2026-07-18 v4.1.3 Global Windows live-image fix-forward
 
@@ -101,18 +171,18 @@ smokes passed. One inert MSI cache left when the old parent lost its staging
 guard was inspected and removed as the exact test fixture; it was not an active
 duplicate. Task #w413 and milestone #v41 are complete.
 
-The separate ND-300 physical-Mac acceptance batch is queued as #nd372 and must
-not start until TR-300 is complete and the user is on the testing Mac. Baseline
-with the public v3.7.1 universal DMG, require receipt
-`com.qubetx.nd300.pkg` and paired `/usr/local/bin/nd300` + `speedqx` ownership,
-then run `nd300 update --json` through the standard Apple Installer flow to
-public v3.7.2. In a fresh shell prove both paths/versions, the current receipt,
-no Cargo/archive shadow, and exactly one JSON stdout object. Run only
-`--version`, `--fast --json`, and `--fast --ascii` smokes. The final download
-entrypoint is versionless:
-`https://github.com/QubeTX/qube-network-diagnostics/releases/latest/download/nd300-universal-apple-darwin.dmg`.
-Never run ND network fixes, change channels, clean unrelated files, or uninstall
-the active setup; stop on ambiguity.
+The separate ND-300 v3.7.3 acceptances are queued as #nd372 and must not start
+until TR-300 is complete. First return proof that no Alienware MSI/Inno/UAC
+transaction remains so the separate ND task can retry its Windows lane without
+the prior code-1602 overlap. A physical-Mac task may then reuse TR-300's proven
+legacy bridge: verify an immutable old DMG and nested PKG, install that exact
+baseline, run its JSON updater into the public direct PKG, complete Apple
+Installer, and prove fresh-shell receipt/file ownership, paired paths/versions,
+no shadow copy, and one-object JSON. The ND task must provide the exact baseline
+and final v3.7.3 URL; this TR task must not guess assets or change ND files. Run
+only `--version`, `--fast --json`, and `--fast --ascii` smokes. Never run ND
+network fixes, change channels, clean unrelated files, or uninstall the active
+setup; stop on ambiguity.
 
 ## 2026-07-18 immutable v4.1.2 supported-validator fix-forward
 
@@ -243,18 +313,19 @@ Implemented local surfaces:
   fresh intent (immutable older MSIs may still block safely);
 - native Windows hybrid-core parsing, proven on this Alienware as `6P + 10E`,
   16 physical / 22 logical cores;
-- `scripts/build-sign-notarize-macos-dmg.sh` and
-  `.github/workflows/macos-installer.yml` for a universal signed
-  `tr300.pkg` inside a signed/notarized/stapled DMG, with native
+- the historical `scripts/build-sign-notarize-macos-dmg.sh` and
+  `.github/workflows/macos-installer.yml` v4.1 implementation for a universal
+  signed `tr300.pkg` inside a signed/notarized/stapled DMG, with native
   `macos-15` and `macos-15-intel` install gates;
 - CI ARM/Intel Mac and Linux ARM64 coverage plus workflow/shell validation.
 
-The PKG-in-DMG choice is intentional, not an Apple requirement. The PKG owns
-the privileged `/usr/local/bin/tr300` transaction and stable receipt; the DMG
-is the familiar versionless download/recovery container. A loose binary in a
-DMG would not meet origin detection or install/uninstall inventory needs. A
-physical Mac is optional visual testing; native GitHub ARM and Intel runners
-are the release requirement.
+This was the v4.1 choice and evidence boundary. v4.2 supersedes DMG-first
+distribution with the direct PKG while retaining that DMG only for immutable
+client compatibility. The PKG always owned the privileged
+`/usr/local/bin/tr300` transaction and stable receipt; a loose binary still
+does not meet origin detection or install/uninstall inventory needs. A physical
+Mac is optional visual testing; native GitHub ARM and Intel runners are the
+release requirement.
 
 Alienware baseline evidence: the naturally installed Global MSI v3.17.0 ran
 its existing CLI updater to v4.0.1 and remained at the same Program Files path
@@ -280,13 +351,14 @@ PKG on native Apple Silicon job 88061567206 and Intel job 88061567218. The
 credential ceremony and hosted identity gate are complete without a physical
 Mac.
 
-The remaining exact sequence is: finish docs/ADR and disposable installer
-fixtures; run every locked local gate; push `main`; wait for exact-SHA CI and
-crates; tag only v4.1.2; wait for cargo-dist, Windows
-installers, and PKG-in-DMG validation; then audit crates.io, all 30 assets,
-checksums, signatures/notarization, every installer channel, update/recovery,
-and uninstall before closing the release. AMD laptop and Pi 4 hardware evidence
-remain tracked continuation.
+The remaining exact sequence for the current candidate is: finish the MIC-1
+docs/ADR and disposable installer fixtures; run every locked local gate; push
+`main`; wait for exact-SHA CI and crates; tag only v4.2.0; wait for cargo-dist,
+all Windows installer/transition jobs, and both direct-PKG/DMG-bridge native
+Mac gates; then audit crates.io, all 34 assets, checksums, signatures/
+notarization, every installer channel, update/recovery, and uninstall before
+closing the release. AMD laptop and Pi 4 hardware evidence remain tracked
+continuation.
 
 ## Session Narrative
 

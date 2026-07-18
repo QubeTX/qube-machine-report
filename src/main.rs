@@ -43,14 +43,15 @@ fn main() -> Result<()> {
 
     // Handle action commands (early exit)
     if action == Some(Action::MigrateCleanup) {
-        // Hidden, installer-internal: consolidate to a single install. Advisory —
-        // never fails (exit 0 on partial/empty); only a true internal error is
-        // nonzero. Mirrors `nd300 migrate-cleanup`.
+        // Hidden, installer-internal: consolidate to a single install. Legacy
+        // calls remain advisory; current native packages pass `--strict` and
+        // require complete convergence before reporting installation success.
         let mut opts = tr300::migrate::MigrateOptions::default();
         opts.cargo_copy = cli.cargo_copy;
         opts.other_edition = cli.other_edition;
         opts.quiet = cli.quiet;
         opts.dry_run = cli.dry_run;
+        opts.strict = cli.strict_cleanup;
         opts.json = cli.json;
         opts.user_profile = cli.user_profile.clone();
         opts.cargo_home = cli.cargo_home.clone();

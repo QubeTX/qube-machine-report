@@ -1,0 +1,88 @@
+# MIC-1 managed installation behavior
+
+## Status
+
+Active. Source implementation is present; local and hosted transition evidence,
+documentation reconciliation, and immutable release proof remain open.
+
+## Activity
+
+- 2026-07-18 — implemented the stable-name managed wrappers, strict transactional
+  ownership migration, native-package convergence rules, hosted malformed-owner
+  fixtures, and the reusable fresh-install versus self-update contract across
+  source, ADR, README, changelogs, testing, plans, and agent guidance (agent: codex)
+- 2026-07-18 — froze the v4.2.0 candidate after 164 unit + 19 integration tests,
+  warning-denying Clippy, release build, RustSec, cargo-dist, workflow/script,
+  rollback, WiX 3.14.1, Inno 6.7.3, and Alienware functionality/hardware gates.
+  Inspected the generated cargo-dist 0.31.0 Unix installer and changed the
+  published Linux smoke to prove its default persistent PATH setup from a clean
+  home and fresh shell. Clean-tree and hosted release evidence remain open
+  (agent: codex)
+
+## Intent
+
+Make the managed prebuilt CLI installer the advertised default on every
+supported platform while keeping native packages as first-class options.
+`tr300 update` preserves the proven channel. A deliberately launched fresh
+managed/native installer is authoritative for upgrade, reinstall, or downgrade;
+it either converges recognized prior ownership or fails visibly without
+guessing. Raw Cargo stays advanced/unmanaged because it has no post-install
+hook.
+
+## Implementation
+
+- Public stable-name PowerShell/shell wrappers retain cargo-dist's generated
+  installer transactions under stable internal exact-tag asset names.
+- Windows PowerShell verifies its new binary/receipt before enumerating the two
+  exact MSI UpgradeCodes and two exact Inno AppIds and invoking real
+  uninstallers.
+- macOS shell takeover requires exact receipt, payload owner, and Developer ID
+  proof. PKG postinstall performs the reverse allowlisted Cargo binary/receipt
+  cleanup.
+- Cross-edition native Windows packages stop before mutation when the other
+  scope is registered or its exact native binary remains; same-edition format
+  changes remain automatic only after a strict non-mutating managed-ownership
+  preflight.
+- Stable human entrypoints use `latest`; every wrapper/updater payload remains
+  pinned to the one resolved immutable tag.
+- Both wrappers snapshot and restore the prior managed/Cargo binary plus receipt
+  when a fresh native takeover cannot commit; isolated rollback fixtures run in
+  CI.
+- Once an external native uninstall/receipt retirement commits and has no
+  supported inverse, the wrappers retain the already-verified managed owner and
+  fail with partial-state recovery evidence rather than risking zero copies.
+- Current MSI/EXE/PKG integrations always use `migrate-cleanup --strict` with no
+  task/checkbox opt-out. Strict mode prevalidates and transactionally
+  quarantines/restores an exact Cargo-path binary plus cargo-dist receipt;
+  ambiguous evidence fails before mutation. Legacy no-`--strict` calls stay
+  advisory for compatibility.
+- Inno extracts the candidate binary and dry-runs that strict ownership check
+  during `PrepareToInstall`, before removing an MSI or writing native state,
+  then reconfirms the transaction after its own registration exists. Hosted
+  malformed-receipt gates require all four Windows packages and the Mac PKG to
+  preserve prior bytes/receipt and leave no rejected native owner.
+
+## Verification
+
+- [x] Rust migration/updater unit tests (including strict pair
+  preflight/transaction), both wrapper rollback fixtures, and
+  PowerShell/shell parsers pass locally.
+- [x] Alienware read-only wrapper discovery identifies exactly the natural
+  Global MSI product through its immutable UpgradeCode.
+- [x] WiX 3.14.1 and Inno 6.7.3 compile both editions locally; only the
+  intentional WiX `AllowDowngrades` ICE61 remains. Hosted source jobs own real
+  takeover, cross-edition, and malformed-receipt rollback proof.
+- [x] Full local locked Rust gates, RustSec, cargo-dist plan/generate-check,
+  actionlint/ShellCheck, wrapper fixtures, and Alienware candidate
+  functionality/hardware validation pass.
+- [ ] Hosted Windows exact-release jobs prove all four native-to-IRM takeovers.
+- [ ] Native Intel/ARM jobs prove shell-to-PKG and PKG-to-shell takeovers.
+- [ ] Published AMD64 Linux wrapper installs, receipts, and no-op-updates.
+- [ ] Final docs and 34-asset release audit agree with MIC-1.
+
+## Resume
+
+Run the full clean-tree release sequence only after local fmt/clippy/tests/build,
+package/publish dry runs, audit, actionlint/shellcheck, WiX, and Inno gates pass.
+Do not use the Alienware's active Global MSI as a takeover fixture; disposable
+hosted Windows runners own that destructive matrix.

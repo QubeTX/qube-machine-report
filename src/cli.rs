@@ -20,8 +20,9 @@ pub enum Action {
     /// (and the silent self-update path) to consolidate to a single install:
     /// remove a shadowing older `cargo install` copy and/or the other Windows
     /// edition. Safe anywhere: never deletes the running install, cargo/rustup,
-    /// the `.cargo\bin` PATH entry, or anything outside the `tr300` allowlist,
-    /// and always exits 0 (cleanup is advisory). Parses as `migrate-cleanup`.
+    /// the `.cargo\bin` PATH entry, or anything outside the `tr300` allowlist.
+    /// Advisory calls exit 0 on partial cleanup; current installers add hidden
+    /// `--strict` and require complete convergence. Parses as `migrate-cleanup`.
     #[value(hide = true)]
     MigrateCleanup,
     /// Delete the renamed live-image backup after a Windows update. HIDDEN —
@@ -131,6 +132,10 @@ pub struct Cli {
     /// Detect and report what WOULD be removed without deleting anything.
     #[arg(long = "dry-run", hide = true)]
     pub dry_run: bool,
+
+    /// Require every requested cleanup target to converge; installer-internal.
+    #[arg(long = "strict", hide = true)]
+    pub strict_cleanup: bool,
 
     /// The invoking user's profile dir, so a perMachine installer can resolve
     /// that user's `.cargo` / `%LocalAppData%` when running as a different user.

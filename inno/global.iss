@@ -46,8 +46,8 @@ DisableDirPage=auto
 ; Require admin (perMachine scope). Triggers UAC prompt at install start.
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64os
+ArchitecturesInstallIn64BitMode=x64os
 OutputBaseFilename=tr300-x86_64-pc-windows-msvc-setup
 OutputDir=Output
 Compression=lzma
@@ -64,6 +64,11 @@ UninstallDisplayName={#MyAppName}
 LicenseFile=..\LICENSE
 ; Allow uninstaller to remove its own metadata.
 SetupLogging=yes
+; The only per-user area in this administrative installer is the compatibility
+; HKCU install-source marker below. The updater can also recover the Global
+; channel from one exact machine-wide ARP registration when an over-the-shoulder
+; elevation writes that marker to the administrator profile.
+UsedUserAreasWarning=no
 ; Cross-method consolidation (v3.17.0+): close any running tr300 before we replace
 ; files so the in-place upgrade isn't blocked. CloseApplications uses Windows'
 ; Restart Manager; AppMutex lets Setup detect a running instance. (tr300 is a
@@ -74,18 +79,13 @@ CloseApplications=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
-[Tasks]
-; Cross-method consolidation (v3.17.0+). BOTH default-checked (operator policy:
-; one install at a time). Under /SILENT, default-checked tasks fire automatically,
-; so the silent self-update path runs both cleanups with no /MERGETASKS
-; suppression. The user can untick either in the interactive wizard.
-Name: "cleancargo"; Description: "Remove an older Cargo-installed copy of tr300 (recommended - keeps one version on PATH)"; GroupDescription: "Consolidate installs:"
-Name: "cleanotheredition"; Description: "Remove the other edition (Corporate per-user) if present (recommended - one edition at a time)"; GroupDescription: "Consolidate installs:"
-
 [Files]
 ; Bundles tr300.exe from target/release/. The CI workflow runs cargo build
 ; --release before invoking iscc so this path is populated.
-Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion
+; PrepareToInstall extracts this same payload temporarily for its non-mutating
+; strict ownership preflight. `noencryption` permits that early extraction;
+; the normal Files pass still installs the one compiled payload.
+Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion noencryption
 
 [Registry]
 ; Install-source marker. tr300 update reads HKCU\Software\TR300\InstallSource
@@ -95,28 +95,60 @@ Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSour
 Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSourceGlobal"; ValueData: "exe-global"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\TR300"; Flags: uninsdeletekeyifempty
 
-[Run]
-; Post-install consolidation. The deletion logic lives in the binary
-; (`tr300 migrate-cleanup`), which only ever removes tr300.exe, never cargo/rustup,
-; never the Cargo bin PATH entry, never the running install, and always exits 0
-; (advisory - never fails the install).
-;
-; perMachine Global EXE runs ELEVATED. Inno has no reliable constant for the
-; pre-elevation (invoking) user's profile, so we do NOT pass a user-profile
-; override here: migrate-cleanup falls back to the process environment (CARGO_HOME,
-; then USERPROFILE / LocalAppData), correct when an admin elevates their own
-; session and fail-safe otherwise (a harmless no-op). The perMachine MSI resolves
-; the right user via an Impersonate='yes' custom action.
-;
-; runhidden + waituntilterminated keeps the wizard clean and ordered; nowait is
-; deliberately NOT used so cleanup finishes before Setup reports done.
-Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --cargo-copy"; Flags: runhidden waituntilterminated; Tasks: cleancargo; StatusMsg: "Removing older Cargo-installed copy..."
-Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
-
 [Code]
 #define ConflictingMsiDisplayName MyAppName
 #define ConflictingMsiPublisher MyAppPublisher
+#define OtherEditionDisplayName "tr300 (Corporate Edition)"
+#define OtherEditionInnoAppId "{76A253EB-3A17-4730-9C54-5BE755A9BC4C}"
+#define OtherEditionBinaryPath "{userpf}\tr300\bin\tr300.exe"
+
+function PreflightManagedTakeover(): String;
+var
+  ExitCode: Integer;
+  Binary: String;
+begin
+  Result := '';
+  ExtractTemporaryFile('{#MyAppExeName}');
+  Binary := ExpandConstant('{tmp}\{#MyAppExeName}');
+  if not ExecAsOriginalUser(Binary,
+      'migrate-cleanup --quiet --strict --dry-run --cargo-copy',
+      ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+  begin
+    Result := 'Could not start the TR-300 managed/Cargo ownership preflight. ' +
+      'Setup stopped before changing the existing installation.';
+    exit;
+  end;
+  if ExitCode <> 0 then
+    Result := 'The existing TR-300 managed/Cargo ownership evidence is ' +
+      'ambiguous. Setup stopped before changing anything. Use ' +
+      'https://github.com/QubeTX/qube-machine-report/releases/latest';
+end;
+
 #include "remove-conflicting-msi.pas"
+
+procedure RunStrictMigration(Args: String; LabelText: String);
+var
+  ExitCode: Integer;
+  Binary: String;
+begin
+  Binary := ExpandConstant('{app}\bin\{#MyAppExeName}');
+  if not ExecAsOriginalUser(Binary, 'migrate-cleanup --quiet --strict ' + Args,
+      ExpandConstant('{app}\bin'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Could not start TR-300 ' + LabelText + ' cleanup. Setup stopped safely.');
+  if ExitCode <> 0 then
+    RaiseException('TR-300 ' + LabelText + ' cleanup did not converge (exit ' +
+      IntToStr(ExitCode) + '). Setup cannot claim one active install. Use ' +
+      'https://github.com/QubeTX/qube-machine-report/releases/latest');
+end;
+
+procedure ConsolidatePriorCli;
+begin
+  { PrepareToInstall rejected both registered and orphaned cross-edition
+    binaries and dry-ran this exact managed/Cargo ownership transaction before
+    any native mutation. The elevated Global setup deliberately uses the
+    original user's token for the final convergence. }
+  RunStrictMigration('--cargo-copy', 'managed/Cargo');
+end;
 
 {
   PATH management — system PATH (HKLM) for the Global perMachine edition.
@@ -180,8 +212,13 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  if CurStep = ssPostInstall then begin
+    { The non-mutating preflight already proved exact ownership. Final strict
+      convergence now uses the installed binary, after its registry and ARP
+      identity exist, before PATH advertises the new channel. }
+    ConsolidatePriorCli;
     EnvAddPath(ExpandConstant('{app}') + '\bin');
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

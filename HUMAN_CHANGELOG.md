@@ -11,6 +11,52 @@ file is the user-facing summary.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [4.2.0] - 2026-07-18
+
+### Changed
+- **The easiest install is now one consistent terminal command.** Windows uses
+  the PowerShell `irm` command; Mac and Linux use the shell command. These
+  managed installers download prebuilt TR-300—Rust is not required—and future
+  `tr300 update` runs stay with that same method. If you deliberately run a
+  fresh managed command after using MSI, EXE, or PKG, it verifies the new copy
+  first and safely makes that command your new install choice. The packaged
+  installers remain available for IT, managed devices, and people who prefer a
+  graphical installer. Raw `cargo install` is now clearly labeled as an
+  advanced path because Cargo cannot run the cleanup hook this promise needs.
+  If authorization is cancelled or native cleanup fails, the managed command
+  restores the prior managed/Cargo copy and receipt instead of pretending the
+  channel switch completed. If a native uninstaller already finished and
+  cannot be reversed, it keeps the verified new managed command available
+  rather than risking a computer with no working TR-300.
+- **A fresh packaged installer now finishes with one clear owner or stops
+  safely.** MSI, EXE, and PKG installs no longer offer a cleanup opt-out. They
+  validate and temporarily preserve an exact older terminal-managed copy while
+  changing ownership, then restore it if cleanup cannot finish. Ambiguous or
+  permission-blocked state is reported as a failure with the fresh download
+  path instead of leaving two active commands and calling the install complete.
+- **Mac users now download and open one direct Apple installer package.** The
+  universal PKG supports Apple Silicon and Intel, installs the same system-wide
+  command, and keeps the same package receipt. TR-300 verifies its download,
+  Apple signature, notarization, and installed version before calling an update
+  successful.
+- **The old DMG remains only so existing v4.1.x installations can update.** It
+  contains the exact same PKG and is tested on both kinds of Mac, but new
+  install links and new self-updates use the PKG directly. This avoids breaking
+  older computers while removing the extra wrapper from the normal experience.
+
+### Fixed
+- **Windows package switches no longer pretend a different edition disappeared.**
+  A direct Global/Corporate package stops before changing anything when the
+  other scope is still registered or its exact native command remains, and
+  points to the managed installer that can request the right authorization.
+  It also checks ambiguous terminal-managed ownership before retiring an MSI or
+  EXE. Switching MSI ↔ EXE within the same edition remains automatic.
+- **Hosted Mac update checks now show their result reliably.** The tests use
+  their existing read-only GitHub access and record update output before making
+  the job pass or fail.
+
 ## [4.1.3] - 2026-07-18
 
 ### Fixed
@@ -27,17 +73,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   waits for the matching installer it already launched, and still requires a
   single correct install. It separately reruns the new Global worker and proves
   the temporary backup is removed.
-
-## [Unreleased]
-
-### Fixed
-
-- **Mac release checks now show why an update probe failed instead of hiding
-  its result.** Hosted Mac tests use their existing read-only GitHub access for
-  the just-published version check and record the updater result before making
-  the job pass or fail. The v4.1.3 Apple Silicon retry repeated the complete
-  install, trust, update, and uninstall flow successfully before the DMG was
-  published.
 
 ## [4.1.2] - 2026-07-18
 

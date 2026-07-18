@@ -65,6 +65,7 @@ jobs:
             tr300-x86_64-pc-windows-msvc-setup.exe
             tr300-x86_64-pc-windows-msvc-corporate-setup.exe
             tr300-installer.ps1
+            tr300-dist-installer.ps1
             tr300-x86_64-pc-windows-msvc.zip
           )
           for asset in "${required[@]}"; do
@@ -714,3 +715,96 @@ jobs:
           }
           Remove-Current
           if (@(Entries).Count -ne 0) { throw "registration remains after final uninstall" }
+
+  managed-cli-choice:
+    name: Fresh PowerShell supersedes ${{ matrix.name }}
+    needs: resolve
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Global MSI
+            kind: msi
+            asset: tr300-x86_64-pc-windows-msvc.msi
+          - name: Corporate MSI
+            kind: msi
+            asset: tr300-x86_64-pc-windows-msvc-corporate.msi
+          - name: Global EXE
+            kind: exe
+            asset: tr300-x86_64-pc-windows-msvc-setup.exe
+          - name: Corporate EXE
+            kind: exe
+            asset: tr300-x86_64-pc-windows-msvc-corporate-setup.exe
+    steps:
+      - name: Download exact native and managed installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          NATIVE_ASSET: ${{ matrix.asset }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force assets | Out-Null
+          gh release download $env:TAG --repo '${{ github.repository }}' --dir assets `
+            --pattern $env:NATIVE_ASSET --pattern tr300-installer.ps1
+
+      - name: Install native channel, then make fresh PowerShell intent authoritative
+        env:
+          TR300_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NATIVE_ASSET: ${{ matrix.asset }}
+          KIND: ${{ matrix.kind }}
+          EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
+        shell: pwsh
+        run: |
+          $native = Join-Path $PWD "assets\$env:NATIVE_ASSET"
+          if ($env:KIND -eq 'msi') {
+            $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $native, '/qn', '/norestart')
+          } else {
+            $process = Start-Process $native -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+          }
+          if ($process.ExitCode -ne 0) { throw "native setup failed: $($process.ExitCode)" }
+
+          & (Join-Path $PWD 'assets\tr300-installer.ps1')
+          if (-not $?) { throw 'managed PowerShell takeover failed' }
+
+          $managed = "$HOME\.cargo\bin\tr300.exe"
+          if (-not (Test-Path -LiteralPath $managed)) { throw 'managed binary is missing' }
+          if ((& $managed --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
+            throw 'managed binary version mismatch'
+          }
+          $receipt = Get-Content "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Raw | ConvertFrom-Json
+          if ($receipt.provider.source -ne 'cargo-dist' -or $receipt.version -ne $env:EXPECTED_VERSION) {
+            throw 'managed receipt does not identify the exact release'
+          }
+
+          $entries = @(
+            Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            Get-ItemProperty 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+          ) | Where-Object { $_.DisplayName -in @('tr300', 'tr300 (Corporate Edition)') }
+          if (@($entries).Count -ne 0) { throw "native registration remains: $($entries.DisplayName)" }
+          foreach ($path in @(
+            "$env:ProgramFiles\tr300\bin\tr300.exe",
+            "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
+          )) {
+            if (Test-Path -LiteralPath $path) { throw "native binary remains: $path" }
+          }
+          $markers = Get-ItemProperty 'HKCU:\Software\TR300' -ErrorAction SilentlyContinue
+          foreach ($name in @('InstallSource', 'InstallSourceGlobal', 'InstallSourceCorporate')) {
+            if ($markers -and $markers.PSObject.Properties[$name]) { throw "stale native marker remains: $name" }
+          }
+
+          $stdout = Join-Path $env:RUNNER_TEMP 'managed-current.json'
+          $stderr = Join-Path $env:RUNNER_TEMP 'managed-current.stderr'
+          $update = Start-Process $managed -Wait -PassThru -ArgumentList @('update', '--json') `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $lines = @(Get-Content -LiteralPath $stdout)
+          if ($update.ExitCode -ne 0 -or $lines.Count -ne 1) { throw 'managed no-op updater JSON failed' }
+          $json = $lines[0] | ConvertFrom-Json
+          if ($json.install_channel -ne 'powershell-installer' -or
+              $json.update_available -ne $false -or $json.success -ne $true) {
+            throw 'managed no-op updater lost its channel'
+          }
+
+          Remove-Item -LiteralPath $managed -Force
+          Remove-Item -LiteralPath "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Force

@@ -8,8 +8,11 @@
   even when the declaration looks correct. Instead, use Inno's supported
   registry helpers and require exact native Add/Remove Programs evidence:
   display name, publisher, WindowsInstaller=1, and a GUID product key.
-  The calling .iss defines ConflictingMsiDisplayName and
-  ConflictingMsiPublisher.
+  The calling .iss defines ConflictingMsiDisplayName,
+  ConflictingMsiPublisher, OtherEditionDisplayName, and
+  OtherEditionInnoAppId. A different edition/scope is not silently reduced to
+  an orphaned registration: the installer stops before mutation and points to
+  the managed CLI/release recovery path.
 
   Do not infer MSI install scope from the Add/Remove Programs hive. A hosted
   runner and the Alienware both registered the no-UAC Corporate per-user MSI
@@ -50,6 +53,61 @@ begin
       exit;
   end;
   Result := True;
+end;
+
+function HasMatchingMsiProduct(RootKey: Integer; DisplayNameToMatch: String): Boolean;
+var
+  Subkeys: TArrayOfString;
+  Key: String;
+  DisplayName: String;
+  Publisher: String;
+  WindowsInstaller: Cardinal;
+  Index: Integer;
+begin
+  Result := False;
+  if not RegGetSubkeyNames(RootKey, UninstallKey, Subkeys) then
+    exit;
+  for Index := 0 to GetArrayLength(Subkeys) - 1 do
+  begin
+    Key := UninstallKey + '\' + Subkeys[Index];
+    if IsProductCode(Subkeys[Index]) and
+       RegQueryStringValue(RootKey, Key, 'DisplayName', DisplayName) and
+       (DisplayName = DisplayNameToMatch) and
+       RegQueryStringValue(RootKey, Key, 'Publisher', Publisher) and
+       (Publisher = '{#ConflictingMsiPublisher}') and
+       RegQueryDWordValue(RootKey, Key, 'WindowsInstaller', WindowsInstaller) and
+       (WindowsInstaller = 1) then
+    begin
+      Result := True;
+      exit;
+    end;
+  end;
+end;
+
+function HasOtherEditionInno(RootKey: Integer): Boolean;
+var
+  Key: String;
+  DisplayName: String;
+  Publisher: String;
+begin
+  Key := UninstallKey + '\{#OtherEditionInnoAppId}_is1';
+  Result := RegQueryStringValue(RootKey, Key, 'DisplayName', DisplayName) and
+    (DisplayName = '{#OtherEditionDisplayName}') and
+    RegQueryStringValue(RootKey, Key, 'Publisher', Publisher) and
+    (Publisher = '{#ConflictingMsiPublisher}');
+end;
+
+function HasOtherEditionRegistration(): Boolean;
+begin
+  Result :=
+    HasMatchingMsiProduct(HKEY_LOCAL_MACHINE_64, '{#OtherEditionDisplayName}') or
+    HasMatchingMsiProduct(HKEY_LOCAL_MACHINE_32, '{#OtherEditionDisplayName}') or
+    HasMatchingMsiProduct(HKEY_CURRENT_USER_64, '{#OtherEditionDisplayName}') or
+    HasMatchingMsiProduct(HKEY_CURRENT_USER_32, '{#OtherEditionDisplayName}') or
+    HasOtherEditionInno(HKEY_LOCAL_MACHINE_64) or
+    HasOtherEditionInno(HKEY_LOCAL_MACHINE_32) or
+    HasOtherEditionInno(HKEY_CURRENT_USER_64) or
+    HasOtherEditionInno(HKEY_CURRENT_USER_32);
 end;
 
 procedure AddMatchingMsiProducts(RootKey: Integer; var ProductCodes: TArrayOfString);
@@ -105,6 +163,21 @@ var
   Index: Integer;
 begin
   Result := '';
+
+  if HasOtherEditionRegistration() or
+     FileExists(ExpandConstant('{#OtherEditionBinaryPath}')) then
+  begin
+    Result := 'The other TR-300 edition is registered or its exact native ' +
+      'binary remains. This installer stopped before changing anything ' +
+      'because it cannot retire that scope ' +
+      'safely. Uninstall the existing edition, or use the recommended managed ' +
+      'installer from https://github.com/QubeTX/qube-machine-report/releases/latest';
+    exit;
+  end;
+
+  Result := PreflightManagedTakeover();
+  if Result <> '' then
+    exit;
 
   AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_64, ProductCodes);
   AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_32, ProductCodes);
