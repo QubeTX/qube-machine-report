@@ -318,10 +318,12 @@ jobs:
             echo 'managed installer placeholder was not rendered' >&2
             exit 1
           fi
-          grep -Fq "releases/download/${RELEASE_TAG}/tr300-dist-installer.sh" artifacts/tr300-installer.sh
-          # The PowerShell variable below is literal wrapper content.
-          # shellcheck disable=SC2016
-          grep -Fq 'releases/download/$Tr300Tag/tr300-dist-installer.ps1' artifacts/tr300-installer.ps1
+          grep -Fq "tr300_tag='${RELEASE_TAG}'" artifacts/tr300-installer.sh
+          grep -Fq "releases/download/\${tr300_tag}" artifacts/tr300-installer.sh
+          grep -Fq "\${tr300_release_base}/tr300-dist-installer.sh" artifacts/tr300-installer.sh
+          grep -Fq "\$Tr300Tag = '${RELEASE_TAG}'" artifacts/tr300-installer.ps1
+          grep -Fq "releases/download/\$Tr300Tag\"" artifacts/tr300-installer.ps1
+          grep -Fq "\$Tr300ReleaseBase/tr300-dist-installer.ps1" artifacts/tr300-installer.ps1
       - name: Add legacy installer aliases
         shell: bash
         run: |

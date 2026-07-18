@@ -263,6 +263,24 @@ jobs:
           grep -Fq 'migrate-cleanup --quiet --strict --cargo-copy --user-profile' "$builder"
           grep -Fq '.config/tr300/tr300-receipt.json' "$builder"
           grep -Fq 'rollback_managed' "$builder"
+          render_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/tr300-wrapper-render.XXXXXXXX")
+          trap 'rm -rf "$render_dir"' EXIT
+          render_tag=v0.0.0-ci
+          render_version=0.0.0
+          sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
+            "$shell_wrapper" > "$render_dir/tr300-installer.sh"
+          sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
+            "$powershell_wrapper" > "$render_dir/tr300-installer.ps1"
+          if grep -R -F '@TR300_' "$render_dir"; then
+            echo 'pre-tag managed wrapper render left a placeholder behind' >&2
+            exit 1
+          fi
+          grep -Fq "tr300_tag='${render_tag}'" "$render_dir/tr300-installer.sh"
+          grep -Fq "releases/download/\${tr300_tag}" "$render_dir/tr300-installer.sh"
+          grep -Fq "\${tr300_release_base}/tr300-dist-installer.sh" "$render_dir/tr300-installer.sh"
+          grep -Fq "\$Tr300Tag = '${render_tag}'" "$render_dir/tr300-installer.ps1"
+          grep -Fq "releases/download/\$Tr300Tag\"" "$render_dir/tr300-installer.ps1"
+          grep -Fq "\$Tr300ReleaseBase/tr300-dist-installer.ps1" "$render_dir/tr300-installer.ps1"
           grep -Fq 'mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh' "$release"
           grep -Fq 'mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1' "$release"
           # The PowerShell expression below is literal fixture text.

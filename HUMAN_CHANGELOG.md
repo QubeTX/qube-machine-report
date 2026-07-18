@@ -13,6 +13,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-07-18
+
+### Fixed
+- **The new one-command installers are now assembled and checked before a
+  release tag is created.** v4.2.0's code and crates.io package passed, and its
+  Mac downloads were signed and notarized during packaging, but release tests
+  looked for fully expanded download URLs instead of the pinned variables and
+  filenames both working scripts actually use. The shell check stopped the job
+  before publishing a GitHub Release. v4.2.1 checks each pinned version, base
+  address, and installer filename separately and performs
+  the same complete wrapper assembly during normal CI, so that host-only check
+  cannot fail for the first time after tagging. No v4.2.0 download was replaced
+  or silently changed.
+
 ## [4.2.0] - 2026-07-18
 
 ### Changed

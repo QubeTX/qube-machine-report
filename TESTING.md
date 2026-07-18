@@ -7,7 +7,7 @@ as passed.
 
 ## Per-version verification log
 
-### v4.2.0 — 2026-07-18 (candidate; not published)
+### v4.2.1 — 2026-07-18 (candidate release-host fix-forward)
 
 - **Decision under test:** ADR MIC-1 makes the managed CLI installers the
   recommended public path while preserving every proven origin for
@@ -60,7 +60,7 @@ as passed.
   now inject that malformed state before every MSI/EXE and PKG attempt and must
   prove byte-for-byte retention plus no rejected native registration/payload,
   then prove normal PATH/registration and duplicate convergence.
-- **Mac distribution candidate:** v4.2.0 adds a direct universal
+- **Mac distribution candidate:** the v4.2 series adds a direct universal
   `tr300-universal-apple-darwin.pkg` plus SHA-256 sidecar. It is signed with
   Developer ID Installer, notarized, stapled, and Gatekeeper-assessed. The DMG
   and sidecar remain compatibility assets only for immutable v4.1.x clients and
@@ -71,7 +71,7 @@ as passed.
   updater proof.
 - **Local code/package evidence:** locked formatting and Clippy pass with
   warnings denied; 164 all-feature unit tests and 19 integration tests pass;
-  the optimized 4.2.0 build succeeds; RustSec scanned 221 locked dependencies
+  the optimized candidate build succeeds; RustSec scanned 221 locked dependencies
   with no vulnerability finding; cargo-dist 0.31.0 plan/generate-check pass; and
   dirty-tree preliminary package-list/publish dry runs package 39 source files
   and compile successfully. PowerShell parsing, actionlint 1.7.12, ShellCheck
@@ -105,6 +105,29 @@ as passed.
   SC2016 annotation was added and the complete extracted guard block was linted
   locally before repeating the full matrix. No tag, crate, or release was
   produced from this SHA.
+- **Immutable v4.2.0 boundary and v4.2.1 reason:** source
+  `b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed complete CI run
+  29662326024 and crates run 29662484965; crates.io serves 4.2.0 with checksum
+  `ffa4244785999c7e81372f7d2b88bf3ef8e5dc7d636d57a63d90aa9d04bf0707`.
+  Tagged release run 29662526880 built all six cargo-dist targets and passed
+  signing/notarization for both Apple archives, then failed in the host's
+  wrapper assertion before `gh release create`. Both wrappers correctly store
+  a pinned tag/release base and internal asset suffix separately; the assertions
+  incorrectly required fully expanded URLs, and the shell assertion failed
+  first. No v4.2.0 GitHub
+  Release or downloadable asset was created. The tag and crate remain immutable;
+  v4.2.1 fixes forward by checking every component separately and rendering/
+  validating both complete wrappers during pre-tag CI.
+- **v4.2.1 local fix-forward evidence:** locked fmt, warnings-denied Clippy,
+  164 unit tests, 19 integration tests, optimized build, RustSec audit of 221
+  locked dependencies, cargo-dist 0.31.0 plan/generate-check, actionlint,
+  direct and embedded ShellCheck, Git Bash syntax, PowerShell parsing, and both
+  managed transaction fixtures pass. The executable lifecycle guard renders
+  both wrappers with a synthetic immutable tag, rejects placeholders, and
+  validates each pinned tag/base/asset component. WiX 3.14.1 compiles the
+  Global and Corporate 4.2.1 MSIs with only the intentional downgrade-capable
+  ICE61 warning; Inno Setup 6.7.3 compiles both 4.2.1 EXEs. These are local
+  package-source results, not hosted install/update evidence.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast
@@ -113,7 +136,7 @@ as passed.
   logical processors, Intel Arc + RTX 4070 Laptop GPUs, about 32 GB memory, NTFS
   C:, Wi-Fi source 10.1.0.51 with DNS/gateway 10.1.0.1, en-US, and a plugged-in
   battery. The installed v4.1.3 MSI and candidate agree on those fields; this
-  does not substitute for the post-publication v4.1.3-to-v4.2.0 UAC update.
+  does not substitute for the post-publication v4.1.3-to-v4.2.1 UAC update.
 - **Release target:** 34 nonempty stable-name assets: the prior 30, direct PKG
   and sidecar, plus internal raw `tr300-dist-installer.ps1` and
   `tr300-dist-installer.sh`. Public commands and filenames remain versionless;

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-07-18
+
+### Fixed
+- **Managed wrapper rendering is now proven before tagging and validates both
+  URLs in the form each wrapper actually uses.** v4.2.0 passed exact-
+  SHA CI, published to crates.io, and built all six release targets; both Apple
+  archives were signed and notarized. The cargo-dist host then failed closed
+  before creating a GitHub Release because its assertions expected fully
+  expanded URLs even though each wrapper stores a pinned tag/base separately
+  from the asset suffix; the shell assertion failed first. v4.2.1 renders both wrappers
+  during branch CI, rejects remaining placeholders, and checks the immutable
+  pinned tag, tag-bearing base, and exact internal asset reference independently. The
+  v4.2.0 tag, crate, and failed release remain immutable. (task #mic1)
+
 ## [4.2.0] - 2026-07-18
 
 ### Changed

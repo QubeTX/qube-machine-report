@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Published / working manifest:** 4.1.3 / 4.2.0 candidate
+**Complete GitHub distribution / crates.io / working manifest:** 4.1.3 / 4.2.0 / 4.2.1 candidate
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
@@ -44,9 +44,16 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.2.0 managed installation and direct-PKG candidate
+## 2. v4.2.1 managed installation and direct-PKG fix-forward candidate
 
-v4.2.0 is implemented locally but is not published. The normative contract is
+The v4.2 implementation is complete. Exact source
+`b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed v4.2.0 exact-SHA CI and
+crates publication, and the tag workflow signed/notarized both Apple archives.
+Release hosting then failed before GitHub Release creation because guards
+expected fully expanded wrapper URLs even though both wrappers correctly
+compose a pinned tag/base and asset suffix; the shell guard failed first. The
+tag and crate remain immutable; v4.2.1 fixes the assertion and adds a pre-tag
+synthetic render of both wrappers. The normative contract is
 ADR **MIC-1**: public documentation recommends the stable managed CLI wrapper,
 `tr300 update` preserves the one proven current channel, and a deliberately
 launched fresh installer is the user's newest channel choice. The release gate
@@ -94,16 +101,18 @@ as sufficient.
 
 ### Candidate gate and publication boundary
 
-Local fmt/Clippy/all-target tests/release build, RustSec, cargo-dist plan and
-generate-check, actionlint/ShellCheck, wrapper transactions, and both WiX/Inno
-source compiles pass. The Alienware candidate report/hardware suite also passes
-without changing its installed MSI. The remaining local boundary is the clean
-committed-tree package/publish dry run. Then push `main`, require exact-SHA CI
-and crates publication, tag only `v4.2.0`, and require every disposable Windows
-managed/native transition plus both native Apple package lifecycles. Audit all
+The v4.2.0 source passed CI run 29662326024 and crates run 29662484965;
+crates.io serves its immutable package. Release run 29662526880 built all six
+targets and signed/notarized both Apple archives, then stopped at the wrapper
+host assertion before creating a GitHub Release. v4.2.1 now passes the complete
+dirty-tree local gate set, including rendered-wrapper lifecycle execution and
+both WiX/Inno source families. It still requires the clean committed-tree
+package/publish dry run, exact-SHA CI and crates publication, then tag only
+`v4.2.1`. Require every disposable Windows
+managed/native transition plus both native Apple package lifecycles; audit all
 34 public assets, checksums, Apple trust evidence, updater/recovery behavior,
 crates.io, and only then update the production homepage. Until those facts are
-recorded in `TESTING.md`, the published version remains 4.1.3.
+recorded in `TESTING.md`, the complete GitHub distribution remains 4.1.3.
 
 ## 3. v4.1.3 Global-updater fix-forward outcome
 
@@ -499,6 +508,7 @@ The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
   release assets/self-update discovery are verified.
 - The homepage accurately reflects the deployed release and is live.
 
-The v4.2.0 release candidate is active and not yet published. The broader
+The v4.2.1 fix-forward candidate is active. The v4.2.0 crate/tag are immutable
+and have no GitHub Release because hosting stopped before creation. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release.

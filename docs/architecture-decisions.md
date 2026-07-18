@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (through v4.2.0)](#decision-ledger-status-through-v420)
+- [Decision ledger status (through v4.2.1)](#decision-ledger-status-through-v421)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.0 addendum)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v420-addendum)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
@@ -71,7 +71,7 @@
 
 ---
 
-## Decision ledger status (through v4.2.0)
+## Decision ledger status (through v4.2.1)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
@@ -206,8 +206,8 @@ stable-name internal assets (`tr300-dist-installer.ps1` and
 `tr300-dist-installer.sh`). The release workflow renders only the immutable tag
 and version into the public wrappers. This keeps cargo-dist's download,
 checksum, atomic-copy, PATH, and receipt behavior while giving the product a
-safe cross-channel convergence layer. It adds two release assets, so the
-v4.2.0 complete-distribution target is 34.
+safe cross-channel convergence layer. It adds two release assets, so a complete
+v4.2-series distribution target is 34.
 
 Pre-tag validation must compile with warnings denied on native Windows, Linux,
 Intel Mac, and Apple Silicon; a helper hidden by host `cfg` is not considered
@@ -219,6 +219,19 @@ check but is not equivalent evidence. Intentional literal-dollar fixtures use
 tightly scoped SC2016 annotations, while negative package assertions use
 explicit `if command; then ...; exit 1; fi` control flow so Bash `errexit`
 behavior is never the assertion mechanism.
+
+The v4.2.0 release attempt established another load-bearing boundary. Exact-SHA
+CI and crates publication passed, all six release targets built, and both Apple
+archives passed signing/notarization; the host then failed before GitHub Release
+creation because tests expected fully expanded URLs even though both wrappers
+deliberately compose pinned tag/base variables and asset suffixes. The shell
+assertion failed first; the PowerShell assertion had the same invalid model.
+Published tag and crate records remain immutable, so v4.2.1 fixes forward. CI
+now renders both wrapper templates with a synthetic immutable tag, rejects any
+unexpanded placeholder, and verifies each pinned tag, tag-bearing base, and
+exact internal asset reference independently. A release-
+host assertion must test the program's real composition model and must have an
+equivalent pre-tag fixture whenever it can prevent first publication.
 
 ### Latest discovery, immutable installation
 

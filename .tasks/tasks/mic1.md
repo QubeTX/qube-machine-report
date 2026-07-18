@@ -38,6 +38,20 @@ documentation reconciliation, and immutable release proof remain open.
   dollar expression in the lifecycle guard (`cmp "$pkg" "$mount/tr300.pkg"`).
   Added the exact SC2016 annotation and locally linted the extracted complete
   guard block before another full exact-SHA run (agent: codex)
+- 2026-07-18 — final v4.2.0 source `b61e8b8` passed CI 29662326024 and
+  crates run 29662484965; crates.io published 4.2.0. Tagged release run
+  29662526880 built all six targets and signed/notarized both Apple archives,
+  then failed closed before GitHub Release creation because host assertions
+  expected fully expanded URLs that both valid wrappers construct from pinned
+  tag/base variables plus asset suffixes; the shell assertion failed first.
+  Preserved the v4.2.0 tag/crate,
+  bumped to v4.2.1, corrected the assertion, and added full wrapper rendering
+  to pre-tag CI (agent: codex)
+- 2026-07-18 — v4.2.1 reran locked fmt/Clippy/tests/build, RustSec, cargo-dist,
+  actionlint, direct plus embedded ShellCheck, both wrapper transactions, the
+  executable synthetic-render lifecycle guard, and WiX 3.14.1/Inno 6.7.3
+  Global/Corporate source compiles successfully; clean committed-tree package
+  and hosted evidence remain (agent: codex)
 
 ## Intent
 

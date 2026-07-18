@@ -37,8 +37,16 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.1.3`; working manifest: `4.2.0` candidate
-  (`Cargo.toml`). v4.1.3 passed exact-SHA CI/crates, signed archives, every
+- Current complete GitHub distribution: `4.1.3`; current crates.io package:
+  `4.2.0`; working manifest: `4.2.1` candidate (`Cargo.toml`). Exact source
+  `b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed CI and crates publication
+  for v4.2.0, and its release workflow signed/notarized both Apple archives,
+  but release-host assertions expected fully expanded wrapper URLs even though
+  both wrappers deliberately compose a pinned tag/base and asset suffix; the
+  first shell assertion stopped the job before GitHub Release creation. The
+  tag and crate stay immutable;
+  v4.2.1 fixes forward and renders/asserts both wrappers before tagging.
+  v4.1.3 passed exact-SHA CI/crates, signed archives, every
   Windows package and transition job, and universal PKG-in-DMG
   sign/notary/install/update/uninstall
   gates on native Intel and Apple Silicon. It fixes the immutable v4.1.2

@@ -37,7 +37,7 @@ exposes a GUI-only defect.
 
 ## Resume
 
-After the clean-tree exact-SHA CI/crates gates pass, tag v4.2.0 and require both
+After the clean-tree exact-SHA CI/crates gates pass, tag v4.2.1 and require both
 native architectures to finish the complete package and legacy bridge lifecycle
 before the publisher attaches the PKG/DMG pairs. Audit fresh public bytes; do not
 substitute Windows emulation or a physical Mac for a failed native runner.

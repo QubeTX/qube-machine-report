@@ -7,7 +7,7 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.1.3` / `4.2.0` candidate (all prior tags remain immutable)
+**Complete GitHub distribution / crates.io / working version:** `4.1.3` / `4.2.0` / `4.2.1` candidate (all prior tags remain immutable)
 **Prior pushed checkpoint:** `7422b3c68f19e08b22f6ca8495efddd23042aeb9`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
@@ -20,9 +20,16 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-07-18 v4.2.0 MIC-1 and direct-PKG candidate
+## 2026-07-18 v4.2.1 MIC-1 and direct-PKG fix-forward candidate
 
-v4.2.0 is implemented in the working tree and remains unpublished. The
+The v4.2 implementation is complete. Exact v4.2.0 source
+`b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed CI run 29662326024 and
+crates run 29662484965; crates.io published it. Release run 29662526880 built
+all six targets and signed/notarized both Apple archives, then host assertions
+expected fully expanded URLs instead of the pinned tag/base plus asset suffix
+both valid wrappers use. The shell assertion failed first, before GitHub Release
+creation. The v4.2.0 tag/crate remain immutable. v4.2.1 fixes
+forward and renders/asserts both wrappers in pre-tag CI. The
 copyable cross-product contract is ADR **MIC-1**:
 
 - advertise the stable managed CLI wrapper first (`irm` on Windows, `curl` on
@@ -86,9 +93,11 @@ DMG-client transition. A future v4.2.x release must provide the first true
 direct-PKG old-to-new updater execution. Local locked fmt/Clippy/all-target
 tests/release build, RustSec, cargo-dist plan/generate-check, actionlint,
 ShellCheck, wrapper transaction fixtures, WiX/Inno compiles, and Alienware
-candidate report/hardware checks pass. The clean committed-tree package gate,
-exact-SHA CI/crates, tag workflows, public asset audit, and homepage update are
-still pending and must not be described as released evidence.
+candidate report/hardware checks pass. v4.2.1 has rerun the locked Rust,
+RustSec, cargo-dist, workflow/shell, wrapper-transaction, executable lifecycle,
+and WiX/Inno source gates successfully. The clean committed-tree package gate,
+exact-SHA CI/crates, tag workflows, public asset audit, and homepage update
+remain. Until then the complete GitHub distribution remains v4.1.3.
 
 ## 2026-07-18 v4.1.3 Global Windows live-image fix-forward
 
@@ -353,7 +362,7 @@ Mac.
 
 The remaining exact sequence for the current candidate is: finish the MIC-1
 docs/ADR and disposable installer fixtures; run every locked local gate; push
-`main`; wait for exact-SHA CI and crates; tag only v4.2.0; wait for cargo-dist,
+`main`; wait for exact-SHA CI and crates; tag only v4.2.1; wait for cargo-dist,
 all Windows installer/transition jobs, and both direct-PKG/DMG-bridge native
 Mac gates; then audit crates.io, all 34 assets, checksums, signatures/
 notarization, every installer channel, update/recovery, and uninstall before
