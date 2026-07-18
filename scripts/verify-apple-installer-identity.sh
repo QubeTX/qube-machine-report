@@ -45,9 +45,12 @@ chmod 600 "$p12"
 security create-keychain -p "$keychain_password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
+# GitHub's documented hosted-runner pattern explicitly selects PKCS#12 and
+# grants access inside this disposable keychain. The partition list below
+# restricts non-interactive Apple tooling, and cleanup deletes the keychain.
 security import "$p12" -k "$keychain" \
     -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" \
-    -T /usr/bin/pkgbuild -T /usr/bin/productsign -T /usr/bin/security
+    -A -t cert -f pkcs12
 security set-key-partition-list -S apple-tool:,apple: -s \
     -k "$keychain_password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"

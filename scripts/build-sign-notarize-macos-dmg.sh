@@ -73,10 +73,13 @@ chmod 600 "$app_p12" "$installer_p12" "$api_key"
 security create-keychain -p "$keychain_password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
+# Explicit PKCS#12 selection follows GitHub's hosted-runner import pattern.
+# `-A` applies only to this disposable keychain; the partition list below
+# enables non-interactive Apple tools and cleanup deletes the keychain.
 security import "$app_p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
-    -T /usr/bin/codesign -T /usr/bin/security
-security import "$installer_p12" -k "$keychain" -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" \
-    -T /usr/bin/pkgbuild -T /usr/bin/productsign -T /usr/bin/security
+    -A -t cert -f pkcs12
+security import "$installer_p12" -k "$keychain" \
+    -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12
 security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
 
