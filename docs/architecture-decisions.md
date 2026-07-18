@@ -403,6 +403,19 @@ could not reveal:
   based on durable native registration rather than only the current
   UpgradeCode, the transition also covers older official MSI registrations
   that retain the same product identity.
+  Global and Corporate enumeration explicitly inspects and deduplicates both
+  64-bit and 32-bit views of both ARP hives. Hosted run 29642711477 proved the
+  previous default found Global but missed Corporate. A controlled Alienware
+  install then established the decisive detail: the no-UAC Corporate per-user
+  MSI registered its exact ARP product under HKLM64 while its payload remained
+  in `%LocalAppData%`. The ARP hive is therefore not accepted as an install-
+  scope oracle. Exact edition display name, publisher, `WindowsInstaller=1`,
+  and GUID product key identify the same-edition MSI; the fresh install remains
+  authoritative while the product code is deduplicated before any mutation.
+  The same controlled lifecycle then proved Corporate MSI→Inno EXE and Inno
+  EXE→MSI both converge to one v4.1.2 registration and the matching scoped
+  marker. Final cleanup restored zero Corporate registrations/binaries and the
+  Alienware's natural Global MSI v4.0.1 plus legacy `msi-global` marker.
 - The reverse fresh transition has its own native-launch contract. Hosted
   source gate 29642491361 proved EXE-to-MSI left both registrations even though
   the exact Inno AppId search existed: a WiX Type 34 custom action requires the

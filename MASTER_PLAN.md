@@ -146,7 +146,15 @@ supported MSI-to-EXE direction and isolated the reverse failure: the MSI
 custom action supplied a relative Inno uninstaller name where Windows Installer
 Type 34 requires a full executable path. Both MSIs now use the exact AppId
 registration's full `UninstallString` from the matching registry scope before
-writing MSI files. v4.1.0 and v4.1.1 remain untouched.
+writing MSI files. Follow-up 29642711477 proved both Global directions and
+isolated Corporate MSI discovery. Controlled Alienware evidence then showed
+the no-UAC Corporate per-user MSI registered under HKLM64 while its payload
+remained under `%LocalAppData%`; ARP hive is not a scope oracle. The current
+Inno source checks/deduplicates both views of both ARP hives and requires exact
+same-edition MSI identity. The resulting local Corporate MSI→EXE→MSI
+lifecycle converged to one registration/matching marker after both takeovers
+and restored the Alienware's Global 4.0.1 baseline after cleanup. v4.1.0 and
+v4.1.1 remain untouched.
 
 1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,

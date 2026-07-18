@@ -7,9 +7,14 @@
   Inno Setup 6.7.1 proved that the output-buffer ABI can access-violate Setup
   even when the declaration looks correct. Instead, use Inno's supported
   registry helpers and require exact native Add/Remove Programs evidence:
-  scope, display name, publisher, WindowsInstaller=1, and a GUID product key.
+  display name, publisher, WindowsInstaller=1, and a GUID product key.
   The calling .iss defines ConflictingMsiDisplayName and
-  ConflictingMsiPublisher; Global also defines ConflictingMsiPerMachine. }
+  ConflictingMsiPublisher.
+
+  Do not infer MSI install scope from the Add/Remove Programs hive. A hosted
+  runner and the Alienware both registered the no-UAC Corporate per-user MSI
+  under HKLM64 while its payload and marker remained user-scoped. Search both
+  hives/views, then let the exact edition identity and product code govern. }
 
 const
   ErrorSuccess = 0;
@@ -56,8 +61,10 @@ var
   WindowsInstaller: Cardinal;
   Index: Integer;
   Count: Integer;
+  ExistingIndex: Integer;
+  AlreadyPresent: Boolean;
 begin
-  { A missing uninstall key simply means this scope has no registered product. }
+  { A missing uninstall key simply means this registry view has no product. }
   if not RegGetSubkeyNames(RootKey, UninstallKey, Subkeys) then
     exit;
 
@@ -72,9 +79,19 @@ begin
        RegQueryDWordValue(RootKey, Key, 'WindowsInstaller', WindowsInstaller) and
        (WindowsInstaller = 1) then
     begin
-      Count := GetArrayLength(ProductCodes);
-      SetArrayLength(ProductCodes, Count + 1);
-      ProductCodes[Count] := Subkeys[Index];
+      AlreadyPresent := False;
+      for ExistingIndex := 0 to GetArrayLength(ProductCodes) - 1 do
+      begin
+        if ProductCodes[ExistingIndex] = Subkeys[Index] then
+          AlreadyPresent := True;
+      end;
+      if not AlreadyPresent then
+      begin
+        Count := GetArrayLength(ProductCodes);
+        SetArrayLength(ProductCodes, Count + 1);
+        ProductCodes[Count] := Subkeys[Index];
+        Log('TR-300 matched same-edition MSI registration: ' + Subkeys[Index]);
+      end;
     end;
   end;
 end;
@@ -89,11 +106,10 @@ var
 begin
   Result := '';
 
-#ifdef ConflictingMsiPerMachine
   AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_64, ProductCodes);
-#else
-  AddMatchingMsiProducts(HKEY_CURRENT_USER, ProductCodes);
-#endif
+  AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_32, ProductCodes);
+  AddMatchingMsiProducts(HKEY_CURRENT_USER_64, ProductCodes);
+  AddMatchingMsiProducts(HKEY_CURRENT_USER_32, ProductCodes);
 
   if GetArrayLength(ProductCodes) > MaxConflictingMsiProducts then
   begin

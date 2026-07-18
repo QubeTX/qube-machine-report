@@ -267,6 +267,10 @@ jobs:
           fi
           grep -Fq 'RegGetSubkeyNames' "$inno_msi_bridge"
           grep -Fq "WindowsInstaller', WindowsInstaller" "$inno_msi_bridge"
+          grep -Fq 'AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_64, ProductCodes);' "$inno_msi_bridge"
+          grep -Fq 'AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_32, ProductCodes);' "$inno_msi_bridge"
+          grep -Fq 'AddMatchingMsiProducts(HKEY_CURRENT_USER_64, ProductCodes);' "$inno_msi_bridge"
+          grep -Fq 'AddMatchingMsiProducts(HKEY_CURRENT_USER_32, ProductCodes);' "$inno_msi_bridge"
           grep -Fq 'ConflictingMsiDisplayName' inno/global.iss
           grep -Fq 'ConflictingMsiDisplayName' inno/corporate.iss
 
@@ -389,6 +393,7 @@ jobs:
           }
           function Install-Exe([string] $path, [string] $name) {
             $log = Join-Path $env:RUNNER_TEMP "tr300-$name-takeover.log"
+            $script:LastInnoLog = $log
             $p = Start-Process (Resolve-Path $path).Path -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
             if ($p.ExitCode -ne 0) {
               Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
@@ -409,7 +414,11 @@ jobs:
             Install-Exe $case.Exe $case.Name
             $entries = @(Entries $case.Display)
             if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -eq 1) {
-              throw "current $($case.Name) EXE did not take over its MSI"
+              Get-Content -LiteralPath $script:LastInnoLog -ErrorAction SilentlyContinue
+              $summary = $entries | ForEach-Object {
+                "key=$($_.PSChildName) publisher=$($_.Publisher) windowsInstaller=$($_.WindowsInstaller) uninstall=$($_.UninstallString)"
+              }
+              throw "current $($case.Name) EXE did not take over its MSI: $summary"
             }
             $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
             if ($marker -notlike 'exe-*') { throw "current EXE marker did not win: $marker" }

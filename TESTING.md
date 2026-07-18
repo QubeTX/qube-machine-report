@@ -42,7 +42,17 @@ as passed.
   warnings and the reverse Global EXE→MSI transition. The latter showed that
   the MSI's Type 34 action had only a relative uninstaller name; both MSI
   sources now read the exact Inno AppId registration's full `UninstallString`
-  and launch it from a neutral directory before writing MSI files.
+  and launch it from a neutral directory before writing MSI files. Follow-up
+  CI 29642711477 proved both Global directions, then isolated Corporate
+  MSI→EXE registration discovery. A controlled Alienware install showed the
+  no-UAC Corporate per-user MSI registered in HKLM64 even though its payload
+  stayed under `%LocalAppData%`; ARP hive is not a reliable scope oracle. The
+  supported Inno enumerator now inspects and deduplicates both views of both
+  ARP hives, then requires exact edition identity, MSI flag, and GUID product
+  key. The corrected local lifecycle proved MSI→EXE and EXE→MSI each left
+  exactly one v4.1.2 registration and the matching scoped marker; cleanup left
+  no Corporate registration/binary and restored the natural Global MSI v4.0.1
+  plus legacy marker. Inno log and exact ARP evidence print on any recurrence.
 - **Current local evidence:** formatting, actionlint 1.7.12, ShellCheck 0.11.0,
   Git Bash syntax, warning-denying all-target/all-feature Clippy, 153 unit
   tests, 19 integration tests, locked release build, RustSec audit (221 locked

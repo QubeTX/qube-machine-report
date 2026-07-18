@@ -116,7 +116,6 @@ Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --ot
 [Code]
 #define ConflictingMsiDisplayName MyAppName
 #define ConflictingMsiPublisher MyAppPublisher
-#define ConflictingMsiPerMachine
 #include "remove-conflicting-msi.pas"
 
 {
