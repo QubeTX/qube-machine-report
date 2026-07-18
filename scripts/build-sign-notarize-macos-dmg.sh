@@ -77,9 +77,9 @@ security unlock-keychain -p "$keychain_password" "$keychain"
 # `-A` applies only to this disposable keychain; the partition list below
 # enables non-interactive Apple tools and cleanup deletes the keychain.
 security import "$app_p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
-    -A -t cert -f pkcs12
+    -A -f pkcs12
 security import "$installer_p12" -k "$keychain" \
-    -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12
+    -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" -A -f pkcs12
 security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
 
