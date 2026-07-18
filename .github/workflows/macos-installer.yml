@@ -1,0 +1,217 @@
+name: macOS Universal DMG
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the DMG to (for example v4.1.0)"
+        required: false
+        default: ""
+        type: string
+      preflight_only:
+        description: "Only prove the Installer identity; do not build or publish"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  credential-preflight:
+    name: Installer identity preflight (${{ matrix.name }})
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-15
+          - name: Intel
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout credential preflight
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Import Installer identity and sign disposable PKG
+        env:
+          APPLE_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ vars.APPLE_INSTALLER_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: scripts/verify-apple-installer-identity.sh
+
+  build:
+    name: Build, sign, and notarize universal PKG-in-DMG
+    needs: credential-preflight
+    runs-on: macos-15-intel
+    if: |
+      needs.credential-preflight.result == 'success' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.preflight_only == false) ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        startsWith(github.event.workflow_run.head_branch, 'v')))
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Resolve target tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
+            tag='${{ inputs.tag }}'
+          else
+            tag='${{ github.event.workflow_run.head_branch }}'
+          fi
+          if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-].*)?$ ]]; then
+            echo "invalid release tag: $tag" >&2
+            exit 64
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify upstream release and download signed architecture archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag='${{ steps.tag.outputs.tag }}'
+          repo='${{ github.repository }}'
+          assets=$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')
+          required=(
+            dist-manifest.json
+            tr300-aarch64-apple-darwin.tar.xz
+            tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-apple-darwin.tar.xz
+            tr300-x86_64-apple-darwin.tar.xz.sha256
+          )
+          for asset in "${required[@]}"; do
+            grep -Fqx "$asset" <<< "$assets" || {
+              echo "upstream Release is incomplete; missing $asset" >&2
+              exit 1
+            }
+          done
+          mkdir upstream
+          gh release download "$tag" --repo "$repo" --dir upstream \
+            --pattern 'tr300-aarch64-apple-darwin.tar.xz*' \
+            --pattern 'tr300-x86_64-apple-darwin.tar.xz*'
+          (cd upstream && shasum -a 256 -c ./*.sha256)
+
+      - name: Checkout exact release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Build signed and notarized DMG
+        timeout-minutes: 45
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ vars.APPLE_INSTALLER_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          scripts/build-sign-notarize-macos-dmg.sh \
+            '${{ steps.tag.outputs.version }}' \
+            upstream/tr300-aarch64-apple-darwin.tar.xz \
+            upstream/tr300-x86_64-apple-darwin.tar.xz \
+            output
+
+      - name: Upload DMG for native validation
+        uses: actions/upload-artifact@v6
+        with:
+          name: tr300-universal-macos-dmg
+          if-no-files-found: error
+          path: |
+            output/tr300-universal-apple-darwin.dmg
+            output/tr300-universal-apple-darwin.dmg.sha256
+
+  validate:
+    name: Validate DMG / PKG (${{ matrix.name }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-15
+          - name: Intel
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: tr300-universal-macos-dmg
+          path: artifact
+
+      - name: Mount, install, and exercise the universal package
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="$PWD/artifact/tr300-universal-apple-darwin.dmg"
+          (cd artifact && shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
+          codesign --verify --deep --strict --verbose=4 "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+
+          mount="$RUNNER_TEMP/tr300-mount"
+          mkdir "$mount"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
+          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true' EXIT
+          pkgutil --check-signature "$mount/tr300.pkg"
+          xcrun stapler validate "$mount/tr300.pkg"
+          spctl --assess --type install --verbose=4 "$mount/tr300.pkg"
+          sudo installer -pkg "$mount/tr300.pkg" -target /
+
+          pkgutil --pkg-info com.qubetx.tr300.pkg
+          test "$(/usr/local/bin/tr300 --version)" = "tr300 ${{ needs.build.outputs.version }}"
+          lipo -verify_arch arm64 x86_64 /usr/local/bin/tr300
+          /usr/local/bin/tr300 --fast --json | jq -e '.schema_version == 1'
+          /usr/local/bin/tr300 --ascii --fast >/dev/null
+          update=$(/usr/local/bin/tr300 update --json)
+          jq -e '.success == true and .install_channel == "macos-dmg-pkg" and .requires_user_action == false' <<< "$update"
+
+          # Clean-runner uninstall proof for the documented package contents.
+          sudo rm -f /usr/local/bin/tr300
+          sudo pkgutil --forget com.qubetx.tr300.pkg
+          test ! -e /usr/local/bin/tr300
+
+  publish:
+    name: Attach validated DMG to GitHub Release
+    needs: [build, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: tr300-universal-macos-dmg
+          path: artifact
+      - name: Upload versionless DMG assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload '${{ needs.build.outputs.tag }}' \
+            artifact/tr300-universal-apple-darwin.dmg \
+            artifact/tr300-universal-apple-darwin.dmg.sha256 \
+            --repo '${{ github.repository }}' --clobber
