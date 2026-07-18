@@ -260,10 +260,14 @@ jobs:
             echo 'pwsh-hosted cargo-dist validation must not inherit modules into Windows PowerShell' >&2
             exit 1
           fi
-          if grep -Eq 'var[[:space:]]+ProductCode:[[:space:]]*string' "$inno_msi_bridge"; then
-            echo 'MsiEnumRelatedProductsW output buffer must not use Pascal Script var' >&2
+          if grep -Eq 'external .*msi\.dll|MsiEnumRelatedProductsW@' "$inno_msi_bridge"; then
+            echo 'Inno takeover must not cross the Windows Installer DLL ABI from Pascal Script' >&2
             exit 1
           fi
+          grep -Fq 'RegGetSubkeyNames' "$inno_msi_bridge"
+          grep -Fq "WindowsInstaller', WindowsInstaller" "$inno_msi_bridge"
+          grep -Fq 'ConflictingMsiDisplayName' inno/global.iss
+          grep -Fq 'ConflictingMsiDisplayName' inno/corporate.iss
 
   windows-installer-sources:
     name: Windows installer source gate

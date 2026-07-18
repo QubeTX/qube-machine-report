@@ -25,11 +25,19 @@ as passed.
   expecting an already-current portable binary to fail, and (3) an Inno
   `MsiEnumRelatedProductsW` output buffer declared with Pascal Script `var`,
   which made both MSI-to-EXE transitions exit during Setup initialization.
-  v4.1.2 runs the cargo-dist script in the current `pwsh`, prefers `pwsh` for
-  same-channel updates, passes the preallocated MSI buffer correctly, and makes
-  the hosted matrix install a prior complete stable release before exercising
-  real same-channel update, current no-op, older-portable recovery, takeover,
-  and uninstall behavior.
+  The initial v4.1.2 hosted replay 29640785777 proved removing `var` was still
+  unsafe: Inno Setup 6.7.1 access-violated on the direct DLL call in both
+  editions. Older portable recovery/no-mutation passed. Recognized-channel
+  updates reached their real strategy but the first workflow hid their JSON
+  and stderr behind a generic assertion; the next replay emits both before
+  evaluating the result. Cargo cleanup also exposed two registered versions,
+  so the matrix now cleans exact package IDs and retains that state as evidence
+  until updater convergence is proven. v4.1.2 runs the cargo-dist script in the
+  current `pwsh`, prefers `pwsh` for same-channel updates, removes the unstable
+  DLL bridge in favor of supported exact ARP registry evidence, and makes the
+  hosted matrix install a prior complete stable release before exercising real
+  same-channel update, current no-op, older-portable recovery, takeover, and
+  uninstall behavior.
 - **Current local evidence:** formatting, actionlint 1.7.12, ShellCheck 0.11.0,
   Git Bash syntax, warning-denying all-target/all-feature Clippy, 151 unit
   tests, 19 integration tests, locked release build, RustSec audit (221 locked
@@ -40,6 +48,11 @@ as passed.
   Cargo/LocalAppData home; direct `pwsh` execution installed v4.1.1 and wrote
   its versioned receipt successfully. Credential-material scan found no private
   key, certificate block, or long base64 payload in tracked source.
+  Inno Setup 6.7.3 locally compiles both revised Global and Corporate sources.
+  The Alienware's natural Global MSI remains v4.0.1 at the single registered
+  Program Files path; a diagnostic updater invocation reached the expected UAC
+  boundary and was cancelled before mutation, retaining that baseline for the
+  final controlled update.
 - **Required proof:** finish every clean-tree release gate, exact-SHA CI/crates,
   then require signed archives, all Windows installers/transitions, and native
   ARM/Intel PKG-in-DMG validation to pass before auditing 30 immutable v4.1.2

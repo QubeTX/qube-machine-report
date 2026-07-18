@@ -126,8 +126,13 @@ closed because current macOS rejects the obsolete `pkgutil --verify` option;
 the DMG assets were not published. Windows validation 29639998787 proved the
 exact-SHA second hop and five clean channel flows, while exposing a PowerShell
 host mismatch, an incorrect already-current portable assertion, and an Inno
-MSI-enumeration buffer declaration in the fresh-format transitions. v4.1.2
-replaces those unsupported/incorrect checks, adds real prior-version
+MSI-enumeration buffer declaration in the fresh-format transitions. Initial
+v4.1.2 replay 29640785777 proved that changing the Pascal declaration did not
+make the direct Windows Installer ABI safe: Inno still access-violated on both
+MSI-to-EXE takeovers. It also passed older-portable recovery and showed that
+recognized prior-version updates need their exact JSON/stderr preserved before
+diagnosis. v4.1.2 removes the DLL bridge in favor of supported exact-scope ARP
+registry evidence, emits strategy diagnostics, and adds real prior-version
 same-channel updates and portable recovery to the disposable matrix, and is the
 complete 30-asset distribution target. v4.1.0 and v4.1.1 remain untouched.
 

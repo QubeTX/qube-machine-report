@@ -100,10 +100,12 @@ jobs:
             echo "no earlier complete Windows release is available for update testing" >&2
             exit 1
           fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
-          echo "previous_version=${previous_tag#v}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "previous_tag=$previous_tag"
+            echo "previous_version=${previous_tag#v}"
+          } >> "$GITHUB_OUTPUT"
 
   channels:
     name: ${{ matrix.name }} install / update / uninstall
@@ -250,6 +252,10 @@ jobs:
           $stdout = & $env:EXE update --json 2> $stderr
           $exit = $LASTEXITCODE
           $lines = @($stdout)
+          Write-Host "update exit=$exit stdout-lines=$($lines.Count)"
+          $lines | ForEach-Object { Write-Host "update-json: $_" }
+          Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "update-stderr: $_" }
           if ($lines.Count -ne 1) { throw "update stdout was not exactly one line/object" }
           $update = $lines[0] | ConvertFrom-Json
           if ($update.install_channel -ne $env:EXPECTED_CHANNEL) {
@@ -361,6 +367,8 @@ jobs:
         env:
           KIND: ${{ matrix.kind }}
           EXE: ${{ steps.install.outputs.exe }}
+          INSTALLED_VERSION: ${{ needs.resolve.outputs.previous_version }}
+          EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
         shell: pwsh
         run: |
           if ($env:KIND -like 'msi-*') {
@@ -382,8 +390,12 @@ jobs:
             Remove-Item -LiteralPath $env:EXE -Force
             Remove-Item -LiteralPath "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Force -ErrorAction SilentlyContinue
           } elseif ($env:KIND -eq 'cargo') {
-            cargo uninstall tr300
-            if ($LASTEXITCODE -ne 0) { throw "cargo uninstall failed" }
+            $registered = @(cargo install --list | Select-String '^tr300 v([^:]+):$')
+            foreach ($entry in $registered) {
+              $version = $entry.Matches[0].Groups[1].Value
+              cargo uninstall "tr300@$version"
+              if ($LASTEXITCODE -ne 0) { throw "cargo uninstall failed for tr300@$version" }
+            }
           }
           if ($env:KIND -ne 'portable' -and (Test-Path $env:EXE)) {
             throw "binary remains after uninstall: $env:EXE"

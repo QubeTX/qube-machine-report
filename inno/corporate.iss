@@ -99,7 +99,8 @@ Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --ca
 Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
 
 [Code]
-#define ConflictingMsiUpgradeCode "{93F465CB-7F66-4930-A773-FDA017E8FD64}"
+#define ConflictingMsiDisplayName MyAppFullName
+#define ConflictingMsiPublisher MyAppPublisher
 #include "remove-conflicting-msi.pas"
 
 {

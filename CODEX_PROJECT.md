@@ -74,7 +74,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   known-channel failures also expose the immutable `exact_installer_url`.
 - A fresh v4.1.0-or-newer MSI can replace a same-edition older, newer, or
   same-version MSI; automatic updates remain latest-only. Explicit MSI/Inno
-  format changes remove the same-edition competing registration first.
+  format changes remove the same-edition competing registration first. Inno
+  uses supported registry enumeration with exact scope/name/publisher/native-
+  installer/GUID evidence; it does not call the Windows Installer DLL from
+  Pascal Script.
 - The native macOS artifact is a universal signed `tr300.pkg` inside a signed,
   notarized, stapled DMG. The PKG owns `/usr/local/bin/tr300` and the stable
   `com.qubetx.tr300.pkg` receipt used by future updates; receipt ID/version,

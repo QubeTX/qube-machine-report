@@ -389,13 +389,20 @@ Cargo. It also exposed three distinct test/transition issues that clean installs
 could not reveal:
 
 - Both EXE-over-MSI takeover jobs exited 1 during Inno initialization. The
-  `MsiEnumRelatedProductsW` ABI requires a preallocated 39-character output
-  buffer. In Inno Pascal Script the buffer string itself is passed to the DLL;
-  declaring that parameter `var` passes the string descriptor by reference and
-  corrupts the expected pointer when a related MSI actually exists. The shared
-  include keeps the buffer preallocated, removes `var`, bounds enumeration to
-  32 products, waits for each `msiexec /x`, accepts only success/already-absent,
-  and stops before writing files on every other outcome.
+  first hypothesis was an incorrect `var` declaration for the
+  `MsiEnumRelatedProductsW` output buffer. Hosted replay 29640785777 disproved
+  that as a sufficient fix: Inno Setup 6.7.1 still access-violated when the
+  preallocated string was passed without `var`. The decision is therefore not
+  to cross this DLL ABI from Pascal Script at all. The shared include uses
+  Inno's supported `RegGetSubkeyNames`/`RegQuery*` APIs and recognizes an MSI
+  only from the edition's correct registry scope plus exact display name,
+  publisher, `WindowsInstaller=1`, and a syntactically valid GUID product key.
+  It collects and bounds the full set before mutation, waits for each exact
+  `msiexec /x`, accepts only success/already-absent, and stops before writing
+  new files on ambiguity, restart, or removal failure. Because recognition is
+  based on durable native registration rather than only the current
+  UpgradeCode, the transition also covers older official MSI registrations
+  that retain the same product identity.
 - Starting legacy `powershell.exe` as a child of `pwsh` inherits the parent's
   `PSModulePath`. On current Windows runners that can make Windows PowerShell
   discover PowerShell 7's incompatible `Microsoft.PowerShell.Security` module
@@ -421,12 +428,14 @@ different state machine from CLI update.
 
 **Rejected alternatives:** accepting a clean install as updater proof; invoking
 a different installer family after failure; hard-coding a historical version
-into the workflow; treating every unknown-origin invocation as an error; or
-ignoring a nonzero Inno/PowerShell exit. The matrix resolves immutable releases
-and stable asset names dynamically and fails before claiming convergence.
+into the workflow; treating every unknown-origin invocation as an error;
+guessing another Pascal declaration for a Win32 output buffer after two hosted
+access violations; or ignoring a nonzero Inno/PowerShell exit. The matrix
+resolves immutable releases and stable asset names dynamically and fails before
+claiming convergence.
 
 **Revalidation triggers:** changes to the PowerShell cargo-dist template or
-launcher order, MSI UpgradeCodes/product scope, Inno DLL declarations or
+launcher order, MSI UpgradeCodes/product scope, Inno registry identity or
 takeover code, marker/ARP recovery, update JSON semantics, portable behavior,
 or Windows runner/PowerShell images require the full prior-version update,
 current-version no-op, cross-format takeover, and uninstall matrix.

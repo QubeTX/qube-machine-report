@@ -19,12 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Team ID. It also accepts macOS 15's empty receipt `location:` as the root
   location. The workflow performs the same signature checks before exercising
   updater selection. v4.1.1 remains immutable; v4.1.2 is the fix-forward.
-- **Windows fresh-format takeover passes the MSI product buffer correctly.**
-  The Inno Setup bridge now supplies `MsiEnumRelatedProductsW` its required
-  preallocated output string rather than a Pascal Script `var` reference, which
-  made Setup exit during MSI-to-EXE transitions. Removal remains bounded,
-  synchronous, same-edition-only, and fail-closed before any new files are
-  written.
+- **Windows fresh-format takeover no longer crosses an unstable installer ABI.**
+  Hosted Inno Setup proved that direct `MsiEnumRelatedProductsW` calls from
+  Pascal Script could access-violate Setup with or without a `var` output
+  buffer. The shared takeover code now uses Inno's supported registry APIs and
+  requires exact scope, edition display name, publisher, `WindowsInstaller=1`,
+  and GUID product-code evidence before a bounded synchronous uninstall. Any
+  ambiguity or removal error stops before new files are written.
 - **PowerShell installer validation uses a compatible host.** The cargo-dist
   script runs in the current `pwsh` process instead of launching legacy Windows
   PowerShell with PowerShell 7's inherited module path. Runtime updates prefer

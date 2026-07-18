@@ -40,9 +40,15 @@ Windows PowerShell from `pwsh` inherited an incompatible module path; the
 already-current portable assertion expected failure when no update existed;
 and both MSI-to-EXE takeovers exited during Inno initialization because the
 preallocated `MsiEnumRelatedProductsW` string buffer was incorrectly passed as
-Pascal Script `var`. v4.1.2 executes cargo-dist in the current `pwsh`, prefers
-`pwsh` for runtime same-channel PowerShell updates, passes the MSI output buffer
-correctly, and upgrades the hosted matrix to install a dynamically resolved
+Pascal Script `var`. Initial v4.1.2 replay 29640785777 proved the DLL boundary
+itself remained unsafe: Inno Setup 6.7.1 access-violated with the non-`var`
+declaration in both editions. The same replay passed the older-portable
+recovery/no-mutation case, while every recognized update failed behind a
+generic assertion and Cargo cleanup exposed multiple registered package
+versions. v4.1.2 executes cargo-dist in the current `pwsh`, prefers `pwsh` for
+runtime same-channel PowerShell updates, removes the Pascal/DLL bridge in favor
+of supported exact-scope ARP registry enumeration, prints exact updater
+JSON/stderr before assertions, and upgrades the hosted matrix to install a dynamically resolved
 prior complete release before testing real same-channel update, no-op,
 portable recovery/no-mutation, both takeover directions, and uninstall.
 

@@ -1,52 +1,110 @@
-{ Remove the same-edition MSI before an explicit Inno install. This runs from
-  PrepareToInstall, before Inno writes any files, so the fresh installer is the
-  user's latest channel choice without leaving a second Windows Installer
-  registration behind. The calling .iss defines ConflictingMsiUpgradeCode. }
+{ Remove same-edition MSI registrations before an explicit Inno install. This
+  runs from PrepareToInstall, before Inno writes any files, so the fresh
+  installer is the user's latest channel choice without leaving a second
+  Windows Installer registration behind.
+
+  Do not call MsiEnumRelatedProductsW directly from Pascal Script here. Hosted
+  Inno Setup 6.7.1 proved that the output-buffer ABI can access-violate Setup
+  even when the declaration looks correct. Instead, use Inno's supported
+  registry helpers and require exact native Add/Remove Programs evidence:
+  scope, display name, publisher, WindowsInstaller=1, and a GUID product key.
+  The calling .iss defines ConflictingMsiDisplayName and
+  ConflictingMsiPublisher; Global also defines ConflictingMsiPerMachine. }
 
 const
   ErrorSuccess = 0;
-  ErrorNoMoreItems = 259;
   ErrorUnknownProduct = 1605;
   ErrorSuccessRebootInitiated = 1641;
   ErrorSuccessRebootRequired = 3010;
+  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
+  MaxConflictingMsiProducts = 32;
 
-function MsiEnumRelatedProducts(
-  UpgradeCode: string; Reserved: Cardinal; ProductIndex: Cardinal;
-  ProductCode: string): Cardinal;
-  external 'MsiEnumRelatedProductsW@msi.dll stdcall';
+function IsHexDigit(Value: Char): Boolean;
+begin
+  Result := ((Value >= '0') and (Value <= '9')) or
+    ((Value >= 'A') and (Value <= 'F')) or
+    ((Value >= 'a') and (Value <= 'f'));
+end;
 
-{ ProductCode intentionally is not declared `var`. Pascal Script passes the
-  preallocated string buffer itself to this Win32 output parameter; `var`
-  passes a reference to the string descriptor instead and can make Setup fail
-  during initialization as soon as a related MSI exists. }
+function IsProductCode(Value: String): Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  if (Length(Value) <> 38) or (Value[1] <> '{') or (Value[38] <> '}') then
+    exit;
+
+  for Index := 2 to 37 do
+  begin
+    if (Index = 10) or (Index = 15) or (Index = 20) or (Index = 25) then
+    begin
+      if Value[Index] <> '-' then
+        exit;
+    end
+    else if not IsHexDigit(Value[Index]) then
+      exit;
+  end;
+  Result := True;
+end;
+
+procedure AddMatchingMsiProducts(RootKey: Integer; var ProductCodes: TArrayOfString);
+var
+  Subkeys: TArrayOfString;
+  Key: String;
+  DisplayName: String;
+  Publisher: String;
+  WindowsInstaller: Cardinal;
+  Index: Integer;
+  Count: Integer;
+begin
+  { A missing uninstall key simply means this scope has no registered product. }
+  if not RegGetSubkeyNames(RootKey, UninstallKey, Subkeys) then
+    exit;
+
+  for Index := 0 to GetArrayLength(Subkeys) - 1 do
+  begin
+    Key := UninstallKey + '\' + Subkeys[Index];
+    if IsProductCode(Subkeys[Index]) and
+       RegQueryStringValue(RootKey, Key, 'DisplayName', DisplayName) and
+       (DisplayName = '{#ConflictingMsiDisplayName}') and
+       RegQueryStringValue(RootKey, Key, 'Publisher', Publisher) and
+       (Publisher = '{#ConflictingMsiPublisher}') and
+       RegQueryDWordValue(RootKey, Key, 'WindowsInstaller', WindowsInstaller) and
+       (WindowsInstaller = 1) then
+    begin
+      Count := GetArrayLength(ProductCodes);
+      SetArrayLength(ProductCodes, Count + 1);
+      ProductCodes[Count] := Subkeys[Index];
+    end;
+  end;
+end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  ProductCode: string;
-  EnumResult: Cardinal;
+  ProductCodes: TArrayOfString;
+  ProductCode: String;
   ExitCode: Integer;
-  Args: string;
-  RemovedProducts: Integer;
+  Args: String;
+  Index: Integer;
 begin
   Result := '';
-  RemovedProducts := 0;
-  while RemovedProducts < 32 do
-  begin
-    SetLength(ProductCode, 39);
-    { Always enumerate index zero: removing a product compacts the related-product
-      set, so another historical registration (if present) becomes index zero. }
-    EnumResult := MsiEnumRelatedProducts(
-      '{#ConflictingMsiUpgradeCode}', 0, 0, ProductCode);
-    if EnumResult = ErrorNoMoreItems then
-      exit;
-    if EnumResult <> ErrorSuccess then
-    begin
-      Result := 'Could not safely inspect the existing MSI installation (Windows Installer error ' +
-        IntToStr(EnumResult) + '). The existing install was left unchanged.';
-      exit;
-    end;
 
-    ProductCode := Copy(ProductCode, 1, 38);
+#ifdef ConflictingMsiPerMachine
+  AddMatchingMsiProducts(HKEY_LOCAL_MACHINE_64, ProductCodes);
+#else
+  AddMatchingMsiProducts(HKEY_CURRENT_USER, ProductCodes);
+#endif
+
+  if GetArrayLength(ProductCodes) > MaxConflictingMsiProducts then
+  begin
+    Result := 'More than 32 matching MSI registrations were found. ' +
+      'The installer stopped before changing anything rather than guessing.';
+    exit;
+  end;
+
+  for Index := 0 to GetArrayLength(ProductCodes) - 1 do
+  begin
+    ProductCode := ProductCodes[Index];
     Args := '/x "' + ProductCode + '" /qn /norestart';
     Log('Removing same-edition MSI before changing the install channel: ' + ProductCode);
     if not Exec(ExpandConstant('{sys}\msiexec.exe'), Args, '', SW_HIDE,
@@ -71,9 +129,5 @@ begin
         IntToStr(ExitCode) + '). It remains installed; this installer did not continue.';
       exit;
     end;
-    RemovedProducts := RemovedProducts + 1;
   end;
-
-  Result := 'More than 32 related MSI registrations were found. ' +
-    'The installer stopped rather than guessing which additional products are safe to remove.';
 end;
