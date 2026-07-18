@@ -347,7 +347,9 @@ mod tests {
         let output = run_output(
             "dd",
             ["if=/dev/zero", "bs=262144", "count=1"],
-            CommandTimeout::Normal,
+            // This test isolates concurrent pipe draining, not the production
+            // Normal-budget threshold. Leave startup headroom on loaded CI.
+            CommandTimeout::Custom(Duration::from_secs(10)),
         )
         .expect("large output should be drained while the child runs");
 
@@ -360,7 +362,9 @@ mod tests {
                 "-Command",
                 "[Console]::Out.Write('x' * 262144)",
             ],
-            CommandTimeout::Normal,
+            // Windows PowerShell cold start can exceed 1.5 s on a busy host;
+            // the assertion below still proves the full pipe was drained.
+            CommandTimeout::Custom(Duration::from_secs(10)),
         )
         .expect("large output should be drained while the child runs");
 

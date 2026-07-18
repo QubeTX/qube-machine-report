@@ -215,9 +215,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Validate GitHub Actions workflows
-        run: "$(go env GOPATH)/bin/actionlint"
+        run: |
+          actionlint_bin="$(go env GOPATH)/bin/actionlint"
+          "$actionlint_bin"
       - name: Validate release shell scripts
         run: shellcheck scripts/*.sh
 

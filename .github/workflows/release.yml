@@ -162,8 +162,8 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
-          read -r -a apple_targets <<< "$APPLE_TARGETS"
-          for target in "${apple_targets[@]}"; do
+          read -r -a targets <<< "$APPLE_TARGETS"
+          for target in "${targets[@]}"; do
             scripts/sign-notarize-macos.sh "$target" dist-manifest.json target/distrib
           done
       - id: cargo-dist

@@ -135,7 +135,9 @@ impl UpdateStrategy {
 /// Precise, cross-platform installation channel. An update never crosses from
 /// one channel to another; ambiguous/portable installs fail safely with a
 /// recovery link instead of creating a second copy.
-#[cfg_attr(windows, allow(dead_code))]
+// Each target constructs only its native subset, while shared matching/JSON
+// code deliberately retains the complete cross-platform taxonomy.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallChannel {
     MsiGlobal,
@@ -1032,7 +1034,9 @@ const MSI_EXIT_REBOOT_INITIATED: i32 = 1641;
 /// Windows Installer policy explicitly forbids this installation.
 #[cfg(windows)]
 const MSI_EXIT_INSTALL_REJECTED_BY_POLICY: i32 = 1625;
+#[cfg(any(windows, target_os = "macos"))]
 const MAX_INSTALLER_BYTES: u64 = 256 * 1024 * 1024;
+#[cfg(any(windows, target_os = "macos"))]
 const MAX_SIDECAR_BYTES: u64 = 16 * 1024;
 
 /// Download a file from `url` to `path` over HTTPS. Used by the MSI/EXE

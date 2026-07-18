@@ -55,6 +55,10 @@ as passed.
   macOS receipt tests require the exact package ID/version, payload path,
   per-file owner, install scope, and running version; hosted validation also
   executes `pkgutil --verify`, so receipt presence alone cannot select PKG/DMG.
+  The large-output pipe-drain test now uses a separate 10-second test budget so
+  Windows PowerShell cold-start load cannot masquerade as a drain deadlock; the
+  production Fast/Normal/Slow budgets and 8 MiB cap are unchanged. It passed
+  three isolated repetitions and the subsequent full suite.
   WiX source now makes fresh older/same-version MSI launches explicit intent
   with `AllowDowngrades`; the pre-tag Windows gate builds newer, current, and a
   second same-version package for both editions and must prove that sequence
@@ -90,6 +94,16 @@ as passed.
 - **Release status:** not yet tagged or published. Do not claim crates.io,
   30-asset release, DMG signature/notarization, or hosted installer-matrix proof
   until exact run IDs and fresh public-byte checks are appended here.
+- **First exact-SHA CI feedback:** run 29638116741 on candidate `eb5d212`
+  failed closed before tagging. Windows passed the Rust cfg surface that local
+  gates exercised, while Linux/macOS correctly exposed dead-code warnings for
+  native subsets of the shared `InstallChannel` taxonomy; the fix retains the
+  full enum with an explicit rationale and target-gates download-size constants.
+  Workflow validation also proved its pinned actionlint 1.7.7 predated the real
+  `macos-15-intel` label and found two embedded-shell findings. The candidate
+  now pins official actionlint 1.7.12 and its shell snippets pass actionlint
+  1.7.12 plus ShellCheck 0.11.0 locally. A new clean exact SHA must reprove every
+  hosted cell; the failed SHA will never be tagged.
 
 ### Architecture decision coverage backfill — 2026-07-17
 
