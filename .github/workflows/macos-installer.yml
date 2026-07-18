@@ -183,6 +183,11 @@ jobs:
           sudo installer -pkg "$mount/tr300.pkg" -target /
 
           pkgutil --pkg-info com.qubetx.tr300.pkg
+          pkgutil --pkg-info com.qubetx.tr300.pkg | grep -F "version: ${{ needs.build.outputs.version }}"
+          pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/tr300'
+          pkgutil --file-info /usr/local/bin/tr300 | grep -Fq 'pkgid: com.qubetx.tr300.pkg'
+          pkgutil --file-info /usr/local/bin/tr300 | grep -F "pkg-version: ${{ needs.build.outputs.version }}"
+          pkgutil --verify com.qubetx.tr300.pkg
           test "$(/usr/local/bin/tr300 --version)" = "tr300 ${{ needs.build.outputs.version }}"
           lipo -verify_arch arm64 x86_64 /usr/local/bin/tr300
           /usr/local/bin/tr300 --fast --json | jq -e '.schema_version == 1'
@@ -211,7 +216,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          # Never replace bytes on an existing tag. A partial/colliding upload
+          # is a release failure and must be fixed forward under a new version.
           gh release upload '${{ needs.build.outputs.tag }}' \
             artifact/tr300-universal-apple-darwin.dmg \
             artifact/tr300-universal-apple-darwin.dmg.sha256 \
-            --repo '${{ github.repository }}' --clobber
+            --repo '${{ github.repository }}'

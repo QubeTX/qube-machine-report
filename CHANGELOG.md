@@ -7,7 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-07-18
+
+### Added
+- **Native universal macOS installer distribution.** Releases now add the
+  versionless `tr300-universal-apple-darwin.dmg` and SHA-256 sidecar after
+  combining the signed ARM64 and Intel binaries. The DMG contains a separately
+  Developer ID Installer-signed `tr300.pkg` with identifier
+  `com.qubetx.tr300.pkg`, installs `/usr/local/bin/tr300`, and is notarized,
+  stapled, mounted, Gatekeeper-checked, installed, and exercised on native
+  Apple Silicon and Intel GitHub runners before publication. A physical Mac is
+  optional visual evidence, not a release dependency.
+- **Windows hybrid-core reporting.** The native
+  `GetLogicalProcessorInformationEx(RelationProcessorCore)` path now reports
+  physical performance/efficiency topology such as `6P + 10E` in fast and full
+  reports without WMI or PowerShell.
+
 ### Changed
+- **Self-update preserves the recognized installation channel.** MSI and Inno
+  Global/Corporate, Cargo, cargo-dist PowerShell/shell, and macOS DMG/PKG
+  installs select only their own update family. Unknown, conflicting, and
+  portable origins do not mutate the system and receive recovery links.
+  Cargo is pinned to the resolved version with `--version --force --locked`;
+  downloaded assets use the immutable resolved tag internally while public
+  filenames, release-note links, and install commands remain versionless
+  `latest` URLs.
+- **Installer intent is explicit and recoverable.** Windows installers write
+  separate Global/Corporate origin markers while preserving the legacy value,
+  and recover a missing marker only from one unambiguous registered product.
+  Explicit MSI/Inno channel switches remove the same-edition competing product
+  before writing shared files. MSI major upgrades intentionally accept older
+  and same-version packages too, so a fresh launch always replaces the existing
+  same-channel product instead of blocking the user's latest explicit choice.
+  Cargo-dist receipts preserve the same install prefix for script updates; when
+  Cargo and cargo-dist share one bin directory, the newer metadata timestamp
+  represents the last explicit install intent and tied/conflicting evidence
+  remains unknown. The macOS PKG receipt selects the DMG channel only when its
+  identifier/version/scope, payload path, per-file owner, running path, and
+  `pkgutil --verify` result all agree; stale receipt presence fails closed.
+- **Update JSON remains one stdout object.** It adds `install_channel`,
+  `recovery_url`, and `requires_user_action` without removing existing fields
+  or Windows `install_origin`. Progress and child output cannot contaminate
+  JSON stdout. Failures leave the previous install in place, return exit 2,
+  and expose both `exact_installer_url` for the matching immutable asset (when
+  known) and the versionless latest release recovery page.
+- **Release CI covers both Apple architectures and both Linux architectures.**
+  Native Apple Silicon/Intel and AMD64/ARM64 Linux test/build jobs are blocking;
+  workflow and shell validation are also first-class CI gates.
 - **Repository development now uses `main` as the actual GitHub default
   branch.** GitHub's atomic branch rename preserved the existing history while
   the CI and crates-publishing filters, release skills, agent guidance, project
@@ -24,6 +70,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Windows one-install decisions; and an exhaustive default-branch/checkout-v6
   record with context, workflow topology, immutable distribution boundaries,
   rejected alternatives, consequences, evidence, and revalidation triggers.
+
+### Fixed
+- **Windows installer restart and legacy-origin handling are safer.** MSI exit
+  1641 and 3010 and Inno's explicit restart exit code are never reported as a
+  verified success; scoped markers avoid a coexisting edition's stale legacy
+  marker, and update verification still requires the installed binary to report
+  the resolved version.
+
+### Internal
+- CI compiles both WiX and both Inno sources before tagging and installs a
+  synthetic newer MSI before the release-candidate MSI for both editions to
+  prove explicit downgrade replacement. A separate
+  post-release Windows workflow uses disposable jobs for all four first-class
+  installers, PowerShell, Cargo, and portable mode; it checks channel JSON,
+  duplicate copies/registrations, same-edition format replacement, report
+  smokes, failure recovery, and uninstall cleanup.
+- The Apple G2 Developer ID Installer identity is independently preflighted on
+  native Apple Silicon and Intel by importing the encrypted PKCS#12 into an
+  ephemeral keychain and signing/verifying a disposable package before release
+  packaging can run.
 
 ## [4.0.1] - 2026-07-15
 

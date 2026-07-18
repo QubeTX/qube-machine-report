@@ -8,15 +8,12 @@
 ; passes the version via `iscc /DMyAppVersion=3.15.0` so the same script
 ; rebuilds at every release without editing.
 ;
-; The MSI sibling lives at wix/main.wxs. Both installers target the SAME
-; install path (C:\Program Files\tr300\bin\tr300.exe) and write the SAME
-; registry marker (HKCU\Software\TR300) — only the InstallSource value
-; differs (msi-global vs exe-global). README documents "pick one format per
-; edition" since coexistence creates duplicate Add/Remove Programs entries.
+; The MSI sibling lives at wix/main.wxs. Both target the same Global path, but
+; a fresh explicit Inno launch removes the same-edition MSI first. The newest
+; format choice therefore owns the binary and one Add/Remove Programs entry.
 ;
-; If install path changes here, update src/update.rs::detect_install_origin()
-; in lockstep — that function matches on the install path to choose which
-; installer to fetch during `tr300 update`.
+; If install path/identity changes here, update src/update.rs, wix/main.wxs,
+; the shared MSI-removal include, validation workflow, and ADR in lockstep.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
@@ -95,6 +92,7 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignore
 ; and picks the matching installer to download for in-place upgrades. Value
 ; must match the `exe-global` arm in src/update.rs.
 Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSource"; ValueData: "exe-global"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSourceGlobal"; ValueData: "exe-global"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\TR300"; Flags: uninsdeletekeyifempty
 
 [Run]
@@ -116,6 +114,9 @@ Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --ca
 Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
 
 [Code]
+#define ConflictingMsiUpgradeCode "{5CD540A8-AD16-4B0F-8CE4-51FF641DE181}"
+#include "remove-conflicting-msi.pas"
+
 {
   PATH management — system PATH (HKLM) for the Global perMachine edition.
   Inno Setup's [Registry] section can't safely append-without-duplicates +

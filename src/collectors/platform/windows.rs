@@ -171,7 +171,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             terminal: get_terminal_fast(),
             shell: None,
             machine_model: None,
-            cpu_core_topology: None,
+            cpu_core_topology: get_cpu_core_topology_native(),
             display_resolution: None,
             battery: None,
             zfs_health: None,
@@ -323,7 +323,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         gpus,
         architecture: get_architecture(),
         machine_model,
-        cpu_core_topology: None,
+        cpu_core_topology: get_cpu_core_topology_native(),
         terminal: get_terminal(),
         shell: get_shell(),
         display_resolution: get_display_resolution(),
@@ -938,6 +938,75 @@ pub fn get_socket_count_native() -> Option<usize> {
     } else {
         Some(sockets)
     }
+}
+
+/// Native hybrid-core topology via `GetLogicalProcessorInformationEx`.
+/// Windows exposes one `RelationProcessorCore` record per physical core and
+/// assigns its `EfficiencyClass` (higher values mean higher performance).
+/// On hybrid CPUs this lets us report physical P/E cores without WMI or a
+/// PowerShell subprocess; homogeneous CPUs correctly return `None`.
+pub fn get_cpu_core_topology_native() -> Option<String> {
+    use std::collections::BTreeMap;
+    use winapi::shared::winerror::ERROR_INSUFFICIENT_BUFFER;
+    use winapi::um::errhandlingapi::GetLastError;
+    use winapi::um::sysinfoapi::GetLogicalProcessorInformationEx;
+    use winapi::um::winnt::RelationProcessorCore;
+
+    let mut returned_length: u32 = 0;
+    // SAFETY: Documented sizing call; no buffer is dereferenced.
+    let ok = unsafe {
+        GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            std::ptr::null_mut(),
+            &mut returned_length,
+        )
+    };
+    if ok != 0 || returned_length == 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
+        return None;
+    }
+
+    let mut buffer = vec![0u8; returned_length as usize];
+    // SAFETY: The allocation is exactly the size requested by the API. Record
+    // parsing below is byte-based and bounds-checked, avoiding unaligned reads.
+    let ok = unsafe {
+        GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            buffer.as_mut_ptr() as *mut _,
+            &mut returned_length,
+        )
+    };
+    if ok == 0 || returned_length as usize > buffer.len() {
+        return None;
+    }
+    buffer.truncate(returned_length as usize);
+
+    let mut by_efficiency: BTreeMap<u8, usize> = BTreeMap::new();
+    let mut offset = 0usize;
+    while offset + 10 <= buffer.len() {
+        let relationship = u32::from_le_bytes(buffer[offset..offset + 4].try_into().ok()?);
+        let size = u32::from_le_bytes(buffer[offset + 4..offset + 8].try_into().ok()?) as usize;
+        if size < 10 || offset + size > buffer.len() {
+            return None;
+        }
+        if relationship == RelationProcessorCore {
+            // The union starts at byte 8. PROCESSOR_RELATIONSHIP has Flags at
+            // byte 0 and EfficiencyClass at byte 1, hence record byte 9.
+            *by_efficiency.entry(buffer[offset + 9]).or_default() += 1;
+        }
+        offset += size;
+    }
+
+    if by_efficiency.len() < 2 {
+        return None;
+    }
+    let (&performance_class, &performance_cores) = by_efficiency.iter().next_back()?;
+    let efficiency_cores: usize = by_efficiency
+        .iter()
+        .filter(|(class, _)| **class < performance_class)
+        .map(|(_, count)| *count)
+        .sum();
+    (performance_cores > 0 && efficiency_cores > 0)
+        .then(|| format!("{performance_cores}P + {efficiency_cores}E"))
 }
 
 /// Get socket count via WMI, with PowerShell fallback (used from cpu.rs).

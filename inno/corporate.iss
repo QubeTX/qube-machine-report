@@ -11,9 +11,9 @@
 ; target only TWO actual install paths — one per edition. The Corporate
 ; edition (both MSI and EXE) installs to
 ;     %LocalAppData%\Programs\tr300\bin\tr300.exe
-; and modifies USER PATH (HKCU\Environment\Path), not system PATH. README
-; documents "pick one format per edition" since coexistence creates duplicate
-; Add/Remove Programs entries.
+; and modifies USER PATH (HKCU\Environment\Path), not system PATH. A fresh
+; explicit Inno launch removes the same-edition MSI first, so the newest format
+; choice owns one binary and one Add/Remove Programs registration.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
@@ -83,6 +83,7 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignore
 ; and picks the matching installer to download for in-place upgrades. Value
 ; must match the `exe-corporate` arm in src/update.rs.
 Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSource"; ValueData: "exe-corporate"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\TR300"; ValueType: string; ValueName: "InstallSourceCorporate"; ValueData: "exe-corporate"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\TR300"; Flags: uninsdeletekeyifempty
 
 [Run]
@@ -98,6 +99,9 @@ Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --ca
 Filename: "{app}\bin\{#MyAppExeName}"; Parameters: "migrate-cleanup --quiet --other-edition"; Flags: runhidden waituntilterminated; Tasks: cleanotheredition; StatusMsg: "Removing the other edition..."
 
 [Code]
+#define ConflictingMsiUpgradeCode "{93F465CB-7F66-4930-A773-FDA017E8FD64}"
+#include "remove-conflicting-msi.pas"
+
 {
   PATH management — user PATH (HKCU\Environment\Path) for the Corporate
   perUser edition. Same canonical pattern as inno/global.iss but pointing

@@ -11,6 +11,7 @@ name: CI
 #   speed      — measure tr300 --fast median wall-clock; fail above 1500 ms
 #   audit      — cargo-audit (blocking dependency-advisory gate)
 #   dist-plan  — verify cargo-dist plan parses (catches dist config errors before tagging)
+#   installers — compile both WiX and both Inno sources before any tag exists
 
 on:
   push:
@@ -57,8 +58,12 @@ jobs:
         include:
           - os: ubuntu-latest
             name: "Linux x86_64 glibc"
-          - os: macos-latest
+          - os: ubuntu-22.04-arm
+            name: "Linux ARM64 glibc"
+          - os: macos-15
             name: "macOS ARM (Apple Silicon)"
+          - os: macos-15-intel
+            name: "macOS Intel"
           - os: windows-latest
             name: "Windows x86_64"
     steps:
@@ -76,8 +81,12 @@ jobs:
         include:
           - os: ubuntu-latest
             name: "Linux x86_64 glibc"
-          - os: macos-latest
+          - os: ubuntu-22.04-arm
+            name: "Linux ARM64 glibc"
+          - os: macos-15
             name: "macOS ARM (Apple Silicon)"
+          - os: macos-15-intel
+            name: "macOS Intel"
           - os: windows-latest
             name: "Windows x86_64"
     steps:
@@ -199,3 +208,104 @@ jobs:
             https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh
       - name: Verify dist plan parses
         run: ~/.cargo/bin/dist plan
+
+  workflow-validation:
+    name: Workflow and shell validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate GitHub Actions workflows
+        run: "$(go env GOPATH)/bin/actionlint"
+      - name: Validate release shell scripts
+        run: shellcheck scripts/*.sh
+
+  windows-installer-sources:
+    name: Windows installer source gate
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        shell: pwsh
+        run: cargo build --locked --release --bin tr300
+      - name: Compile Global and Corporate MSI sources
+        shell: pwsh
+        run: |
+          $candle = "$env:WIX\bin\candle.exe"
+          $light = "$env:WIX\bin\light.exe"
+          if (-not (Test-Path $candle)) { throw "candle.exe not found at $candle" }
+          if (-not (Test-Path $light)) { throw "light.exe not found at $light" }
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          New-Item -ItemType Directory -Force target\wix-ci | Out-Null
+          function Build-Msi([string] $source, [string] $name, [string] $packageVersion) {
+            $object = "target\wix-ci\$name.wixobj"
+            $output = "target\wix-ci\$name.msi"
+            & $candle -arch x64 "-dVersion=$packageVersion" `
+              "-dCargoTargetBinDir=target\release" -out $object $source
+            if ($LASTEXITCODE -ne 0) { throw "candle failed for $source" }
+            & $light -sice:ICE38 -sice:ICE64 -sice:ICE91 `
+              -ext WixUIExtension -out $output $object
+            if ($LASTEXITCODE -ne 0) { throw "light failed for $source" }
+            if (-not (Test-Path $output)) { throw "missing $output" }
+          }
+          Build-Msi 'wix\main.wxs' 'global-current' $version
+          Build-Msi 'wix\main.wxs' 'global-same-version-fixture' $version
+          Build-Msi 'wix\main.wxs' 'global-newer-fixture' '99.0.0'
+          Build-Msi 'wix-corporate\corporate.wxs' 'corporate-current' $version
+          Build-Msi 'wix-corporate\corporate.wxs' 'corporate-same-version-fixture' $version
+          Build-Msi 'wix-corporate\corporate.wxs' 'corporate-newer-fixture' '99.0.0'
+      - name: Prove fresh older and same-version MSIs replace registered MSIs
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $cases = @(
+            @{ Name = 'global'; Display = 'tr300'; Exe = "$env:ProgramFiles\tr300\bin\tr300.exe" },
+            @{ Name = 'corporate'; Display = 'tr300 (Corporate Edition)'; Exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe" }
+          )
+          function Entries([string] $display) {
+            @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object { $_.DisplayName -eq $display -and $_.WindowsInstaller -eq 1 }
+          }
+          foreach ($case in $cases) {
+            foreach ($variant in @('newer-fixture', 'current', 'same-version-fixture')) {
+              $msi = (Resolve-Path "target\wix-ci\$($case.Name)-$variant.msi").Path
+              $process = Start-Process msiexec.exe -Wait -PassThru `
+                -ArgumentList @('/i', $msi, '/qn', '/norestart')
+              if ($process.ExitCode -ne 0) {
+                throw "install failed for $msi with $($process.ExitCode)"
+              }
+            }
+            $entries = @(Entries $case.Display)
+            if ($entries.Count -ne 1) {
+              throw "expected one $($case.Display) MSI registration, found $($entries.Count)"
+            }
+            if ($entries[0].DisplayVersion -ne $version) {
+              throw "fresh older/same-version MSI did not win: $($entries[0].DisplayVersion)"
+            }
+            if (-not (Test-Path $case.Exe)) { throw "installed binary missing: $($case.Exe)" }
+            $actualVersion = & $case.Exe --version 2>$null
+            if ($actualVersion -ne "tr300 $version") {
+              throw "installed binary version does not match $version"
+            }
+            $process = Start-Process msiexec.exe -Wait -PassThru `
+              -ArgumentList @('/x', $entries[0].PSChildName, '/qn', '/norestart')
+            if ($process.ExitCode -ne 0) {
+              throw "uninstall failed for $($case.Display) with $($process.ExitCode)"
+            }
+          }
+      - name: Compile Global and Corporate Inno Setup sources
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress --no-color
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\iscc.exe"
+          if (-not (Test-Path $iscc)) { throw "iscc.exe not found" }
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          foreach ($source in @("inno\global.iss", "inno\corporate.iss")) {
+            & $iscc "/DMyAppVersion=$version" $source
+            if ($LASTEXITCODE -ne 0) { throw "Inno compile failed for $source" }
+          }

@@ -312,7 +312,15 @@ jobs:
           RELEASE_COMMIT: "${{ github.sha }}"
         run: |
           # Write and read notes from a file to avoid quoting breaking things
-          echo "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
+          # cargo-dist correctly plans immutable exact-tag URLs. Public install
+          # commands and download links intentionally stay on the versionless
+          # latest endpoint; updater internals still use the resolved tag.
+          printf '%s\n' "$ANNOUNCEMENT_BODY" \
+            | sed \
+                -e "s|/releases/download/${{ needs.plan.outputs.tag }}/|/releases/latest/download/|g" \
+                -e 's/^## Install tr300 [^[:space:]]*$/## Install tr300 (latest)/' \
+                -e 's/^## Download tr300 [^[:space:]]*$/## Download tr300 (latest)/' \
+            > "$RUNNER_TEMP/notes.txt"
 
           prerelease_args=()
           if [[ -n $PRERELEASE_FLAG ]]; then

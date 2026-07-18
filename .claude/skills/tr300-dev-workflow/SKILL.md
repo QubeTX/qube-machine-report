@@ -106,18 +106,22 @@ time ./target/release/tr300 --fast > /dev/null
 
 If a CI job fails, click into the job logs first — `clippy` and `test` failures are usually obvious from the diff. Speed regressions print the per-run times and median in the step summary; correlate against the recent change set.
 
-### Intel macOS coverage policy (v3.11.2+)
+### Intel macOS coverage policy (v4.1.0 current; supersedes v3.11.2)
 
-**Contract: CI never blocks on Intel; releases still produce the artifact.**
+**Contract: native Apple Silicon and native Intel are blocking for shared/macOS
+release changes.**
 
-- `.github/workflows/ci.yml` — **no `macos-13` entry**. The default state is "Intel is not in CI, period." Tested matrix is Linux x64 glibc + macOS ARM + Windows x64.
-- `[workspace.metadata.dist].targets` in `Cargo.toml` — **still includes `x86_64-apple-darwin`**. cargo-dist's `release.yml` still builds it on a `macos-13` runner at every `vX.Y.Z` tag. The mismatch between tested (3) and shipped (6) targets is intentional.
+- `.github/workflows/ci.yml` uses `macos-15` and `macos-15-intel` for native
+  ARM64/x86_64 test and release-build coverage.
+- `.github/workflows/macos-installer.yml` installs and exercises the universal
+  PKG-in-DMG on those same architectures before publication.
+- `[workspace.metadata.dist].targets` keeps both Apple target triples.
 
-**Don't re-add `macos-13` to ci.yml** without a concrete reason and a capacity-risk discussion. `macos-13` is GitHub's last public Intel x86_64 macOS hosted runner label and capacity is structurally winding down (no `macos-14`/`-15`/`-latest` Intel variant exists). Pre-removal CI runs queued 3h+ to 15h+ on Intel before manual cancellation; `continue-on-error: true` is theatrical coverage — same UX. Hard removal was the only fix that actually changed the dashboard state.
-
-**Don't drop `x86_64-apple-darwin` from cargo-dist targets** unless `release.yml` starts taking >2h at tag time because of `macos-13` queue depth. Tag cadence is weekly-to-monthly, willing to absorb the wait — users on 2019/2020-era Intel hardware deserve a working binary download.
-
-**For Intel-specific bugs**: reproduce locally on Intel hardware (or one-shot self-hosted runner). The arch-agnostic `#[cfg(target_os = "macos")]` paths mean Apple Silicon CI exercises every line of the macOS code path; bug rate doesn't justify the queue cost.
+The old `macos-13` capacity exception and Rosetta-as-primary-Intel proof are
+historical only. Do not remove `macos-15-intel` based on the old queue record;
+GitHub now provides the explicit native Intel label. Rosetta may supplement but
+never replace it. A physical Mac is optional unless hosted CI exposes a GUI-only
+defect.
 
 — Full reasoning, the five concrete CI run IDs / queue times that triggered the removal, the rejected `continue-on-error` and target-drop alternatives, the per-architecture correctness analysis: see [`docs/architecture-decisions.md` § "Intel macOS coverage policy (v3.11.2+)"](../../../docs/architecture-decisions.md#intel-macos-coverage-policy-v3112).
 

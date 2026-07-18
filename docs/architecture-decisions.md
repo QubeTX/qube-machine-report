@@ -10,7 +10,7 @@
 > revised) the decision. Verbatim moves from CLAUDE.md preserved word-for-word
 > so `git blame` history continues to make sense.
 >
-> **Coverage reconciled through 2026-07-17.** This is the repository's
+> **Coverage reconciled through 2026-07-18.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. Accepted decisions remain binding until a later dated
 > section explicitly supersedes them. Historical failure evidence is retained
@@ -18,7 +18,15 @@
 
 ## Table of contents
 
-- [Decision ledger status (through 2026-07-17)](#decision-ledger-status-through-2026-07-17)
+- [Decision ledger status (through v4.1.0)](#decision-ledger-status-through-v410)
+- [Origin-preserving updates and native PKG-in-DMG distribution (v4.1.0)](#origin-preserving-updates-and-native-pkg-in-dmg-distribution-v410)
+  - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
+  - [Install channel is product state](#install-channel-is-product-state)
+  - [Fresh installer intent and legacy consolidation](#fresh-installer-intent-and-legacy-consolidation)
+  - [Why the PKG is inside the DMG](#why-the-pkg-is-inside-the-dmg)
+  - [Apple credentials and hosted-native proof](#apple-credentials-and-hosted-native-proof)
+  - [Machine-readable and failure contract](#machine-readable-and-failure-contract)
+  - [Reusable contract for other CLI products](#reusable-contract-for-other-cli-products)
 - [Cross-platform report semantics (v4.0.0)](#cross-platform-report-semantics-v400)
   - [One Rust product, platform adapters, and two collection budgets](#one-rust-product-platform-adapters-and-two-collection-budgets)
   - [Stable table, JSON, locale, and privacy contracts](#stable-table-json-locale-and-privacy-contracts)
@@ -41,6 +49,7 @@
   - [v3.11.0+ — registry OS, IsWow64Process2, WTS last-login, CPUID hypervisor, BitLocker](#v3110--registry-os-iswow64process2-wts-last-login-cpuid-hypervisor-bitlocker)
   - [v3.12.0+ — VPN-aware default-route, Fast Startup uptime annotation](#v3120--vpn-aware-default-route-fast-startup-uptime-annotation)
   - [v3.13.0+ — 5-state battery, native cores, GPU registry-prefer, PSCore detection, terminal walk](#v3130--5-state-battery-native-cores-gpu-registry-prefer-pscore-detection-terminal-walk)
+  - [v4.1.0 — Native Windows hybrid-core topology](#v410--native-windows-hybrid-core-topology)
   - [v3.14.4+ — Windows install execution-policy preflight](#v3144--windows-install-execution-policy-preflight)
   - [v3.14.5+ — Windows install error advisor](#v3145--windows-install-error-advisor)
   - [Windows distribution model (v3.15.0+)](#windows-distribution-model-v3150)
@@ -56,10 +65,10 @@
 
 ---
 
-## Decision ledger status (through 2026-07-17)
+## Decision ledger status (through v4.1.0)
 
-This reconciliation compared the ledger against current source, all four
-workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
+This reconciliation compared the ledger against current source, all release
+and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
 ledger, technical and human changelogs, agent guides, and the public v4.0.1
 release state. The result is an accepted decision set, not a claim that every
 future hardware row has already been exercised.
@@ -74,25 +83,282 @@ future hardware row has already been exercised.
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
 | Developer ID plus Apple `Accepted` before Mac artifact upload | Accepted and release-blocking | signing script and protected cargo-dist workflow step |
 | Frozen Mac surface during personal Windows/Linux/Pi continuation | Accepted | agent guides, current handoff, release workflow, hardware task boundary |
-| Personal hardware remains post-release evidence | Accepted deferral, still open | `#winhw`, `#plat`, `TESTING.md`; hosted jobs do not impersonate physical machines |
+| Personal hardware evidence | Alienware complete; AMD64 laptop and Pi 4 still open | `#win`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
 | GitHub default branch `main` and checkout v6/Node 24 | Accepted and hosted-verified | GitHub default metadata, workflow filters/actions, exact-SHA CI/crates runs |
 | Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
 | Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
-| Advisory one-install Windows consolidation | Accepted | hidden `migrate-cleanup`, installer hooks, deletion allowlist and tests |
+| Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
+| Native universal macOS PKG-in-DMG | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel install gates |
+| Explicit fresh-installer choice supersedes the prior Windows channel | Accepted | WiX/Inno cross-format removal, scoped markers, advisory cross-edition cleanup |
+| Physical Mac requirement | Superseded; optional visual smoke only | GitHub `macos-15` and `macos-15-intel` are the required native gates |
 
 The following earlier states are **superseded**, not alternative supported
 modes: automatic report saving, `master` as the default branch, non-blocking
 Mac/audit CI gates, ad-hoc-signed public Mac binaries, unsigned Mac release
-fallbacks, path-only Windows installer inference, and any force/direct-running-
-binary updater bypass. Historical sections retain them only as failure context.
+fallbacks, path-only Windows installer inference, the v3.17 cargo-first updater
+chain, Intel-as-release-only coverage, the claim that a physical Mac is needed
+for release proof, the claim that a bare CLI must not have a PKG, and any
+force/direct-running-binary updater bypass. Historical sections retain them
+only as failure context.
+
+---
+
+## Origin-preserving updates and native PKG-in-DMG distribution (v4.1.0)
+
+**Status:** Accepted. This section supersedes the older updater fallback,
+Intel-runner, bare-binary packaging, and same-edition coexistence decisions
+where they conflict. The governing user intent is: an update preserves the
+channel that installed the running copy, while an explicit fresh installer
+launch is a newer choice and may replace the previous channel.
+
+### Latest discovery, immutable installation
+
+Public commands, links, and asset filenames are versionless. Users download
+from `/releases/latest` or `/releases/latest/download/<stable-name>` and never
+need to edit a version embedded in a command. The updater follows a stricter
+two-stage rule: it queries the GitHub latest-release API once, validates the
+resolved tag/version, then constructs every payload and checksum URL from that
+immutable tag. Cargo receives the resolved `--version` and `--locked`; shell
+and PowerShell installers are fetched from the exact tag even though their
+filenames remain stable.
+
+This split is deliberate. A mutable latest URL is the correct human-facing
+entry point, but resolving it again during a multi-file update creates a
+time-of-check/time-of-use race if a release changes between the version check,
+payload download, and sidecar download. Stable filenames plus exact tagged
+bytes give both a durable user command and a reproducible update attempt.
+Cargo-dist's plan necessarily contains the exact announcement tag, but the
+checked-in release workflow normalizes the published release-note install and
+download URLs back to `/releases/latest/download/` before creating the release.
+The release tag/title still identify immutable history; user-facing artifact
+names and copy-paste commands do not embed a version.
+Cargo-dist creates the release once, and supplemental Windows and macOS jobs
+upload without `--clobber`. A collision or partial prior upload therefore fails
+the release; it is fixed forward under a new version instead of changing bytes
+or checksums behind an existing tag.
+
+### Install channel is product state
+
+The updater treats install format, edition, scope, and prefix as state rather
+than as a preference to rediscover on every run:
+
+| Detected running origin | Only permitted CLI update strategy |
+|---|---|
+| Global MSI | Global MSI, passive, UAC when required |
+| Corporate MSI | Corporate per-user MSI |
+| Global EXE | Global Inno Setup EXE |
+| Corporate EXE | Corporate per-user Inno Setup EXE |
+| cargo-dist PowerShell receipt | Exact-tag PowerShell installer and recorded prefix |
+| Cargo metadata | Exact resolved Cargo version with `--force --locked` |
+| macOS package receipt | Universal DMG and Apple Installer |
+| cargo-dist shell receipt | Exact-tag shell installer and recorded prefix |
+| Unknown, portable, or conflicting evidence | No mutation; recovery links only |
+
+Windows writes separate `InstallSourceGlobal` and `InstallSourceCorporate`
+values while retaining the legacy `InstallSource` value for compatibility. A
+missing marker may be recovered only when Add/Remove Programs registration,
+scope, and executable path identify exactly one MSI or Inno product. Cargo uses
+Cargo metadata. cargo-dist uses its versioned receipt and recorded install
+prefix. macOS uses the stable `pkgutil` receipt
+`com.qubetx.tr300.pkg`, but receipt existence alone is not ownership proof. The
+receipt identifier, version, install scope, payload list, per-file owner, and
+`pkgutil --verify` result must all agree with the running
+`/usr/local/bin/tr300`. Path alone cannot distinguish Windows MSI from EXE and
+therefore cannot authorize a mutation.
+
+No strategy crosses into another channel after failure. Preserving the old
+working install is more important than “trying something” that creates a
+second registration, changes Corporate to Global, changes per-user to
+per-machine, or shadows the running binary. This also makes very old versions
+safe: legacy evidence is recovered when unambiguous and otherwise stops with a
+fresh-installer link instead of guessing.
+
+### Fresh installer intent and legacy consolidation
+
+A CLI update preserves origin; a manually launched fresh installer expresses
+newer intent. Within a Windows edition, an MSI detects and removes the matching
+Inno registration before writing shared-path files, and Inno enumerates and
+removes the matching MSI product before installation. The new installer then
+writes its scoped marker. MSI UpgradeCode and Inno AppId continue to handle
+ordinary same-channel upgrades across arbitrarily old versions. Both MSI
+packages set WiX `MajorUpgrade AllowDowngrades='yes'`: an explicitly launched
+older or same-version MSI replaces the registered same-edition MSI instead of
+being blocked. This same-version behavior is part of the
+[WiX v3 `MajorUpgrade` contract](https://docs.firegiant.com/wix3/xsd/wix/majorupgrade/),
+not an inference from the path or product name. `RemoveExistingProducts` is
+scheduled after `InstallInitialize`, so a failed replacement can roll the old
+package back. The downgrade permission is intentional because a fresh installer
+launch is user intent; the automatic updater never selects an older release.
+This works for v4.1.0-and-newer MSI packages. An immutable historical MSI owns
+its already-published launch policy and may still block when launched against a
+newer installation; that safe stop cannot be fixed retroactively and must not
+be bypassed by deleting registered product state behind Windows Installer.
+
+The v3.17 advisory `migrate-cleanup` remains the bounded post-install mechanism
+for a shadowing Cargo copy and the other Global/Corporate executable. It may
+not delete a toolchain or the running install. A no-admin Corporate install
+can safely report that a Global copy needs elevated removal rather than
+pretending the conflict was resolved. The active new copy and scoped marker
+still reflect the latest explicit intent; installer-matrix gates must detect
+duplicate active binaries, PATH entries, or product registrations.
+The pre-tag Windows gate builds a second MSI with the same version and another
+with a synthetic newer version for each edition, then proves a deliberate
+newer-to-current-to-same-version sequence converges to one current registration
+and executable.
+
+### Why the PKG is inside the DMG
+
+The DMG is not mechanically required; a signed PKG could be published alone.
+For TR-300, the nested design is the smallest distribution that satisfies the
+whole contract:
+
+- the universal Mach-O supports both `arm64` and `x86_64`;
+- the signed system package owns `/usr/local/bin/tr300`, presents Apple's
+  normal privileged Installer prompts, and creates the stable receipt needed
+  for origin-preserving updates;
+- the signed DMG is the familiar versionless downloadable container and can
+  include short recovery instructions without inventing an `.app` wrapper;
+- the PKG and DMG are independently notarized, stapled, signature-checked, and
+  Gatekeeper-assessed before publication.
+
+A loose binary in a DMG was rejected because it gives no package receipt,
+privileged install transaction, uninstall inventory, or reliable updater
+origin. An artificial GUI `.app` was rejected because TR-300 remains a CLI.
+Publishing only the PKG was rejected as a weaker download/recovery experience,
+not because Apple requires the DMG.
+
+The updater downloads the exact-version DMG, verifies its SHA-256 sidecar,
+validates and mounts it read-only, validates the nested `tr300.pkg`, and invokes
+Apple Installer with `open -W`. Success is reported only after Installer
+returns, the receipt exists, and `/usr/local/bin/tr300 --version` matches the
+resolved version. Later update detection revalidates that the receipt claims
+that exact file and version and that its bill of materials still verifies; a
+stale receipt beside a replaced binary fails closed. Cancellation or failure
+leaves the old installation in place and exits 2.
+
+### Apple credentials and hosted-native proof
+
+Developer ID Application and Developer ID Installer are distinct identities.
+The Installer private key and CSR may be generated with OpenSSL on the
+Alienware; Apple Developer portal authentication, 2FA, CSR upload, and
+certificate download do not require a Mac. Apple requires RSA 2048 for this
+portal CSR and the current G2 intermediary is preferred over the expiring
+previous Sub-CA. The certificate and encrypted private key are converted to a
+password-protected, Apple-keychain-compatible PKCS#12 outside the repository,
+uploaded through authenticated GitHub CLI, and imported only into an ephemeral
+runner keychain. Secret values never enter source, task boards, browser fields,
+or logs.
+
+Repository credentials add
+`APPLE_INSTALLER_CERTIFICATE_P12_BASE64` and
+`APPLE_INSTALLER_CERTIFICATE_PASSWORD`; the corresponding repository variable
+is `APPLE_INSTALLER_SIGNING_IDENTITY` and contains the certificate's full
+Developer ID Installer common name. Existing application-signing and App
+Store Connect credentials remain separate.
+
+Before any release PKG/DMG packaging, both native runner architectures import
+the Installer PKCS#12 into an ephemeral keychain and use `pkgbuild` to sign a
+disposable package. Verifying that package proves both the certificate and its
+matching private key are usable; merely finding the public certificate in a
+keychain is not sufficient evidence. Local OpenSSL integrity is also not a
+substitute for this gate: PKCS#12 algorithms accepted on Windows can still be
+rejected by macOS Keychain. Secret upload must use raw standard input without a
+literal `--body -` or newline transformation, and the hosted signing proof is
+rerun after any certificate, password, container, variable, or upload change.
+
+GitHub's native `macos-15` Apple Silicon and `macos-15-intel` runners are the
+required gate. They build, sign, notarize, mount, install, report, select the
+update strategy, and uninstall on the architecture they claim. A physical Mac
+is optional for visual inspection of Finder/Installer prompts and becomes
+blocking only if CI exposes a GUI-only defect. This avoids a strange
+cross-compilation/signing workaround on Windows without making the maintainer
+rent or borrow hardware for every release.
+
+### Machine-readable and failure contract
+
+Update JSON stdout is exactly one object; child installer output and progress
+go to stderr. Existing keys and Windows `install_origin` remain. Additive keys
+are `install_channel`, `recovery_url`, and `requires_user_action`. A failed
+known installer channel also carries `exact_installer_url`; this pins the
+matching recovery payload while `recovery_url` stays the versionless release
+page. Successful same-channel/no-op updates return 0. Cancellation, ambiguity,
+restart-required installer exits, blocked staging, failed verification, or installer failure
+returns 2 and keeps the old installation.
+
+When the channel is known, failure output includes the exact tagged matching
+payload and the versionless latest release page. When origin is unknown, no
+payload is guessed and the fresh-installer page is the recovery path. Windows
+MSI codes 3010 and 1641 and the equivalent Inno restart exit are never
+misreported as a complete in-place update.
+
+### Reusable contract for other CLI products
+
+The v4.1.0 implementation is intended to be copied into other standalone CLI
+products. Product names, package identifiers, paths, asset names, registry
+keys, and installer GUIDs are parameters; the following invariants are the
+portable architecture:
+
+1. **Separate explicit install from self-update.** A deliberately launched
+   fresh installer is the user's newest instruction and may select a different
+   format, scope, edition, or even an older/same version. A self-update is
+   latest-only and preserves the proven format, scope, edition, and prefix.
+   Never apply fresh-install downgrade semantics to an automatic update.
+2. **Make origin durable product state.** Native product registration and
+   package receipts outrank paths. Product-owned receipts are versioned and
+   record product identity, channel, prefix, installed version, and write time.
+   A path may bound a candidate but cannot distinguish formats that share it.
+   Missing state is recoverable only from one unambiguous native registration;
+   equal, stale, or conflicting evidence becomes unknown.
+3. **Prove receipt ownership, not receipt presence.** For a native package,
+   require the package ID, recorded payload path, installed file owner,
+   receipt/package version, running executable path, and package verification
+   to agree. Apply the equivalent identity/registration checks on Windows and
+   package-manager metadata checks elsewhere.
+4. **Resolve mutable discovery once.** Public filenames, download commands, and
+   recovery pages remain versionless. The updater resolves `latest` once, then
+   pins the tag/version for the payload, sidecar, package-manager command, and
+   post-install expectation. Do not fetch one transaction from multiple
+   mutable `latest/download` URLs.
+   Treat the resolved tag and every attached asset as immutable: supplemental
+   upload jobs must refuse collisions rather than clobber public bytes.
+5. **Treat replacement as a transaction.** Use private randomized staging,
+   payload size limits, cryptographic digest checks, native signature/trust
+   checks, and the original installer engine. Do not delete or directly
+   overwrite the running installation as a fallback. Report success only after
+   the installer exits successfully, durable ownership metadata matches, and
+   the intended executable reports the resolved version.
+6. **Converge fresh installs before claiming ownership.** An official installer
+   removes or upgrades recognized conflicting registrations for the selected
+   product before it writes shared-path files. If privilege is insufficient,
+   it stops or reports the exact remaining conflict; it never claims a
+   one-copy result it did not establish. A package manager with no install-time
+   lifecycle hook needs an official wrapper/first-run convergence step or must
+   be documented as unable to guarantee cross-method takeover.
+7. **Fail closed and remain recoverable.** Cancellation, ambiguity, policy
+   blocks, reboot-required exits, checksum/signature failure, or post-install
+   mismatch retains the old working copy, returns a stable nonzero exit, and
+   supplies both the exact matching tagged asset when one is known and the
+   versionless fresh-install/release page. JSON stdout remains exactly one
+   backward-compatible object; child progress is stderr-only.
+8. **Test transitions, not only clean installs.** Every release gate covers
+   old-to-new and very-old-to-new updates, same-version repair, explicit
+   downgrade, both directions of cross-format takeover, missing metadata,
+   conflicting metadata, cancellation/UAC denial, restart-required exits,
+   corrupted downloads, PATH/registration cleanup, uninstall, and the absence
+   of duplicate active binaries. Tests deliberately remove markers/receipts so
+   recovery behavior is evidence rather than an unexercised branch.
+
+These rules are intentionally stricter than “download the newest binary and
+replace the file.” The portable unit is the installation transaction and its
+durable ownership evidence, not merely an executable byte stream.
 
 ---
 
 ## Cross-platform report semantics (v4.0.0)
 
-Substantially revised and released 2026-07-14. Personal Alienware, AMD64 Linux
-laptop, and Raspberry Pi 4 live checks remain explicit post-release evidence
-for patches; their absence must not be rewritten as proof.
+Substantially revised and released 2026-07-14. Alienware verification completed
+2026-07-17; AMD64 Linux laptop and Raspberry Pi 4 live checks remain tracked
+continuation and their absence must not be rewritten as proof.
 
 ### One Rust product, platform adapters, and two collection budgets
 
@@ -446,11 +712,12 @@ issuer ID; repository variables select the signing identity/team. Only the
 names are documented. Pull-request planning does not receive them because the
 step additionally requires cargo-dist's publishing output.
 
-The product is a standalone Mach-O CLI, not an `.app` or installer `.pkg`.
-There is therefore no staplable ticket container. Apple's accepted service
-record binds the signed bytes online. `codesign --verify --strict` plus
-`notarytool` acceptance is the correct proof; `spctl --type execute` reports
-that the code is valid but not an app and is not used as a false gate.
+This bare-archive conclusion applied to the v4.0 cargo-dist artifacts and is
+superseded for the installer-first path by the v4.1.0 PKG-in-DMG decision. The
+archives still use Developer ID plus Apple's accepted service record because a
+bare Mach-O has no ticket container. The new PKG and DMG are containers and
+must both be stapled and Gatekeeper-assessed in addition to the nested binary's
+signature verification.
 
 **Rejected alternatives:**
 
@@ -459,24 +726,23 @@ that the code is valid but not an app and is not used as a false gate.
 - Host first and replace assets later: creates a public unsigned window and a
   race between manifests/checksums.
 - Unsigned fallback when secrets are absent: defeats the stated trust contract.
-- Wrap the CLI in an app/pkg solely for stapling: changes install/launch
-  semantics without improving the accepted bare executable.
+- Wrap the CLI in a GUI app solely for stapling: still rejected. A PKG is now
+  accepted for its system-install transaction and stable receipt, not as a
+  cosmetic ticket wrapper.
 
-#### Alienware continuation freeze
+#### Alienware continuation freeze (historical; superseded by v4.1.0)
 
-The enforced Mac path is a release boundary, not an invitation to refactor Mac
-code from Windows. Later Alienware/Linux/Pi work must leave macOS collectors/cfg
-branches, Apple target triples, artifact/installer names,
-`scripts/sign-notarize-macos.sh`, the Apple `release.yml` step, toolchain pins,
-and Apple secrets/variables untouched. Do not regenerate or rotate this setup
-from Windows.
+The v4.0.1 handoff temporarily froze the proven archive path while work moved
+back to Windows. v4.1.0 intentionally reopens that boundary for a tracked,
+reviewable PKG-in-DMG workflow. Windows remains unsuitable for executing Apple
+signing tools, but it is valid for authoring the workflow, generating the
+Installer CSR/private key, and managing GitHub credentials. Native hosted Mac
+runners now supply the required execution and proof.
 
-A Windows/Linux finding should be fixed in cfg-local code. If correctness truly
-requires a shared module, schema, dependency/Cargo.lock, workflow, or Apple
-artifact change, the native/Rosetta evidence is no longer sufficient for that
-commit. Return to a Mac for the complete arm64 + Rosetta gate; if Apple inputs
-changed, repeat a real cargo-dist archive signing/notary/repack test. Hosted
-Apple Silicon CI alone does not prove the translated x86_64 path.
+A shared or Apple-artifact change still invalidates old Mac evidence, but the
+required revalidation is native `macos-15` plus native `macos-15-intel` hosted
+CI. A physical Mac is needed only for a defect that cannot be observed through
+those runners.
 
 ### Post-release personal-hardware evidence boundary
 
@@ -793,7 +1059,15 @@ minors silently.
 
 ### Self-update auto-rustup (v3.11.1+)
 
-`src/update.rs` checks `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest` (15s timeout via `ureq`), compares against `VERSION` from `Cargo.toml`, and runs an ordered probe-and-retry chain:
+**v4.1.0 superseding rule:** the auto-rustup behavior below remains only for a
+confirmed Cargo origin, and Cargo is pinned to the resolved release with
+`--version <resolved> --force --locked`. The ordered cross-method fallback
+chain described historically below is retired. Shell, PowerShell, MSI, EXE,
+and PKG/DMG origins each have their own single channel-preserving strategy;
+unknown origins do not mutate the machine.
+
+Before v4.1.0, `src/update.rs` checked the same latest-release endpoint,
+compared against `VERSION`, and ran this ordered probe-and-retry chain:
 - `cargo install tr300 --force` first when `cargo --version` succeeds
 - macOS/Linux fallback: cargo-dist shell installer via `curl`, then `wget`
 - Windows fallback: cargo-dist PowerShell installer via `powershell`, then `pwsh`
@@ -867,6 +1141,18 @@ simpler, idempotent, and self-correcting; rustup itself decides whether
 work is needed.
 
 ### Intel macOS coverage policy (v3.11.2+)
+
+**Current policy (v4.1.0; supersedes the remainder of this historical
+section).** GitHub now exposes the native `macos-15-intel` runner label used by
+this repository. Intel is once again a blocking test/build and PKG-in-DMG
+install gate, paired with native Apple Silicon `macos-15`. Do not remove either
+matrix cell merely because the old `macos-13` public fleet was unreliable. A
+physical Intel Mac and Rosetta emulation are no longer substitutes for the
+native hosted Intel gate.
+
+The following records why Intel was temporarily release-only while
+`macos-13` was the only available label; it is retained as historical failure
+context and is not current instruction.
 
 **What changed.** On 2026-04-28 the `macos-13` matrix entries were removed
 from both the `test` and `build` jobs in `.github/workflows/ci.yml`. CI no
@@ -1145,6 +1431,23 @@ is intentional and is exactly what this section documents — see above.
   resolves to `Claude Code`. Reference:
   [CreateToolhelp32Snapshot](https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot).
 
+### v4.1.0 — Native Windows hybrid-core topology
+
+Windows hybrid-core reporting uses
+`GetLogicalProcessorInformationEx(RelationProcessorCore)` and parses the
+variable-sized processor-core records with byte-bounded iteration. The highest
+observed nonzero `EfficiencyClass` is treated as performance cores and lower
+classes as efficiency cores. If the firmware/OS does not expose useful classes,
+the optional topology remains absent rather than inferring P/E counts from
+logical processor totals or CPU marketing names.
+
+This replaces a gap exposed on the Alienware m16 R2: Windows correctly reported
+16 physical and 22 logical cores, but the older collector could not render the
+Core Ultra 7 155H's `6P + 10E` topology. The same native query is cheap enough
+for full and fast modes and avoids PowerShell/WMI startup overhead. Record-size
+bounds and zero-size guards are load-bearing because the API returns a packed
+buffer rather than a Rust slice.
+
 ### v3.14.4+ — Windows install execution-policy preflight
 
 **Failure mode this prevents.** On a fresh Windows machine, `tr300 install`
@@ -1381,6 +1684,12 @@ Reference:
 
 ### Windows distribution model (v3.15.0+)
 
+The four-product model and permanent identities remain current. The v3.15
+same-edition coexistence and single legacy marker behavior below are
+superseded by v4.1.0: an explicit fresh MSI/EXE removes its same-edition
+counterpart, and scoped Global/Corporate marker values preserve coexisting
+legacy evidence without authorizing cross-channel updates.
+
 **Decision: ship four Windows installer artifacts at every tagged release.** Two MSIs (Global perMachine + Corporate perUser) and two Inno Setup EXE installers (Global perMachine + Corporate perUser). The MSI Global has been shipping since v3.13.1; this release adds the other three.
 
 ```
@@ -1405,12 +1714,25 @@ Same reasoning for two EXE installers vs one with a runtime mode switch (`tr300-
 
 **Why install both formats to the same path within each edition.** Two alternatives considered:
 
-1. **Same path, document "pick one"** (chosen). MSI Global and EXE Global both install to `C:\Program Files\tr300\bin\`. The first installer to run wins; the second sees the binary already exists and either overwrites or merges. README documents that users should pick ONE format per edition. If they install both anyway, the result is two Add/Remove Programs entries, one binary file, and PATH ordering decides which `tr300` (logically both refer to the same file) runs. Confusing but not broken.
+1. **Same path, originally document "pick one"** (v3.15 choice, superseded in
+   v4.1.0). MSI Global and EXE Global share
+   `C:\Program Files\tr300\bin\`; Corporate formats share their per-user path.
+   v4.1.0 keeps those paths but makes the newly launched installer remove the
+   same-edition counterpart first, so the newest explicit format choice owns
+   the binary, marker, PATH, and Add/Remove Programs registration.
 2. **Distinct paths** (`C:\Program Files\tr300\bin\` for MSI, `C:\Program Files\tr300 (Setup)\bin\` for EXE). Rejected because the suffix is ugly, PATH ordering still picks a winner, and the duplicate-install scenario is rare enough that it's not worth uglifying the common case.
 
-The Industry Standard Solution to the duplicate-install problem is **don't let users install both** — installers detect their counterpart and refuse. WiX can do this with custom actions; Inno Setup can do this with `[Code]` checks. I considered it and rejected for v3.15.0 because the user-visible problem is small (annoying ARP duplication) and the engineering cost is high (cross-installer detection logic in both WiX and Inno Setup). May revisit in a future release if real users hit this.
+The v3.15 rejection of cross-installer detection is superseded. v4.1.0 uses
+WiX registry search/custom action and Inno's MSI product enumeration to remove
+the counterpart transactionally before installing. Failure stops the fresh
+install instead of merging two registrations.
 
-**The registry marker (`HKCU\Software\TR300\InstallSource`).** All four installers write a literal string to this registry value on install: `msi-global`, `msi-corporate`, `exe-global`, or `exe-corporate`. `src/update.rs::detect_install_origin()` reads it to choose which installer to fetch and re-run for in-place upgrades.
+**The registry markers.** All four installers retain the legacy
+`HKCU\Software\TR300\InstallSource` value and also write one scoped value:
+`InstallSourceGlobal` or `InstallSourceCorporate`. Values remain
+`msi-global`, `msi-corporate`, `exe-global`, or `exe-corporate`.
+`src/update.rs::detect_install_origin()` validates the scoped marker against
+the running path before choosing exactly one in-place update strategy.
 
 Why HKCU and not HKLM:
 - `tr300 update` always runs as the user, who reads HKCU naturally.
@@ -1419,13 +1741,11 @@ Why HKCU and not HKLM:
   running path, preventing a stale HKCU value from selecting a coexisting
   install's product.
 
-Marker-free `.cargo\bin` installs use the legacy Cargo/PowerShell chain.
-Marker-free Program Files and LocalAppData copies are deliberately `Unknown`:
-those paths reveal Global versus Corporate scope but not MSI versus Inno EXE,
-because both formats share the edition path. Guessing would create a
-cross-format Add/Remove Programs entry. New first-class installs set the marker;
-an admin-installed copy run by another user therefore takes the conservative
-legacy/manual path rather than a fabricated product identity.
+Marker-free `.cargo\bin` installs are classified only through a matching Cargo
+or cargo-dist receipt, not a probe-and-retry chain. Marker-free Program Files
+and LocalAppData copies recover an origin only when Add/Remove Programs has one
+unambiguous matching registration; otherwise they are `Unknown`. Guessing
+would create a cross-format registration, so the updater performs no mutation.
 
 **Checksum evolution.** v3.15.0 initially trusted HTTPS alone. v3.15.4 added
 SHA-256 sidecar verification before MSI/EXE launch, and later releases retained

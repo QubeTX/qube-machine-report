@@ -32,19 +32,17 @@
         WiX docs, InstallScope="perUser" is equivalent to ALLUSERS unset.
     - UpgradeCode is a DIFFERENT GUID from the Global edition.
         Same UpgradeCode across editions would confuse Windows Installer
-        and break upgrades in both directions. A user can have both
-        editions installed simultaneously (Add/Remove Programs shows
-        two entries); PATH order decides which `tr300` wins.
+        and break upgrades in both directions. Post-install consolidation
+        targets an older opposite-edition executable; an explicit format
+        choice within Corporate removes its MSI/Inno counterpart first.
     - Install location: %LocalAppData%\Programs\tr300\bin\tr300.exe
         instead of %ProgramFiles%\tr300\bin\tr300.exe.
     - PATH entry: user PATH (HKCU\Environment\Path) instead of
         system PATH (HKLM\...\Session Manager\Environment\Path).
     - Product Name: "tr300 (Corporate Edition)" — distinct ARP entry.
 
-  If install paths in this file change, update
-  `src/update.rs::detect_install_origin()` in lockstep — that function
-  matches on the install path to choose which MSI to fetch during
-  `tr300 update`.
+  If install paths/identity in this file change, update src/update.rs,
+  inno/corporate.iss, validation workflow, and the ADR in lockstep.
 -->
 
 <!--
@@ -115,10 +113,18 @@
 
         <MajorUpgrade
             Schedule='afterInstallInitialize'
-            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+            AllowDowngrades='yes'/>
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='tr300 (Corporate Edition) Installation'/>
+        <Property Id='CONFLICTING_INNO_INSTALLED'>
+            <RegistrySearch Id='FindConflictingCorporateInno'
+                Root='HKCU'
+                Key='Software\Microsoft\Windows\CurrentVersion\Uninstall\{76A253EB-3A17-4730-9C54-5BE755A9BC4C}_is1'
+                Name='DisplayVersion'
+                Type='raw'
+                Win64='yes'/>
+        </Property>
 
         <!-- Cross-method consolidation (v3.17.0+) - see wix/main.wxs. CLEANCARGO
              removes a shadowing older `cargo install` copy; on this perUser MSI
@@ -139,13 +145,19 @@
                              in-place upgrades. Value must match the literal
                              `corporate-msi` arm in src/update.rs. -->
                         <Component Id='InstallSourceMarker' Guid='405304C3-7EBD-42C6-8F4D-A88610980F8C'>
-                            <RegistryValue
-                                Root='HKCU'
-                                Key='Software\TR300'
-                                Name='InstallSource'
-                                Type='string'
-                                Value='msi-corporate'
-                                KeyPath='yes'/>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\TR300'
+                            Name='InstallSource'
+                            Type='string'
+                            Value='msi-corporate'
+                            KeyPath='yes'/>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\TR300'
+                            Name='InstallSourceCorporate'
+                            Type='string'
+                            Value='msi-corporate'/>
                         </Component>
                         <Directory Id='Bin' Name='bin'>
                             <Component Id='Path' Guid='13D45AEB-3A5D-471C-B185-63DB3B897C66' KeyPath='yes'>
@@ -209,6 +221,12 @@
             Execute='deferred'
             Impersonate='yes'
             Return='ignore'/>
+        <CustomAction Id='RemoveConflictingInno'
+            Directory='APPLICATIONFOLDER'
+            ExeCommand='&quot;unins000.exe&quot; /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
+            Execute='deferred'
+            Impersonate='yes'
+            Return='check'/>
         <CustomAction Id='CleanOtherEdition'
             FileKey='exe0'
             ExeCommand='migrate-cleanup --quiet --other-edition'
@@ -217,6 +235,9 @@
             Return='ignore'/>
 
         <InstallExecuteSequence>
+            <Custom Action='RemoveConflictingInno' Before='InstallFiles'>
+                <![CDATA[CONFLICTING_INNO_INSTALLED AND NOT REMOVE~="ALL"]]>
+            </Custom>
             <Custom Action='CleanCargoCopy' Before='InstallFinalize'>
                 <![CDATA[NOT Installed AND CLEANCARGO="1"]]>
             </Custom>

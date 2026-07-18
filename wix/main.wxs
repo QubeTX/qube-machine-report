@@ -80,10 +80,18 @@
 
         <MajorUpgrade
             Schedule='afterInstallInitialize'
-            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+            AllowDowngrades='yes'/>
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='tr300 Installation'/>
+        <Property Id='CONFLICTING_INNO_INSTALLED'>
+            <RegistrySearch Id='FindConflictingGlobalInno'
+                Root='HKLM'
+                Key='Software\Microsoft\Windows\CurrentVersion\Uninstall\{AB14223F-2693-4EC2-824F-BF53CC32D061}_is1'
+                Name='DisplayVersion'
+                Type='raw'
+                Win64='yes'/>
+        </Property>
 
         <!-- Cross-method consolidation (v3.17.0+). Operator policy: exactly one
              version/edition installed at a time. CLEANCARGO removes a shadowing
@@ -128,8 +136,9 @@
                          in-place upgrades. HKCU even on a perMachine install: the
                          user running this MSI is the user who'll later invoke
                          `tr300 update`. The path-based fallback in
-                         src/update.rs::detect_install_origin() catches the rare
-                         "admin pushed via Intune, end-user is different" case.
+                         Add/Remove Programs recovery in src/update.rs handles
+                         a missing marker only when one product/path is
+                         unambiguous; it never guesses MSI versus Inno.
                          Value must match the `msi-global` arm in src/update.rs.
                          See wix/corporate.wxs for the perUser sibling. -->
                     <Component Id='InstallSourceMarker' Guid='537B3C60-6E17-4EFF-8D56-E0CA97F447B5'>
@@ -140,6 +149,12 @@
                             Type='string'
                             Value='msi-global'
                             KeyPath='yes'/>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\TR300'
+                            Name='InstallSourceGlobal'
+                            Type='string'
+                            Value='msi-global'/>
                     </Component>
 
                     <Directory Id='Bin' Name='bin'>
@@ -217,6 +232,15 @@
             Execute='deferred'
             Impersonate='yes'
             Return='ignore'/>
+        <!-- An explicit MSI install is the user's newest channel choice. Remove
+             the same-edition Inno product before MSI writes shared-path files,
+             preventing duplicate ARP registrations and a stale uninstaller. -->
+        <CustomAction Id='RemoveConflictingInno'
+            Directory='APPLICATIONFOLDER'
+            ExeCommand='&quot;unins000.exe&quot; /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
+            Execute='deferred'
+            Impersonate='no'
+            Return='check'/>
         <CustomAction Id='CleanOtherEdition'
             FileKey='exe0'
             ExeCommand='migrate-cleanup --quiet --other-edition'
@@ -225,6 +249,9 @@
             Return='ignore'/>
 
         <InstallExecuteSequence>
+            <Custom Action='RemoveConflictingInno' Before='InstallFiles'>
+                <![CDATA[CONFLICTING_INNO_INSTALLED AND NOT REMOVE~="ALL"]]>
+            </Custom>
             <Custom Action='CleanCargoCopy' Before='InstallFinalize'>
                 <![CDATA[NOT Installed AND CLEANCARGO="1"]]>
             </Custom>

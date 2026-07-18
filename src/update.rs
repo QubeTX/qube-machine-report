@@ -4,50 +4,49 @@
 // installer strategy that matches how this binary was installed. On Windows
 // (v3.15.0+), the four first-class installers (MSI Global, MSI Corporate,
 // EXE Global, EXE Corporate) write a HKCU\Software\TR300\InstallSource
-// registry marker, which `detect_install_origin()` reads to pick the
-// matching MSI/EXE for in-place upgrade. Path-based fallback handles the
-// cargo install / PowerShell installer path that doesn't write a marker.
+// registry marker, which `detect_install_origin()` reads to pick the matching
+// MSI/EXE for in-place upgrade. Cargo, cargo-dist, and macOS PKG installs use
+// their own durable metadata/receipt. Ambiguous or portable origins do not
+// mutate the machine.
 
 use crate::config::{Config, OutputFormat};
 use crate::VERSION;
 
+#[cfg(target_os = "macos")]
+use crate::collectors::command::{run_output, CommandTimeout};
+
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static JSON_UPDATE_MODE: AtomicBool = AtomicBool::new(false);
 
 /// GitHub API endpoint for the latest release.
 const RELEASES_URL: &str =
     "https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest";
 
-/// Shell installer URL (macOS/Linux).
-#[cfg(not(windows))]
-const SHELL_INSTALLER: &str =
-    "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh";
-
-/// PowerShell installer URL (Windows).
-#[cfg(windows)]
-const PS_INSTALLER: &str =
-    "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1";
-
-/// Global (perMachine) MSI installer URL.
-#[cfg(windows)]
-const MSI_GLOBAL_URL: &str = "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc.msi";
-
-/// Corporate (perUser) MSI installer URL.
-#[cfg(windows)]
-const MSI_CORPORATE_URL: &str = "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-corporate.msi";
-
-/// Global (perMachine) EXE installer URL (Inno Setup).
-#[cfg(windows)]
-const EXE_GLOBAL_URL: &str = "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-setup.exe";
-
-/// Corporate (perUser) EXE installer URL (Inno Setup).
-#[cfg(windows)]
-const EXE_CORPORATE_URL: &str = "https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc-corporate-setup.exe";
+const RELEASE_DOWNLOAD_BASE: &str =
+    "https://github.com/QubeTX/qube-machine-report/releases/download";
+const SHELL_INSTALLER_ASSET: &str = "tr300-installer.sh";
+const PS_INSTALLER_ASSET: &str = "tr300-installer.ps1";
+const MSI_GLOBAL_ASSET: &str = "tr300-x86_64-pc-windows-msvc.msi";
+const MSI_CORPORATE_ASSET: &str = "tr300-x86_64-pc-windows-msvc-corporate.msi";
+const EXE_GLOBAL_ASSET: &str = "tr300-x86_64-pc-windows-msvc-setup.exe";
+const EXE_CORPORATE_ASSET: &str = "tr300-x86_64-pc-windows-msvc-corporate-setup.exe";
+const MAC_DMG_ASSET: &str = "tr300-universal-apple-darwin.dmg";
+#[cfg(any(test, target_os = "macos"))]
+const MAC_PKG_ID: &str = "com.qubetx.tr300.pkg";
 
 /// Crate name for cargo install.
 const CRATE_NAME: &str = "tr300";
 
 const MANUAL_INSTALL_URL: &str = "https://github.com/QubeTX/qube-machine-report#installation";
 const RELEASES_PAGE: &str = "https://github.com/QubeTX/qube-machine-report/releases/latest";
+
+/// Public docs and filenames stay versionless, but an update transaction pins
+/// every downloaded byte to the immutable tag returned by the releases API.
+fn release_asset_url(version: &str, asset: &str) -> String {
+    format!("{RELEASE_DOWNLOAD_BASE}/v{version}/{asset}")
+}
 
 // ── Strategy types ─────────────────────────────────────────────────
 
@@ -57,8 +56,9 @@ const RELEASES_PAGE: &str = "https://github.com/QubeTX/qube-machine-report/relea
 /// exactly one strategy based on `detect_install_origin()` and does NOT
 /// fall back to a different installer type on failure — re-running a
 /// different product would create coexistence problems (two ARP entries,
-/// PATH ordering decides which wins). For cargo install / shell installer
-/// users, the legacy probe-and-retry chain runs as before.
+/// PATH ordering decides which wins). Cargo and cargo-dist users also get only
+/// their detected channel; multiple launchers such as curl/wget may implement
+/// that one channel, but no strategy crosses into another install method.
 // The four MSI/EXE variants are only ever constructed by
 // build_strategy_list() inside its #[cfg(windows)] block, so on non-Windows
 // targets the dead_code lint flags them as never-constructed. The variants
@@ -82,6 +82,8 @@ enum UpdateStrategy {
     ExeGlobal,
     /// Re-runs the Corporate perUser Inno Setup EXE (no UAC required).
     ExeCorporate,
+    /// Reopens the signed universal DMG and waits for Apple Installer.
+    MacDmg,
 }
 
 impl UpdateStrategy {
@@ -96,6 +98,7 @@ impl UpdateStrategy {
             UpdateStrategy::MsiCorporate => "Corporate MSI installer",
             UpdateStrategy::ExeGlobal => "Global EXE installer",
             UpdateStrategy::ExeCorporate => "Corporate EXE installer",
+            UpdateStrategy::MacDmg => "macOS DMG / PKG installer",
         }
     }
 
@@ -110,6 +113,7 @@ impl UpdateStrategy {
             UpdateStrategy::MsiCorporate => "msi_corporate",
             UpdateStrategy::ExeGlobal => "exe_global",
             UpdateStrategy::ExeCorporate => "exe_corporate",
+            UpdateStrategy::MacDmg => "mac_dmg_pkg",
         }
     }
 
@@ -128,16 +132,48 @@ impl UpdateStrategy {
     }
 }
 
+/// Precise, cross-platform installation channel. An update never crosses from
+/// one channel to another; ambiguous/portable installs fail safely with a
+/// recovery link instead of creating a second copy.
+#[cfg_attr(windows, allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallChannel {
+    MsiGlobal,
+    MsiCorporate,
+    ExeGlobal,
+    ExeCorporate,
+    PowerShellInstaller,
+    ShellInstaller,
+    Cargo,
+    MacPkg,
+    Unknown,
+}
+
+impl InstallChannel {
+    fn json_id(self) -> &'static str {
+        match self {
+            Self::MsiGlobal => "msi-global",
+            Self::MsiCorporate => "msi-corporate",
+            Self::ExeGlobal => "exe-global",
+            Self::ExeCorporate => "exe-corporate",
+            Self::PowerShellInstaller => "powershell-installer",
+            Self::ShellInstaller => "shell-installer",
+            Self::Cargo => "cargo",
+            Self::MacPkg => "macos-dmg-pkg",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Where this binary was installed from, on Windows.
 ///
 /// Determines which installer `tr300 update` downloads and re-runs for an
 /// in-place upgrade. First-class installers (the four MSI/EXE variants)
 /// write a `HKCU\Software\TR300\InstallSource` registry marker on install;
-/// `detect_install_origin()` reads that marker. A path-based fallback
-/// covers the cargo install / PowerShell installer path that doesn't write
-/// a marker.
+/// `detect_install_origin()` reads that marker. Receipt/metadata detection
+/// later distinguishes Cargo from cargo-dist without trusting the shared path.
 #[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum InstallOrigin {
     /// `C:\Program Files\tr300\bin\tr300.exe`, installed from wix/main.wxs.
     MsiGlobal,
@@ -148,10 +184,11 @@ pub(crate) enum InstallOrigin {
     /// `%LocalAppData%\Programs\tr300\bin\tr300.exe`, from inno/corporate.iss.
     ExeCorporate,
     /// `~\.cargo\bin\tr300.exe` — installed via `cargo install` or the
-    /// cargo-dist PowerShell installer. Uses the legacy strategy chain.
+    /// cargo-dist PowerShell installer. Receipt/Cargo metadata distinguishes
+    /// the precise channel before strategy selection.
     CargoOrInstaller,
     /// Couldn't determine origin (custom install location, portable use,
-    /// etc.). Treated like `CargoOrInstaller` so the legacy chain runs.
+    /// etc.). No update mutation is attempted.
     Unknown,
 }
 
@@ -170,12 +207,6 @@ impl InstallOrigin {
             InstallOrigin::Unknown => "unknown",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TargetOs {
-    Unix,
-    Windows,
 }
 
 #[derive(Debug)]
@@ -296,7 +327,8 @@ pub fn run(config: &Config) -> i32 {
         latest,
     );
 
-    let strategies = build_strategy_list();
+    let channel = detect_install_channel();
+    let strategies = build_strategy_list(channel);
     if let Some(strategy) = strategies.first() {
         println!(
             "  {} Updating via {}...",
@@ -321,33 +353,46 @@ pub fn run(config: &Config) -> i32 {
         }
         Err(failure) => {
             println!();
-            println!(
-                "  {} {}",
-                red(fail_icon(config), config),
-                red("Update failed. Strategies attempted:", config),
-            );
-            for record in &failure.attempts {
-                let kind = match record.kind {
-                    AttemptKind::Skipped => "skipped",
-                    AttemptKind::Failed => "failed",
-                    AttemptKind::Blocked => "blocked",
-                };
+            if failure.attempts.is_empty() {
                 println!(
-                    "      · {} — {}: {}",
-                    record.strategy.label(),
-                    kind,
-                    record.message
+                    "  {} {}",
+                    red(fail_icon(config), config),
+                    red(
+                        "No update was attempted because the installation channel is unknown or conflicting.",
+                        config,
+                    ),
                 );
+            } else {
+                println!(
+                    "  {} {}",
+                    red(fail_icon(config), config),
+                    red("Update failed. Strategies attempted:", config),
+                );
+                for record in &failure.attempts {
+                    let kind = match record.kind {
+                        AttemptKind::Skipped => "skipped",
+                        AttemptKind::Failed => "failed",
+                        AttemptKind::Blocked => "blocked",
+                    };
+                    println!(
+                        "      · {} — {}: {}",
+                        record.strategy.label(),
+                        kind,
+                        record.message
+                    );
+                }
             }
             println!();
-            println!("  To update manually, see: {}", MANUAL_INSTALL_URL);
-            if failure
-                .attempts
-                .iter()
-                .any(|attempt| attempt.kind == AttemptKind::Blocked)
-            {
-                println!("  Official releases: {}", RELEASES_PAGE);
+            println!("  Your existing installation was left in place.");
+            if let Some(asset) = recovery_asset_for_channel(channel) {
+                println!(
+                    "  Matching v{} installer: {}",
+                    latest,
+                    release_asset_url(&latest, asset)
+                );
             }
+            println!("  Fresh installer: {}", MANUAL_INSTALL_URL);
+            println!("  Official latest release: {}", RELEASES_PAGE);
             2
         }
     }
@@ -356,6 +401,8 @@ pub fn run(config: &Config) -> i32 {
 // ── JSON output mode ───────────────────────────────────────────────
 
 fn run_json() -> i32 {
+    JSON_UPDATE_MODE.store(true, Ordering::Relaxed);
+    let channel = detect_install_channel();
     let latest = match fetch_latest_version() {
         Ok(v) => v,
         Err(e) => {
@@ -365,7 +412,7 @@ fn run_json() -> i32 {
                 "message": format!("Failed to check for updates: {}", e),
                 "current_version": VERSION,
             });
-            inject_install_origin(&mut payload);
+            inject_update_context(&mut payload, channel, true);
             println!("{}", payload);
             return 2;
         }
@@ -383,12 +430,12 @@ fn run_json() -> i32 {
             "latest_version": latest,
             "update_available": false,
         });
-        inject_install_origin(&mut payload);
+        inject_update_context(&mut payload, channel, false);
         println!("{}", payload);
         return 0;
     }
 
-    let strategies = build_strategy_list();
+    let strategies = build_strategy_list(channel);
     match execute_update(&latest, &strategies) {
         Ok(used) => {
             let mut payload = serde_json::json!({
@@ -401,13 +448,13 @@ fn run_json() -> i32 {
                 "method": used.json_method(),
                 "strategy": used.json_id(),
             });
-            inject_install_origin(&mut payload);
+            inject_update_context(&mut payload, channel, false);
             println!("{}", payload);
             0
         }
         Err(failure) => {
-            let mut payload = update_failure_payload(&current, &latest, &failure);
-            inject_install_origin(&mut payload);
+            let mut payload = update_failure_payload(&current, &latest, &failure, channel);
+            inject_update_context(&mut payload, channel, true);
             println!("{}", payload);
             2
         }
@@ -418,6 +465,7 @@ fn update_failure_payload(
     current: &str,
     latest: &str,
     failure: &UpdateFailure,
+    channel: InstallChannel,
 ) -> serde_json::Value {
     let attempts: Vec<serde_json::Value> = failure
         .attempts
@@ -438,16 +486,27 @@ fn update_failure_payload(
         .attempts
         .iter()
         .any(|attempt| attempt.kind == AttemptKind::Blocked);
+    let message = if failure.attempts.is_empty() {
+        "Update not attempted because the installation channel is unknown or conflicting"
+    } else {
+        "Update failed; see attempts"
+    };
     let mut payload = serde_json::json!({
         "action": "update",
         "success": false,
-        "message": "Update failed; see attempts",
+        "message": message,
         "current_version": current,
         "latest_version": latest,
         "update_available": true,
         "attempts": attempts,
         "manual_install_url": MANUAL_INSTALL_URL,
+        "recovery_url": RELEASES_PAGE,
+        "requires_user_action": true,
     });
+    if let Some(asset) = recovery_asset_for_channel(channel) {
+        payload["exact_installer_url"] =
+            serde_json::Value::String(release_asset_url(latest, asset));
+    }
     if blocked {
         payload["official_releases_url"] = serde_json::Value::String(RELEASES_PAGE.to_string());
     }
@@ -471,6 +530,28 @@ fn inject_install_origin(payload: &mut serde_json::Value) {
 #[cfg(not(windows))]
 fn inject_install_origin(_payload: &mut serde_json::Value) {
     // No-op on non-Windows; the field would always be the same value.
+}
+
+fn inject_update_context(
+    payload: &mut serde_json::Value,
+    channel: InstallChannel,
+    requires_user_action: bool,
+) {
+    inject_install_origin(payload);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "install_channel".to_string(),
+            serde_json::Value::String(channel.json_id().to_string()),
+        );
+        obj.insert(
+            "recovery_url".to_string(),
+            serde_json::Value::String(RELEASES_PAGE.to_string()),
+        );
+        obj.insert(
+            "requires_user_action".to_string(),
+            serde_json::Value::Bool(requires_user_action),
+        );
+    }
 }
 
 // ── Version check ──────────────────────────────────────────────────
@@ -606,36 +687,6 @@ fn parse_numeric_version(version: &str) -> Option<Vec<u64>> {
 
 // ── Strategy ordering ───────────────────────────────────────────────
 
-fn order_strategies(cargo_invokable: bool, os: TargetOs) -> Vec<UpdateStrategy> {
-    let mut strategies = Vec::new();
-    if cargo_invokable {
-        strategies.push(UpdateStrategy::Cargo);
-    }
-    match os {
-        TargetOs::Unix => {
-            strategies.push(UpdateStrategy::InstallerCurl);
-            strategies.push(UpdateStrategy::InstallerWget);
-        }
-        TargetOs::Windows => {
-            strategies.push(UpdateStrategy::InstallerPowerShell);
-            strategies.push(UpdateStrategy::InstallerPwsh);
-        }
-    }
-    strategies
-}
-
-fn current_target_os() -> TargetOs {
-    if cfg!(windows) {
-        TargetOs::Windows
-    } else {
-        TargetOs::Unix
-    }
-}
-
-fn cargo_invokable() -> bool {
-    tool_exists("cargo")
-}
-
 fn tool_exists(tool: &str) -> bool {
     crate::collectors::command::run_output(
         tool,
@@ -645,24 +696,23 @@ fn tool_exists(tool: &str) -> bool {
     .is_some_and(|output| output.status.success())
 }
 
-fn build_strategy_list() -> Vec<UpdateStrategy> {
-    #[cfg(windows)]
-    {
-        // For first-class Windows installs, dispatch to a single
-        // matching-installer strategy. Don't cross-fall-back to a different
-        // installer type — running a different product would create
-        // coexistence problems (two ARP entries, PATH ordering wins).
-        match detect_install_origin() {
-            InstallOrigin::MsiGlobal => return vec![UpdateStrategy::MsiGlobal],
-            InstallOrigin::MsiCorporate => return vec![UpdateStrategy::MsiCorporate],
-            InstallOrigin::ExeGlobal => return vec![UpdateStrategy::ExeGlobal],
-            InstallOrigin::ExeCorporate => return vec![UpdateStrategy::ExeCorporate],
-            InstallOrigin::CargoOrInstaller | InstallOrigin::Unknown => {
-                // Fall through to the legacy cargo/PS chain.
-            }
+fn build_strategy_list(channel: InstallChannel) -> Vec<UpdateStrategy> {
+    match channel {
+        InstallChannel::MsiGlobal => vec![UpdateStrategy::MsiGlobal],
+        InstallChannel::MsiCorporate => vec![UpdateStrategy::MsiCorporate],
+        InstallChannel::ExeGlobal => vec![UpdateStrategy::ExeGlobal],
+        InstallChannel::ExeCorporate => vec![UpdateStrategy::ExeCorporate],
+        InstallChannel::Cargo => vec![UpdateStrategy::Cargo],
+        InstallChannel::PowerShellInstaller => vec![
+            UpdateStrategy::InstallerPowerShell,
+            UpdateStrategy::InstallerPwsh,
+        ],
+        InstallChannel::ShellInstaller => {
+            vec![UpdateStrategy::InstallerCurl, UpdateStrategy::InstallerWget]
         }
+        InstallChannel::MacPkg => vec![UpdateStrategy::MacDmg],
+        InstallChannel::Unknown => Vec::new(),
     }
-    order_strategies(cargo_invokable(), current_target_os())
 }
 
 // ── Platform-specific update execution ─────────────────────────────
@@ -675,8 +725,11 @@ fn rustup_update_stable_best_effort() {
     if !tool_exists("rustup") {
         return;
     }
-    println!("Updating Rust toolchain (rustup update stable)…");
-    let _ = Command::new("rustup").args(["update", "stable"]).status();
+    eprintln!("Updating Rust toolchain (rustup update stable)…");
+    let mut command = Command::new("rustup");
+    command.args(["update", "stable"]);
+    suppress_stdout_for_json(&mut command);
+    let _ = command.status();
 }
 
 fn execute_update(
@@ -735,73 +788,92 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
     match strategy {
         UpdateStrategy::Cargo => {
             rustup_update_stable_best_effort();
-            run_command_status("cargo", &["install", CRATE_NAME, "--force"])?;
-            // cargo exit 0 doesn't guarantee the running binary changed (crates.io
-            // lag, or a different tr300 earlier on PATH). Verify, and fall through
-            // to the prebuilt installer on mismatch.
+            run_command_status(
+                "cargo",
+                &[
+                    "install",
+                    CRATE_NAME,
+                    "--version",
+                    latest,
+                    "--force",
+                    "--locked",
+                ],
+            )?;
+            // Cargo exit 0 doesn't guarantee the running binary changed (for
+            // example another tr300 may be earlier on PATH). Verify and fail
+            // this channel on mismatch; never switch to a prebuilt installer.
             verify_cargo_post_install(latest)
         }
         UpdateStrategy::InstallerCurl => {
-            try_installer_curl()?;
+            try_installer_curl(latest)?;
             verify_installer_post_install(latest, "shell installer")
         }
         UpdateStrategy::InstallerWget => {
-            try_installer_wget()?;
+            try_installer_wget(latest)?;
             verify_installer_post_install(latest, "shell installer")
         }
         UpdateStrategy::InstallerPowerShell => {
-            try_installer_powershell("powershell")?;
+            try_installer_powershell("powershell", latest)?;
             verify_installer_post_install(latest, "PowerShell installer")
         }
         UpdateStrategy::InstallerPwsh => {
-            try_installer_powershell("pwsh")?;
+            try_installer_powershell("pwsh", latest)?;
             verify_installer_post_install(latest, "PowerShell installer")
         }
-        UpdateStrategy::MsiGlobal => try_msi_install(msi_global_url(), latest),
-        UpdateStrategy::MsiCorporate => try_msi_install(msi_corporate_url(), latest),
-        UpdateStrategy::ExeGlobal => try_exe_install(exe_global_url(), latest),
-        UpdateStrategy::ExeCorporate => try_exe_install(exe_corporate_url(), latest),
+        UpdateStrategy::MsiGlobal => {
+            try_msi_install(&release_asset_url(latest, MSI_GLOBAL_ASSET), latest)
+        }
+        UpdateStrategy::MsiCorporate => {
+            try_msi_install(&release_asset_url(latest, MSI_CORPORATE_ASSET), latest)
+        }
+        UpdateStrategy::ExeGlobal => {
+            try_exe_install(&release_asset_url(latest, EXE_GLOBAL_ASSET), latest)
+        }
+        UpdateStrategy::ExeCorporate => {
+            try_exe_install(&release_asset_url(latest, EXE_CORPORATE_ASSET), latest)
+        }
+        UpdateStrategy::MacDmg => try_macos_dmg_install(latest),
     }
 }
 
-// URL accessors are #[cfg(windows)] under the hood but we expose them
-// uniformly so the dispatch arms above don't need their own #[cfg] gates —
-// keeps the match exhaustive on all platforms.
-#[cfg(windows)]
-fn msi_global_url() -> &'static str {
-    MSI_GLOBAL_URL
-}
-#[cfg(windows)]
-fn msi_corporate_url() -> &'static str {
-    MSI_CORPORATE_URL
-}
-#[cfg(windows)]
-fn exe_global_url() -> &'static str {
-    EXE_GLOBAL_URL
-}
-#[cfg(windows)]
-fn exe_corporate_url() -> &'static str {
-    EXE_CORPORATE_URL
-}
-#[cfg(not(windows))]
-fn msi_global_url() -> &'static str {
-    ""
-}
-#[cfg(not(windows))]
-fn msi_corporate_url() -> &'static str {
-    ""
-}
-#[cfg(not(windows))]
-fn exe_global_url() -> &'static str {
-    ""
-}
-#[cfg(not(windows))]
-fn exe_corporate_url() -> &'static str {
-    ""
+fn recovery_asset_for_channel(channel: InstallChannel) -> Option<&'static str> {
+    match channel {
+        InstallChannel::MsiGlobal => Some(MSI_GLOBAL_ASSET),
+        InstallChannel::MsiCorporate => Some(MSI_CORPORATE_ASSET),
+        InstallChannel::ExeGlobal => Some(EXE_GLOBAL_ASSET),
+        InstallChannel::ExeCorporate => Some(EXE_CORPORATE_ASSET),
+        InstallChannel::PowerShellInstaller => Some(PS_INSTALLER_ASSET),
+        InstallChannel::ShellInstaller => Some(SHELL_INSTALLER_ASSET),
+        InstallChannel::MacPkg => Some(MAC_DMG_ASSET),
+        InstallChannel::Cargo | InstallChannel::Unknown => None,
+    }
 }
 
 fn run_command_status(launcher: &str, args: &[&str]) -> Result<(), StrategyError> {
-    match Command::new(launcher).args(args).status() {
+    run_command_status_inner(launcher, args, None)
+}
+
+fn run_command_status_with_env(
+    launcher: &str,
+    args: &[&str],
+    env_name: &str,
+    env_value: &str,
+) -> Result<(), StrategyError> {
+    run_command_status_inner(launcher, args, Some((env_name, env_value)))
+}
+
+fn run_command_status_inner(
+    launcher: &str,
+    args: &[&str],
+    extra_env: Option<(&str, &str)>,
+) -> Result<(), StrategyError> {
+    let mut command = Command::new(launcher);
+    command.args(args);
+    if let Some((name, value)) = extra_env {
+        command.env(name, value);
+    }
+    suppress_stdout_for_json(&mut command);
+    match command.status() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StrategyError::Preflight(
             format!("{} not on PATH", launcher),
         )),
@@ -833,7 +905,7 @@ fn likely_endpoint_policy_error(error: &std::io::Error) -> bool {
     )
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn prelaunch_installer_io_error(
     operation: &str,
     path: &std::path::Path,
@@ -857,7 +929,7 @@ fn prelaunch_installer_io_error(
 }
 
 #[cfg(unix)]
-fn try_installer_curl() -> Result<(), StrategyError> {
+fn try_installer_curl(latest: &str) -> Result<(), StrategyError> {
     if !tool_exists("curl") {
         return Err(StrategyError::Preflight("curl not on PATH".into()));
     }
@@ -866,41 +938,66 @@ fn try_installer_curl() -> Result<(), StrategyError> {
     }
     let script = format!(
         "set -euo pipefail; curl --proto '=https' --tlsv1.2 -fLsS {} | sh",
-        SHELL_INSTALLER
+        release_asset_url(latest, SHELL_INSTALLER_ASSET)
     );
-    run_command_status("bash", &["-c", &script])
+    let prefix = cargo_dist_install_prefix().ok_or_else(|| {
+        StrategyError::Preflight("matching cargo-dist receipt is unavailable".into())
+    })?;
+    run_command_status_with_env(
+        "bash",
+        &["-c", &script],
+        "CARGO_DIST_FORCE_INSTALL_DIR",
+        &prefix,
+    )
 }
 
 #[cfg(not(unix))]
-fn try_installer_curl() -> Result<(), StrategyError> {
+fn try_installer_curl(_latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "curl installer is Unix-only".into(),
     ))
 }
 
 #[cfg(unix)]
-fn try_installer_wget() -> Result<(), StrategyError> {
+fn try_installer_wget(latest: &str) -> Result<(), StrategyError> {
     if !tool_exists("wget") {
         return Err(StrategyError::Preflight("wget not on PATH".into()));
     }
     if !tool_exists("bash") {
         return Err(StrategyError::Preflight("bash not on PATH".into()));
     }
-    let script = format!("set -euo pipefail; wget -qO- {} | sh", SHELL_INSTALLER);
-    run_command_status("bash", &["-c", &script])
+    let script = format!(
+        "set -euo pipefail; wget -qO- {} | sh",
+        release_asset_url(latest, SHELL_INSTALLER_ASSET)
+    );
+    let prefix = cargo_dist_install_prefix().ok_or_else(|| {
+        StrategyError::Preflight("matching cargo-dist receipt is unavailable".into())
+    })?;
+    run_command_status_with_env(
+        "bash",
+        &["-c", &script],
+        "CARGO_DIST_FORCE_INSTALL_DIR",
+        &prefix,
+    )
 }
 
 #[cfg(not(unix))]
-fn try_installer_wget() -> Result<(), StrategyError> {
+fn try_installer_wget(_latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "wget installer is Unix-only".into(),
     ))
 }
 
 #[cfg(windows)]
-fn try_installer_powershell(launcher: &str) -> Result<(), StrategyError> {
-    let script = format!("$ErrorActionPreference='Stop'; irm {} | iex", PS_INSTALLER);
-    run_command_status(
+fn try_installer_powershell(launcher: &str, latest: &str) -> Result<(), StrategyError> {
+    let script = format!(
+        "$ErrorActionPreference='Stop'; irm {} | iex",
+        release_asset_url(latest, PS_INSTALLER_ASSET)
+    );
+    let prefix = cargo_dist_install_prefix().ok_or_else(|| {
+        StrategyError::Preflight("matching cargo-dist receipt is unavailable".into())
+    })?;
+    run_command_status_with_env(
         launcher,
         &[
             "-NoProfile",
@@ -910,11 +1007,13 @@ fn try_installer_powershell(launcher: &str) -> Result<(), StrategyError> {
             "-Command",
             &script,
         ],
+        "CARGO_DIST_FORCE_INSTALL_DIR",
+        &prefix,
     )
 }
 
 #[cfg(not(windows))]
-fn try_installer_powershell(_launcher: &str) -> Result<(), StrategyError> {
+fn try_installer_powershell(_launcher: &str, _latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "PowerShell installer is Windows-only".into(),
     ))
@@ -928,12 +1027,12 @@ fn try_installer_powershell(_launcher: &str) -> Result<(), StrategyError> {
 /// and scheduled a `MoveFileEx`-style delete-on-reboot instead).
 #[cfg(windows)]
 const MSI_EXIT_REBOOT_REQUIRED: i32 = 3010;
+#[cfg(windows)]
+const MSI_EXIT_REBOOT_INITIATED: i32 = 1641;
 /// Windows Installer policy explicitly forbids this installation.
 #[cfg(windows)]
 const MSI_EXIT_INSTALL_REJECTED_BY_POLICY: i32 = 1625;
-#[cfg(windows)]
 const MAX_INSTALLER_BYTES: u64 = 256 * 1024 * 1024;
-#[cfg(windows)]
 const MAX_SIDECAR_BYTES: u64 = 16 * 1024;
 
 /// Download a file from `url` to `path` over HTTPS. Used by the MSI/EXE
@@ -942,7 +1041,7 @@ const MAX_SIDECAR_BYTES: u64 = 16 * 1024;
 /// `ureq`; the caller then verifies the release sidecar to detect corruption
 /// or an installer/sidecar mismatch. The sidecar is not an independent
 /// signature and does not replace HTTPS origin authentication.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), StrategyError> {
     use std::io::Read;
 
@@ -1005,7 +1104,7 @@ fn download_to_file(url: &str, path: &std::path::Path) -> Result<(), StrategyErr
 /// `dist-manifest.json` generation and the parallel implementation in
 /// `.github/workflows/windows-installers.yml`. Tolerant of trailing
 /// whitespace / missing asterisk via `parse_sha256_sidecar`.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn fetch_sha256_sidecar(url: &str) -> Result<String, String> {
     use std::io::Read;
 
@@ -1032,7 +1131,7 @@ fn fetch_sha256_sidecar(url: &str) -> Result<String, String> {
 /// Extract the 64-char hex from a `.sha256` sidecar line. Returns
 /// `None` when the first whitespace-separated token is not exactly
 /// 64 hex characters.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", test))]
 fn parse_sha256_sidecar(content: &str) -> Option<String> {
     content
         .split_whitespace()
@@ -1042,7 +1141,7 @@ fn parse_sha256_sidecar(content: &str) -> Option<String> {
 }
 
 /// Compute the SHA-256 of `path`, returning the lowercase hex.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", test))]
 fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let mut file = std::fs::File::open(path)?;
@@ -1059,12 +1158,12 @@ fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
 /// release origin, this is an integrity check rather than independent artifact
 /// authentication; a future signed-release design would be a separate trust
 /// layer.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn verify_checksum(
     installer_path: &std::path::Path,
     installer_url: &str,
 ) -> Result<(), StrategyError> {
-    println!("  Verifying SHA256 checksum...");
+    eprintln!("  Verifying SHA256 checksum...");
     let sidecar_content = fetch_sha256_sidecar(installer_url).map_err(StrategyError::Runtime)?;
     let expected = parse_sha256_sidecar(&sidecar_content).ok_or_else(|| {
         StrategyError::Runtime(format!(
@@ -1086,7 +1185,7 @@ fn verify_checksum(
 /// Compare a computed SHA-256 against the expected sidecar hash, refusing on
 /// mismatch. Separated from the network fetch + file read in `verify_checksum`
 /// so the load-bearing refusal-on-mismatch is unit-testable on any target.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
     if actual.eq_ignore_ascii_case(expected) {
         Ok(())
@@ -1098,13 +1197,13 @@ fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 struct StagedInstaller {
     dir: tempfile::TempDir,
     path: std::path::PathBuf,
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 impl StagedInstaller {
     fn new(extension: &str) -> std::io::Result<Self> {
         let dir = tempfile::Builder::new().prefix("tr300-update-").tempdir()?;
@@ -1116,12 +1215,17 @@ impl StagedInstaller {
         &self.path
     }
 
+    #[cfg(target_os = "macos")]
+    fn dir(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+
     fn close(self) -> std::io::Result<()> {
         self.dir.close()
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 fn finish_staged_attempt(
     staged: StagedInstaller,
     result: Result<(), StrategyError>,
@@ -1196,23 +1300,21 @@ fn reexec_installed_version() -> Option<String> {
     }
 }
 
-/// Confirm a `cargo install tr300 --force` update actually landed.
+/// Confirm a pinned `cargo install tr300 --version ... --force --locked`
+/// update actually landed.
 ///
-/// `cargo install` reports success (exit 0) even when crates.io still serves
-/// the OLD version — a publish lag right after a GitHub release, or a failed
-/// `crates-publish` run. Without this check, the updater would print
-/// "Updated to vX" while `tr300 --version` is unchanged, then loop forever.
-/// Re-exec `--version`; on mismatch return a `Runtime` error so
-/// `execute_update` falls through to the prebuilt GitHub-release installer,
-/// which always carries `latest`.
+/// Cargo can report success without replacing the running path when metadata
+/// or PATH is inconsistent. Without this check, the updater would print
+/// "Updated to vX" while `tr300 --version` is unchanged. Re-exec `--version`;
+/// a mismatch fails this channel without falling into another one.
 fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
     match reexec_installed_version() {
         Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
         Some(installed) => Err(StrategyError::Runtime(format!(
-            "cargo install reported success but `tr300 --version` still reports v{installed} (expected v{expected}). crates.io may not have v{expected} yet, or another tr300 is earlier on your PATH — falling through to the prebuilt installer."
+            "cargo install reported success but `tr300 --version` still reports v{installed} (expected v{expected}). Another tr300 may be earlier on PATH; this Cargo-channel update stopped without switching installers."
         ))),
         None => Err(StrategyError::Runtime(
-            "cargo install reported success but `tr300 --version` could not be run to confirm the new version — falling through to the prebuilt installer.".to_string(),
+            "cargo install reported success but `tr300 --version` could not be run to confirm the new version; this Cargo-channel update stopped without switching installers.".to_string(),
         )),
     }
 }
@@ -1280,33 +1382,33 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let temp_path = staged.path();
 
     let result = (|| -> Result<(), StrategyError> {
-        println!("  Downloading MSI installer...");
+        eprintln!("  Downloading MSI installer...");
         download_to_file(url, temp_path)?;
 
         verify_checksum(temp_path, url)?;
 
-        println!("  Launching Windows Installer...");
+        eprintln!("  Launching Windows Installer...");
         // /passive shows a progress dialog with no user interaction; /norestart
         // suppresses any reboot prompt (we don't need a reboot for a simple file
         // replace). For the Global perMachine MSI, msiexec triggers UAC before
         // doing anything; for the Corporate perUser MSI, it installs silently
         // into LocalAppData with no elevation prompt.
-        let status = Command::new("msiexec")
-            .args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"])
-            .status()
-            .map_err(|error| {
-                prelaunch_installer_io_error("launching Windows Installer", temp_path, url, error)
-            })?;
+        let mut command = Command::new("msiexec");
+        command.args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"]);
+        suppress_stdout_for_json(&mut command);
+        let status = command.status().map_err(|error| {
+            prelaunch_installer_io_error("launching Windows Installer", temp_path, url, error)
+        })?;
 
         let code = status.code().unwrap_or(-1);
-        if code == MSI_EXIT_REBOOT_REQUIRED {
+        if code == MSI_EXIT_REBOOT_REQUIRED || code == MSI_EXIT_REBOOT_INITIATED {
             // Install completed but Restart Manager couldn't finalize a
             // file replace in-place. Surface this rather than silently
             // claiming success — `verify_post_install` would fail because
             // the on-disk binary is still old.
             return Err(StrategyError::Runtime(format!(
                 "MSI install completed but requires a reboot to finalize (msiexec exit {}). Reboot, then verify with `tr300 --version`.",
-                MSI_EXIT_REBOOT_REQUIRED
+                code
             )));
         }
         if code == MSI_EXIT_INSTALL_REJECTED_BY_POLICY {
@@ -1351,25 +1453,36 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let temp_path = staged.path();
 
     let result = (|| -> Result<(), StrategyError> {
-        println!("  Downloading EXE installer...");
+        eprintln!("  Downloading EXE installer...");
         download_to_file(url, temp_path)?;
 
         verify_checksum(temp_path, url)?;
 
-        println!("  Launching Inno Setup installer...");
+        eprintln!("  Launching Inno Setup installer...");
         // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
         // suppresses non-critical message boxes; /NORESTART skips reboot prompts.
-        let status = Command::new(temp_path)
-            .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
-            .status()
-            .map_err(|error| {
-                prelaunch_installer_io_error("launching the EXE installer", temp_path, url, error)
-            })?;
+        let mut command = Command::new(temp_path);
+        command.args([
+            "/SILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/RESTARTEXITCODE=3010",
+        ]);
+        suppress_stdout_for_json(&mut command);
+        let status = command.status().map_err(|error| {
+            prelaunch_installer_io_error("launching the EXE installer", temp_path, url, error)
+        })?;
 
+        let code = status.code().unwrap_or(-1);
+        if code == MSI_EXIT_REBOOT_REQUIRED {
+            return Err(StrategyError::Runtime(
+                "EXE install completed but requires a reboot to finalize. Reboot, then verify with `tr300 --version`.".to_string(),
+            ));
+        }
         if !status.success() {
             return Err(StrategyError::Runtime(format!(
                 "EXE installer exited with code {} (likely user cancel, UAC denied, security software, or install error). The update was not verified; check the retained installation with `tr300 --version`",
-                status.code().unwrap_or(-1),
+                code,
             )));
         }
 
@@ -1378,6 +1491,130 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     })();
 
     finish_staged_attempt(staged, result)
+}
+
+fn suppress_stdout_for_json(command: &mut Command) {
+    if JSON_UPDATE_MODE.load(Ordering::Relaxed) {
+        command.stdout(std::process::Stdio::null());
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn try_macos_dmg_install(latest: &str) -> Result<(), StrategyError> {
+    let url = release_asset_url(latest, MAC_DMG_ASSET);
+    let staged = StagedInstaller::new("dmg").map_err(|error| {
+        prelaunch_installer_io_error(
+            "creating a private update staging directory",
+            &std::env::temp_dir(),
+            &url,
+            error,
+        )
+    })?;
+    let dmg_path = staged.path().to_path_buf();
+    let mount_path = staged.dir().join("mounted");
+
+    let result = (|| -> Result<(), StrategyError> {
+        std::fs::create_dir(&mount_path).map_err(|error| {
+            prelaunch_installer_io_error(
+                "creating the private DMG mount point",
+                &mount_path,
+                &url,
+                error,
+            )
+        })?;
+
+        eprintln!("  Downloading signed macOS DMG...");
+        download_to_file(&url, &dmg_path)?;
+        verify_checksum(&dmg_path, &url)?;
+        run_command_status(
+            "codesign",
+            &[
+                "--verify",
+                "--deep",
+                "--strict",
+                &dmg_path.to_string_lossy(),
+            ],
+        )?;
+        run_command_status(
+            "xcrun",
+            &["stapler", "validate", &dmg_path.to_string_lossy()],
+        )?;
+        run_command_status(
+            "spctl",
+            &[
+                "--assess",
+                "--type",
+                "open",
+                "--context",
+                "context:primary-signature",
+                "--verbose=4",
+                &dmg_path.to_string_lossy(),
+            ],
+        )?;
+        run_command_status(
+            "hdiutil",
+            &[
+                "attach",
+                "-nobrowse",
+                "-readonly",
+                "-mountpoint",
+                &mount_path.to_string_lossy(),
+                &dmg_path.to_string_lossy(),
+            ],
+        )?;
+
+        let pkg_path = mount_path.join("tr300.pkg");
+        let install_result = (|| -> Result<(), StrategyError> {
+            if !pkg_path.is_file() {
+                return Err(StrategyError::Runtime(format!(
+                    "The verified DMG did not contain the expected {} package",
+                    pkg_path.display()
+                )));
+            }
+            run_command_status(
+                "pkgutil",
+                &["--check-signature", &pkg_path.to_string_lossy()],
+            )?;
+            run_command_status(
+                "xcrun",
+                &["stapler", "validate", &pkg_path.to_string_lossy()],
+            )?;
+            run_command_status(
+                "spctl",
+                &[
+                    "--assess",
+                    "--type",
+                    "install",
+                    "--verbose=4",
+                    &pkg_path.to_string_lossy(),
+                ],
+            )?;
+            eprintln!("  Opening Apple Installer; complete or cancel the prompts there...");
+            run_command_status(
+                "open",
+                &["-W", "-a", "Installer", &pkg_path.to_string_lossy()],
+            )?;
+            run_command_status("pkgutil", &["--pkg-info", MAC_PKG_ID])?;
+            verify_installer_post_install(latest, "macOS DMG / PKG installer")
+        })();
+
+        let detach_result =
+            run_command_status("hdiutil", &["detach", &mount_path.to_string_lossy()]);
+        match (install_result, detach_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    })();
+
+    finish_staged_attempt(staged, result)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn try_macos_dmg_install(_latest: &str) -> Result<(), StrategyError> {
+    Err(StrategyError::Preflight(
+        "DMG / PKG installer is macOS-only".into(),
+    ))
 }
 
 #[cfg(not(windows))]
@@ -1394,6 +1631,263 @@ fn try_exe_install(_url: &str, _latest: &str) -> Result<(), StrategyError> {
     ))
 }
 
+// ── Cross-platform install-channel detection ──────────────────────
+
+fn cargo_dist_receipt_path() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .map(|path| path.join("tr300").join("tr300-receipt.json"))
+    }
+    #[cfg(not(windows))]
+    {
+        let config_home = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|home| home.join(".config")))?;
+        Some(config_home.join("tr300").join("tr300-receipt.json"))
+    }
+}
+
+fn find_json_string<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    match value {
+        serde_json::Value::Object(map) => map
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| map.values().find_map(|child| find_json_string(child, key))),
+        serde_json::Value::Array(values) => {
+            values.iter().find_map(|child| find_json_string(child, key))
+        }
+        _ => None,
+    }
+}
+
+fn path_is_within(path: &std::path::Path, parent: &std::path::Path) -> bool {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let parent = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
+    #[cfg(windows)]
+    {
+        let path = path
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase();
+        let parent = parent
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase();
+        path == parent || path.starts_with(&format!("{parent}\\"))
+    }
+    #[cfg(not(windows))]
+    {
+        path.starts_with(parent)
+    }
+}
+
+/// A cargo-dist receipt is trusted only when it names this app/provider and
+/// its recorded prefix contains the executable that is actually running. Its
+/// modification time is evidence for resolving a shared Cargo-bin path: the
+/// newest explicit Cargo or cargo-dist install owns the channel.
+fn cargo_dist_receipt_evidence() -> Option<std::time::SystemTime> {
+    let path = cargo_dist_receipt_path()?;
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return None;
+    };
+    let Ok(receipt) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return None;
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        return None;
+    };
+    cargo_dist_receipt_matches(&receipt, &exe)
+        .then(|| std::fs::metadata(path).ok()?.modified().ok())
+        .flatten()
+}
+
+fn cargo_dist_install_prefix() -> Option<String> {
+    let contents = std::fs::read_to_string(cargo_dist_receipt_path()?).ok()?;
+    let receipt: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    let exe = std::env::current_exe().ok()?;
+    cargo_dist_receipt_matches(&receipt, &exe)
+        .then(|| find_json_string(&receipt, "install_prefix").map(str::to_string))
+        .flatten()
+}
+
+fn cargo_dist_receipt_matches(receipt: &serde_json::Value, exe: &std::path::Path) -> bool {
+    if find_json_string(receipt, "source") != Some("cargo-dist") {
+        return false;
+    }
+    if find_json_string(receipt, "app_name").or_else(|| find_json_string(receipt, "name"))
+        != Some(CRATE_NAME)
+    {
+        return false;
+    }
+    let Some(prefix) = find_json_string(receipt, "install_prefix") else {
+        return false;
+    };
+    path_is_within(exe, std::path::Path::new(prefix))
+}
+
+fn cargo_metadata_evidence() -> Option<std::time::SystemTime> {
+    let home = std::env::var_os("CARGO_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|path| path.join(".cargo")))?;
+    let Ok(exe) = std::env::current_exe() else {
+        return None;
+    };
+    if !path_is_within(&exe, &home.join("bin")) {
+        return None;
+    }
+    [".crates2.json", ".crates.toml"]
+        .iter()
+        .filter_map(|name| {
+            let path = home.join(name);
+            let contents = std::fs::read_to_string(&path).ok()?;
+            contents.contains("tr300 ").then(|| {
+                std::fs::metadata(path)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+            })?
+        })
+        .max()
+}
+
+fn newest_metadata_channel(
+    dist: Option<std::time::SystemTime>,
+    cargo: Option<std::time::SystemTime>,
+    dist_channel: InstallChannel,
+) -> InstallChannel {
+    match (dist, cargo) {
+        (Some(_), None) => dist_channel,
+        (None, Some(_)) => InstallChannel::Cargo,
+        (Some(dist), Some(cargo)) if dist > cargo => dist_channel,
+        (Some(dist), Some(cargo)) if cargo > dist => InstallChannel::Cargo,
+        // Equal/coarse timestamps are conflicting evidence. Refuse to guess.
+        _ => InstallChannel::Unknown,
+    }
+}
+
+fn metadata_install_channel(dist_channel: InstallChannel) -> InstallChannel {
+    newest_metadata_channel(
+        cargo_dist_receipt_evidence(),
+        cargo_metadata_evidence(),
+        dist_channel,
+    )
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn pkgutil_field<'a>(output: &'a str, key: &str) -> Option<&'a str> {
+    output.lines().find_map(|line| {
+        let (candidate, value) = line.split_once(':')?;
+        candidate
+            .trim()
+            .eq_ignore_ascii_case(key)
+            .then(|| value.trim())
+    })
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn pkg_receipt_metadata_matches(
+    package_info: &str,
+    payload_files: &str,
+    file_info: &str,
+    expected_version: &str,
+) -> bool {
+    let package_id_matches = pkgutil_field(package_info, "package-id") == Some(MAC_PKG_ID);
+    let package_version_matches = pkgutil_field(package_info, "version")
+        .is_some_and(|version| post_install_version_ok(version, expected_version));
+    let package_scope_matches = pkgutil_field(package_info, "volume") == Some("/")
+        && pkgutil_field(package_info, "location") == Some("/");
+
+    let payload_matches = payload_files.lines().any(|line| {
+        line.trim().trim_start_matches("./").trim_start_matches('/') == "usr/local/bin/tr300"
+    });
+
+    let owner_id =
+        pkgutil_field(file_info, "pkgid").or_else(|| pkgutil_field(file_info, "package-id"));
+    let owner_version =
+        pkgutil_field(file_info, "pkg-version").or_else(|| pkgutil_field(file_info, "version"));
+    let owner_matches = owner_id == Some(MAC_PKG_ID)
+        && owner_version.is_some_and(|version| post_install_version_ok(version, expected_version))
+        && pkgutil_field(file_info, "volume") == Some("/")
+        && pkgutil_field(file_info, "path") == Some("/usr/local/bin/tr300");
+
+    package_id_matches
+        && package_version_matches
+        && package_scope_matches
+        && payload_matches
+        && owner_matches
+}
+
+#[cfg(target_os = "macos")]
+fn pkgutil_text(args: &[&str]) -> Option<String> {
+    let output = run_output(
+        "pkgutil",
+        args,
+        CommandTimeout::Custom(std::time::Duration::from_secs(5)),
+    )?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn mac_pkg_receipt_matches_current_exe() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let expected = std::path::Path::new("/usr/local/bin/tr300");
+    if exe.canonicalize().unwrap_or(exe)
+        != expected.canonicalize().unwrap_or_else(|_| expected.into())
+    {
+        return false;
+    }
+
+    let Some(package_info) = pkgutil_text(&["--pkg-info", MAC_PKG_ID]) else {
+        return false;
+    };
+    let Some(payload_files) = pkgutil_text(&["--files", MAC_PKG_ID]) else {
+        return false;
+    };
+    let Some(file_info) = pkgutil_text(&["--file-info", "/usr/local/bin/tr300"]) else {
+        return false;
+    };
+    if !pkg_receipt_metadata_matches(&package_info, &payload_files, &file_info, VERSION) {
+        return false;
+    }
+
+    run_output(
+        "pkgutil",
+        ["--verify", MAC_PKG_ID],
+        CommandTimeout::Custom(std::time::Duration::from_secs(5)),
+    )
+    .is_some_and(|output| output.status.success())
+}
+
+#[cfg(windows)]
+fn detect_install_channel() -> InstallChannel {
+    match detect_install_origin() {
+        InstallOrigin::MsiGlobal => InstallChannel::MsiGlobal,
+        InstallOrigin::MsiCorporate => InstallChannel::MsiCorporate,
+        InstallOrigin::ExeGlobal => InstallChannel::ExeGlobal,
+        InstallOrigin::ExeCorporate => InstallChannel::ExeCorporate,
+        InstallOrigin::CargoOrInstaller | InstallOrigin::Unknown => {
+            metadata_install_channel(InstallChannel::PowerShellInstaller)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn detect_install_channel() -> InstallChannel {
+    #[cfg(target_os = "macos")]
+    if mac_pkg_receipt_matches_current_exe() {
+        return InstallChannel::MacPkg;
+    }
+    metadata_install_channel(InstallChannel::ShellInstaller)
+}
+
 // ── Windows install-origin detection (v3.15.0+) ────────────────────
 
 /// Read the `HKCU\Software\TR300\InstallSource` registry value written by
@@ -1403,14 +1897,8 @@ fn try_exe_install(_url: &str, _latest: &str) -> Result<(), StrategyError> {
 /// Returns `None` if the key is missing, the value is missing, the value
 /// type isn't a string, or the value content doesn't match a known variant.
 #[cfg(windows)]
-fn read_install_source_marker() -> Option<InstallOrigin> {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let key = hkcu.open_subkey("Software\\TR300").ok()?;
-    let value: String = key.get_value("InstallSource").ok()?;
-    match value.as_str() {
+fn parse_install_source_marker(value: &str) -> Option<InstallOrigin> {
+    match value {
         "msi-global" => Some(InstallOrigin::MsiGlobal),
         "msi-corporate" => Some(InstallOrigin::MsiCorporate),
         "exe-global" => Some(InstallOrigin::ExeGlobal),
@@ -1419,28 +1907,52 @@ fn read_install_source_marker() -> Option<InstallOrigin> {
     }
 }
 
+#[cfg(windows)]
+fn read_install_source_value(name: &str) -> Option<InstallOrigin> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let key = hkcu.open_subkey("Software\\TR300").ok()?;
+    let value: String = key.get_value(name).ok()?;
+    parse_install_source_marker(&value)
+}
+
+#[cfg(windows)]
+fn read_install_source_marker(exe_path: &str) -> Option<InstallOrigin> {
+    let scoped = if is_global_install_path(exe_path) {
+        read_install_source_value("InstallSourceGlobal")
+    } else if is_corporate_install_path(exe_path) {
+        read_install_source_value("InstallSourceCorporate")
+    } else {
+        None
+    };
+    scoped.or_else(|| read_install_source_value("InstallSource"))
+}
+
 /// Determine how this binary was installed on Windows.
 ///
 /// Strategy:
 /// 1. Read the `HKCU\Software\TR300\InstallSource` marker and accept it only
 ///    when its Global/Corporate scope matches the running executable. All four
 ///    first-class installers write this marker on install.
-/// 2. If no marker, fall back to path-based detection on the running
-///    binary's location. Handles the cargo install / PowerShell installer
-///    path (which doesn't write a marker), and any pre-marker legacy
-///    installs.
+/// 2. If no marker, consult Add/Remove Programs and accept exactly one
+///    registration whose product family/scope matches the running path.
+/// 3. A `.cargo\bin` path is classified only as the broad historical
+///    `CargoOrInstaller`; receipt/metadata detection later resolves the
+///    precise channel.
 ///
 /// A marker-free Program Files or LocalAppData install is deliberately
 /// `Unknown`: those paths identify edition scope but cannot distinguish MSI
 /// from Inno EXE. Guessing would risk a cross-format update and duplicate
-/// uninstall registrations, so the conservative legacy chain is used.
+/// uninstall registrations, so the update performs no mutation.
 #[cfg(windows)]
 pub(crate) fn detect_install_origin() -> InstallOrigin {
     let Ok(exe) = std::env::current_exe() else {
         return InstallOrigin::Unknown;
     };
     let exe = exe.to_string_lossy();
-    if let Some(origin) = read_install_source_marker() {
+    if let Some(origin) = read_install_source_marker(&exe) {
         // One HKCU marker can outlive an old/coexisting install. Trust it only
         // when its edition scope matches the binary that is actually running.
         let scope_matches = match origin {
@@ -1454,7 +1966,118 @@ pub(crate) fn detect_install_origin() -> InstallOrigin {
             return origin;
         }
     }
+    if let Some(origin) = detect_registered_installer(&exe) {
+        return origin;
+    }
     classify_install_path(&exe)
+}
+
+/// Recover a missing marker only when Add/Remove Programs contains exactly one
+/// registered installer family whose scope and install location match the
+/// executable that is running. Coexisting or malformed registrations remain
+/// Unknown; guessing here would violate the no-cross-channel update contract.
+#[cfg(windows)]
+fn detect_registered_installer(exe_path: &str) -> Option<InstallOrigin> {
+    use winreg::enums::{
+        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+    };
+    use winreg::RegKey;
+
+    let global = is_global_install_path(exe_path);
+    let corporate = is_corporate_install_path(exe_path);
+    if !global && !corporate {
+        return None;
+    }
+
+    let roots = [
+        ("hkcu", RegKey::predef(HKEY_CURRENT_USER)),
+        ("hklm", RegKey::predef(HKEY_LOCAL_MACHINE)),
+    ];
+    let views = [KEY_READ | KEY_WOW64_64KEY, KEY_READ | KEY_WOW64_32KEY];
+    let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (root_name, root) in roots {
+        for view in views {
+            let Ok(uninstall) = root.open_subkey_with_flags(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+                view,
+            ) else {
+                continue;
+            };
+            for name in uninstall.enum_keys().filter_map(Result::ok) {
+                let Ok(entry) = uninstall.open_subkey_with_flags(&name, KEY_READ) else {
+                    continue;
+                };
+                let display: String = entry.get_value("DisplayName").unwrap_or_default();
+                let install_location: String =
+                    entry.get_value("InstallLocation").unwrap_or_default();
+                let uninstall_string: String =
+                    entry.get_value("UninstallString").unwrap_or_default();
+                let windows_installer: u32 = entry.get_value("WindowsInstaller").unwrap_or(0);
+                let Some(origin) = classify_registered_installer_entry(
+                    global,
+                    &display,
+                    &install_location,
+                    &uninstall_string,
+                    windows_installer == 1,
+                ) else {
+                    continue;
+                };
+                // Registry redirection can expose the same product identity in
+                // both enumeration views. Count that product once, but retain
+                // genuinely distinct product keys as conflicting evidence.
+                if !seen.insert((root_name, name.to_ascii_lowercase(), origin)) {
+                    continue;
+                }
+                // Preserve duplicate registrations as conflicting evidence.
+                // Two products of the same family are still ambiguous; the
+                // updater must not collapse them into one guessed channel.
+                candidates.push(origin);
+            }
+        }
+    }
+    (candidates.len() == 1).then(|| candidates[0])
+}
+
+#[cfg(windows)]
+fn classify_registered_installer_entry(
+    global: bool,
+    display: &str,
+    install_location: &str,
+    uninstall_string: &str,
+    windows_installer: bool,
+) -> Option<InstallOrigin> {
+    let expected_display = if global {
+        "tr300"
+    } else {
+        "tr300 (Corporate Edition)"
+    };
+    if display != expected_display {
+        return None;
+    }
+
+    if windows_installer {
+        // MSI commonly leaves ARP InstallLocation empty. The exact edition
+        // display identity plus the running executable's already-established
+        // scope and WindowsInstaller flag identify the format without guessing.
+        return Some(if global {
+            InstallOrigin::MsiGlobal
+        } else {
+            InstallOrigin::MsiCorporate
+        });
+    }
+
+    let registration_text = format!("{install_location} {uninstall_string}").to_ascii_lowercase();
+    let path_matches = if global {
+        registration_text.contains("\\program files\\tr300")
+    } else {
+        registration_text.contains("\\appdata\\local\\programs\\tr300")
+    };
+    path_matches.then_some(if global {
+        InstallOrigin::ExeGlobal
+    } else {
+        InstallOrigin::ExeCorporate
+    })
 }
 
 /// Pure-function half of `detect_install_origin()` for unit testing.
@@ -1468,8 +2091,8 @@ fn classify_install_path(exe_path: &str) -> InstallOrigin {
     } else {
         // Program Files and LocalAppData paths identify the edition scope but
         // cannot distinguish MSI from Inno EXE. Choosing either would risk a
-        // cross-format update, so ambiguous/missing-marker installs use the
-        // conservative legacy update chain.
+        // cross-format update, so ambiguous/missing-marker installs do not
+        // mutate the machine.
         InstallOrigin::Unknown
     }
 }
@@ -1493,45 +2116,118 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unix_with_cargo_orders_cargo_first() {
+    fn release_asset_urls_pin_the_resolved_tag_without_versioning_the_filename() {
         assert_eq!(
-            order_strategies(true, TargetOs::Unix),
-            vec![
-                UpdateStrategy::Cargo,
-                UpdateStrategy::InstallerCurl,
-                UpdateStrategy::InstallerWget,
-            ]
+            release_asset_url("4.1.0", MSI_GLOBAL_ASSET),
+            "https://github.com/QubeTX/qube-machine-report/releases/download/v4.1.0/tr300-x86_64-pc-windows-msvc.msi"
         );
+        assert!(!MSI_GLOBAL_ASSET.contains("4.1.0"));
     }
 
     #[test]
-    fn unix_without_cargo_prunes_cargo() {
+    fn every_recognized_channel_has_a_non_crossing_strategy() {
         assert_eq!(
-            order_strategies(false, TargetOs::Unix),
-            vec![UpdateStrategy::InstallerCurl, UpdateStrategy::InstallerWget,]
+            build_strategy_list(InstallChannel::MsiGlobal),
+            vec![UpdateStrategy::MsiGlobal]
         );
+        assert_eq!(
+            build_strategy_list(InstallChannel::Cargo),
+            vec![UpdateStrategy::Cargo]
+        );
+        assert_eq!(
+            build_strategy_list(InstallChannel::MacPkg),
+            vec![UpdateStrategy::MacDmg]
+        );
+        assert!(build_strategy_list(InstallChannel::Unknown).is_empty());
     }
 
     #[test]
-    fn windows_with_cargo_orders_cargo_first() {
-        assert_eq!(
-            order_strategies(true, TargetOs::Windows),
-            vec![
-                UpdateStrategy::Cargo,
-                UpdateStrategy::InstallerPowerShell,
-                UpdateStrategy::InstallerPwsh,
-            ]
-        );
+    fn cargo_dist_receipt_requires_provider_app_and_matching_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let exe = bin.join(if cfg!(windows) { "tr300.exe" } else { "tr300" });
+        std::fs::write(&exe, b"fixture").unwrap();
+        let receipt = serde_json::json!({
+            "install_prefix": root.path().to_string_lossy(),
+            "provider": {"source": "cargo-dist", "version": "0.31.0"},
+            "source": {"app_name": "tr300"}
+        });
+        assert!(cargo_dist_receipt_matches(&receipt, &exe));
+
+        let wrong_app = serde_json::json!({
+            "install_prefix": root.path().to_string_lossy(),
+            "provider": {"source": "cargo-dist"},
+            "source": {"app_name": "different-app"}
+        });
+        assert!(!cargo_dist_receipt_matches(&wrong_app, &exe));
     }
 
     #[test]
-    fn windows_without_cargo_prunes_cargo() {
+    fn mac_pkg_receipt_requires_exact_payload_version_and_file_ownership() {
+        let package_info = "\
+package-id: com.qubetx.tr300.pkg\n\
+version: 4.1.0\n\
+volume: /\n\
+location: /\n";
+        let payload = "usr\nusr/local\nusr/local/bin\nusr/local/bin/tr300\n";
+        let file_info = "\
+volume: /\n\
+path: /usr/local/bin/tr300\n\
+pkgid: com.qubetx.tr300.pkg\n\
+pkg-version: 4.1.0\n";
+
+        assert!(pkg_receipt_metadata_matches(
+            package_info,
+            payload,
+            file_info,
+            "4.1.0"
+        ));
+        assert!(!pkg_receipt_metadata_matches(
+            package_info,
+            payload,
+            file_info,
+            "4.0.1"
+        ));
+        assert!(!pkg_receipt_metadata_matches(
+            package_info,
+            "usr/local/bin/another-tool\n",
+            file_info,
+            "4.1.0"
+        ));
+        assert!(!pkg_receipt_metadata_matches(
+            package_info,
+            payload,
+            &file_info.replace("com.qubetx.tr300.pkg", "com.example.shadow"),
+            "4.1.0"
+        ));
+    }
+
+    #[test]
+    fn newest_shared_path_metadata_represents_the_latest_install_intent() {
+        use std::time::{Duration, SystemTime};
+
+        let older = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+        let newer = SystemTime::UNIX_EPOCH + Duration::from_secs(20);
         assert_eq!(
-            order_strategies(false, TargetOs::Windows),
-            vec![
-                UpdateStrategy::InstallerPowerShell,
-                UpdateStrategy::InstallerPwsh,
-            ]
+            newest_metadata_channel(
+                Some(newer),
+                Some(older),
+                InstallChannel::PowerShellInstaller,
+            ),
+            InstallChannel::PowerShellInstaller
+        );
+        assert_eq!(
+            newest_metadata_channel(Some(older), Some(newer), InstallChannel::ShellInstaller,),
+            InstallChannel::Cargo
+        );
+        assert_eq!(
+            newest_metadata_channel(Some(newer), Some(newer), InstallChannel::ShellInstaller,),
+            InstallChannel::Unknown
+        );
+        assert_eq!(
+            newest_metadata_channel(None, Some(newer), InstallChannel::ShellInstaller),
+            InstallChannel::Cargo
         );
     }
 
@@ -1580,6 +2276,7 @@ mod tests {
             UpdateStrategy::InstallerPwsh.label(),
             UpdateStrategy::InstallerCurl.label(),
             UpdateStrategy::InstallerWget.label(),
+            UpdateStrategy::MacDmg.label(),
         ];
         let unique: std::collections::HashSet<_> = labels.iter().collect();
         assert_eq!(
@@ -1650,6 +2347,60 @@ mod tests {
             "cargo-or-installer"
         );
         assert_eq!(InstallOrigin::Unknown.json_id(), "unknown");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn arp_recovery_accepts_msi_without_install_location_but_not_wrong_edition() {
+        assert_eq!(
+            classify_registered_installer_entry(true, "tr300", "", "MsiExec.exe /I{GUID}", true),
+            Some(InstallOrigin::MsiGlobal)
+        );
+        assert_eq!(
+            classify_registered_installer_entry(
+                false,
+                "tr300 (Corporate Edition)",
+                "",
+                "MsiExec.exe /I{GUID}",
+                true,
+            ),
+            Some(InstallOrigin::MsiCorporate)
+        );
+        assert_eq!(
+            classify_registered_installer_entry(
+                true,
+                "tr300 (Corporate Edition)",
+                "",
+                "MsiExec.exe /I{GUID}",
+                true,
+            ),
+            None
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn arp_recovery_requires_matching_inno_path() {
+        assert_eq!(
+            classify_registered_installer_entry(
+                true,
+                "tr300",
+                r"C:\Program Files\tr300\",
+                r#""C:\Program Files\tr300\unins000.exe""#,
+                false,
+            ),
+            Some(InstallOrigin::ExeGlobal)
+        );
+        assert_eq!(
+            classify_registered_installer_entry(
+                true,
+                "tr300",
+                r"D:\portable\tr300\",
+                r#""D:\portable\tr300\unins000.exe""#,
+                false,
+            ),
+            None
+        );
     }
 
     #[test]
@@ -1793,11 +2544,16 @@ mod tests {
         assert_eq!(failure.attempts[0].kind, AttemptKind::Blocked);
         assert!(failure.attempts[0].message.contains("endpoint policy"));
 
-        let payload = update_failure_payload("3.17.0", "4.0.0", &failure);
+        let payload =
+            update_failure_payload("3.17.0", "4.0.0", &failure, InstallChannel::MsiGlobal);
         assert_eq!(payload["success"], false);
         assert_eq!(payload["attempts"][0]["result"], "blocked");
         assert_eq!(payload["manual_install_url"], MANUAL_INSTALL_URL);
         assert_eq!(payload["official_releases_url"], RELEASES_PAGE);
+        assert_eq!(
+            payload["exact_installer_url"],
+            release_asset_url("4.0.0", MSI_GLOBAL_ASSET)
+        );
     }
 
     #[test]
@@ -1809,10 +2565,23 @@ mod tests {
                 message: "simulated ordinary failure".to_string(),
             }],
         };
-        let payload = update_failure_payload("3.17.0", "4.0.0", &failure);
+        let payload = update_failure_payload("3.17.0", "4.0.0", &failure, InstallChannel::Cargo);
         assert_eq!(payload["attempts"][0]["result"], "failed");
         assert_eq!(payload["manual_install_url"], MANUAL_INSTALL_URL);
         assert!(payload.get("official_releases_url").is_none());
+        assert!(payload.get("exact_installer_url").is_none());
+    }
+
+    #[test]
+    fn unknown_channel_failure_explains_safe_no_mutation() {
+        let failure = UpdateFailure { attempts: vec![] };
+        let payload = update_failure_payload("3.17.0", "4.0.0", &failure, InstallChannel::Unknown);
+        assert!(payload["message"]
+            .as_str()
+            .unwrap()
+            .contains("not attempted"));
+        assert_eq!(payload["attempts"], serde_json::json!([]));
+        assert!(payload.get("exact_installer_url").is_none());
     }
 
     #[test]

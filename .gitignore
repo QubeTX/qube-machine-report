@@ -49,5 +49,5 @@ coverage/
 # Contents are sessionId + pid + epoch — stale if pulled on another machine.
 .claude/*.lock
 
-# Local SHAUGHV task board and working memory
-.tasks/
+# The shared SHAUGHV task board and working memory are Git tracked.
+# Machine-local runtime and secure files are excluded by .tasks/.gitignore.

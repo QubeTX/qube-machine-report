@@ -1,14 +1,13 @@
-# Handoff: v4 release and personal fleet continuation
+# Handoff: v4 release, origin-preserving updates, and fleet continuation
 
 **Date:** 2026-07-14–17 CDT
 **Session:** 002
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
-**Working directory:** `/Users/realemmetts/Downloads/temp_git/qube-machine-report`
+**Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Release version:** `4.0.1` fix-forward (`v4.0.0` is immutable and failed
-closed before GitHub artifact hosting)
+**Published / working version:** `4.0.1` / `4.1.0` (`v4.0.0` remains immutable)
 **Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
@@ -19,6 +18,83 @@ Windows Installers 29392382949
 This is the exhaustive portable continuation record. The richer SHAUGHV task
 board is local and gitignored; a fresh checkout must read this file, `AGENTS.md`,
 `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+
+## 2026-07-17 Alienware continuation — v4.1.0 active
+
+The maintainer approved implementation and release of origin-preserving
+updates plus a native universal PKG-in-DMG. The channel rule is precise:
+`tr300 update` preserves the method/edition/scope that installed the running
+copy; a manually launched fresh installer is newer user intent and may replace
+the prior channel. “Same version” in the discussion was corrected to “same
+channel”; the updater always installs the resolved latest version.
+
+Public filenames, download links, and commands stay versionless. Internally,
+the updater resolves latest once and pins the installer, checksum, script, or
+Cargo `--version` to that exact tag. It never crosses channels after failure.
+Unknown/conflicting/portable evidence causes no mutation and prints both
+recovery guidance and the versionless latest-release page.
+The release workflow also rewrites cargo-dist's generated public release-note
+install/download links to `latest`; exact tags remain internal and historical.
+
+Implemented local surfaces:
+
+- generalized install-channel detection for Global/Corporate MSI and EXE,
+  cargo-dist PowerShell/shell receipts and prefixes, Cargo metadata, and macOS
+  `com.qubetx.tr300.pkg`; the Mac receipt must match package/version/scope,
+  payload path, per-file owner, and `pkgutil --verify`; scoped Windows markers
+  retain the legacy value;
+- one-object update JSON with `install_channel`, `recovery_url`, and
+  `requires_user_action`, child progress on stderr, restart/cancellation as
+  failure, randomized staging, exact-tag payloads, and no cross-fallback;
+- same-edition MSI/Inno replacement when a fresh Windows installer is launched,
+  plus v4.1.0-and-newer MSI downgrade/same-version replacement for explicit
+  fresh intent (immutable older MSIs may still block safely);
+- native Windows hybrid-core parsing, proven on this Alienware as `6P + 10E`,
+  16 physical / 22 logical cores;
+- `scripts/build-sign-notarize-macos-dmg.sh` and
+  `.github/workflows/macos-installer.yml` for a universal signed
+  `tr300.pkg` inside a signed/notarized/stapled DMG, with native
+  `macos-15` and `macos-15-intel` install gates;
+- CI ARM/Intel Mac and Linux ARM64 coverage plus workflow/shell validation.
+
+The PKG-in-DMG choice is intentional, not an Apple requirement. The PKG owns
+the privileged `/usr/local/bin/tr300` transaction and stable receipt; the DMG
+is the familiar versionless download/recovery container. A loose binary in a
+DMG would not meet origin detection or install/uninstall inventory needs. A
+physical Mac is optional visual testing; native GitHub ARM and Intel runners
+are the release requirement.
+
+Alienware baseline evidence: the naturally installed Global MSI v3.17.0 ran
+its existing CLI updater to v4.0.1 and remained at the same Program Files path
+with the same Global marker, MSI product registration, and PATH. No Corporate
+or Cargo duplicate appeared. The old updater left a fixed-name temp MSI; the
+new randomized/cleaned staging implementation fixes that forward. Complete
+remaining functional/save/code-page/performance and installer-matrix rows
+before tag; never record the hardware serial number.
+
+Credential status: Apple issued the G2 **Developer ID Installer** certificate
+for Team `M9D5379H93`. Local checks proved RSA-2048, the Installer EKU, official
+Apple G2 chain, and a public key matching the encrypted local private key. The
+certificate/key were converted into an encrypted PKCS#12 outside git and
+uploaded via authenticated GitHub CLI as
+`APPLE_INSTALLER_CERTIFICATE_P12_BASE64` and
+`APPLE_INSTALLER_CERTIFICATE_PASSWORD`, and set repository variable
+`APPLE_INSTALLER_SIGNING_IDENTITY` to the certificate's full Developer ID
+Installer common name. Redundant key-generation material was removed after the
+upload, leaving one encrypted off-repository backup and public certificate
+copies. No secret value appears in this handoff. GitHub Actions run 29637224793
+imported the Apple-keychain-compatible identity and signed/verified a disposable
+PKG on native Apple Silicon job 88061567206 and Intel job 88061567218. The
+credential ceremony and hosted identity gate are complete without a physical
+Mac.
+
+The remaining exact sequence is: finish docs/ADR and disposable installer
+fixtures; run every locked local gate; push `main`; wait for exact-SHA CI and
+crates; tag only v4.1.0; wait for cargo-dist, Windows
+installers, and PKG-in-DMG validation; then audit crates.io, all 30 assets,
+checksums, signatures/notarization, every installer channel, update/recovery,
+and uninstall before closing the release. AMD laptop and Pi 4 hardware evidence
+remain tracked continuation.
 
 ## Session Narrative
 
@@ -122,6 +198,10 @@ tar.gz archive: `stapler` targets supported bundles/packages, and
 Do not convert this into a false “must staple” gate. The precise evidence is
 Developer ID signature verification on the exact uploaded binary plus Apple's
 `Accepted` notarization result in the protected pre-upload job.
+
+That statement remains true for the bare cargo-dist archives. It is superseded
+for the v4.1.0 installer-first artifact: the PKG and DMG are supported stapling
+containers and are required to carry/validate stapled tickets.
 
 The operator was tired and asked for autonomous completion: finish all Mac work,
 fully update `AGENTS.md` and `CLAUDE.md`, keep the board exact, push/deploy v4,
@@ -441,9 +521,9 @@ upgrade paths.
 - `v4.0.0` is exactly that partial state: its immutable tag and crates.io
   package exist, but release run 29390216481 failed both Apple jobs before
   Post-build/upload and skipped host/announce. Never move or reuse it.
-- `.tasks/` is local/gitignored. Resolve the board from
-  `.tasks/.board-server.json` and verify its root. Do not assume port 4319 on
-  another host.
+- `.tasks/` board/task/dashboard sources are tracked; runtime state and secure
+  data remain gitignored. Resolve the live board from `.tasks/.board-server.json`
+  and verify its root rather than assuming a port on another host.
 - Credential values exist in GitHub Actions and local secure storage. Future
   Windows work should need neither Apple browser access nor local Apple keys.
   Do not print `gh secret` values or try to export them.

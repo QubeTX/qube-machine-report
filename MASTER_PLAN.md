@@ -4,14 +4,15 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-17 02:52 CDT
-**Release / working manifest:** 4.0.1
-**Release scope:** v4.0.1 and its homepage are deployed; personal
-Alienware/AMD/Pi evidence remains open and drives forward patches
+**Last updated:** 2026-07-18
+**Published / working manifest:** 4.0.1 / 4.1.0
+**Release scope:** origin-preserving updates, native PKG-in-DMG, Apple Installer
+credentials, hosted ARM/Intel Mac gates, Windows installer matrix, and real
+Alienware validation. AMD laptop and Pi evidence remain open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
-The branch migration is complete: commit
+The v4.0.1 branch migration/release baseline remains complete: commit
 `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed all 13 hosted CI jobs on
 `main` (run 29557626125), and downstream crates run 29557758673 succeeded by
 skipping the already-published 4.0.1 package. Fresh-clone/default/redirect,
@@ -38,10 +39,83 @@ run 29561137746 performed the expected existing-4.0.1 pre-token safe skip.
 4. `TESTING.md`
 5. `CHANGELOG.md` and `HUMAN_CHANGELOG.md`
 
-The local `.tasks/` board is gitignored. The tracked handoff therefore contains
-all continuation-critical state and is authoritative on a fresh Alienware clone.
+The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
+only its runtime/secure state is gitignored. The board and tracked handoff are
+both pickup-ready on a fresh clone.
 
-## 2. v4.0.0 Mac and shared outcome
+## 2. v4.1.0 active release plan
+
+The implementation is tracked in git and is intended to release from the
+Alienware. A physical Mac is not a normal requirement: native GitHub
+`macos-15` Apple Silicon and `macos-15-intel` runners are the required build,
+sign, notarize, mount, install, update-strategy, report, and uninstall gates.
+Use physical hardware only for an optional visual smoke or a CI-discovered
+GUI-only defect.
+
+### Implemented locally
+
+- The updater resolves latest once but pins every payload, checksum, installer
+  script, and Cargo command to that exact tag/version. Public commands and
+  filenames remain versionless; the release workflow also normalizes generated
+  release-note links and copy-paste commands to `latest` before publication.
+- MSI Global/Corporate, EXE Global/Corporate, cargo-dist PowerShell/shell,
+  Cargo, and macOS PKG/DMG each retain their own channel. Unknown/conflicting
+  origins do not mutate the host and receive fresh-installer recovery links.
+- Update JSON remains one stdout object and adds `install_channel`,
+  `recovery_url`, and `requires_user_action`; installer progress is stderr.
+- Windows uses scoped Global/Corporate markers plus legacy compatibility,
+  conservative ARP recovery, and same-edition MSI/Inno replacement for a fresh
+  explicit installer choice. v4.1.0-and-newer MSI authoring also accepts a
+  fresh older/same-version MSI as the user's newest instruction; automatic
+  updates remain latest-only.
+- The universal macOS binary is packaged in a signed
+  `com.qubetx.tr300.pkg` inside
+  `tr300-universal-apple-darwin.dmg`. Both containers are notarized/stapled;
+  future updates trust the PKG only when its identifier, version, payload,
+  per-file owner, install path, and `pkgutil --verify` result all match the
+  running binary.
+- CI includes native Apple Silicon, native Intel, Linux AMD64/ARM64, Windows,
+  actionlint, and shellcheck. The DMG publishes only after native install gates.
+- The Alienware's natural Global MSI v3.17.0 → v4.0.1 update preserved the
+  Program Files path, Global marker, product registration, and PATH with no
+  Corporate/Cargo duplicate. The Windows collector now reports the Core Ultra
+  7 155H as `6P + 10E` with 16 physical / 22 logical cores.
+
+### Credential ceremony — complete
+
+- Apple issued the G2 **Developer ID Installer** certificate for Team
+  `M9D5379H93`. Its RSA-2048 key, Installer EKU, official G2 chain, subject, and
+  locally generated private-key match were verified on the Alienware.
+- The certificate and key were converted into an encrypted `.p12` outside the
+  repository and uploaded through authenticated GitHub CLI as
+  `APPLE_INSTALLER_CERTIFICATE_P12_BASE64` and
+  `APPLE_INSTALLER_CERTIFICATE_PASSWORD`; set
+  `APPLE_INSTALLER_SIGNING_IDENTITY` to the certificate's full common name as
+  a repository variable. No credential value entered git, docs, browser fields,
+  or logs.
+- Redundant key-generation material was removed after the GitHub upload. The
+  retained off-repository backup is the encrypted PKCS#12, its Windows-user-
+  encrypted password record, and public certificate copies.
+- GitHub Actions run 29637224793 imported the Apple-keychain-compatible
+  encrypted identity and signed/verified a disposable PKG on native Apple
+  Silicon (job 88061567206) and Intel (job 88061567218). Credential issuance
+  and hosted identity proof are complete; no physical Mac was required.
+
+### Remaining release gates
+
+1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
+2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,
+   dist plan, actionlint, shellcheck, updater fixtures, and Alienware functional
+   modes/save/code-page/performance checks.
+3. Commit/push `main`; wait for exact-SHA CI and crates publication.
+4. Tag/push only `v4.1.0`; wait for cargo-dist, Windows installers, and native
+   PKG-in-DMG workflows.
+5. Verify crates.io, signatures/notarization, checksums, every installer family,
+   all 30 release assets, update behavior, recovery links, and clean uninstall.
+6. Record exact run IDs/hashes/evidence here, in `TESTING.md`, and in the
+   canonical handoff before marking release complete.
+
+## 3. v4.0.0 Mac and shared outcome (historical baseline)
 
 macOS collection work is complete for v4.0.0. Shared report/update changes and
 the new release-trust path passed comprehensive native arm64, Rosetta x86_64,
@@ -94,7 +168,7 @@ Host: MacBook Pro M2 (`Mac14,7`), macOS 26.3.1 build 25D2128.
 - final five-run medians: native full 0.51s, native fast 0.23s, Rosetta full
   0.72s, Rosetta fast 0.36s; fast budget is 1.5s
 
-## 3. Shared hardening already implemented
+## 4. Shared hardening already implemented
 
 These changes are cross-platform Rust and compile-tested, but platform-specific
 runtime claims remain gated by the hardware matrix below.
@@ -121,16 +195,19 @@ runtime claims remain gated by the hardware matrix below.
   hardened runtime/timestamp, and Apple Notary Service acceptance. The exact
   signed bytes are repacked and the sidecar/manifest checksums regenerated
   before upload.
-- Windows-specific code passes xwin clippy with `-D warnings`; this is compile
-  evidence only, not live Alienware validation.
+- Windows-specific code passes xwin clippy with `-D warnings`; v4.1.0 also has
+  live Alienware validation described below.
 
-## 4. Post-release personal hardware tasks
+## 5. Personal hardware continuation
 
 ### A. Personal Alienware / Windows
 
-After v4.0.1, run the full, fast, JSON, and manually saved Markdown report from
-the intended Windows install
-and compare every visible fact with native Windows tools:
+**Status: active, baseline/update/topology evidence captured.** The natural
+Global MSI v3.17.0 → v4.0.1 update preserved path, marker, registration, and
+PATH without a duplicate. The source-built v4.1.0 report confirms 16 physical,
+22 logical, `6P + 10E`, and both GPUs. Complete the remaining full/fast/table/
+JSON/manual-save, code-page, failure/recovery, cleanup, and performance rows
+before tagging.
 
 - OS edition/build/architecture and model/motherboard/BIOS
 - CPU model, physical/logical topology, socket count, frequency provenance, GPU
@@ -140,10 +217,9 @@ and compare every visible fact with native Windows tools:
 - installer-origin detection and the installed edition's `tr300 update --json`
 - Console code-page restoration and full/fast runtime budget
 
-Record Windows version/build, install origin, command evidence, screenshots when
-useful, and every discrepancy in `TESTING.md`. Patch forward as needed. The
-managed work machine's antivirus freeze is endpoint-policy evidence, not a
-substitute for this personal Alienware accuracy matrix.
+Record command evidence and every discrepancy in `TESTING.md`; never include
+serial numbers. The managed work machine's antivirus freeze remains a separate
+endpoint-policy case.
 
 ### B. Linux AMD64 laptop
 
@@ -160,7 +236,7 @@ substitute for this personal Alienware accuracy matrix.
 - battery absence, missing desktop/tool fallbacks, fast runtime budget
 - installer/update path on the actual distribution
 
-## 5. v4.0.1 fix-forward release outcome — complete
+## 6. v4.0.1 fix-forward release outcome — complete
 
 The maintainer explicitly approved sections 4A–4C after release, accepting
 forward patches. Every Mac/local/hosted gate still passed before publication.
@@ -191,7 +267,7 @@ patch fix-forward.
   embedded-certificate checks. Canonical/legacy installer aliases match, and
   every supplemental Windows installer matches its sidecar.
 
-## 6. Homepage deployment — complete
+## 7. Homepage deployment — complete
 
 - Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is pushed to its
   default branch and production at `https://reports.qubetx.com/` serves its
@@ -205,7 +281,7 @@ patch fix-forward.
 - SD-300 and Shaughv OS remain intentionally WIP-delisted and must not be
   re-linked until their separate work is ready.
 
-## 7. Non-negotiable contracts
+## 8. Non-negotiable contracts
 
 - Keep one shared Rust architecture and preserve both binary and library APIs.
 - Optional probe failure yields `None`/fallback, never a fabricated claim or a
@@ -220,15 +296,12 @@ patch fix-forward.
 - Never publish locally just because registry credentials are available.
 - Windows installer GUIDs and `InstallSource` marker strings are permanent and
   must remain in lockstep across WiX, Inno, updater, and migration code.
-- The Alienware continuation must preserve the enforced macOS release path: no
-  macOS collector/cfg branch, Apple target/artifact name,
-  `scripts/sign-notarize-macos.sh`, Apple `release.yml` step, toolchain,
-  signing/notarization input, or secret/variable change from Windows. A
-  dependency-resolution, shared runtime, build, dist, workflow, or Apple change
-  forces native + Rosetta Mac revalidation; Apple-input changes also require a
-  real archive notary test before any tag.
+- Shared/macOS/release changes require native Apple Silicon and native Intel
+  hosted validation. PKG-in-DMG changes also require sign/notary/staple/mount/
+  install/update/uninstall proof on both architectures. A physical Mac is
+  optional unless those runners expose a GUI-only defect.
 
-## 8. Completion state
+## 9. Completion state
 
 The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
 
@@ -239,6 +312,5 @@ The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
   release assets/self-update discovery are verified.
 - The homepage accurately reflects the deployed release and is live.
 
-The broader cross-platform hardening milestone stays open until the personal
-Alienware, AMD Linux, and Pi 4 matrices are recorded and any confirmed defects
-are patched. This is intentional and does not make the v4 release incomplete.
+The v4.1.0 release remains active. The broader personal-hardware milestone stays
+open for AMD Linux and Pi 4 evidence after this release.

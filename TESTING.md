@@ -7,6 +7,90 @@ as passed.
 
 ## Per-version verification log
 
+### v4.1.0 — 2026-07-18 (release candidate in progress)
+
+- **Scope:** origin-preserving safe updates, versionless public downloads with
+  exact-tag internal payloads, universal signed PKG-in-DMG, separate Developer
+  ID Installer credentials, native ARM/Intel Mac gates, Windows fresh-installer
+  intent, Alienware functional/hardware validation, and hybrid CPU topology.
+- **Public/latest split:** stable asset names and README commands use
+  `/releases/latest/download/`; the release workflow rewrites cargo-dist's
+  generated public install/download links to the same endpoint, while updater
+  tests prove payload and checksum bytes remain pinned to the resolved tag.
+- **Alienware natural update:** the installed Global MSI v3.17.0 at
+  `C:\Program Files\tr300\bin\tr300.exe` ran its normal CLI updater to v4.0.1.
+  Afterward the executable path, Global install-source marker, Add/Remove
+  Programs Global MSI registration, and system PATH remained correct. No
+  Corporate or Cargo copy appeared. The old updater left one fixed-name staging
+  file in `%TEMP%`; v4.1.0's randomized temporary directory and explicit
+  cleanup directly address that historical residue.
+- **Alienware hardware:** source-built v4.1.0 JSON reports the Alienware m16 R2
+  with Intel Core Ultra 7 155H topology `6P + 10E`, 16 physical and 22 logical
+  cores, plus Intel Arc and NVIDIA RTX 4070 Laptop GPUs. No serial/unique
+  hardware identifier is recorded here. The remaining functional evidence is
+  recorded immediately below.
+- **Alienware report/runtime proof:** full and fast schema-v1 JSON parsed;
+  native CIM agreed on physical/logical cores, model, BIOS, OS build, memory,
+  NTFS system disk, and two GPUs. Network route/DNS, hostname, locale, shell,
+  battery, and UEFI boot fields were present/coherent. The packaged Codex
+  command session exposed no terminal identity and the collector returned
+  `null` gracefully. The unelevated BitLocker native probe itself returned
+  access denied, so TR-300's absent encryption field is correct rather than a
+  fabricated state. Unicode and ASCII fast tables passed; all 32 ASCII lines
+  were exactly 51 columns. A manual Markdown report was created, verified, and
+  removed. Console output code page remained 65001 before/after the child.
+  Five fast JSON runs were 253/274/274/263/275 ms (274 ms median, below the
+  1.5 s budget); three full runs were 5108/5118/5129 ms (5118 ms median).
+- **Updater JSON smoke:** source v4.1.0 against currently published v4.0.1
+  emitted exactly one stdout object, no child/progress stdout, channel
+  `unknown` from the portable build path, versionless latest recovery URL, and
+  no mutation. The update-available unknown-origin failure is fixture-covered.
+- **Updater unit contract:** exact-tag/versionless-filename URL construction,
+  one-channel-only strategy selection, Cargo version pinning, cargo-dist receipt
+  parsing, unknown-origin no-mutation, update JSON fields, randomized staging,
+  checksum, post-install version, policy-block, and restart-required paths are
+  covered. The shared Cargo-bin collision test proves the newer Cargo or
+  cargo-dist metadata wins and tied evidence becomes Unknown. Local locked
+  warning-denying Clippy passed; 150 library + 19 integration tests passed.
+  macOS receipt tests require the exact package ID/version, payload path,
+  per-file owner, install scope, and running version; hosted validation also
+  executes `pkgutil --verify`, so receipt presence alone cannot select PKG/DMG.
+  WiX source now makes fresh older/same-version MSI launches explicit intent
+  with `AllowDowngrades`; the pre-tag Windows gate builds newer, current, and a
+  second same-version package for both editions and must prove that sequence
+  converges to one current registration. Rerun the clean committed-tree gates
+  after the final review.
+- **Local installer-source proof:** WiX 3.14.1 compiled both Global and
+  Corporate MSI sources; the only linker diagnostic was expected ICE61 from the
+  intentional no-maximum-version downgrade policy. Inno Setup 6.7.3 compiled
+  both Global and Corporate EXEs, including the loop-bounded same-edition MSI
+  removal include. Hosted disposable installs remain the runtime authority.
+- **macOS implementation:** `scripts/build-sign-notarize-macos-dmg.sh` builds one
+  universal Mach-O, signed `com.qubetx.tr300.pkg`, and versionless signed DMG;
+  it requires Apple `Accepted`, staples/checks both containers, and emits a
+  sidecar. `.github/workflows/macos-installer.yml` validates mount, nested PKG,
+  receipt identity/payload/file ownership, package verification, binary
+  architecture/version, table/JSON/update selection, and clean package-content
+  removal independently on `macos-15` and
+  `macos-15-intel`, then publishes the final two assets.
+- **Credential status:** Apple issued the G2 Developer ID Installer certificate
+  for Team `M9D5379H93`. Local verification proved RSA-2048, the Installer EKU,
+  official Apple G2 chain, and a public key matching the encrypted private key.
+  The encrypted PKCS#12/password secrets and full common-name variable were
+  uploaded through authenticated GitHub CLI, redundant key-generation material
+  was removed, and no credential value is in source or this ledger. After
+  correcting the cross-platform PKCS#12 encoding and raw-stdin secret upload,
+  run 29637224793 passed native Apple Silicon job 88061567206 and native Intel
+  job 88061567218: both imported the identity, signed a disposable PKG, and
+  verified its Developer ID Installer signature. The build/publish jobs were
+  intentionally skipped by `preflight_only=true`.
+- **Physical Mac decision:** not a release gate. Native GitHub Apple Silicon and
+  Intel jobs are required; physical visual testing becomes blocking only if CI
+  reveals a GUI-only defect.
+- **Release status:** not yet tagged or published. Do not claim crates.io,
+  30-asset release, DMG signature/notarization, or hosted installer-matrix proof
+  until exact run IDs and fresh public-byte checks are appended here.
+
 ### Architecture decision coverage backfill — 2026-07-17
 
 - **Scope:** reconcile the canonical `docs/architecture-decisions.md` against

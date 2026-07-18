@@ -13,7 +13,46 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-07-18
+
+### Added
+- **Mac users now get a familiar universal DMG with a real Apple installer
+  inside.** It installs the versionless `tr300` command for the whole machine,
+  keeps an Apple package receipt for future updates, and must pass signing,
+  notarization, stapling, Gatekeeper, installation, and report checks on both
+  Apple Silicon and Intel cloud Macs before it can be published. A borrowed
+  physical Mac is no longer required to make a release.
+- **Hybrid Intel Windows machines show their real P-core/E-core layout.** On
+  the Alienware Core Ultra system, fast and full reports now correctly show
+  `6P + 10E` alongside 16 physical and 22 logical cores.
+
 ### Changed
+- **Updates stay with the way you installed TR-300.** A Global MSI remains a
+  Global MSI, Corporate EXE remains Corporate EXE, Cargo remains Cargo, a
+  script install stays in its recorded folder, and the Mac DMG reopens Apple
+  Installer. On Mac, the receipt must actually claim the running file and
+  version and still verify—a leftover receipt cannot hijack an update. When
+  Cargo and the script installer share a folder, the most
+  recently written install record wins; a tie is treated as unknown. TR-300
+  never guesses across installer types. If the origin is
+  portable, conflicting, or unknown, it keeps the working copy and directs you
+  to the fresh versionless installer instead.
+- **Fresh installer choices win.** Launching a different current Windows
+  installer is treated as the user's latest intent: the installer removes the
+  competing same-edition format before writing shared files and records the new
+  channel without leaving two active versions on PATH. A deliberately launched
+  older or same-version MSI also replaces the installed MSI instead of being
+  rejected—the fresh action is the user's newest instruction.
+- **Automation gets cleaner update results.** JSON is always one object and now
+  says which install channel was detected, where recovery lives, and whether a
+  person must act. Downloads are internally pinned to the release TR-300 just
+  checked, while public filenames, release-page links, and commands continue to
+  say `latest` and never embed a release number.
+- **Cloud validation is broader.** Every change now builds and tests on native
+  Apple Silicon, Intel Mac, x64 Linux, ARM64 Linux, and Windows, with workflow
+  and release-script checks included. Windows installer sources are compiled
+  before a release, and disposable Windows machines later install, update,
+  check, and uninstall every published installer family.
 - **The source repository now calls its primary branch `main`.** This matches
   the rest of Emmett's repositories. The change keeps the same project history
   and does not replace or alter any published downloads, installers, package,
@@ -27,6 +66,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   display/privacy rules, safe Windows install cleanup, Mac release protection,
   and the `main` migration—including why alternatives were rejected and what a
   future change must re-test.
+
+### Fixed
+- **Cancelled, blocked, or restart-pending installer updates no longer look
+  successful.** TR-300 keeps the previous installation, returns a failure code,
+  and shows the matching download and latest release page.
+
+### Internal
+- Windows build machines now compile every installer before a release and
+  rehearse both editions replacing a pretend newer MSI with the fresh release
+  candidate. Disposable machines then verify every published installer,
+  channel, recovery path, and uninstall independently.
 
 ## [4.0.1] - 2026-07-15
 

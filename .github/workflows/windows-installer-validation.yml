@@ -1,0 +1,398 @@
+name: Windows Installer Validation
+
+on:
+  workflow_run:
+    workflows: ["Windows Installers"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to validate (for example v4.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve complete release
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Resolve tag and require every Windows family
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if [[ '${{ github.event_name }}' == workflow_dispatch ]]; then
+            tag='${{ inputs.tag }}'
+          else
+            tag='${{ github.event.workflow_run.head_branch }}'
+          fi
+          [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-].*)?$ ]] || {
+            echo "invalid release tag: $tag" >&2
+            exit 64
+          }
+          assets=$(gh release view "$tag" --repo '${{ github.repository }}' \
+            --json assets --jq '.assets[].name')
+          required=(
+            tr300-x86_64-pc-windows-msvc.msi
+            tr300-x86_64-pc-windows-msvc-corporate.msi
+            tr300-x86_64-pc-windows-msvc-setup.exe
+            tr300-x86_64-pc-windows-msvc-corporate-setup.exe
+            tr300-installer.ps1
+            tr300-x86_64-pc-windows-msvc.zip
+          )
+          for asset in "${required[@]}"; do
+            grep -Fqx "$asset" <<< "$assets" || {
+              echo "release is incomplete; missing $asset" >&2
+              exit 1
+            }
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  channels:
+    name: ${{ matrix.name }} install / update / uninstall
+    needs: resolve
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Global MSI
+            kind: msi-global
+            asset: tr300-x86_64-pc-windows-msvc.msi
+            channel: msi-global
+          - name: Corporate MSI
+            kind: msi-corporate
+            asset: tr300-x86_64-pc-windows-msvc-corporate.msi
+            channel: msi-corporate
+          - name: Global EXE
+            kind: exe-global
+            asset: tr300-x86_64-pc-windows-msvc-setup.exe
+            channel: exe-global
+          - name: Corporate EXE
+            kind: exe-corporate
+            asset: tr300-x86_64-pc-windows-msvc-corporate-setup.exe
+            channel: exe-corporate
+          - name: PowerShell installer
+            kind: powershell
+            asset: tr300-installer.ps1
+            channel: powershell-installer
+          - name: Cargo
+            kind: cargo
+            asset: ""
+            channel: cargo
+          - name: Portable / unknown
+            kind: portable
+            asset: tr300-x86_64-pc-windows-msvc.zip
+            channel: unknown
+    steps:
+      - name: Download exact tagged input
+        if: matrix.asset != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ${{ matrix.asset }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force assets | Out-Null
+          gh release download $env:TAG --repo '${{ github.repository }}' `
+            --dir assets --pattern $env:ASSET --clobber
+          if (-not (Test-Path (Join-Path assets $env:ASSET))) {
+            throw "missing downloaded asset $env:ASSET"
+          }
+
+      - name: Verify release checksum when published
+        if: matrix.asset != '' && matrix.kind != 'powershell'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ${{ matrix.asset }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        shell: pwsh
+        run: |
+          gh release download $env:TAG --repo '${{ github.repository }}' `
+            --dir assets --pattern "$env:ASSET.sha256" --clobber
+          $line = (Get-Content "assets\$env:ASSET.sha256" -Raw).Trim()
+          $expected = ($line -split '\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash "assets\$env:ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "checksum mismatch for $env:ASSET" }
+
+      - name: Install the selected channel
+        id: install
+        env:
+          KIND: ${{ matrix.kind }}
+          ASSET: ${{ matrix.asset }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        shell: pwsh
+        run: |
+          $asset = if ($env:ASSET) { Join-Path $PWD "assets\$env:ASSET" } else { $null }
+          switch ($env:KIND) {
+            'msi-global' {
+              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+              if ($p.ExitCode -ne 0) { throw "Global MSI failed: $($p.ExitCode)" }
+              $exe = "$env:ProgramFiles\tr300\bin\tr300.exe"
+            }
+            'msi-corporate' {
+              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+              if ($p.ExitCode -ne 0) { throw "Corporate MSI failed: $($p.ExitCode)" }
+              $exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
+            }
+            'exe-global' {
+              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+              if ($p.ExitCode -ne 0) { throw "Global EXE failed: $($p.ExitCode)" }
+              $exe = "$env:ProgramFiles\tr300\bin\tr300.exe"
+            }
+            'exe-corporate' {
+              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+              if ($p.ExitCode -ne 0) { throw "Corporate EXE failed: $($p.ExitCode)" }
+              $exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
+            }
+            'powershell' {
+              $p = Start-Process powershell.exe -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $asset)
+              if ($p.ExitCode -ne 0) { throw "PowerShell installer failed: $($p.ExitCode)" }
+              $exe = "$HOME\.cargo\bin\tr300.exe"
+            }
+            'cargo' {
+              cargo install tr300 --version $env:VERSION --force --locked
+              if ($LASTEXITCODE -ne 0) { throw "cargo install failed" }
+              $exe = "$HOME\.cargo\bin\tr300.exe"
+            }
+            'portable' {
+              Expand-Archive -LiteralPath $asset -DestinationPath portable
+              $exe = (Get-ChildItem portable -Recurse -Filter tr300.exe | Select-Object -First 1).FullName
+            }
+          }
+          if (-not $exe -or -not (Test-Path $exe)) { throw "installed executable is missing" }
+          "exe=$exe" | Add-Content $env:GITHUB_OUTPUT
+
+      - name: Verify reports, channel, registration, PATH, and safe update result
+        env:
+          KIND: ${{ matrix.kind }}
+          EXPECTED_CHANNEL: ${{ matrix.channel }}
+          EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
+          EXE: ${{ steps.install.outputs.exe }}
+        shell: pwsh
+        run: |
+          $reported = (& $env:EXE --version).Trim()
+          if ($reported -ne "tr300 $env:EXPECTED_VERSION") { throw "unexpected version: $reported" }
+          (& $env:EXE --fast --json | ConvertFrom-Json) | Out-Null
+          & $env:EXE --fast --ascii | Out-Null
+
+          $stderr = Join-Path $env:RUNNER_TEMP 'update-stderr.txt'
+          $stdout = & $env:EXE update --json 2> $stderr
+          $exit = $LASTEXITCODE
+          $lines = @($stdout)
+          if ($lines.Count -ne 1) { throw "update stdout was not exactly one line/object" }
+          $update = $lines[0] | ConvertFrom-Json
+          if ($update.install_channel -ne $env:EXPECTED_CHANNEL) {
+            throw "expected channel $env:EXPECTED_CHANNEL, got $($update.install_channel)"
+          }
+          if ($env:KIND -eq 'portable') {
+            if ($exit -ne 2 -or $update.success -ne $false -or $update.requires_user_action -ne $true) {
+              throw "portable update did not fail safely"
+            }
+            if ($update.recovery_url -ne 'https://github.com/QubeTX/qube-machine-report/releases/latest') {
+              throw "portable recovery URL is not versionless latest"
+            }
+          } else {
+            if ($exit -ne 0 -or $update.success -ne $true -or $update.update_available -ne $false) {
+              throw "installed channel no-op update failed"
+            }
+            if ($update.requires_user_action -ne $false) { throw "no-op unexpectedly requires user action" }
+          }
+
+          $global = "$env:ProgramFiles\tr300\bin\tr300.exe"
+          $corporate = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
+          $cargo = "$HOME\.cargo\bin\tr300.exe"
+          $copies = @($global, $corporate, $cargo) | Where-Object { Test-Path $_ }
+          if ($env:KIND -ne 'portable' -and $copies.Count -ne 1) {
+            throw "expected one active installed copy, found $($copies.Count): $copies"
+          }
+
+          if ($env:KIND -match '^(msi|exe)-' -or $env:KIND -eq 'powershell') {
+            $scope = if ($env:KIND -like '*-global') { 'Machine' } else { 'User' }
+            $expectedDir = (Split-Path $env:EXE -Parent).TrimEnd('\')
+            $persistedPath = [Environment]::GetEnvironmentVariable('Path', $scope)
+            $pathEntries = @($persistedPath -split ';') | ForEach-Object { $_.Trim().TrimEnd('\') }
+            if ($pathEntries -notcontains $expectedDir) {
+              throw "$scope PATH does not contain the selected channel directory: $expectedDir"
+            }
+          }
+
+          if ($env:KIND -match '^(msi|exe)-') {
+            $marker = if ($env:KIND -like '*-global') { 'InstallSourceGlobal' } else { 'InstallSourceCorporate' }
+            $properties = Get-ItemProperty 'HKCU:\Software\TR300'
+            $markerProperty = $properties.PSObject.Properties[$marker]
+            if (-not $markerProperty) { throw "scoped marker is missing: $marker" }
+            $value = $markerProperty.Value
+            if ($value -ne $env:EXPECTED_CHANNEL) { throw "scoped marker mismatch: $value" }
+            $display = if ($env:KIND -like '*-corporate') { 'tr300 (Corporate Edition)' } else { 'tr300' }
+            $entries = @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object DisplayName -EQ $display
+            if (@($entries).Count -ne 1) { throw "expected one $display registration" }
+
+            # Prove the documented legacy recovery path: a very old or damaged
+            # install may have its executable/ARP identity but no marker. Delete
+            # both values and require one unambiguous registered product to
+            # recover the exact MSI/Inno format and edition without mutation.
+            Remove-ItemProperty 'HKCU:\Software\TR300' -Name $marker -ErrorAction SilentlyContinue
+            Remove-ItemProperty 'HKCU:\Software\TR300' -Name InstallSource -ErrorAction SilentlyContinue
+            $recoveredStdout = & $env:EXE update --json 2> $stderr
+            $recoveredExit = $LASTEXITCODE
+            $recoveredLines = @($recoveredStdout)
+            if ($recoveredLines.Count -ne 1) { throw "recovery stdout was not one JSON object" }
+            $recovered = $recoveredLines[0] | ConvertFrom-Json
+            if ($recoveredExit -ne 0 -or $recovered.install_channel -ne $env:EXPECTED_CHANNEL) {
+              throw "missing-marker ARP recovery failed for $env:KIND"
+            }
+            if ($recovered.install_origin -ne $env:EXPECTED_CHANNEL) {
+              throw "missing-marker origin recovery crossed channels: $($recovered.install_origin)"
+            }
+          }
+
+      - name: Uninstall and verify cleanup
+        if: always() && steps.install.outputs.exe != ''
+        env:
+          KIND: ${{ matrix.kind }}
+          EXE: ${{ steps.install.outputs.exe }}
+        shell: pwsh
+        run: |
+          if ($env:KIND -like 'msi-*') {
+            $display = if ($env:KIND -eq 'msi-corporate') { 'tr300 (Corporate Edition)' } else { 'tr300' }
+            $entry = @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object { $_.DisplayName -eq $display -and $_.WindowsInstaller -eq 1 } | Select-Object -First 1
+            if (-not $entry) { throw "MSI registration missing before uninstall" }
+            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+            if ($p.ExitCode -ne 0) { throw "MSI uninstall failed: $($p.ExitCode)" }
+          } elseif ($env:KIND -like 'exe-*') {
+            $root = Split-Path (Split-Path $env:EXE -Parent) -Parent
+            $uninstaller = Join-Path $root 'unins000.exe'
+            if (-not (Test-Path $uninstaller)) { throw "Inno uninstaller missing" }
+            $p = Start-Process $uninstaller -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            if ($p.ExitCode -ne 0) { throw "EXE uninstall failed: $($p.ExitCode)" }
+          } elseif ($env:KIND -eq 'powershell') {
+            Remove-Item -LiteralPath $env:EXE -Force
+            Remove-Item -LiteralPath "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Force -ErrorAction SilentlyContinue
+          } elseif ($env:KIND -eq 'cargo') {
+            cargo uninstall tr300
+            if ($LASTEXITCODE -ne 0) { throw "cargo uninstall failed" }
+          }
+          if ($env:KIND -ne 'portable' -and (Test-Path $env:EXE)) {
+            throw "binary remains after uninstall: $env:EXE"
+          }
+          if ($env:KIND -match '^(msi|exe)-') {
+            $scope = if ($env:KIND -like '*-global') { 'Machine' } else { 'User' }
+            $removedDir = (Split-Path $env:EXE -Parent).TrimEnd('\')
+            $persistedPath = [Environment]::GetEnvironmentVariable('Path', $scope)
+            $pathEntries = @($persistedPath -split ';') | ForEach-Object { $_.Trim().TrimEnd('\') }
+            if ($pathEntries -contains $removedDir) {
+              throw "$scope PATH still contains the uninstalled channel directory: $removedDir"
+            }
+          }
+
+  fresh-format-choice:
+    name: Fresh ${{ matrix.name }} format choice
+    needs: resolve
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Global
+            msi: tr300-x86_64-pc-windows-msvc.msi
+            exe: tr300-x86_64-pc-windows-msvc-setup.exe
+            display: tr300
+            marker: InstallSourceGlobal
+          - name: Corporate
+            msi: tr300-x86_64-pc-windows-msvc-corporate.msi
+            exe: tr300-x86_64-pc-windows-msvc-corporate-setup.exe
+            display: tr300 (Corporate Edition)
+            marker: InstallSourceCorporate
+    steps:
+      - name: Download both exact tagged formats
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          MSI: ${{ matrix.msi }}
+          EXE: ${{ matrix.exe }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force assets | Out-Null
+          gh release download $env:TAG --repo '${{ github.repository }}' --dir assets `
+            --pattern $env:MSI --pattern "$env:MSI.sha256" `
+            --pattern $env:EXE --pattern "$env:EXE.sha256"
+
+      - name: Verify newest explicit format owns the edition
+        env:
+          MSI: ${{ matrix.msi }}
+          EXE: ${{ matrix.exe }}
+          DISPLAY: ${{ matrix.display }}
+          MARKER: ${{ matrix.marker }}
+        shell: pwsh
+        run: |
+          function Entries {
+            @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object DisplayName -EQ $env:DISPLAY
+          }
+          function Install-Msi {
+            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', (Join-Path $PWD "assets\$env:MSI"), '/qn', '/norestart')
+            if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
+          }
+          function Install-Exe {
+            $p = Start-Process (Join-Path $PWD "assets\$env:EXE") -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            if ($p.ExitCode -ne 0) { throw "EXE install failed: $($p.ExitCode)" }
+          }
+          function Remove-Current {
+            $entry = @(Entries)[0]
+            if ($entry.WindowsInstaller -eq 1) {
+              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+            } else {
+              if ($entry.UninstallString -notmatch '^"([^"]+)"$') {
+                throw "unexpected Inno uninstall command: $($entry.UninstallString)"
+              }
+              $uninstaller = $Matches[1]
+              $p = Start-Process $uninstaller -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            }
+            if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          }
+
+          Install-Msi
+          Install-Exe
+          $entries = @(Entries)
+          if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -eq 1) {
+            throw "fresh EXE did not replace the same-edition MSI registration"
+          }
+          $properties = Get-ItemProperty 'HKCU:\Software\TR300'
+          if ($properties.PSObject.Properties[$env:MARKER].Value -notlike 'exe-*') {
+            throw "fresh EXE marker did not win"
+          }
+          Remove-Current
+
+          Install-Exe
+          Install-Msi
+          $entries = @(Entries)
+          if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -ne 1) {
+            throw "fresh MSI did not replace the same-edition EXE registration"
+          }
+          $properties = Get-ItemProperty 'HKCU:\Software\TR300'
+          if ($properties.PSObject.Properties[$env:MARKER].Value -notlike 'msi-*') {
+            throw "fresh MSI marker did not win"
+          }
+          Remove-Current
+          if (@(Entries).Count -ne 0) { throw "registration remains after final uninstall" }

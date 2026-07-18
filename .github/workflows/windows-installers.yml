@@ -23,7 +23,7 @@
 #   ↓ (workflow_run trigger on Release completion)
 #   windows-installers.yml (this file) → uploads the remaining 6 assets
 #       (Corporate MSI + 2 EXEs + their .sha256 sidecars).
-# Final release has 28 assets.
+# The native macOS workflow later adds its DMG + sidecar. Final release: 30.
 #
 # If install paths or registry-marker values change in wix/*.wxs,
 # wix-corporate/*.wxs, or inno/*.iss, update
@@ -277,14 +277,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          # --clobber so we can re-run this workflow if the release upload
-          # fails mid-flight without manually deleting old assets first.
+          # Tagged release bytes are immutable. If a prior attempt uploaded any
+          # same-named asset, fail closed and ship a fix-forward version.
           gh release upload "${{ steps.tag.outputs.tag }}" `
             "target\wix\tr300-x86_64-pc-windows-msvc-corporate.msi" `
             "target\wix\tr300-x86_64-pc-windows-msvc-corporate.msi.sha256" `
             "inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe" `
             "inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe.sha256" `
             "inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe" `
-            "inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe.sha256" `
-            --clobber
+            "inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe.sha256"
           Write-Host "✓ Uploaded 6 assets to ${{ steps.tag.outputs.tag }}"
