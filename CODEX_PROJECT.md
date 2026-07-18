@@ -82,7 +82,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   format changes remove the same-edition competing registration first. Inno
   uses supported registry enumeration with exact scope/name/publisher/native-
   installer/GUID evidence; it does not call the Windows Installer DLL from
-  Pascal Script.
+  Pascal Script. The reverse MSI takeover reads the exact Inno AppId's full
+  registered `UninstallString`; a relative uninstaller name is invalid for a
+  Windows Installer Type 34 action.
 - The native macOS artifact is a universal signed `tr300.pkg` inside a signed,
   notarized, stapled DMG. The PKG owns `/usr/local/bin/tr300` and the stable
   `com.qubetx.tr300.pkg` receipt used by future updates; receipt ID/version,

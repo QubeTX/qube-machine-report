@@ -141,7 +141,12 @@ recognized prior-version updates need their exact JSON/stderr preserved before
 diagnosis. v4.1.2 removes the DLL bridge in favor of supported exact-scope ARP
 registry evidence, emits strategy diagnostics, and adds real prior-version
 same-channel updates and portable recovery to the disposable matrix, and is the
-complete 30-asset distribution target. v4.1.0 and v4.1.1 remain untouched.
+complete 30-asset distribution target. Pre-tag CI 29642491361 then proved the
+supported MSI-to-EXE direction and isolated the reverse failure: the MSI
+custom action supplied a relative Inno uninstaller name where Windows Installer
+Type 34 requires a full executable path. Both MSIs now use the exact AppId
+registration's full `UninstallString` from the matching registry scope before
+writing MSI files. v4.1.0 and v4.1.1 remain untouched.
 
 1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,

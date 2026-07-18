@@ -226,6 +226,7 @@ enum StrategyError {
     PolicyBlocked(String),
 }
 
+#[cfg(windows)]
 impl StrategyError {
     fn append(self, detail: impl AsRef<str>) -> Self {
         let detail = detail.as_ref();
@@ -1529,15 +1530,19 @@ fn post_install_version_ok(installed: &str, expected: &str) -> bool {
 /// process errors, or the output doesn't parse. Cross-platform — used by both
 /// the Windows installer verify and the cargo-path verify.
 fn reexec_installed_version() -> Option<String> {
-    let mut exe = std::env::current_exe().ok()?;
+    let exe = std::env::current_exe().ok()?;
     #[cfg(windows)]
-    if exe
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(is_windows_update_backup_name)
-    {
-        exe.set_file_name("tr300.exe");
-    }
+    let exe = {
+        let mut exe = exe;
+        if exe
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_windows_update_backup_name)
+        {
+            exe.set_file_name("tr300.exe");
+        }
+        exe
+    };
     let output = Command::new(&exe).arg("--version").output().ok()?;
     if !output.status.success() {
         return None;

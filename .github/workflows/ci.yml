@@ -419,7 +419,10 @@ jobs:
             Install-Msi $case.Msi
             $entries = @(Entries $case.Display)
             if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -ne 1) {
-              throw "current $($case.Name) MSI did not take over its EXE"
+              $summary = $entries | ForEach-Object {
+                "key=$($_.PSChildName) windowsInstaller=$($_.WindowsInstaller) uninstall=$($_.UninstallString)"
+              }
+              throw "current $($case.Name) MSI did not take over its EXE: $summary"
             }
             $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
             if ($marker -notlike 'msi-*') { throw "current MSI marker did not win: $marker" }

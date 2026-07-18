@@ -84,11 +84,11 @@
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='tr300 Installation'/>
-        <Property Id='CONFLICTING_INNO_INSTALLED'>
+        <Property Id='CONFLICTING_INNO_UNINSTALL'>
             <RegistrySearch Id='FindConflictingGlobalInno'
                 Root='HKLM'
                 Key='Software\Microsoft\Windows\CurrentVersion\Uninstall\{AB14223F-2693-4EC2-824F-BF53CC32D061}_is1'
-                Name='DisplayVersion'
+                Name='UninstallString'
                 Type='raw'
                 Win64='yes'/>
         </Property>
@@ -234,10 +234,13 @@
             Return='ignore'/>
         <!-- An explicit MSI install is the user's newest channel choice. Remove
              the same-edition Inno product before MSI writes shared-path files,
-             preventing duplicate ARP registrations and a stale uninstaller. -->
+             preventing duplicate ARP registrations and a stale uninstaller.
+             Type 34 requires a full executable path, so use the exact Inno
+             AppId registration's UninstallString rather than assuming a
+             relative unins000.exe resolves from the application directory. -->
         <CustomAction Id='RemoveConflictingInno'
-            Directory='APPLICATIONFOLDER'
-            ExeCommand='&quot;unins000.exe&quot; /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
+            Directory='TARGETDIR'
+            ExeCommand='[CONFLICTING_INNO_UNINSTALL] /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
             Execute='deferred'
             Impersonate='no'
             Return='check'/>
@@ -250,7 +253,7 @@
 
         <InstallExecuteSequence>
             <Custom Action='RemoveConflictingInno' Before='InstallFiles'>
-                <![CDATA[CONFLICTING_INNO_INSTALLED AND NOT REMOVE~="ALL"]]>
+                <![CDATA[CONFLICTING_INNO_UNINSTALL AND NOT REMOVE~="ALL"]]>
             </Custom>
             <Custom Action='CleanCargoCopy' Before='InstallFinalize'>
                 <![CDATA[NOT Installed AND CLEANCARGO="1"]]>

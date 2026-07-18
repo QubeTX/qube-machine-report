@@ -403,6 +403,15 @@ could not reveal:
   based on durable native registration rather than only the current
   UpgradeCode, the transition also covers older official MSI registrations
   that retain the same product identity.
+- The reverse fresh transition has its own native-launch contract. Hosted
+  source gate 29642491361 proved EXE-to-MSI left both registrations even though
+  the exact Inno AppId search existed: a WiX Type 34 custom action requires the
+  executable's full path, while the package supplied only a relative
+  `unins000.exe`. Each MSI now reads the exact AppId registration's full
+  `UninstallString`, formats that path into the checked deferred action, and
+  runs it from `TARGETDIR` before MSI files are written. The registered path is
+  in machine scope for Global and user scope for Corporate, matching the
+  privilege context that executes it.
 - Starting legacy `powershell.exe` as a child of `pwsh` inherits the parent's
   `PSModulePath`. On current Windows runners that can make Windows PowerShell
   discover PowerShell 7's incompatible `Microsoft.PowerShell.Security` module

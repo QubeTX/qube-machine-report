@@ -37,7 +37,12 @@ as passed.
   DLL bridge in favor of supported exact ARP registry evidence, and makes the
   hosted matrix install a prior complete stable release before exercising real
   same-channel update, current no-op, older-portable recovery, takeover, and
-  uninstall behavior.
+  uninstall behavior. Exact-SHA CI 29642491361 then passed workflow semantics
+  and proved current MSI→EXE takeover before stopping on two target-gating
+  warnings and the reverse Global EXE→MSI transition. The latter showed that
+  the MSI's Type 34 action had only a relative uninstaller name; both MSI
+  sources now read the exact Inno AppId registration's full `UninstallString`
+  and launch it from a neutral directory before writing MSI files.
 - **Current local evidence:** formatting, actionlint 1.7.12, ShellCheck 0.11.0,
   Git Bash syntax, warning-denying all-target/all-feature Clippy, 153 unit
   tests, 19 integration tests, locked release build, RustSec audit (221 locked
