@@ -26,6 +26,12 @@ documentation reconciliation, and immutable release proof remain open.
   `! command`/`errexit` checks with ordinary fail-closed conditionals. Windows
   installer source/transition/rollback gates passed in that run; the complete
   exact-SHA matrix must now repeat on the fix-forward commit (agent: codex)
+- 2026-07-18 — second exact-SHA CI run 29662005364 proved every native Apple,
+  Windows, Linux, performance, audit, and real Windows installer source job,
+  but stopped before tagging because ShellCheck directives do not accept a
+  trailing prose suffix after `disable=SC2016`. Moved each explanation to its
+  own preceding comment and retained the narrowly scoped directive; the final
+  exact-SHA matrix still must pass as a whole (agent: codex)
 
 ## Intent
 

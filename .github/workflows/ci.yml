@@ -263,7 +263,8 @@ jobs:
           grep -Fq 'rollback_managed' "$builder"
           grep -Fq 'mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh' "$release"
           grep -Fq 'mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1' "$release"
-          # shellcheck disable=SC2016 -- the PowerShell expression is literal fixture text
+          # The PowerShell expression below is literal fixture text.
+          # shellcheck disable=SC2016
           grep -Fq 'Switching TR-300 ownership from $($Product.Channel) to powershell-installer' "$powershell_wrapper"
           grep -Fq 'Restore-Tr300ManagedState' "$powershell_wrapper"
           grep -Fq "ExeCommand='migrate-cleanup --quiet --strict --cargo-copy'" wix/main.wxs wix-corporate/corporate.wxs
@@ -283,7 +284,8 @@ jobs:
             echo 'current updater must open the direct PKG without mounting a DMG' >&2
             exit 1
           fi
-          # shellcheck disable=SC2016 -- require the literal workflow interpolation prefix
+          # Require the literal workflow interpolation prefix.
+          # shellcheck disable=SC2016
           grep -Fq 'TeamIdentifier=$' "$workflow"
           grep -Fq 'vars.APPLE_TEAM_ID' "$workflow"
           grep -Fq 'github.event.workflow_run.head_sha' "$windows_validation"

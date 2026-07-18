@@ -89,6 +89,14 @@ as passed.
   removes the unused API, annotates only the exact literal fixtures, and uses
   explicit receipt-present conditionals. No v4.2.0 tag or public artifact was
   created from the failed SHA.
+- **Second exact-SHA hosted attempt:** source
+  `46f0d3f07f271537622f7d5a795acdcde8700c53` passed native Intel/ARM Mac
+  build/tests, all Windows/Linux Rust and performance jobs, RustSec, and the
+  complete real Windows installer source/transition/rollback matrix. CI run
+  29662005364 stopped only because ShellCheck directive grammar rejects prose
+  after `disable=SC2016`. The fix-forward places the explanation on a separate
+  comment and keeps the narrow directive. No tag, crate publish, or v4.2.0
+  release was produced from this SHA.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast
