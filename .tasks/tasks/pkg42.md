@@ -2,8 +2,8 @@
 
 ## Status
 
-Active. Direct-PKG source/workflows are implemented; native hosted credentials,
-signing/notary/install/update/bridge evidence and publication remain open.
+Done. v4.2.2 publishes the direct PKG and byte-identical compatibility DMG;
+native Intel/ARM trust, lifecycle, legacy bridge, and public-byte gates pass.
 
 ## Activity
 
@@ -26,6 +26,12 @@ signing/notary/install/update/bridge evidence and publication remain open.
   postinstall extract and pass ShellCheck independently; the full executable
   workflow guard also passes locally. Native Apple Installer proof remains the
   release-blocking gate (agent: codex)
+- 2026-07-18 — native run 29664824418 passed Installer identity, universal
+  architecture, sign/notary/staple/Gatekeeper, direct install, receipt/file
+  ownership, malformed-owner pre-payload rejection, uninstall, byte equality,
+  and immutable v4.1.3 DMG-client bridge checks on Intel and Apple Silicon.
+  All four assets published and passed the 34-asset fresh public audit; the
+  production homepage advertises only the direct PKG (agent: codex)
 
 ## Intent
 
@@ -46,14 +52,13 @@ exposes a GUI-only defect.
   `preinstall`, before Apple Installer can place the package payload.
 - [x] Both generated package lifecycle scripts receive independent pre-tag
   ShellCheck instead of hiding inside quoted builder heredocs.
-- [ ] Native Intel and Apple Silicon direct package lifecycle passes.
-- [ ] Immutable v4.1.3 DMG updater crosses to the final release on both runners.
-- [ ] Direct PKG/sidecar and compatibility DMG/sidecar publish without clobber.
-- [ ] Final public checksums, signatures, tickets, receipts, and 34 assets pass.
+- [x] Native Intel and Apple Silicon direct package lifecycle passes.
+- [x] Immutable v4.1.3 DMG updater crosses to the final release on both runners.
+- [x] Direct PKG/sidecar and compatibility DMG/sidecar publish without clobber.
+- [x] Final public checksums, signatures, tickets, receipts, and 34 assets pass.
 
 ## Resume
 
-After the clean-tree exact-SHA CI/crates gates pass, tag v4.2.2 and require both
-native architectures to finish the complete package and legacy bridge lifecycle
-before the publisher attaches the PKG/DMG pairs. Audit fresh public bytes; do not
-substitute Windows emulation or a physical Mac for a failed native runner.
+Released and closed. Reopen for any package payload, receipt, signing identity,
+notary, runner-image, updater transport, or bridge-retirement change. Native
+Intel/ARM CI remains blocking; a physical Mac remains optional visual smoke.

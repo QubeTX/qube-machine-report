@@ -1,19 +1,20 @@
 # Handoff: v4 release, origin-preserving updates, and fleet continuation
 
-**Date:** 2026-07-14–17 CDT
+**Date:** 2026-07-14–18 CDT
 **Session:** 002
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete GitHub distribution / crates.io and incomplete release / working version:** `4.1.3` / `4.2.1` / `4.2.2` candidate (all prior tags remain immutable)
-**Prior pushed checkpoint:** `7422b3c68f19e08b22f6ca8495efddd23042aeb9`
-**Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
-**Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
-Windows Installers 29392382949
-**Task IDs:** `#mic1`, `#pkg42`, `#v42`, `#v400`, `#core`, `#plat`,
-`#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`, `#adrlog`
+**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.2.2` / `4.2.2` (all prior tags remain immutable)
+**Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
+**Release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
+**Hosted run IDs:** CI 29664547910; crates 29664653519; cargo-dist 29664688035;
+native macOS 29664824418; Windows Installers 29664824432; Windows transitions 29664948031
+**Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
+`#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
+`#adrlog`
 
 This is the exhaustive portable continuation record. The SHAUGHV board source,
 milestones, and task details under `.tasks/` are Git-tracked; only runtime and
@@ -114,7 +115,48 @@ lifecycle guard exposed a ShellCheck-version difference: hosted ShellCheck
 labels the intentionally trap-only rollback body SC2317 while the newer local
 build labels it SC2329. The callback now carries one scoped annotation for both
 diagnostics and remains covered by the executable rollback fixture. The failed
-CI prevented crates publication; no v4.2.2 tag or release was created.
+CI prevented crates publication; no v4.2.2 tag or release was created from
+that failed SHA.
+
+## 2026-07-18 v4.2.2 release closure and public deployment
+
+Final source `db0f538c82961569a7118b105a20e967b15476f0` passed the clean-tree
+39-file package list, locked publish dry run, exact-SHA CI 29664547910, crates
+29664653519, Release 29664688035, native macOS 29664824418, Windows packaging
+29664824432, and the full 14-job Windows transition matrix 29664948031.
+crates.io serves v4.2.2 with checksum
+`1e2aff33305a7eb31ed8ef54691a69de3c101435d8c88a320729940bb9f2f5c1`.
+The annotated v4.2.2 tag peels to that exact source.
+
+The GitHub release has exactly 34 nonempty stable-name assets. Fresh downloads
+matched API digests, every SHA sidecar, and `sha256.sum`; public wrapper bytes
+contain the exact tag and no placeholder. Versionless latest URLs for both
+managed wrappers, all four Windows installers, the universal direct PKG, and
+the compatibility DMG match the immutable tagged bytes. Homepage PR #12 merged
+as `4829c4430ee917bcb1508c2ea7ac87988ba5e055`; Vercel and a fresh production
+browser confirmed the CLI-first copy, direct-PKG link, and corrected `main`
+documentation links with no console errors. The DMG remains public only for
+legacy updater compatibility and is not advertised.
+
+Native Intel and Apple Silicon runners passed Installer-identity preflight,
+universal architecture/signature, direct-PKG and compatibility-DMG sign/notary/
+staple/Gatekeeper, install/receipt/file-owner/report/update/uninstall, malformed
+managed-owner rejection before payload, byte equality, and immutable v4.1.3
+DMG-client-to-v4.2.2 bridge gates. A physical Mac is not a release requirement;
+reuse this exact trust/install/receipt/duplicate/JSON sequence for an optional
+visible Installer acceptance or an ND-300 physical handoff.
+
+The Alienware's natural Global MSI remains v4.1.3. The final requested v4.2.2
+retry resolved and pinned the exact same-channel Global MSI, then UAC was
+cancelled. The updater returned exit 2 and exactly one JSON object with
+`install_channel`/`install_origin` `msi-global`, exact and latest recovery URLs,
+and `requires_user_action: true`; no installed state changed and no UAC/MSI/
+Setup/TR-300 process remains. This is valid safe-cancellation evidence, not a
+successful physical update. Two older inert TR-300-only temp fixtures were
+inspected, removed by exact path, and the final `tr300-update-*` staging scan is
+empty. Task #w422 owns the user-approved retry and full
+post-update matrix. Keep the ND-300 Alienware installer lane queued behind it
+so native installer work does not overlap again.
 
 ## 2026-07-18 v4.1.3 Global Windows live-image fix-forward
 

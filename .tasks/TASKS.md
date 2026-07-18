@@ -6,26 +6,27 @@
 
 - [ ] **Validate TR-300 on the AMD64 Linux laptop** - full/fast reports, shell/Cargo update preservation, permissions, networking, and graceful optional probes (ms #hw4) #amd
 - [ ] **Validate TR-300 on Raspberry Pi 4 ARM64** - native ARM asset, full/fast reports, shell/Cargo updates, permissions, networking, and graceful optional probes (ms #hw4) #pi4
-- [ ] **Hand off the bounded ND-300 v3.7.3 native-installer acceptance lanes** - only after TR-300 is complete and no installer/UAC process remains; run the Alienware lane first, then reuse the proven legacy-DMG-to-direct-PKG Mac procedure only when the user is on the testing Mac (needs #v42) (ms #hw4) #nd372
+- [ ] **Complete the Alienware Global MSI v4.1.3 → v4.2.2 UAC update** - approve the same-channel transaction, then reprove one Program Files owner, registry/PATH, cleanup, JSON, functionality, and hardware (needs #v42) (ms #hw4) #w422
+- [ ] **Hand off the bounded ND-300 v3.7.3 native-installer acceptance lanes** - only after TR-300 is complete and no installer/UAC process remains; run the Alienware lane first, then reuse the proven legacy-DMG-to-direct-PKG Mac procedure only when the user is on the testing Mac (needs #w422) (ms #hw4) #nd372
 
 ## Active
 
-- [ ] **Codify and ship MIC-1 managed installation behavior** - make CLI installers the documented default, preserve update origin, make fresh managed intent authoritative, and fail closed across unsupported native scope transitions (ms #v42) (owner codex) #mic1
+## Done
+
+- [x] **Codify and ship MIC-1 managed installation behavior** - make CLI installers the documented default, preserve update origin, make fresh managed intent authoritative, and fail closed across unsupported native scope transitions (ms #v42) (owner codex) (done 2026-07-18) #mic1
   - [x] Define the reusable managed-install/update state machine and raw-Cargo boundary
   - [x] Add stable public wrappers over exact-tag cargo-dist installer transactions
   - [x] Add Windows native-to-PowerShell and Mac shell/PKG convergence paths
   - [x] Make cross-edition native Windows packages stop before unsafe mutation
   - [x] Pass local Rust/script/package-plan/installer-source and Alienware candidate gates
-  - [ ] Pass hosted Windows/macOS/Linux transition jobs
+  - [x] Pass hosted Windows/macOS/Linux transition jobs
   - [x] Reconcile README, changelogs, ADR, testing, plans, handoff, and agent guides
-- [ ] **Publish direct universal PKG with the v4.1.x DMG bridge** - make the signed PKG the current Mac package/update artifact without stranding immutable DMG clients (ms #v42) (owner codex) #pkg42
+- [x] **Publish direct universal PKG with the v4.1.x DMG bridge** - make the signed PKG the current Mac package/update artifact without stranding immutable DMG clients (ms #v42) (owner codex) (done 2026-07-18) #pkg42
   - [x] Change current Mac updater selection from exact DMG to exact direct PKG
   - [x] Build one signed/notarized/stapled PKG plus byte-identical compatibility DMG
   - [x] Add native Intel/ARM direct install, bidirectional CLI takeover, and legacy bridge jobs
-  - [ ] Pass Apple credential, package, updater, bridge, and publication gates
-  - [ ] Audit the final 34-asset immutable release
-
-## Done
+  - [x] Pass Apple credential, package, updater, bridge, and publication gates
+  - [x] Audit the final 34-asset immutable release
 
 - [x] **Validate the public v4.1.3 Global MSI on the Alienware** - update the natural 4.0.1 installation, then re-run functionality, origin, cleanup, PATH, hardware, code-page, save, and performance evidence (needs #rsh) (ms #v41) (owner codex) (done 2026-07-18) #w413
   - [x] Complete the one-UAC Global MSI update and capture installed-success evidence

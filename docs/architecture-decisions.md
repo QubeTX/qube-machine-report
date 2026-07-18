@@ -21,6 +21,7 @@
 - [Decision ledger status (through v4.2.2)](#decision-ledger-status-through-v422)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
+  - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
   - [Latest discovery, immutable installation](#latest-discovery-immutable-installation)
   - [Install channel is product state](#install-channel-is-product-state)
   - [Fresh installer intent and legacy consolidation](#fresh-installer-intent-and-legacy-consolidation)
@@ -264,6 +265,47 @@ assets. Otherwise a legitimate historical baseline becomes impossible merely
 because the new release expands its artifact family. Current publication still
 uses the complete current contract. v4.2.2 encodes those two distinct lists and
 keeps the selected previous tag and SHA immutable for the transition job.
+
+### v4.2.2 release closure and evidence boundary
+
+MIC-1 and the direct-PKG decision became released, copyable product policy in
+v4.2.2. Exact source `db0f538c82961569a7118b105a20e967b15476f0`
+passed clean-tree package/publish dry runs, exact-SHA CI 29664547910, crates
+29664653519, cargo-dist Release 29664688035, native macOS 29664824418,
+Windows packaging 29664824432, and all 14 isolated Windows transition jobs in
+29664948031. crates.io checksum is
+`1e2aff33305a7eb31ed8ef54691a69de3c101435d8c88a320729940bb9f2f5c1`.
+The public release contains exactly 34 nonempty stable-name assets. Fresh
+downloads matched GitHub digests, sidecars, the aggregate checksum, and each
+versionless latest entrypoint; both public wrappers rendered one immutable
+v4.2.2 tag and no placeholder.
+
+The Apple gate is deliberately native and two-architecture. Both
+`macos-15-intel` and `macos-15` imported the dedicated Installer identity,
+verified the universal executable, direct PKG, and compatibility DMG, and
+passed signature, notary, staple, Gatekeeper, install, receipt/file ownership,
+update selection, malformed-owner pre-payload rejection, uninstall, and an
+immutable v4.1.3 DMG-client-to-v4.2.2 bridge. This is sufficient release proof
+without a physical Mac. A physical Mac is optional visual acceptance and
+becomes blocking only when native CI exposes a defect that cannot be observed
+without the visible Installer UI.
+
+The Alienware evidence boundary remains equally explicit. Hosted Windows jobs
+prove every disposable installer family and transition. The physical machine
+proves its long-lived registration, PATH, hardware, and terminal state only
+after a real UAC-approved transaction. Its final v4.1.3-to-v4.2.2 attempt was
+cancelled at UAC and therefore retained the single v4.1.3 Global MSI while
+returning one failure JSON object and recovery links. That cancellation is
+positive safe-failure evidence but is not a successful physical update. It
+does not invalidate the immutable release; it remains task `#w422` under the
+personal-hardware milestone and must be rerun only with the user present.
+
+This closure fixes the reusable proof hierarchy for sibling CLI products:
+source/unit gates establish logic, clean package gates establish publishable
+source, isolated hosted native matrices establish release portability and
+installer transactions, fresh public-byte checks establish distribution, and
+personal hardware establishes only the device-specific facts it actually
+observed. No layer may be promoted into evidence supplied by another layer.
 
 ### Latest discovery, immutable installation
 

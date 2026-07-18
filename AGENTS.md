@@ -37,38 +37,28 @@ Never put secrets in board or memory files; use environment variables, the OS ke
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current complete GitHub distribution: `4.1.3`; current crates.io package and
-  latest incomplete GitHub Release: `4.2.1`; working manifest: `4.2.2`
-  candidate (`Cargo.toml`). Exact v4.2.1 source
-  `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed CI/crates, all six release
-  targets, both Apple archive sign/notary jobs, release hosting, and Windows
-  packaging. Its native Intel/ARM package gate then proved the malformed-
-  receipt check ran after the PKG payload had landed, so it withheld all four
-  Mac assets. The Windows transition resolver also required a v4.2-only
-  internal script from its v4.1.3 baseline. The 30-asset release/tag/crate stay
-  immutable; v4.2.2 moves strict Mac ownership proof into a signed preinstall
-  dry run and separates current versus historical Windows asset contracts.
-  v4.1.3 passed exact-SHA CI/crates, signed archives, every
-  Windows package and transition job, and universal PKG-in-DMG
-  sign/notary/install/update/uninstall
-  gates on native Intel and Apple Silicon. It fixes the immutable v4.1.2
-  finding that Restart Manager could terminate a Global installer updater
-  before final JSON by using a strict elevated live-image worker. Alienware
-  public-binary and installed functionality/hardware validation is real
-  evidence; its natural Global MSI completed the v4.0.1 to v4.1.3 same-channel
-  UAC transition with one Program Files copy/registration/PATH.
+- Current published version and working manifest: `4.2.2` (`Cargo.toml`).
+  v4.2.2 passed exact-SHA CI/crates, signed archives, every Windows package and
+  transition job, and universal PKG/compatibility-DMG sign/notary/install/
+  update/uninstall gates on native Intel and Apple Silicon. It fixes the
+  immutable v4.2.1 finding that strict Mac ownership rejection happened after
+  payload installation by using a signed `preinstall` probe, and separates the
+  current Windows asset contract from historical baseline requirements.
+  Alienware public-binary functionality/hardware validation is real evidence;
+  its natural Global MSI remains v4.1.3 until the user completes the final
+  v4.2.2 UAC ceremony.
   AMD64 Linux laptop and Raspberry Pi 4 live verification remain open. The
   major v4 boundary
   is required because public Rust records gained fields and collector helpers
   changed signature; the CLI and additive schema-v1 JSON stay compatible.
   Changed public records are `#[non_exhaustive]`.
 - Last fully published distribution state: release source
-  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed exact-SHA CI/crates,
+  `db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA CI/crates,
   both signed Apple archive jobs, all Windows packaging/transitions, and the
-  native Intel/ARM universal DMG publication workflow. The public release has
-  30 nonempty stable-name assets whose sidecars and versionless `latest`
+  native Intel/ARM universal direct-PKG/legacy-DMG workflow. The public release
+  has 34 nonempty stable-name assets whose sidecars and versionless `latest`
   entrypoints were audited against the immutable bytes. Homepage commit
-  `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
+  `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/`; exact evidence is in `TESTING.md` and the
   current handoff.
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)

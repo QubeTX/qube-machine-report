@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-07-18
-**Complete GitHub distribution / crates.io and incomplete release / working manifest:** 4.1.3 / 4.2.1 / 4.2.2 candidate
+**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.2.2
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
@@ -44,7 +44,7 @@ The `.tasks/` board, milestones, task details, and dashboard assets are tracked;
 only its runtime/secure state is gitignored. The board and tracked handoff are
 both pickup-ready on a fresh clone.
 
-## 2. v4.2.2 managed installation and direct-PKG fix-forward candidate
+## 2. v4.2.2 managed installation and direct-PKG release closure
 
 The v4.2 implementation is complete. Exact source
 `b61e8b8e5e5ac2c702625360f05b795a4d2b9006` passed v4.2.0 exact-SHA CI and
@@ -66,7 +66,7 @@ launched fresh installer is the user's newest channel choice. The release gate
 must prove observed final ownership rather than treating a child process exit
 as sufficient.
 
-### Candidate implementation
+### Released implementation
 
 - Windows recommends the versionless `tr300-installer.ps1` `irm` command. The
   rendered wrapper pins one resolved tag, invokes the renamed raw cargo-dist
@@ -99,28 +99,27 @@ as sufficient.
   old-to-new updater proof.
 - cargo-dist's raw scripts are published under stable internal names while the
   four public/legacy names are rendered MIC-1 wrappers. With the direct PKG,
-  its sidecar, and the two internal raw scripts, the candidate distribution is
+  its sidecar, and the two internal raw scripts, the distribution is
   exactly 34 stable-name assets.
 - Update stdout remains exactly one JSON object. The durable Mac channel string
   stays `macos-dmg-pkg` for existing consumers even though the current strategy
   is `mac_pkg`; changing a transport does not rewrite installation identity.
 
-### Candidate gate and publication boundary
+### Gate and publication evidence
 
-v4.2.1 passed CI 29663392937, crates 29663494252, release 29663533999, and
-Windows packaging 29663678096. macOS run 29663678097 signed/notarized the
-universal package but both native validators failed safely before attaching
-four assets. Windows transition run 29663781604 failed at legacy baseline
-selection before installation. v4.2.2 now passes the full local Rust, audit,
-cargo-dist, workflow/script, extracted PKG lifecycle, wrapper rollback,
-Windows source-package, resolver, and Alienware candidate-functionality gate
-set. It must still pass the clean committed-tree package/publish dry run,
-exact-SHA CI and crates publication,
-then tag only `v4.2.2`. Require every disposable Windows
-managed/native transition plus both native Apple package lifecycles; audit all
-34 public assets, checksums, Apple trust evidence, updater/recovery behavior,
-crates.io, and only then update the production homepage. Until those facts are
-recorded in `TESTING.md`, the complete GitHub distribution remains 4.1.3.
+Final source `db0f538c82961569a7118b105a20e967b15476f0` passed clean-tree
+package/publish dry runs, exact-SHA CI 29664547910, crates 29664653519,
+Release 29664688035, native Mac 29664824418, Windows packaging 29664824432,
+and the 14-job Windows transition matrix 29664948031. crates.io checksum is
+`1e2aff33305a7eb31ed8ef54691a69de3c101435d8c88a320729940bb9f2f5c1`.
+Fresh downloads proved all 34 stable-name assets nonempty, every sidecar and
+GitHub digest correct, both wrappers fully rendered, and every advertised
+`latest/download` entrypoint byte-identical to its immutable v4.2.2 asset.
+Native Intel and Apple Silicon jobs passed direct PKG install/ownership,
+malformed-receipt rejection before payload, sign/notary/staple/Gatekeeper,
+uninstall, and immutable-v4.1.3-DMG-client-to-v4.2.2 bridge checks. Homepage
+commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is deployed and advertises the
+direct PKG; the compatibility DMG remains unadvertised.
 
 ## 3. v4.1.3 Global-updater fix-forward outcome
 
@@ -405,12 +404,15 @@ runtime claims remain gated by the hardware matrix below.
 
 ### A. Personal Alienware / Windows
 
-**Status: complete.** The natural Global MSI v3.17.0 → v4.0.1 → v4.1.3
+**v4.1.3 evidence complete; v4.2.2 UAC continuation open.** The natural Global MSI v3.17.0 → v4.0.1 → v4.1.3
 path preserved the Program Files binary, Global markers, one MSI registration,
 and machine PATH without a duplicate. Public and installed reports confirmed
 16 physical, 22 logical, `6P + 10E`, both GPUs, and the remaining full/fast/
 table/JSON/manual-save, code-page, failure/recovery, cleanup, and performance
-rows.
+rows. Three v4.1.3 → v4.2.2 attempts reached the exact pinned Global MSI and
+cancelled safely at UAC; each left the sole v4.1.3 installation unchanged and
+returned the versionless recovery path. Repeat only when the user is present
+to approve UAC, then rerun the same one-copy/origin/PATH/functionality matrix.
 
 - OS edition/build/architecture and model/motherboard/BIOS
 - CPU model, physical/logical topology, socket count, frequency provenance, GPU
@@ -516,7 +518,7 @@ The v4.0.1 **release is complete**. Observed evidence satisfies every condition:
   release assets/self-update discovery are verified.
 - The homepage accurately reflects the deployed release and is live.
 
-The v4.2.2 fix-forward candidate is active. The v4.2.0 crate/tag and v4.2.1
-30-asset incomplete release/tag/crate are immutable. The broader
+The v4.2.2 release is complete. The v4.2.0 crate/tag and v4.2.1 30-asset
+incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
-this release.
+this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.

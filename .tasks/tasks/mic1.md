@@ -2,8 +2,8 @@
 
 ## Status
 
-Active. Source implementation is present; local and hosted transition evidence,
-documentation reconciliation, and immutable release proof remain open.
+Done. v4.2.2 is public; local, hosted, immutable-release, public-byte, homepage,
+and documentation evidence all satisfy MIC-1.
 
 ## Activity
 
@@ -76,6 +76,13 @@ documentation reconciliation, and immutable release proof remain open.
   Scoped the callback annotation to both version-dependent diagnostics and kept
   its executable rollback fixture. No crate, tag, or release was produced
   (agent: codex)
+- 2026-07-18 — final source `db0f538` passed CI 29664547910, crates
+  29664653519, Release 29664688035, native macOS 29664824418, Windows
+  packaging 29664824432, and all 14 Windows transition jobs in 29664948031.
+  Fresh audit proved 34 stable-name assets, exact checksums/digests/latest
+  entrypoints, fully rendered wrappers, and the deployed CLI-first homepage.
+  ADR, testing, plans, handoff, changelogs, README, and agent guidance now
+  encode the released contract (agent: codex)
 
 ## Intent
 
@@ -140,14 +147,13 @@ hook.
 - [x] Extracted PKG lifecycle scripts lint independently, and the Windows
   release resolver selects v4.1.3 under the historical contract without
   weakening the v4.2.2 current contract.
-- [ ] Hosted Windows exact-release jobs prove all four native-to-IRM takeovers.
-- [ ] Native Intel/ARM jobs prove shell-to-PKG and PKG-to-shell takeovers.
-- [ ] Published AMD64 Linux wrapper installs, receipts, and no-op-updates.
-- [ ] Final docs and 34-asset release audit agree with MIC-1.
+- [x] Hosted Windows exact-release jobs prove all four native-to-IRM takeovers.
+- [x] Native Intel/ARM jobs prove shell-to-PKG and PKG-to-shell takeovers.
+- [x] Published AMD64 Linux wrapper installs, receipts, and no-op-updates.
+- [x] Final docs and 34-asset release audit agree with MIC-1.
 
 ## Resume
 
-Run the v4.2.2 full clean-tree release sequence only after local fmt/clippy/tests/build,
-package/publish dry runs, audit, actionlint/shellcheck, WiX, and Inno gates pass.
-Do not use the Alienware's active Global MSI as a takeover fixture; disposable
-hosted Windows runners own that destructive matrix.
+Released and closed. Reopen only when a channel identity, wrapper transaction,
+installer scope, asset family, or recovery contract changes. The remaining
+Alienware/AMD/Pi tasks are personal-hardware evidence, not MIC-1 release gates.

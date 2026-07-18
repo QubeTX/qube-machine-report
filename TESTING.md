@@ -7,7 +7,39 @@ as passed.
 
 ## Per-version verification log
 
-### v4.2.2 — 2026-07-18 (candidate package-transaction fix-forward)
+### v4.2.2 — 2026-07-18 (published package-transaction fix-forward)
+
+- **Immutable release qualification:** final source
+  `db0f538c82961569a7118b105a20e967b15476f0` passed clean-tree
+  `cargo package --locked --list` (39 files),
+  `cargo publish --locked --dry-run`, exact-SHA CI 29664547910, crates
+  29664653519, Release 29664688035, native macOS 29664824418, Windows
+  packaging 29664824432, and Windows transition validation 29664948031.
+  crates.io serves unyanked 4.2.2 with checksum
+  `1e2aff33305a7eb31ed8ef54691a69de3c101435d8c88a320729940bb9f2f5c1`.
+- **Native Mac release evidence:** Intel and Apple Silicon identity preflights
+  imported the dedicated Developer ID Installer identity. Both runners passed
+  universal-binary architecture/signature checks, direct-PKG and compatibility-
+  DMG signing/notarization/stapling/Gatekeeper checks, direct installation,
+  receipt/payload/per-file ownership, report/update selection/uninstall, and
+  malformed managed-receipt rejection before payload installation. Both also
+  replayed the immutable v4.1.3 DMG client's real update selection into the
+  v4.2.2 byte-identical direct PKG. This is the required release gate; a
+  physical Mac remains optional visual smoke unless a GUI-only defect appears.
+- **Hosted Windows release evidence:** all four native channel updates and
+  uninstalls, all four native-to-IRM takeovers, fresh same-edition format
+  choice, managed PowerShell, Cargo, portable/unknown recovery, origin/edition/
+  scope preservation, rollback, cleanup, and one-object JSON passed in 14
+  isolated jobs. No hosted job substitutes for the open final Alienware UAC
+  ceremony.
+- **Fresh public-byte and homepage audit:** all 34 assets are nonempty and use
+  stable versionless names; GitHub digests, every sidecar, and `sha256.sum`
+  match fresh downloads. Both public wrappers contain the exact v4.2.2 tag and
+  no template placeholders. Versionless latest entrypoints for the wrappers,
+  four Windows installers, direct PKG, and compatibility DMG matched their
+  immutable assets. Homepage merge
+  `4829c4430ee917bcb1508c2ea7ac87988ba5e055` passed lint/build/Vercel and is
+  live with CLI-first copy and the direct PKG; the DMG is not advertised.
 
 - **Decision under test:** ADR MIC-1 makes the managed CLI installers the
   recommended public path while preserving every proven origin for
@@ -16,7 +48,7 @@ as passed.
   after the final binary, durable receipt/marker, registration, PATH, and
   absence of a shadowing recognized copy agree. Unknown or conflicting evidence
   fails closed with the stable release recovery URL.
-- **Windows candidate:** the public `tr300-installer.ps1` wrapper is rendered
+- **Windows implementation:** the public `tr300-installer.ps1` wrapper is rendered
   with one immutable release tag, invokes the internal exact-tag cargo-dist
   script, verifies the new managed receipt/binary, enumerates only TR-300's
   fixed MSI UpgradeCodes and Inno AppIds, and removes those registered products.
@@ -30,7 +62,7 @@ as passed.
   edition native product. Hosted disposable jobs must prove all four native-to-managed
   takeovers, both cross-edition safe stops, same-edition format changes, normal
   preserved-channel updates, cleanup, and one-object JSON.
-- **Unix candidate:** the public `tr300-installer.sh` wrapper invokes the
+- **Unix implementation:** the public `tr300-installer.sh` wrapper invokes the
   internal exact-tag cargo-dist script and verifies its version/receipt. On
   macOS it removes a native package only after the fixed receipt, root payload,
   per-file package owner, `/usr/local/bin/tr300`, and Developer ID identity all
@@ -63,7 +95,7 @@ as passed.
   exact signed universal binary is embedded as a strict dry-run `preinstall`
   probe, so ambiguity fails before Installer copies `/usr/local/bin/tr300`;
   `postinstall` performs the actual bounded convergence only after preflight.
-- **Mac distribution candidate:** the v4.2 series adds a direct universal
+- **Mac distribution:** the v4.2 series adds a direct universal
   `tr300-universal-apple-darwin.pkg` plus SHA-256 sidecar. It is signed with
   Developer ID Installer, notarized, stapled, and Gatekeeper-assessed. The DMG
   and sidecar remain compatibility assets only for immutable v4.1.x clients and
@@ -74,14 +106,14 @@ as passed.
   updater proof.
 - **Local code/package evidence:** locked formatting and Clippy pass with
   warnings denied; 164 all-feature unit tests and 19 integration tests pass;
-  the optimized candidate build succeeds; RustSec scanned 221 locked dependencies
+  the optimized release build succeeds; RustSec scanned 221 locked dependencies
   with no vulnerability finding; cargo-dist 0.31.0 plan/generate-check pass; and
   dirty-tree preliminary package-list/publish dry runs package 39 source files
   and compile successfully. PowerShell parsing, actionlint 1.7.12, ShellCheck
   0.11.0, Git Bash syntax, and both managed rollback/unknown-PATH fixtures pass.
   WiX 3.14.1 compiles both MSIs with only the intentional `AllowDowngrades`
-  ICE61; Inno Setup 6.7.3 compiles both EXEs. The clean committed-tree package
-  gate and all hosted/public evidence remain deliberately open.
+  ICE61; Inno Setup 6.7.3 compiles both EXEs. The clean committed-tree and
+  hosted/public evidence are recorded above.
 - **First exact-SHA hosted attempt:** source `590031dbe8cf4b89d8e9308900ea9c8ed3f80cca`
   passed the real Windows installer source/transition/rollback job, plus Windows
   and Linux Rust jobs, but CI run 29661664992 failed before tagging. Native
@@ -167,7 +199,29 @@ as passed.
   SC2317; the newer local ShellCheck classified the same indirection as SC2329.
   The narrowly scoped callback annotation now names both version-dependent
   diagnostics while the executable rollback fixture remains mandatory. The
-  failed CI prevented crates publication; no v4.2.2 tag or release exists.
+  failed CI prevented crates publication; no v4.2.2 tag or release was created
+  from that failed SHA.
+- **Final Alienware UAC continuation:** the natural installation remains the
+  sole Global MSI v4.1.3 at `C:\Program Files\tr300\bin\tr300.exe`. The final
+  requested retry resolved v4.2.2 once, selected `msi-global`, pinned the exact
+  tagged Global MSI, and reached native UAC. Cancellation returned exit 2 with
+  exactly one JSON object, `requires_user_action: true`, the exact asset URL,
+  and the stable release/manual recovery URLs. It emitted the matching
+  stderr-only diagnostic, launched no lasting MSI transaction, changed no
+  installed bytes/registration, and left no `consent`, `msiexec`, Setup, or
+  TR-300 process. Two older, inert TR-300-only temp fixtures (one cleanup pair,
+  one staged MSI) were inspected, removed by exact path, and the final
+  `tr300-update-*` scan is empty. This proves safe cancellation and recovery,
+  not a successful
+  physical v4.1.3 → v4.2.2 transition; task #w422 remains open for a user-
+  approved retry and the full post-update matrix. A post-cancellation smoke
+  parsed full/fast schema-v1 JSON, rendered Unicode/ASCII tables, measured
+  5.136s/0.265s, saved one 1,724-byte Markdown report and removed that exact
+  file, and left no generated report. Hardware remained plausible: Windows 11
+  Home 25H2, Alienware m16 R2/BIOS 1.21.0/UEFI, `6P + 10E`, 16 physical/22
+  logical, Intel Arc plus RTX 4070 Laptop, NTFS C:, about 32 GB RAM, plugged-in
+  battery, default-route 10.1.0.51, and DNS 10.1.0.1; unavailable optional
+  fields remained null rather than guessed.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast

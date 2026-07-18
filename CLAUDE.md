@@ -51,16 +51,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete GitHub distribution: **4.1.3**; crates.io package and latest incomplete
-GitHub Release: **4.2.1**; working manifest: **4.2.2 candidate**. Exact v4.2.1
-source `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed exact-SHA CI/crates,
-all six release targets, Apple archive signing/notarization, release hosting,
-and Windows packaging. Native Intel/ARM package validation then proved the
-strict malformed-receipt check happened after the PKG payload had landed, so
-all four Mac assets were withheld. Windows transition selection also required
-a v4.2-only internal script from the v4.1.3 baseline. Keep the 30-asset release,
-tag, and crate immutable; v4.2.2 moves Mac proof before payload mutation and
-separates current from historical Windows asset contracts.
+Complete GitHub distribution, crates.io package, and working manifest:
+**4.2.2**. Exact source `db0f538c82961569a7118b105a20e967b15476f0`
+passed exact-SHA CI/crates, all six release targets, Apple archive signing/
+notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
+all Windows package/transition jobs, and the fresh 34-asset public audit.
 The v4.1.0-v4.1.3
 tags/assets are immutable. v4.1.3 completed exact-SHA CI/crates, supported
 macOS receipt/file-owner/Developer ID validation, the hosted 30-asset release,
@@ -80,16 +75,18 @@ as optional native choices and raw Cargo as advanced/unmanaged. `tr300 update`
 preserves the proven channel, while a deliberately launched fresh installer is
 authoritative channel intent. The direct signed/notarized/stapled universal PKG
 is the current Mac native artifact; the DMG remains only as an immutable-v4.1
-updater bridge. The v4.2.2 candidate target is 34 stable-name assets. None of
-the complete distribution is published evidence until its own exact-SHA and
-hosted package matrices pass.
+updater bridge. v4.2.2 publishes 34 stable-name assets and passed its own
+exact-SHA plus hosted package matrices. The Alienware's natural Global MSI
+remains v4.1.3 only because the final v4.2.2 UAC prompt was cancelled safely;
+do not represent that personal same-channel transition as passed yet.
 
 Observed distribution state: release source
-`c5a25617b8b6438b1e7589e7518a1c1bd305ed64` passed exact-SHA CI/crates,
+`db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA CI/crates,
 signed Apple archives, every Windows package/transition, and native ARM/Intel
-universal DMG publication. Public 30-asset, checksum, stable `latest` URL, and
+direct-PKG/legacy-DMG publication. Public 34-asset, checksum, stable `latest`
+URL, and
 crates.io audits passed. Homepage commit
-`d77397479ad2b1189cce86b5402eaf1cc966abdf` is deployed at
+`4829c4430ee917bcb1508c2ea7ac87988ba5e055` is deployed at
 `https://reports.qubetx.com/`. Exact run IDs, submissions, and hashes live in
 `TESTING.md` and the current tracked handoff.
 
