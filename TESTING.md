@@ -159,6 +159,15 @@ as passed.
   full/fast JSON, ordinary no-write, explicit-save/cleanup, console-encoding,
   and 16-physical/22-logical topology checks. These are local source/binary
   results, not native Mac or installed-public-update evidence.
+- **First v4.2.2 exact-SHA attempt:** source
+  `32a5d967bb973c3cffd598050bbe83e4d1754b6a` passed 18 product, native
+  Apple/Windows/Linux, performance, audit, cargo-dist, and real Windows
+  installer-source jobs in CI 29664322349. The workflow job stopped only when
+  hosted ShellCheck classified the intentionally trap-invoked rollback body as
+  SC2317; the newer local ShellCheck classified the same indirection as SC2329.
+  The narrowly scoped callback annotation now names both version-dependent
+  diagnostics while the executable rollback fixture remains mandatory. The
+  failed CI prevented crates publication; no v4.2.2 tag or release exists.
 - **Alienware candidate functionality/hardware:** the uninstalled release
   binary passes full table, fast ASCII, full JSON, ordinary-no-save, one manual
   Markdown save plus exact cleanup, and UTF-8 code-page restoration. Full/fast

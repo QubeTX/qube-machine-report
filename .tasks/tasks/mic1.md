@@ -69,6 +69,13 @@ documentation reconciliation, and immutable release proof remain open.
   historical-baseline resolver, and Alienware candidate functionality gates.
   Clean committed-tree package/publish proof and exact-SHA hosted publication
   remain (agent: codex)
+- 2026-07-18 — first v4.2.2 exact-SHA CI 29664322349 passed every product,
+  native-platform, audit, performance, cargo-dist, and real Windows installer
+  source job, but the lifecycle job stopped because hosted ShellCheck reports a
+  trap-only rollback body as SC2317 while the newer local build reports SC2329.
+  Scoped the callback annotation to both version-dependent diagnostics and kept
+  its executable rollback fixture. No crate, tag, or release was produced
+  (agent: codex)
 
 ## Intent
 

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contain a future-only asset. Current releases still require every v4.2
   Windows family; prior-version selection requires the complete historical
   family it could actually publish. (task #mic1)
+- **Generated PKG lifecycle scripts are linted as executable scripts before
+  tagging.** Their quoted builder heredocs no longer hide shell diagnostics;
+  the trap-only rollback callback carries a narrowly scoped SC2317/SC2329
+  annotation because supported ShellCheck versions classify that same indirect
+  invocation differently, while the rollback fixture still executes it.
+  (tasks #mic1, #pkg42)
 
 ## [4.2.1] - 2026-07-18
 

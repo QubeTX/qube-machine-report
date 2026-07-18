@@ -108,6 +108,14 @@ WiX/Inno source gates successfully. The clean committed-tree package gate,
 exact-SHA CI/crates, tag workflows, public asset audit, and homepage update
 remain. Until then the complete GitHub distribution remains v4.1.3.
 
+First v4.2.2 exact-SHA CI 29664322349 passed every product, native platform,
+audit, performance, cargo-dist, and real Windows installer-source job, then its
+lifecycle guard exposed a ShellCheck-version difference: hosted ShellCheck
+labels the intentionally trap-only rollback body SC2317 while the newer local
+build labels it SC2329. The callback now carries one scoped annotation for both
+diagnostics and remains covered by the executable rollback fixture. The failed
+CI prevented crates publication; no v4.2.2 tag or release was created.
+
 ## 2026-07-18 v4.1.3 Global Windows live-image fix-forward
 
 v4.1.2 exact source `a94645b9f61432c403c129ef055b8ad2d3876d35`

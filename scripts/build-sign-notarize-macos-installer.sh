@@ -275,7 +275,8 @@ managed_binary_existed=0
 managed_receipt_existed=0
 takeover_committed=0
 # Invoked indirectly by the EXIT/HUP/INT/TERM trap below.
-# shellcheck disable=SC2329
+# ShellCheck versions classify that indirection as SC2317 or SC2329.
+# shellcheck disable=SC2317,SC2329
 rollback_managed() {
     if [ "$takeover_committed" -eq 0 ]; then
         if [ "$managed_binary_existed" -eq 1 ]; then

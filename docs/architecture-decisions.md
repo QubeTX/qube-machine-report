@@ -218,7 +218,10 @@ Windows actionlint invocation without ShellCheck on PATH remains a useful YAML
 check but is not equivalent evidence. Intentional literal-dollar fixtures use
 tightly scoped SC2016 annotations, while negative package assertions use
 explicit `if command; then ...; exit 1; fi` control flow so Bash `errexit`
-behavior is never the assertion mechanism.
+behavior is never the assertion mechanism. Trap-only cleanup callbacks may be
+classified as SC2317 or SC2329 by different supported ShellCheck versions; any
+suppression must name only those two diagnostics immediately above the callback
+and retain an executable rollback fixture.
 
 The v4.2.0 release attempt established another load-bearing boundary. Exact-SHA
 CI and crates publication passed, all six release targets built, and both Apple
