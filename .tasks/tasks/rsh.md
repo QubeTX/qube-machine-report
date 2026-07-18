@@ -20,7 +20,7 @@ The exact release commit passes CI/crates; the immutable tag points at that SHA;
 
 - [x] Clean-tree local release gates pass without `--allow-dirty`
 - [x] v4.1.0 release SHA passed CI/crates and its supplemental DMG failure was retained as immutable evidence
-- [ ] Exact v4.1.2 release SHA passes CI and crates publication
+- [x] Exact v4.1.2 release SHA passes CI and crates publication
 - [ ] Tag `v4.1.2` points at that exact SHA and every release workflow succeeds
 
 ## Status
@@ -53,3 +53,5 @@ Active. #c8r's hosted identity proof passed in run 29637224793 on both native ar
 - 2026-07-18 08:55 — candidate `62e0982` passed every non-source job reached and proved both Global takeover directions after the Type 34 fix; the source gate then isolated Corporate MSI→EXE. Made the supported ARP enumerator inspect/deduplicate both HKCU registry views explicitly (and both HKLM views for old Global coverage), with exact prior-registration and Inno-log evidence on any recurrence (agent: codex)
 - 2026-07-18 09:10 — controlled Alienware install found the no-UAC Corporate per-user MSI registered its exact ARP product in HKLM64 while keeping the payload in `%LocalAppData%`; restored the machine's natural Global MSI 4.0.1 state and legacy marker, then made fresh Inno takeover search both views of both ARP hives without treating hive as a scope oracle (agent: codex)
 - 2026-07-18 09:20 — local Corporate MSI→EXE and EXE→MSI both converged to exactly one v4.1.2 registration and matching scoped marker; teardown proved zero Corporate registrations/binaries and restored the natural Global MSI v4.0.1 plus legacy `msi-global` marker (agent: codex)
+- 2026-07-18 09:45 — exact source `a94645b9f61432c403c129ef055b8ad2d3876d35` passed CI 29643258539 and crates publication 29643384988; immutable tag `v4.1.2` points at that SHA, cargo-dist 29643419013 passed, Windows packaging 29643558226 passed, and native DMG/PKG run 29643558237 passed build/sign/notary/staple/install/validation/publication on both architectures (agent: codex)
+- 2026-07-18 10:05 — Windows matrix 29643664099 resolved the complete release and passed fresh-format choice, but its channel jobs stopped before their intentional exit-2 recovery assertions because GitHub's `pwsh` host promoted native nonzero exits under stop-on-error. The validation step now disables only native-command promotion and still asserts the captured exit/JSON/retained binary before exact same-channel recovery; immutable v4.1.2 assets are unchanged (agent: codex)

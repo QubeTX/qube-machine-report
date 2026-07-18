@@ -82,6 +82,23 @@ as passed.
   then require signed archives, all Windows installers/transitions, and native
   ARM/Intel PKG-in-DMG validation to pass before auditing 30 immutable v4.1.2
   assets. v4.1.0 and v4.1.1 tags/assets remain unchanged.
+- **Hosted publication boundary:** exact source
+  `a94645b9f61432c403c129ef055b8ad2d3876d35` passed CI 29643258539 and
+  crates publication 29643384988. Immutable tag `v4.1.2` targets that SHA.
+  Cargo-dist 29643419013 passed all six targets and both signed/notarized Apple
+  archives; Windows packaging 29643558226 published the Corporate MSI and both
+  Inno EXEs; DMG run 29643558237 passed Installer identity preflight,
+  universal build/sign/notary/staple, and PKG-in-DMG install/validation on
+  native Intel and Apple Silicon before attaching the DMG/sidecar.
+- **Validation replay boundary:** first automatic Windows matrix 29643664099
+  resolved the complete exact release and passed both fresh-format-choice jobs.
+  Its channel jobs then exposed a harness control-flow defect: GitHub `pwsh`
+  promoted an immutable old updater's intentional exit 2 to a terminating
+  native-command error before the script could inspect its safe-recovery JSON.
+  The replay disables only that host promotion, captures `$LASTEXITCODE`, and
+  retains the strict exit/one-object JSON/old-binary/recovery-link assertions
+  before launching the exact new same-channel installer. This does not change
+  or excuse any v4.1.2 product asset.
 
 ### v4.1.1 — 2026-07-18 (published archives; DMG fixed forward in v4.1.2)
 

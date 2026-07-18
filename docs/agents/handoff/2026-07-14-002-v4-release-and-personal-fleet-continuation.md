@@ -7,8 +7,8 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Published / working version:** `4.1.1` / `4.1.2` (all prior tags remain immutable)
-**Prior pushed checkpoint:** `553dbd53a50982792030b518d7f5ca48fd3ba7de`
+**Published / working version:** `4.1.2` / `4.1.2` (all prior tags remain immutable)
+**Prior pushed checkpoint:** `a94645b9f61432c403c129ef055b8ad2d3876d35`
 **Release commit:** `b67ad083503d0fff840af8467015d05c659268ea`
 **Hosted run IDs:** CI 29391956665; crates 29392101640; cargo-dist 29392185522;
 Windows Installers 29392382949
@@ -80,6 +80,20 @@ rate-limit failures.
 
 Never modify v4.1.0 or v4.1.1 tags/assets. Complete exact-SHA gates and the
 30-asset public audit only on v4.1.2.
+
+Exact v4.1.2 source `a94645b9f61432c403c129ef055b8ad2d3876d35`
+passed CI 29643258539 and crates publication 29643384988; immutable tag
+`v4.1.2` targets that SHA. Cargo-dist 29643419013, supplemental Windows
+packaging 29643558226, and native universal DMG/PKG run 29643558237 all passed.
+The Mac run validated the installed universal package on Intel and Apple
+Silicon and attached the DMG/sidecar, so physical-Mac proof is non-blocking.
+Automatic Windows matrix 29643664099 resolved the release and passed both
+fresh-format jobs, then its channel jobs terminated before expected legacy
+exit-2 recovery assertions because the GitHub `pwsh` host promoted the native
+nonzero exit under stop-on-error. The corrected validation disables only that
+promotion, captures the native exit/JSON/stderr, and retains all strict safe-
+failure and exact same-channel convergence checks. Replay it against v4.1.2;
+do not alter the immutable tag or assets for this harness-only correction.
 
 ## 2026-07-18 immutable v4.1.1 packaging fix-forward
 

@@ -492,14 +492,27 @@ without a token retain the public API path. Serializing the disposable matrix
 and authenticating current binaries reduces shared-runner rate-limit noise;
 neither weakens exact-tag resolution or permits a mutable asset URL.
 
+The matrix must also preserve native exit status as data. GitHub's current
+`pwsh` host can promote a nonzero native exit to a terminating error under the
+runner's stop-on-error preference. That is incompatible with a contract that
+deliberately distinguishes updater exit 2 (old bytes retained, recovery JSON,
+user action required) from success. The validation step disables only native-
+command error promotion, captures `$LASTEXITCODE`, stdout, and stderr, and then
+applies the strict assertions itself. It does not relax PowerShell exceptions,
+installer exit checks, JSON shape, channel identity, recovery URL, or final
+convergence. Run 29643664099 exposed this harness boundary by terminating before
+its own `update exit=...` diagnostic on every completed legacy channel job.
+
 **Rejected alternatives:** accepting a clean install as updater proof; invoking
 a different installer family after failure; hard-coding a historical version
 into the workflow; treating every unknown-origin invocation as an error;
 guessing another Pascal declaration for a Win32 output buffer after two hosted
 access violations; ignoring a nonzero Inno/PowerShell exit; claiming an
-immutable old binary exercised new updater code; or mutating the installed
-Cargo binary from `build.rs`. The matrix resolves immutable releases and stable
-asset names dynamically and fails before claiming convergence.
+immutable old binary exercised new updater code; mutating the installed Cargo
+binary from `build.rs`; or letting the PowerShell host turn an expected native
+exit into control flow before the recovery contract is inspected. The matrix
+resolves immutable releases and stable asset names dynamically and fails before
+claiming convergence.
 
 **Revalidation triggers:** changes to the PowerShell cargo-dist template or
 launcher order, MSI UpgradeCodes/product scope, Inno registry identity or

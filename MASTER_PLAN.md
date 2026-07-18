@@ -154,16 +154,24 @@ Inno source checks/deduplicates both views of both ARP hives and requires exact
 same-edition MSI identity. The resulting local Corporate MSI→EXE→MSI
 lifecycle converged to one registration/matching marker after both takeovers
 and restored the Alienware's Global 4.0.1 baseline after cleanup. v4.1.0 and
-v4.1.1 remain untouched.
+v4.1.1 remain untouched. Exact source
+`a94645b9f61432c403c129ef055b8ad2d3876d35` then passed CI 29643258539 and
+crates 29643384988. Tag `v4.1.2` targets that SHA; cargo-dist 29643419013,
+Windows packaging 29643558226, and native Intel/ARM DMG/PKG run 29643558237
+are green. Windows replay 29643664099 exposed only a harness boundary before
+the channel assertions: hosted `pwsh` promoted expected old-client exit 2 to a
+terminating native error. The replay now captures native exit codes explicitly
+and still requires safe JSON/retention/recovery before exact-channel takeover.
 
 1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,
    dist plan, actionlint, shellcheck, updater fixtures, and Alienware functional
    modes/save/code-page/performance checks.
-3. Commit/push `main`; wait for exact-SHA CI and crates publication.
-4. Tag/push only `v4.1.2`; wait for cargo-dist, Windows installers, and native
-   PKG-in-DMG workflows.
-5. Verify crates.io, signatures/notarization, checksums, every installer family,
+3. ✓ Commit/push `main`; exact-SHA CI and crates publication passed.
+4. ✓ Tag/push only `v4.1.2`; cargo-dist, Windows installers, and native
+   PKG-in-DMG workflows passed.
+5. Replay the corrected disposable Windows matrix, then verify crates.io,
+   signatures/notarization, checksums, every installer family,
    all 30 release assets, update behavior, recovery links, and clean uninstall.
 6. Record exact run IDs/hashes/evidence here, in `TESTING.md`, and in the
    canonical handoff before marking release complete.

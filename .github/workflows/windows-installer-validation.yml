@@ -276,6 +276,13 @@ jobs:
           ASSET: ${{ matrix.asset }}
         shell: pwsh
         run: |
+          # GitHub's PowerShell host enables native-command errors. The matrix
+          # deliberately accepts updater exit 2 when an immutable old client
+          # retains its binary and returns safe recovery JSON, so capture
+          # native exit codes explicitly instead of terminating before the
+          # contract assertions below can inspect stdout/stderr.
+          $PSNativeCommandUseErrorActionPreference = $false
+
           function Install-Candidate {
             $asset = if ($env:ASSET) { Join-Path $PWD "candidate\$env:ASSET" } else { $null }
             switch ($env:KIND) {
