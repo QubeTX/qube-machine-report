@@ -248,7 +248,8 @@ jobs:
           fi
           grep -Fq 'pkgutil --file-info /usr/local/bin/tr300' "$workflow"
           grep -Fq 'codesign --verify --strict --verbose=4 /usr/local/bin/tr300' "$workflow"
-          grep -Fq 'TeamIdentifier=${{ vars.APPLE_TEAM_ID }}' "$workflow"
+          grep -Fq 'TeamIdentifier=$' "$workflow"
+          grep -Fq 'vars.APPLE_TEAM_ID' "$workflow"
           grep -Fq 'github.event.workflow_run.head_sha' "$windows_validation"
           if grep -Fq 'github.event.workflow_run.head_branch' "$windows_validation"; then
             echo 'second-hop workflow validation must resolve from head_sha, not head_branch' >&2
@@ -356,4 +357,71 @@ jobs:
           foreach ($source in @("inno\global.iss", "inno\corporate.iss")) {
             & $iscc "/DMyAppVersion=$version" $source
             if ($LASTEXITCODE -ne 0) { throw "Inno compile failed for $source" }
+          }
+      - name: Prove current MSI and Inno formats take over bidirectionally
+        shell: pwsh
+        run: |
+          $cases = @(
+            @{
+              Name = 'global'
+              Display = 'tr300'
+              Msi = 'target\wix-ci\global-current.msi'
+              Exe = 'inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe'
+              Marker = 'InstallSourceGlobal'
+            },
+            @{
+              Name = 'corporate'
+              Display = 'tr300 (Corporate Edition)'
+              Msi = 'target\wix-ci\corporate-current.msi'
+              Exe = 'inno\Output\tr300-x86_64-pc-windows-msvc-corporate-setup.exe'
+              Marker = 'InstallSourceCorporate'
+            }
+          )
+          function Entries([string] $display) {
+            @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object DisplayName -EQ $display
+          }
+          function Install-Msi([string] $path) {
+            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', (Resolve-Path $path).Path, '/qn', '/norestart')
+            if ($p.ExitCode -ne 0) { throw "MSI install failed for ${path}: $($p.ExitCode)" }
+          }
+          function Install-Exe([string] $path, [string] $name) {
+            $log = Join-Path $env:RUNNER_TEMP "tr300-$name-takeover.log"
+            $p = Start-Process (Resolve-Path $path).Path -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+            if ($p.ExitCode -ne 0) {
+              Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+              throw "EXE install failed for ${path}: $($p.ExitCode)"
+            }
+          }
+          function Remove-Entry($entry) {
+            if ($entry.WindowsInstaller -eq 1) {
+              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+            } else {
+              if ($entry.UninstallString -notmatch '^"([^"]+)"$') { throw "unexpected Inno uninstall command" }
+              $p = Start-Process $Matches[1] -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+            }
+            if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          }
+          foreach ($case in $cases) {
+            Install-Msi $case.Msi
+            Install-Exe $case.Exe $case.Name
+            $entries = @(Entries $case.Display)
+            if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -eq 1) {
+              throw "current $($case.Name) EXE did not take over its MSI"
+            }
+            $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
+            if ($marker -notlike 'exe-*') { throw "current EXE marker did not win: $marker" }
+            Remove-Entry $entries[0]
+
+            Install-Exe $case.Exe $case.Name
+            Install-Msi $case.Msi
+            $entries = @(Entries $case.Display)
+            if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -ne 1) {
+              throw "current $($case.Name) MSI did not take over its EXE"
+            }
+            $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
+            if ($marker -notlike 'msi-*') { throw "current MSI marker did not win: $marker" }
+            Remove-Entry $entries[0]
           }

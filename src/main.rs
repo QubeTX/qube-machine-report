@@ -60,6 +60,17 @@ fn main() -> Result<()> {
         std::process::exit(exit_code);
     }
 
+    if action == Some(Action::UpdateCleanup) {
+        let exit_code = cli
+            .update_backup
+            .as_deref()
+            .map(update::cleanup_windows_update_backup)
+            .unwrap_or(2);
+        #[cfg(windows)]
+        drop(_cp_guard);
+        std::process::exit(exit_code);
+    }
+
     if cli.update || action == Some(Action::Update) {
         let exit_code = update::run(&config);
         #[cfg(windows)]

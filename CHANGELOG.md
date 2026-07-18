@@ -32,10 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pwsh` and retain Windows PowerShell as a same-channel fallback.
 - **Hosted Windows validation exercises real version transitions.** Each
   recognized channel installs the most recent lower complete stable release,
-  updates in place to the candidate through the same channel, then verifies a
-  current-version no-op and clean uninstall. The older portable case proves
-  exit-2 recovery without mutation; fresh MSI/EXE takeover remains separately
-  bidirectional.
+  attempts the same-channel update, and accepts only verified success or a
+  safe exit-2 recovery followed by an exact fresh same-channel install. It then
+  verifies a current-version no-op and clean uninstall. The older portable case
+  proves recovery without mutation; freshly compiled MSI/EXE sources are also
+  tested bidirectionally before any tag.
+- **Windows user-scoped updates hand off the live executable transactionally.**
+  Cargo, PowerShell, Corporate MSI, and Corporate EXE updates rename the
+  executing image to a private sibling, run and verify the preserved channel at
+  the original path, then spawn the new binary to remove the backup after the
+  updater exits. Strategy failure restores the old image before exit 2. GitHub
+  API checks also reuse an existing `GITHUB_TOKEN`/`GH_TOKEN` without logging it,
+  avoiding shared-runner rate-limit false failures.
 
 ## [4.1.1] - 2026-07-18
 

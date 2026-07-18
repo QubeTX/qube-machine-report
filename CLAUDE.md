@@ -255,6 +255,14 @@ These three are the most frequently touched; their full rules are in the matchin
   described as corruption/mismatch detection rather than an independent
   signature; `is_newer` is semver-prerelease-aware. Public names are
   versionless, but all update bytes are pinned to the once-resolved exact tag.
+- Windows user-scoped Cargo, PowerShell, Corporate MSI, and Corporate EXE
+  updates must use the live-image transaction in `src/update.rs`: rename the
+  running image to the strictly named private sibling, recreate and verify
+  `tr300.exe`, roll back a failed strategy, and let only the verified new binary
+  perform delayed cleanup. Do not replace this with Cargo `build.rs` mutation,
+  a direct overwrite, an arbitrary elevated helper, or cross-channel fallback.
+  Hosted release discovery may reuse `GITHUB_TOKEN`/`GH_TOKEN`, but the value
+  must never enter output or persistent state.
 - Likely antivirus/Group Policy/filesystem blocks during staged create/write/
   sync/launch become `PolicyBlocked`: stop the channel, retain the current
   install, return exit 2 with official manual-release guidance, and never offer

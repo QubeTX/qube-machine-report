@@ -417,28 +417,75 @@ could not reveal:
   two states as the same assertion either invents a failure or fails to test
   recovery.
 
-The release validation matrix therefore installs the most recent lower stable
-release that contains every required Windows family, exercises a real
-old-to-new CLI update for each recognized channel, verifies the target version
-and preserved marker/registration/PATH, then invokes update again to prove the
-already-current no-op. Portable uses that same older release to prove safe
-recovery without mutation. Separate jobs still test both directions of
-same-edition MSI/EXE fresh takeover because explicit installer intent is a
-different state machine from CLI update.
+A fourth issue is specific to Windows' running-image lifetime. A
+Cargo-installed v4.1.0 fixture invoked the real v4.1.1 updater from a private
+`CARGO_HOME`; `cargo install --force --locked` compiled the exact target, then
+failed with access denied while moving the running `tr300.exe`. The updater
+returned 2 and the v4.1.0 binary remained runnable, but Cargo had recorded an
+empty v4.1.1 package entry beside the intact v4.1.0 registration. After that
+process exited, repeating the exact fresh Cargo command succeeded and Cargo
+automatically converged the metadata and binary to one v4.1.1 registration.
+This proves both the live-image cause and the safe fresh-channel recovery; it
+does not make an old updater capable of a handoff that was absent from its
+immutable code.
+
+Current Windows user-scoped updates therefore use a product-owned live-image
+transaction for Cargo, cargo-dist PowerShell, Corporate MSI, and Corporate
+EXE. Before invoking the preserved strategy, the running image is atomically
+renamed to a randomized private sibling in the same directory. The installer
+must recreate `tr300.exe` at the original path and that binary must report the
+resolved version. Failure removes any partial replacement and renames the old
+image back; success starts the verified new binary's hidden cleanup action,
+which accepts only an absolute same-directory
+`.tr300-update-backup-<pid>-<nonce>.exe` path and waits for the old process to
+release it. A later update also removes a stale private backup left by an
+interrupted cleanup helper. Global MSI/EXE continue through their native
+elevated installer and Restart Manager transaction; a reboot requirement or
+UAC/policy failure is not reclassified as success.
+
+This handoff is intentionally runtime-owned rather than a Cargo build-script
+trick. Cargo build scripts are package builds and are constrained to their
+`OUT_DIR`; having a downloaded crate mutate an arbitrary existing executable
+or Cargo installation metadata during compilation would violate that boundary,
+run at the wrong lifecycle stage, and be unsafe to copy to other products.
+
+The pre-tag Windows source gate compiles the current MSI and Inno sources and
+tests both fresh takeover directions for each edition. This is the only way to
+prove a fix that does not yet exist in immutable public installers. The
+post-release matrix separately installs the most recent lower stable release
+that contains every required Windows family and exercises its real CLI updater.
+An older updater may either complete the preserved-channel transition or fail
+safely with exit 2, the old binary intact, required user action, and the stable
+recovery page. In the latter case the matrix follows that published recovery
+contract by launching the exact new same-channel asset, then requires one
+target version, marker, registration, PATH result, and a successful
+already-current no-op. Portable uses the older release only to prove safe
+recovery without mutation. Replaying an old release cannot be presented as
+proof of new source code.
+
+Hosted updater calls reuse `GITHUB_TOKEN`, or `GH_TOKEN` when that is the
+available caller credential, for the release API. The token is applied only as
+an authorization header and is never printed or persisted. Ordinary users
+without a token retain the public API path. Serializing the disposable matrix
+and authenticating current binaries reduces shared-runner rate-limit noise;
+neither weakens exact-tag resolution or permits a mutable asset URL.
 
 **Rejected alternatives:** accepting a clean install as updater proof; invoking
 a different installer family after failure; hard-coding a historical version
 into the workflow; treating every unknown-origin invocation as an error;
 guessing another Pascal declaration for a Win32 output buffer after two hosted
-access violations; or ignoring a nonzero Inno/PowerShell exit. The matrix
-resolves immutable releases and stable asset names dynamically and fails before
-claiming convergence.
+access violations; ignoring a nonzero Inno/PowerShell exit; claiming an
+immutable old binary exercised new updater code; or mutating the installed
+Cargo binary from `build.rs`. The matrix resolves immutable releases and stable
+asset names dynamically and fails before claiming convergence.
 
 **Revalidation triggers:** changes to the PowerShell cargo-dist template or
 launcher order, MSI UpgradeCodes/product scope, Inno registry identity or
 takeover code, marker/ARP recovery, update JSON semantics, portable behavior,
-or Windows runner/PowerShell images require the full prior-version update,
-current-version no-op, cross-format takeover, and uninstall matrix.
+live-image handoff/cleanup naming, Cargo installation behavior, GitHub API
+authentication, or Windows runner/PowerShell images require the compiled-source
+takeover gate plus the full prior-version update/recovery, current-version
+no-op, registration convergence, cross-format takeover, and uninstall matrix.
 
 ### Machine-readable and failure contract
 
@@ -493,10 +540,12 @@ portable architecture:
    upload jobs must refuse collisions rather than clobber public bytes.
 5. **Treat replacement as a transaction.** Use private randomized staging,
    payload size limits, cryptographic digest checks, native signature/trust
-   checks, and the original installer engine. Do not delete or directly
-   overwrite the running installation as a fallback. Report success only after
-   the installer exits successfully, durable ownership metadata matches, and
-   the intended executable reports the resolved version.
+   checks, and the original installer engine. Never delete or directly
+   overwrite the sole working copy as a fallback. If a platform locks a running
+   image, move it only through a same-directory, product-private transaction
+   with validated delayed cleanup and rollback of a failed replacement. Report
+   success only after the installer exits successfully, durable ownership
+   metadata matches, and the intended executable reports the resolved version.
 6. **Converge fresh installs before claiming ownership.** An official installer
    removes or upgrades recognized conflicting registrations for the selected
    product before it writes shared-path files. If privilege is insufficient,
@@ -525,6 +574,12 @@ portable architecture:
    upstream SHA/release identity instead of assuming branch/tag context crosses
    event hops. A successful checksum in one step does not prove the input still
    exists or that a later tool call or downstream job is valid.
+10. **Separate source proof from legacy recovery proof.** Compile and exercise
+    current installer/updater source before tagging. Post-release, run a real
+    immutable older client: accept either a genuine same-channel update or its
+    documented safe failure followed by the exact fresh same-channel recovery.
+    Require final one-copy/one-registration convergence in both cases. Never
+    imply that replaying immutable old bytes executed a newly authored fix.
 
 These rules are intentionally stricter than “download the newest binary and
 replace the file.” The portable unit is the installation transaction and its

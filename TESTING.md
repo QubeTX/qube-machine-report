@@ -39,7 +39,7 @@ as passed.
   same-channel update, current no-op, older-portable recovery, takeover, and
   uninstall behavior.
 - **Current local evidence:** formatting, actionlint 1.7.12, ShellCheck 0.11.0,
-  Git Bash syntax, warning-denying all-target/all-feature Clippy, 151 unit
+  Git Bash syntax, warning-denying all-target/all-feature Clippy, 153 unit
   tests, 19 integration tests, locked release build, RustSec audit (221 locked
   dependencies), cargo-dist 0.31.0 plan, 39-file package list, and publish
   dry-run pass. The release binary reports `tr300 4.1.2`; fast schema-v1 JSON,
@@ -53,6 +53,16 @@ as passed.
   Program Files path; a diagnostic updater invocation reached the expected UAC
   boundary and was cancelled before mutation, retaining that baseline for the
   final controlled update.
+  A private Alienware Cargo-home fixture reproduced the legacy 4.1.0 → 4.1.1
+  failure exactly: Cargo compiled the target, Windows denied moving it over the
+  running image (`os error 5`), the old binary remained, and Cargo temporarily
+  recorded an empty target package entry. Re-running the fresh exact Cargo
+  install after the updater exited converged automatically to one 4.1.1
+  registration and binary. v4.1.2 therefore adds a transactional live-image
+  rename/restore/verified-cleanup handoff for current and future user-scoped
+  Windows channels. Its hidden cleanup action was exercised against valid and
+  invalid sibling names: valid backup removed with exit 0; arbitrary name
+  refused with exit 2 and remained untouched.
 - **Required proof:** finish every clean-tree release gate, exact-SHA CI/crates,
   then require signed archives, all Windows installers/transitions, and native
   ARM/Intel PKG-in-DMG validation to pass before auditing 30 immutable v4.1.2

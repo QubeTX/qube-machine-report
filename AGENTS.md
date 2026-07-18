@@ -580,6 +580,9 @@ Behavior:
 - fetches latest release from `https://api.github.com/repos/QubeTX/qube-machine-report/releases/latest`
 - uses `ureq` with a 15 second timeout
 - sends `User-Agent: tr300/<current version>`
+- reuses a nonempty caller-provided `GITHUB_TOKEN` or `GH_TOKEN` for hosted
+  release discovery without printing or persisting it; ordinary public updates
+  remain unauthenticated
 - strips leading `v` from release tags
 - compares semver-like numeric components
 - resolves the release once, then builds exact-tag asset/sidecar URLs with
@@ -615,6 +618,13 @@ Behavior:
   the official release/manual URL, and exits 2. Do not add a force prompt,
   atomic-backup bypass, or direct running-binary replacement fallback
 - verifies the installed binary's `--version` before claiming success
+- on Windows user-scoped Cargo, cargo-dist PowerShell, Corporate MSI, and
+  Corporate EXE channels, atomically renames the running image to a randomized
+  private sibling, installs/verifies the replacement at `tr300.exe`, restores
+  the old image on strategy failure, and asks only the verified new binary to
+  delete the backup after the old process exits. The hidden cleanup action
+  accepts only an absolute same-parent numeric private name; another update
+  best-effort removes a stale backup left by an interrupted helper.
 - **Fresh-installer intent:** a manually launched Windows installer is the
   user's newest channel choice. WiX removes the same-edition Inno product
   before MSI file installation; Inno enumerates/removes the same-edition MSI

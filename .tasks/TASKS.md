@@ -16,7 +16,7 @@
 - [ ] **Ship v4.1.2 through exact-SHA hosted gates** - preserve v4.1.0/v4.1.1, qualify supported Mac ownership proof and Windows transitions, then tag and publish without bypassing a gate (needs #c8r) (ms #v41) (owner codex) #rsh
   - [x] Publish v4.1.0 CI, crates, and signed archives and record the failed supplemental DMG gate
   - [x] Publish v4.1.1 CI/crates/archives/Windows assets and retain its failed DMG/partial Windows evidence
-  - [ ] Commit and push the v4.1.2 fix-forward to main
+  - [x] Commit and push the v4.1.2 fix-forward to main
   - [ ] Wait for exact-SHA CI and crates.io publication
   - [ ] Push only tag v4.1.2 and watch every release workflow
 

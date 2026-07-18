@@ -113,6 +113,7 @@ jobs:
     runs-on: windows-2022
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - name: Global MSI
@@ -173,6 +174,36 @@ jobs:
           $expected = ($line -split '\s+')[0].ToLowerInvariant()
           $actual = (Get-FileHash "assets\$env:ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "checksum mismatch for $env:ASSET" }
+
+      - name: Download exact candidate recovery input
+        if: matrix.asset != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ${{ matrix.asset }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force candidate | Out-Null
+          gh release download $env:TAG --repo '${{ github.repository }}' `
+            --dir candidate --pattern $env:ASSET --clobber
+          if (-not (Test-Path (Join-Path candidate $env:ASSET))) {
+            throw "missing candidate asset $env:ASSET"
+          }
+
+      - name: Verify candidate recovery checksum when published
+        if: matrix.asset != '' && matrix.kind != 'powershell'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ${{ matrix.asset }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        shell: pwsh
+        run: |
+          gh release download $env:TAG --repo '${{ github.repository }}' `
+            --dir candidate --pattern "$env:ASSET.sha256" --clobber
+          $line = (Get-Content "candidate\$env:ASSET.sha256" -Raw).Trim()
+          $expected = ($line -split '\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash "candidate\$env:ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "candidate checksum mismatch for $env:ASSET" }
 
       - name: Install the selected channel
         id: install
@@ -241,8 +272,42 @@ jobs:
           INSTALLED_VERSION: ${{ needs.resolve.outputs.previous_version }}
           EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
           EXE: ${{ steps.install.outputs.exe }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ${{ matrix.asset }}
         shell: pwsh
         run: |
+          function Install-Candidate {
+            $asset = if ($env:ASSET) { Join-Path $PWD "candidate\$env:ASSET" } else { $null }
+            switch ($env:KIND) {
+              'msi-global' {
+                $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                if ($p.ExitCode -ne 0) { throw "candidate Global MSI failed: $($p.ExitCode)" }
+              }
+              'msi-corporate' {
+                $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                if ($p.ExitCode -ne 0) { throw "candidate Corporate MSI failed: $($p.ExitCode)" }
+              }
+              'exe-global' {
+                $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-global-exe.log'
+                $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+                if ($p.ExitCode -ne 0) { Get-Content $log -ErrorAction SilentlyContinue; throw "candidate Global EXE failed: $($p.ExitCode)" }
+              }
+              'exe-corporate' {
+                $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-corporate-exe.log'
+                $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+                if ($p.ExitCode -ne 0) { Get-Content $log -ErrorAction SilentlyContinue; throw "candidate Corporate EXE failed: $($p.ExitCode)" }
+              }
+              'powershell' {
+                & $asset
+                if (-not $?) { throw 'candidate PowerShell installer failed' }
+              }
+              'cargo' {
+                cargo install tr300 --version $env:EXPECTED_VERSION --force --locked
+                if ($LASTEXITCODE -ne 0) { throw 'candidate Cargo install failed' }
+              }
+            }
+          }
+
           $reported = (& $env:EXE --version).Trim()
           if ($reported -ne "tr300 $env:INSTALLED_VERSION") { throw "unexpected prior version: $reported" }
           (& $env:EXE --fast --json | ConvertFrom-Json) | Out-Null
@@ -276,8 +341,20 @@ jobs:
               throw "portable failure mutated the existing binary: $retained"
             }
           } else {
+            $legacyFallback = $false
             if ($exit -ne 0 -or $update.success -ne $true) {
-              throw "same-channel update failed"
+              if ($exit -ne 2 -or $update.success -ne $false -or $update.requires_user_action -ne $true) {
+                throw "legacy updater neither succeeded nor failed safely"
+              }
+              if ($update.recovery_url -ne 'https://github.com/QubeTX/qube-machine-report/releases/latest') {
+                throw "legacy updater did not return the versionless recovery page"
+              }
+              $retained = (& $env:EXE --version).Trim()
+              if ($retained -ne "tr300 $env:INSTALLED_VERSION") {
+                throw "legacy updater failure did not retain the old binary: $retained"
+              }
+              $legacyFallback = $true
+              Install-Candidate
             }
             $expectedStrategies = switch ($env:KIND) {
               'msi-global' { @('msi_global') }
@@ -287,10 +364,12 @@ jobs:
               'powershell' { @('installer_powershell', 'installer_pwsh') }
               'cargo' { @('cargo') }
             }
-            if ($expectedStrategies -notcontains $update.strategy) {
+            if (-not $legacyFallback -and $expectedStrategies -notcontains $update.strategy) {
               throw "update crossed or misreported strategy: $($update.strategy)"
             }
-            if ($update.requires_user_action -ne $false) { throw "successful update unexpectedly requires user action" }
+            if (-not $legacyFallback -and $update.requires_user_action -ne $false) {
+              throw "successful update unexpectedly requires user action"
+            }
             $updated = (& $env:EXE --version).Trim()
             if ($updated -ne "tr300 $env:EXPECTED_VERSION") {
               throw "same-channel update did not install target version: $updated"
@@ -308,6 +387,12 @@ jobs:
             }
             if ($current.install_channel -ne $env:EXPECTED_CHANNEL -or $current.requires_user_action -ne $false) {
               throw "no-op lost channel identity or unexpectedly requires user action"
+            }
+            if ($env:KIND -eq 'cargo') {
+              $registrations = @(cargo install --list | Select-String '^tr300 v([^:]+):$')
+              if ($registrations.Count -ne 1 -or $registrations[0].Matches[0].Groups[1].Value -ne $env:EXPECTED_VERSION) {
+                throw "Cargo recovery did not converge to one target registration: $registrations"
+              }
             }
           }
 

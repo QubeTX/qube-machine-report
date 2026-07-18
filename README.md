@@ -344,6 +344,12 @@ install or update to fail.
 | PowerShell installer | Downloads the exact-tag PowerShell installer into the recorded prefix | No |
 | `cargo install` | Runs exact `cargo install --version … --force --locked` | No |
 
+Cargo, PowerShell, and Corporate installer updates use a transactional
+running-image handoff on Windows: the old command is kept under a private
+sibling name while the preserved channel installs and verifies the replacement,
+then the new command removes that backup after the updater exits. A failed
+replacement restores the old executable before returning exit code 2.
+
 Detection prefers separate Global/Corporate registry markers while preserving
 the legacy `HKCU\Software\TR300\InstallSource` value. A missing marker is
 recovered only when Add/Remove Programs and the running path identify one

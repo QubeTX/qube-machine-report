@@ -68,6 +68,13 @@ GUI-only defect.
   explicit installer choice. v4.1.0-and-newer MSI authoring also accepts a
   fresh older/same-version MSI as the user's newest instruction; automatic
   updates remain latest-only.
+- Windows Cargo, PowerShell, Corporate MSI, and Corporate EXE updates perform a
+  transactional live-image handoff: rename the executing binary, update and
+  verify the same channel at the original path, restore on failure, and let the
+  verified new binary delete the backup after the caller exits. Immutable older
+  updaters may safely exit 2 when they cannot replace themselves; the exact
+  fresh same-channel installer is then authoritative and must converge to one
+  registration/binary before the current-version no-op is accepted.
 - The universal macOS binary is packaged in a signed
   `com.qubetx.tr300.pkg` inside
   `tr300-universal-apple-darwin.dmg`. Both containers are notarized/stapled;

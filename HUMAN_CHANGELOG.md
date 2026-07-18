@@ -34,6 +34,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   installer family in place, prove the second update is a harmless no-op, and
   prove an older portable copy stays untouched while directing the user to the
   fresh versionless download.
+- **User-scoped Windows updates can replace the command that launched them.**
+  Cargo, PowerShell, and Corporate installers temporarily preserve the running
+  command under a private backup name, install and verify the new command in
+  the same place, then remove the backup after the updater exits. If the update
+  fails, TR-300 restores the old working command and directs the user to the
+  matching fresh installer instead of leaving two active versions.
 
 ## [4.1.1] - 2026-07-18
 

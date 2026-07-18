@@ -72,6 +72,11 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Update JSON stays one stdout object and adds `install_channel`,
   `recovery_url`, and `requires_user_action` without removing existing fields;
   known-channel failures also expose the immutable `exact_installer_url`.
+- Current Windows user-scoped channels rename the live image to a private
+  sibling before replacement, verify the original path, restore on failure,
+  and use the new binary for delayed backup cleanup. Legacy updater failure is
+  valid only when it retains the old binary and returns recovery; a fresh exact
+  same-channel install must then converge to one current registration.
 - A fresh v4.1.0-or-newer MSI can replace a same-edition older, newer, or
   same-version MSI; automatic updates remain latest-only. Explicit MSI/Inno
   format changes remove the same-edition competing registration first. Inno

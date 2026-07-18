@@ -52,6 +52,32 @@ JSON/stderr before assertions, and upgrades the hosted matrix to install a dynam
 prior complete release before testing real same-channel update, no-op,
 portable recovery/no-mutation, both takeover directions, and uninstall.
 
+The next hosted replay clarified the remaining Windows boundary. CI
+29641305931 passed 18 of 19 jobs and stopped only because a semantic grep let
+GitHub interpolate the Apple Team expression before comparing it with checked-
+out source; the guard now verifies the literal variable components. Windows
+run 29641313782 replayed immutable v4.1.1 assets, so its EXE jobs correctly
+reproduced the old unsafe DLL bridge rather than proving the new registry code.
+It also supplied the missing runtime diagnosis: a private Cargo v4.1.0 fixture
+compiled v4.1.1 successfully, then Windows denied Cargo's attempt to move the
+still-running executable. The updater retained the old runnable binary; a
+fresh exact Cargo install after process exit converged automatically to one
+v4.1.1 registration.
+
+Current v4.1.2 source now gives user-scoped Windows channels a transactional
+live-image handoff: rename the current image to a randomized private sibling,
+run and verify only the preserved strategy at `tr300.exe`, restore the old
+image on failure, and let the verified new binary delete the backup after the
+updater exits. The cleanup action is hidden and accepts only an absolute
+same-parent numeric private name; a later update sweeps an interrupted stale
+backup. The pre-tag Windows CI gate compiles and tests current MSI/EXE takeover
+in both directions. The post-release matrix tests immutable older behavior
+honestly: direct same-channel success or safe exit 2 followed by the exact
+fresh same-channel asset are both allowed, but the final state must be exactly
+one target binary/registration with preserved channel identity. Hosted current
+updaters reuse `GITHUB_TOKEN`/`GH_TOKEN` without logging it to avoid shared API
+rate-limit failures.
+
 Never modify v4.1.0 or v4.1.1 tags/assets. Complete exact-SHA gates and the
 30-asset public audit only on v4.1.2.
 

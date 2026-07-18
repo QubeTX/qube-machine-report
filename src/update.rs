@@ -226,6 +226,17 @@ enum StrategyError {
     PolicyBlocked(String),
 }
 
+impl StrategyError {
+    fn append(self, detail: impl AsRef<str>) -> Self {
+        let detail = detail.as_ref();
+        match self {
+            Self::Preflight(message) => Self::Preflight(format!("{message}; {detail}")),
+            Self::Runtime(message) => Self::Runtime(format!("{message}; {detail}")),
+            Self::PolicyBlocked(message) => Self::PolicyBlocked(format!("{message}; {detail}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttemptKind {
     Skipped,
@@ -594,12 +605,14 @@ fn fetch_latest_version() -> Result<String, String> {
         .timeout(std::time::Duration::from_secs(15))
         .build();
 
-    let resp = agent
+    let mut request = agent
         .get(RELEASES_URL)
         .set("User-Agent", &format!("tr300/{}", VERSION))
-        .set("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(classify_fetch_error)?;
+        .set("Accept", "application/vnd.github+json");
+    if let Some(token) = github_api_token() {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let resp = request.call().map_err(classify_fetch_error)?;
 
     let body: serde_json::Value = resp
         .into_json()
@@ -618,6 +631,18 @@ fn fetch_latest_version() -> Result<String, String> {
         ));
     }
     Ok(version.to_string())
+}
+
+/// Reuse a caller-provided GitHub token when one is already available (for
+/// example in hosted validation). The value is never printed or persisted.
+/// `GITHUB_TOKEN` is canonical; `GH_TOKEN` keeps GitHub CLI environments
+/// convenient without changing update behavior for ordinary users.
+fn github_api_token() -> Option<String> {
+    ["GITHUB_TOKEN", "GH_TOKEN"].into_iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })
 }
 
 /// Strip any prerelease (`-rc.1`) or build-metadata (`+nightly.42`)
@@ -791,6 +816,22 @@ where
 }
 
 fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyError> {
+    #[cfg(windows)]
+    if matches!(
+        strategy,
+        UpdateStrategy::Cargo
+            | UpdateStrategy::InstallerPowerShell
+            | UpdateStrategy::InstallerPwsh
+            | UpdateStrategy::MsiCorporate
+            | UpdateStrategy::ExeCorporate
+    ) {
+        return with_windows_live_image_handoff(|| try_strategy_inner(strategy, latest));
+    }
+
+    try_strategy_inner(strategy, latest)
+}
+
+fn try_strategy_inner(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyError> {
     match strategy {
         UpdateStrategy::Cargo => {
             rustup_update_stable_best_effort();
@@ -840,6 +881,204 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
         }
         UpdateStrategy::MacDmg => try_macos_dmg_install(latest),
     }
+}
+
+/// Windows keeps a running executable image open. Cargo and user-scoped
+/// installers therefore cannot replace `tr300.exe` while this process waits
+/// for them. Rename the live image to a private sibling first (Windows permits
+/// renaming an executing image), run and verify the same-channel strategy at
+/// the original path, then let the newly installed binary delete the backup
+/// after this process exits. A failed strategy restores the old image before
+/// its error is reported.
+#[cfg(windows)]
+fn with_windows_live_image_handoff<F>(attempt: F) -> Result<(), StrategyError>
+where
+    F: FnOnce() -> Result<(), StrategyError>,
+{
+    cleanup_stale_windows_update_backups();
+    let handoff = WindowsLiveImageHandoff::begin()?;
+    handoff.finish(attempt())
+}
+
+/// Best-effort maintenance for a prior successful update whose detached
+/// cleanup helper was interrupted. This runs only when another update of a
+/// user-scoped channel begins, and only removes product-private sibling names.
+#[cfg(windows)]
+fn cleanup_stale_windows_update_backups() {
+    let Ok(current) = std::env::current_exe() else {
+        return;
+    };
+    if !current
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"))
+    {
+        return;
+    }
+    let Some(parent) = current.parent() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(is_windows_update_backup_name)
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+#[cfg(windows)]
+struct WindowsLiveImageHandoff {
+    original: std::path::PathBuf,
+    backup: std::path::PathBuf,
+}
+
+#[cfg(windows)]
+impl WindowsLiveImageHandoff {
+    fn begin() -> Result<Self, StrategyError> {
+        let original = std::env::current_exe().map_err(|error| {
+            StrategyError::Preflight(format!(
+                "could not resolve the running executable for safe handoff: {error}"
+            ))
+        })?;
+        let parent = original.parent().ok_or_else(|| {
+            StrategyError::Preflight(
+                "running executable has no parent directory for safe handoff".to_string(),
+            )
+        })?;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let backup = parent.join(format!(
+            ".tr300-update-backup-{}-{nonce}.exe",
+            std::process::id()
+        ));
+        std::fs::rename(&original, &backup).map_err(|error| {
+            let message = format!(
+                "could not rename the running executable from {} to {} before the same-channel update: {error}. The old installation was left unchanged",
+                original.display(),
+                backup.display()
+            );
+            if likely_endpoint_policy_error(&error) {
+                StrategyError::PolicyBlocked(message)
+            } else {
+                StrategyError::Runtime(message)
+            }
+        })?;
+        Ok(Self { original, backup })
+    }
+
+    fn finish(self, result: Result<(), StrategyError>) -> Result<(), StrategyError> {
+        match result {
+            Ok(()) => {
+                self.spawn_cleanup().map_err(|error| {
+                    StrategyError::Runtime(format!(
+                        "the update installed and verified the new binary, but could not start safe cleanup for {}: {error}",
+                        self.backup.display()
+                    ))
+                })?;
+                Ok(())
+            }
+            Err(error) => match self.rollback() {
+                Ok(()) => Err(error.append("the renamed old executable was restored")),
+                Err(rollback) => Err(error.append(format!(
+                    "automatic rollback also failed: {rollback}; the old executable remains at {}",
+                    self.backup.display()
+                ))),
+            },
+        }
+    }
+
+    fn rollback(&self) -> std::io::Result<()> {
+        if self.original.exists() {
+            std::fs::remove_file(&self.original)?;
+        }
+        std::fs::rename(&self.backup, &self.original)
+    }
+
+    fn spawn_cleanup(&self) -> std::io::Result<()> {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut command = Command::new(&self.original);
+        command
+            .arg("update-cleanup")
+            .arg("--update-backup")
+            .arg(&self.backup)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        command.spawn().map(|_| ())
+    }
+}
+
+/// Internal cleanup action used only by `WindowsLiveImageHandoff`. The newly
+/// installed executable is in the same directory as the backup and polls until
+/// the old updater releases its image handle. Strict sibling/name validation
+/// prevents the hidden action from becoming an arbitrary-file deletion API.
+#[cfg(windows)]
+pub fn cleanup_windows_update_backup(backup: &std::path::Path) -> i32 {
+    let Ok(current) = std::env::current_exe() else {
+        return 2;
+    };
+    let same_parent =
+        current
+            .parent()
+            .zip(backup.parent())
+            .is_some_and(|(current_parent, backup_parent)| {
+                current_parent
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&backup_parent.to_string_lossy())
+            });
+    let valid_name = backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(is_windows_update_backup_name);
+    let current_is_product = current
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"));
+    if !backup.is_absolute() || !same_parent || !valid_name || !current_is_product {
+        return 2;
+    }
+
+    for _ in 0..600 {
+        match std::fs::remove_file(backup) {
+            Ok(()) => return 0,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return 0,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+    2
+}
+
+#[cfg(any(windows, test))]
+fn is_windows_update_backup_name(name: &str) -> bool {
+    let Some(body) = name
+        .strip_prefix(".tr300-update-backup-")
+        .and_then(|name| name.strip_suffix(".exe"))
+    else {
+        return false;
+    };
+    let Some((pid, nonce)) = body.split_once('-') else {
+        return false;
+    };
+    !pid.is_empty()
+        && !nonce.is_empty()
+        && pid.bytes().all(|byte| byte.is_ascii_digit())
+        && nonce.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(not(windows))]
+pub fn cleanup_windows_update_backup(_backup: &std::path::Path) -> i32 {
+    2
 }
 
 fn recovery_asset_for_channel(channel: InstallChannel) -> Option<&'static str> {
@@ -1290,7 +1529,15 @@ fn post_install_version_ok(installed: &str, expected: &str) -> bool {
 /// process errors, or the output doesn't parse. Cross-platform — used by both
 /// the Windows installer verify and the cargo-path verify.
 fn reexec_installed_version() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
+    let mut exe = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    if exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(is_windows_update_backup_name)
+    {
+        exe.set_file_name("tr300.exe");
+    }
     let output = Command::new(&exe).arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
@@ -2781,5 +3028,25 @@ TeamIdentifier=M9D5379H93\n";
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn windows_live_image_cleanup_accepts_only_private_sibling_names() {
+        assert!(is_windows_update_backup_name(
+            ".tr300-update-backup-123-456.exe"
+        ));
+        assert!(!is_windows_update_backup_name("tr300.exe"));
+        assert!(!is_windows_update_backup_name(
+            ".tr300-update-backup-123-456.dll"
+        ));
+        assert!(!is_windows_update_backup_name(
+            "other-update-backup-123-456.exe"
+        ));
+        assert!(!is_windows_update_backup_name(
+            ".tr300-update-backup--456.exe"
+        ));
+        assert!(!is_windows_update_backup_name(
+            ".tr300-update-backup-123-other.exe"
+        ));
     }
 }

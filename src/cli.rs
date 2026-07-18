@@ -24,6 +24,11 @@ pub enum Action {
     /// and always exits 0 (cleanup is advisory). Parses as `migrate-cleanup`.
     #[value(hide = true)]
     MigrateCleanup,
+    /// Delete the renamed live-image backup after a Windows update. HIDDEN —
+    /// spawned only by the newly installed binary after the updater verifies
+    /// the replacement at the original path.
+    #[value(hide = true)]
+    UpdateCleanup,
 }
 
 /// TR-300: Cross-platform system information report
@@ -131,6 +136,10 @@ pub struct Cli {
     /// for locating the cargo-bin directory).
     #[arg(long = "cargo-home", value_name = "PATH", hide = true)]
     pub cargo_home: Option<String>,
+
+    /// Exact sibling backup created by the Windows live-image handoff.
+    #[arg(long = "update-backup", value_name = "PATH", hide = true)]
+    pub update_backup: Option<std::path::PathBuf>,
 }
 
 #[cfg(test)]
@@ -175,6 +184,24 @@ mod tests {
             Cli::try_parse_from(["tr300", "uninstall"]).expect("uninstall action should parse");
         assert_eq!(install.action, Some(Action::Install));
         assert_eq!(uninstall.action, Some(Action::Uninstall));
+    }
+
+    #[test]
+    fn parses_hidden_windows_update_cleanup_action() {
+        let cli = Cli::try_parse_from([
+            "tr300",
+            "update-cleanup",
+            "--update-backup",
+            r"C:\Users\example\.cargo\bin\.tr300-update-backup-123-456.exe",
+        ])
+        .expect("internal update cleanup action should parse");
+        assert_eq!(cli.action, Some(Action::UpdateCleanup));
+        assert_eq!(
+            cli.update_backup.as_deref(),
+            Some(std::path::Path::new(
+                r"C:\Users\example\.cargo\bin\.tr300-update-backup-123-456.exe"
+            ))
+        );
     }
 
     #[test]
