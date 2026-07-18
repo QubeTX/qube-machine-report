@@ -158,18 +158,22 @@ commands. Windows installers remain intentionally unsigned under the existing
 documented Authenticode decision; their SHA sidecars detect mismatch but are
 not represented as independent signatures.
 
-On the Alienware, the exact public ZIP binary passed table/ASCII/schema-v1
-fast+full JSON, current no-op JSON, ordinary no-write, manual save/cleanup,
-console code-page restoration, and performance checks (272–293 ms fast;
-5,121 ms full). Hardware remained plausible: Alienware m16 R2, BIOS 1.21.0,
-UEFI, Core Ultra 7 155H, `6P + 10E`, 16 physical/22 logical cores, Intel Arc +
-RTX 4070, Samsung NVMe, 32 GiB RAM, battery/route/DNS/session data. BitLocker
-status requires elevation and remains unclaimed. The natural Global MSI is
-still one v4.0.1 Program Files install: its old updater selected/downloaded/
-checksum-verified the exact Global v4.1.3 MSI, then two UAC ceremonies timed
-out/cancelled with MSI 1602 and no mutation. Finish that one user-approved UAC
-transition, then prove one current registration/marker/PATH and no backup or
-duplicate. AMD64 laptop and Raspberry Pi hardware checks remain open.
+On the Alienware, both the exact public ZIP and final installed Global MSI
+passed table/ASCII/schema-v1 fast+full JSON, current no-op JSON, ordinary
+no-write, manual save/cleanup, console code-page restoration, and performance
+checks. The installed runs took 820–824 ms fast and 5,592–5,628 ms full.
+Hardware remained plausible: Alienware m16 R2, BIOS 1.21.0, UEFI, Core Ultra 7
+155H, `6P + 10E`, 16 physical/22 logical cores, Intel Arc + RTX 4070, Samsung
+NVMe, 32 GiB RAM, battery/route/DNS/session data. BitLocker status requires
+elevation and remains unclaimed. After safe 1602 cancellations and one transient
+1618, the user-approved UAC retry let the immutable v4.0.1 client launch its
+exact Global v4.1.3 MSI. Restart Manager ended that legacy parent before final
+JSON, but the installer converged to one v4.1.3 Program Files binary and one
+HKLM MSI registration with matching Global markers/machine PATH, no Corporate,
+Cargo, user-PATH, or live-image-backup copy, and an exit-0 one-object current
+no-op. One inert private staging MSI orphaned by the terminated old process was
+inspected and removed with the exact test fixtures; it was never active or on
+PATH. AMD64 laptop and Raspberry Pi hardware checks remain open.
 
 v4.1.0 source SHA `5b4e18d5928e602452a0030a9f5b130dc611d3c9`
 passed exact-SHA CI run 29638735899, crates run 29638873747, and signed archive
@@ -227,10 +231,10 @@ native invocation from old-client/Restart Manager termination, so the final
 harness uses a separate `Start-Process` child plus redirected stdout/stderr and
 the process object's exit code before applying the same assertions.
 
-Release implementation, publication, and public audit are complete. Remaining
-v4.1 work is the user-approved Alienware Global-MSI UAC transition plus the
-separately tracked AMD64 laptop and Raspberry Pi hardware continuation. After
-TR-300 is complete and only when the user is on the testing Mac, #nd372 reserves
+Release implementation, publication, public audit, and the Alienware Global-MSI
+UAC transition are complete. The separately tracked AMD64 laptop and Raspberry
+Pi checks remain personal-hardware continuation. Only when the user is on the
+testing Mac, #nd372 reserves
 one bounded external ND-300 v3.7.1-to-v3.7.2 PKG-in-DMG acceptance batch; it is
 not a TR-300 release gate and must not start on this Alienware.
 
@@ -321,12 +325,12 @@ runtime claims remain gated by the hardware matrix below.
 
 ### A. Personal Alienware / Windows
 
-**Status: active, baseline/update/topology evidence captured.** The natural
-Global MSI v3.17.0 → v4.0.1 update preserved path, marker, registration, and
-PATH without a duplicate. The source-built v4.1.0 report confirms 16 physical,
-22 logical, `6P + 10E`, and both GPUs. Complete the remaining full/fast/table/
-JSON/manual-save, code-page, failure/recovery, cleanup, and performance rows
-before tagging.
+**Status: complete.** The natural Global MSI v3.17.0 → v4.0.1 → v4.1.3
+path preserved the Program Files binary, Global markers, one MSI registration,
+and machine PATH without a duplicate. Public and installed reports confirmed
+16 physical, 22 logical, `6P + 10E`, both GPUs, and the remaining full/fast/
+table/JSON/manual-save, code-page, failure/recovery, cleanup, and performance
+rows.
 
 - OS edition/build/architecture and model/motherboard/BIOS
 - CPU model, physical/logical topology, socket count, frequency provenance, GPU

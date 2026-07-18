@@ -645,6 +645,30 @@ legacy recovery evidence, never a substitute for testing current code. Current
 Global jobs separately invoke the strict worker as a same-version repair and
 require the private backup to disappear.
 
+#### Real legacy-to-current evidence
+
+The Alienware's natural Global MSI supplied the required post-release legacy
+proof on 2026-07-18. Its immutable v4.0.1 updater resolved the public v4.1.3
+release, selected only Global MSI, downloaded and checksum-verified the exact
+tagged asset, and launched Windows Installer after one approved UAC prompt.
+Restart Manager then ended the old parent before final JSON, while the already-
+started MSI converged to one v4.1.3 Program Files binary and one HKLM product.
+Fresh-shell evidence required the Global scoped and legacy markers, exactly one
+machine PATH entry, no Corporate/Cargo/user-PATH/live-image-backup copy, and an
+exit-0 current-version response containing exactly one JSON object. This is the
+legacy recovery branch described above; it does not claim that v4.0.1 executed
+the live-image worker added in v4.1.3.
+
+The interrupted legacy parent left one inert private staging directory
+containing only its verified MSI. That residue was neither registered nor on
+PATH and was inspected and removed as an exact test fixture. This sharpens the
+evidence vocabulary for reuse: an immutable old process may be terminated
+before its RAII staging guard runs, so final one-copy ownership and PATH proof
+must be reported separately from transient-cache cleanup. Current-source gates
+still require their own staging and private live-image backups to disappear;
+validators must never treat an arbitrary similarly named temporary directory
+as product-owned or delete it without exact provenance.
+
 **Rejected alternatives:** relying on Restart Manager to preserve/rename the
 updater after it demonstrably terminated it; invoking `powershell Start-Process
 -Verb RunAs` and inheriting another interpreter/quoting/module boundary; asking

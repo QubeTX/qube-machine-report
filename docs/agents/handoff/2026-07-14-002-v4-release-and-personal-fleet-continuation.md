@@ -82,20 +82,24 @@ token and emits captured updater JSON/exit to stderr before asserting, so Bash
 `errexit` cannot hide the evidence. This workflow-only hardening is on `main`;
 it does not alter v4.1.3 public bytes or the ordinary unauthenticated path.
 
-Alienware public-byte functionality is complete from the release ZIP: table,
+Alienware public-byte and installed functionality are complete: table,
 ASCII, fast/full JSON, no-op update JSON, no-write/manual-save cleanup,
 code-page restoration, and performance passed. Hardware reconfirmed Alienware
 m16 R2, BIOS 1.21.0, UEFI, `6P + 10E`, 16 physical/22 logical cores, both GPUs,
 NVMe, 32 GiB/two modules, battery, route, DNS, locale, and session fields;
 BitLocker is unclaimed because the read-only probe requires elevation. The
-natural installed Global MSI remains one v4.0.1 Program Files copy. Its old
-updater selected/downloaded/checksum-verified the exact Global v4.1.3 MSI, then
-UAC timed out/cancelled with MSI 1602 and returned failure JSON while retaining
-the old install. The exact public MSI recovery prompt also timed out without
-mutation. Resume #w413 only when the user can approve UAC, then require v4.1.3,
-one ARP product/path/marker/PATH, no Corporate/Cargo/private backup, and a
-current one-object no-op. Do not substitute portable success for installed-
-origin proof.
+final requested UAC retry updated the natural Global MSI from v4.0.1 to v4.1.3
+at `C:\Program Files\tr300\bin\tr300.exe`. A first retry safely returned MSI
+1618 while another installer transaction was active. Once clear, the immutable
+old updater downloaded/checksum-verified/launched only the exact Global MSI;
+Restart Manager ended that legacy parent before final JSON, but the MSI
+converged. A fresh shell proved one HKLM v4.1.3 product/path, legacy plus scoped
+Global markers, one machine PATH entry, no Corporate/Cargo/user-PATH/private
+backup, and an exit-0 one-object current no-op. Installed fast/full/table/ASCII,
+no-write/manual-save cleanup, code-page restoration, performance, and hardware
+smokes passed. One inert MSI cache left when the old parent lost its staging
+guard was inspected and removed as the exact test fixture; it was not an active
+duplicate. Task #w413 and milestone #v41 are complete.
 
 The separate ND-300 physical-Mac acceptance batch is queued as #nd372 and must
 not start until TR-300 is complete and the user is on the testing Mac. Baseline

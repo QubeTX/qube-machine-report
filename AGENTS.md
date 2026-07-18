@@ -43,8 +43,9 @@ Never put secrets in board or memory files; use environment variables, the OS ke
   gates on native Intel and Apple Silicon. It fixes the immutable v4.1.2
   finding that Restart Manager could terminate a Global installer updater
   before final JSON by using a strict elevated live-image worker. Alienware
-  public-binary functionality/hardware validation is real evidence; its natural
-  Global MSI remains v4.0.1 until the user completes the final UAC ceremony.
+  public-binary and installed functionality/hardware validation is real
+  evidence; its natural Global MSI completed the v4.0.1 to v4.1.3 same-channel
+  UAC transition with one Program Files copy/registration/PATH.
   AMD64 Linux laptop and Raspberry Pi 4 live verification remain open. The
   major v4 boundary
   is required because public Rust records gained fields and collector helpers

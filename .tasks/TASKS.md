@@ -10,13 +10,12 @@
 
 ## Active
 
-- [ ] **Validate the public v4.1.3 Global MSI on the Alienware** - update the natural 4.0.1 installation, then re-run functionality, origin, cleanup, PATH, hardware, code-page, save, and performance evidence (needs #rsh) (ms #v41) (owner codex) #w413
-  - [ ] Complete the one-UAC Global MSI update and capture installed-success evidence
-  - [ ] Prove one Program Files binary/registration/marker/PATH and no backup/duplicate
-  - [x] Re-run public report modes, save/no-write, code-page, performance, and hardware checks
-
 ## Done
 
+- [x] **Validate the public v4.1.3 Global MSI on the Alienware** - update the natural 4.0.1 installation, then re-run functionality, origin, cleanup, PATH, hardware, code-page, save, and performance evidence (needs #rsh) (ms #v41) (owner codex) (done 2026-07-18) #w413
+  - [x] Complete the one-UAC Global MSI update and capture installed-success evidence
+  - [x] Prove one Program Files binary/registration/marker/PATH and no backup/duplicate
+  - [x] Re-run public report modes, save/no-write, code-page, performance, and hardware checks
 - [x] **Audit the public v4.1.3 distribution and close the release ledger** - verify all public bytes, installers, signatures, notarization, update channels, and recovery behavior (needs #rsh) (ms #v41) (owner codex) (done 2026-07-18) #rau
   - [x] Verify crates.io and all 30 GitHub Release assets
   - [x] Verify every Windows installer family and both Apple architectures

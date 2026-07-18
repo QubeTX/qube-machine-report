@@ -56,9 +56,10 @@ tags/assets are immutable. v4.1.3 completed exact-SHA CI/crates, supported
 macOS receipt/file-owner/Developer ID validation, the hosted 30-asset release,
 and every disposable Windows transition. Its strict elevated live-image worker
 fixes the v4.1.2 finding that Restart Manager could terminate a Global native-
-installer updater before final JSON. Alienware public-binary functionality and
-hardware validation is captured; the natural Global MSI remains v4.0.1 until
-the user completes the final UAC ceremony. AMD64 Linux laptop and Raspberry
+installer updater before final JSON. Alienware public-binary and installed
+functionality/hardware validation is captured; the natural Global MSI completed
+the v4.0.1 to v4.1.3 same-channel UAC transition with one Program Files
+copy/registration/PATH. AMD64 Linux laptop and Raspberry
 Pi 4 checks remain continuation work and must not be reported as completed.
 Managed-work antivirus behavior is a separate endpoint-policy case, not
 personal Windows field-accuracy proof.

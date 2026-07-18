@@ -86,7 +86,7 @@ as passed.
   existing ADR; checksum equality is not misrepresented as an independent
   signature. Apple trust is the protected Developer ID/notary/staple evidence
   from the exact public-byte workflows.
-- **Alienware public-binary continuation:** the exact public ZIP binary passed
+- **Alienware public and installed continuation:** the exact public ZIP binary passed
   table and ASCII (32 lines each), schema-v1 fast/full JSON, a one-object
   already-current updater no-op, ordinary no-write, a 1,726-byte manual save
   followed by exact fixture cleanup, and code-page restoration. Three fast
@@ -95,14 +95,26 @@ as passed.
   155H, `6P + 10E`, 16 physical/22 logical cores, Intel Arc and RTX 4070,
   Samsung 1 TB NVMe, two populated memory modules/32 GiB, battery OK, a
   default Wi-Fi route and one DNS server. BitLocker remained unavailable to
-  the non-elevated probe and is not claimed. The natural installed baseline is
-  still one Global MSI v4.0.1 at `C:\Program Files\tr300\bin\tr300.exe` with
-  one ARP registration, machine PATH, legacy `msi-global`, and no Corporate or
-  Cargo copy. Its updater selected, downloaded, and checksum-verified the exact
-  public v4.1.3 Global MSI, then returned failure JSON and retained v4.0.1 when
-  UAC timed out/cancelled with MSI 1602; an exact-MSI recovery prompt also
-  timed out with no mutation. The remaining physical step is one user-approved
-  UAC followed by installed one-copy/origin/cleanup/no-op proof. Keep all
+  the non-elevated probe and is not claimed. After the documented safe 1602
+  cancellations, a requested retry first returned MSI 1618 while another
+  installer transaction was active and retained v4.0.1. Once that marker
+  cleared, the user approved one UAC prompt and the immutable v4.0.1 updater's
+  exact Global MSI transaction installed v4.1.3 at
+  `C:\Program Files\tr300\bin\tr300.exe`. Restart Manager ended the old parent
+  after its download/checksum/launch progress and before final JSON, which is
+  valid legacy recovery evidence rather than current-client JSON proof.
+  Fresh-shell verification found `where`/`Get-Command` resolving only that
+  path, one HKLM MSI product at 4.1.3, legacy plus scoped `msi-global`, one
+  machine PATH entry, no user TR-300 PATH, Corporate/Cargo copy, or private
+  live-image backup. The installed no-op returned exit 0 and exactly one JSON
+  object with current/latest 4.1.3, `install_channel`/`install_origin`
+  `msi-global`, and `requires_user_action:false`. Installed fast/full JSON,
+  Unicode table, ASCII fast, ordinary no-write, a 1,724-byte manual save with
+  exact cleanup, and code-page 437 restoration all passed; fast took 820–824
+  ms and full took 5,592–5,628 ms. Hardware fields matched the public-byte
+  evidence. One inert `installer.msi` in the old parent's randomized staging
+  directory was inspected and removed with the test fixtures; it was not a
+  registration, executable, PATH entry, or duplicate install. Keep all
   v4.1.0–v4.1.3 tags/assets unchanged.
 
 ### v4.1.2 — 2026-07-18 (immutable fix-forward in progress)
