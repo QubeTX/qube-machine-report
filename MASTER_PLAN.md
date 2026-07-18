@@ -162,6 +162,10 @@ are green. Windows replay 29643664099 exposed only a harness boundary before
 the channel assertions: hosted `pwsh` promoted expected old-client exit 2 to a
 terminating native error. The replay now captures native exit codes explicitly
 and still requires safe JSON/retention/recovery before exact-channel takeover.
+Replay 29643849174 proved a preference switch alone did not isolate direct
+native invocation from old-client/Restart Manager termination, so the final
+harness uses a separate `Start-Process` child plus redirected stdout/stderr and
+the process object's exit code before applying the same assertions.
 
 1. Finish the tracked ADR/docs/handoff and isolated Windows installer matrix.
 2. Run fmt, locked clippy/tests, release build, package/publish dry runs, audit,

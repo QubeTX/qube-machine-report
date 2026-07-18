@@ -95,10 +95,15 @@ as passed.
   Its channel jobs then exposed a harness control-flow defect: GitHub `pwsh`
   promoted an immutable old updater's intentional exit 2 to a terminating
   native-command error before the script could inspect its safe-recovery JSON.
-  The replay disables only that host promotion, captures `$LASTEXITCODE`, and
-  retains the strict exit/one-object JSON/old-binary/recovery-link assertions
-  before launching the exact new same-channel installer. This does not change
-  or excuse any v4.1.2 product asset.
+  The first correction disabled only that host promotion while retaining the
+  strict exit/one-object JSON/old-binary/recovery-link assertions before the
+  exact new same-channel installer. This did not change or excuse any v4.1.2
+  product asset. Manual replay 29643849174 then showed
+  the preference switch alone was insufficient: direct `& tr300 update --json`
+  still ended MSI jobs before their first runtime diagnostic. The final harness
+  uses `Start-Process` with redirected stdout/stderr and the returned process
+  exit code, isolating runner control flow from an old updater or Windows
+  Installer/Restart Manager while retaining every result assertion.
 
 ### v4.1.1 — 2026-07-18 (published archives; DMG fixed forward in v4.1.2)
 

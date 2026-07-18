@@ -90,10 +90,14 @@ Silicon and attached the DMG/sidecar, so physical-Mac proof is non-blocking.
 Automatic Windows matrix 29643664099 resolved the release and passed both
 fresh-format jobs, then its channel jobs terminated before expected legacy
 exit-2 recovery assertions because the GitHub `pwsh` host promoted the native
-nonzero exit under stop-on-error. The corrected validation disables only that
-promotion, captures the native exit/JSON/stderr, and retains all strict safe-
-failure and exact same-channel convergence checks. Replay it against v4.1.2;
-do not alter the immutable tag or assets for this harness-only correction.
+nonzero exit under stop-on-error. The first correction disabled only that
+promotion and retained all strict safe-failure and exact same-channel
+convergence checks; it did not alter the immutable tag or assets. Manual replay
+29643849174 proved the preference switch alone did not preserve
+direct invocation around the MSI updater. The final harness starts the updater
+as an isolated `Start-Process` child, redirects both streams, and uses the
+process object's exit code so the parent assertion shell survives old-client
+or Restart Manager termination. Replay it against v4.1.2.
 
 ## 2026-07-18 immutable v4.1.1 packaging fix-forward
 

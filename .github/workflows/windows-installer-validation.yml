@@ -283,6 +283,20 @@ jobs:
           # contract assertions below can inspect stdout/stderr.
           $PSNativeCommandUseErrorActionPreference = $false
 
+          function Invoke-Updater([string] $label) {
+            $stdoutPath = Join-Path $env:RUNNER_TEMP "update-$label-stdout.txt"
+            $stderrPath = Join-Path $env:RUNNER_TEMP "update-$label-stderr.txt"
+            $process = Start-Process -FilePath $env:EXE -Wait -PassThru `
+              -ArgumentList @('update', '--json') `
+              -RedirectStandardOutput $stdoutPath `
+              -RedirectStandardError $stderrPath
+            [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              Lines = @(Get-Content -LiteralPath $stdoutPath -ErrorAction SilentlyContinue)
+              StderrPath = $stderrPath
+            }
+          }
+
           function Install-Candidate {
             $asset = if ($env:ASSET) { Join-Path $PWD "candidate\$env:ASSET" } else { $null }
             switch ($env:KIND) {
@@ -320,13 +334,12 @@ jobs:
           (& $env:EXE --fast --json | ConvertFrom-Json) | Out-Null
           & $env:EXE --fast --ascii | Out-Null
 
-          $stderr = Join-Path $env:RUNNER_TEMP 'update-stderr.txt'
-          $stdout = & $env:EXE update --json 2> $stderr
-          $exit = $LASTEXITCODE
-          $lines = @($stdout)
+          $updateRun = Invoke-Updater 'prior'
+          $exit = $updateRun.ExitCode
+          $lines = $updateRun.Lines
           Write-Host "update exit=$exit stdout-lines=$($lines.Count)"
           $lines | ForEach-Object { Write-Host "update-json: $_" }
-          Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue |
+          Get-Content -LiteralPath $updateRun.StderrPath -ErrorAction SilentlyContinue |
             ForEach-Object { Write-Host "update-stderr: $_" }
           if ($lines.Count -ne 1) { throw "update stdout was not exactly one line/object" }
           $update = $lines[0] | ConvertFrom-Json
@@ -384,9 +397,9 @@ jobs:
 
             # The second call proves an already-current install is a graceful
             # no-op and still reports exactly one JSON object.
-            $currentStdout = & $env:EXE update --json 2> $stderr
-            $currentExit = $LASTEXITCODE
-            $currentLines = @($currentStdout)
+            $currentRun = Invoke-Updater 'current'
+            $currentExit = $currentRun.ExitCode
+            $currentLines = $currentRun.Lines
             if ($currentLines.Count -ne 1) { throw "no-op stdout was not exactly one JSON object" }
             $current = $currentLines[0] | ConvertFrom-Json
             if ($currentExit -ne 0 -or $current.success -ne $true -or $current.update_available -ne $false) {
@@ -441,9 +454,9 @@ jobs:
             # recover the exact MSI/Inno format and edition without mutation.
             Remove-ItemProperty 'HKCU:\Software\TR300' -Name $marker -ErrorAction SilentlyContinue
             Remove-ItemProperty 'HKCU:\Software\TR300' -Name InstallSource -ErrorAction SilentlyContinue
-            $recoveredStdout = & $env:EXE update --json 2> $stderr
-            $recoveredExit = $LASTEXITCODE
-            $recoveredLines = @($recoveredStdout)
+            $recoveredRun = Invoke-Updater 'recovered'
+            $recoveredExit = $recoveredRun.ExitCode
+            $recoveredLines = $recoveredRun.Lines
             if ($recoveredLines.Count -ne 1) { throw "recovery stdout was not one JSON object" }
             $recovered = $recoveredLines[0] | ConvertFrom-Json
             if ($recoveredExit -ne 0 -or $recovered.install_channel -ne $env:EXPECTED_CHANNEL) {

@@ -497,11 +497,17 @@ The matrix must also preserve native exit status as data. GitHub's current
 runner's stop-on-error preference. That is incompatible with a contract that
 deliberately distinguishes updater exit 2 (old bytes retained, recovery JSON,
 user action required) from success. The validation step disables only native-
-command error promotion, captures `$LASTEXITCODE`, stdout, and stderr, and then
-applies the strict assertions itself. It does not relax PowerShell exceptions,
+command error promotion, launches the updater as an isolated child, captures
+`Process.ExitCode`, stdout, and stderr, and then applies the strict assertions
+itself. It does not relax PowerShell exceptions,
 installer exit checks, JSON shape, channel identity, recovery URL, or final
 convergence. Run 29643664099 exposed this harness boundary by terminating before
 its own `update exit=...` diagnostic on every completed legacy channel job.
+Replay 29643849174 proved the preference switch by itself was insufficient for
+direct native invocation around an old updater/Windows Installer transaction.
+The durable runner pattern is therefore an isolated `Start-Process` child with
+redirected stdout/stderr and `Process.ExitCode`; the parent assertion shell
+survives even when the updater or Restart Manager terminates that child.
 
 **Rejected alternatives:** accepting a clean install as updater proof; invoking
 a different installer family after failure; hard-coding a historical version
