@@ -41,7 +41,10 @@ as passed.
   schema-v1 JSON completed in 255 ms, full JSON in 5,113 ms, fast ASCII and
   console-code-page restoration passed, and update JSON was one no-op object
   against public v4.1.2. Manual Markdown save produced a nonempty 1,725-byte
-  Downloads report and the test fixture was removed. New unit coverage
+  Downloads report and the test fixture was removed. From committed source,
+  `cargo package --locked --list` contained the expected 39 files and
+  `cargo publish --dry-run --locked` packaged/verified v4.1.3 without a dirty-
+  tree bypass. New unit coverage
   rejects injected/prerelease worker versions and proves Windows command-line
   quoting. The hosted matrix now recognizes the immutable legacy termination
   only from exact native status + zero stdout + matching same-channel launch
