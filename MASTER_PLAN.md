@@ -309,13 +309,15 @@ native invocation from old-client/Restart Manager termination, so the final
 harness uses a separate `Start-Process` child plus redirected stdout/stderr and
 the process object's exit code before applying the same assertions.
 
-Release implementation, publication, public audit, and the Alienware Global-MSI
-UAC transition are complete. The separately tracked AMD64 laptop and Raspberry
-Pi checks remain personal-hardware continuation. After v4.2 closure, #nd372
-reserves an idle-installer handoff for ND-300 v3.7.3's Alienware UAC lane and,
-only when the user is on the testing Mac, one bounded external
-legacy-DMG-to-direct-PKG acceptance batch. Neither is a TR-300 release gate;
-the ND repository remains owned by its separate task.
+Release implementation, publication, public audit, and the v4.1.3 Alienware
+Global-MSI transition are complete. The separately tracked AMD64 laptop,
+Raspberry Pi, and v4.2.2 Alienware UAC checks remain personal-hardware
+continuation. External task #nd372 is also complete: its operator-approved
+ND-300 v3.7.2 Global MSI → v3.7.3 update finished exit 0 before the hold arrived,
+with no live TR overlap, one native owner, matching public hashes, no duplicate
+or staging residue, and zero remaining installer transactions. The owning ND
+task accepts completed native Intel/ARM Apple gates and keeps physical-Mac GUI
+acceptance optional/deferred; this repository changed no ND file or install.
 
 ## 4. v4.0.0 Mac and shared outcome (historical baseline)
 

@@ -155,8 +155,9 @@ Setup/TR-300 process remains. This is valid safe-cancellation evidence, not a
 successful physical update. Two older inert TR-300-only temp fixtures were
 inspected, removed by exact path, and the final `tr300-update-*` staging scan is
 empty. Task #w422 owns the user-approved retry and full
-post-update matrix. Keep the ND-300 Alienware installer lane queued behind it
-so native installer work does not overlap again.
+post-update matrix. The ND-300 task later reported that its operator-approved
+transaction had already completed before this hold arrived; there was no live
+overlap, and it will run no further Windows installer operation.
 
 ## 2026-07-18 v4.1.3 Global Windows live-image fix-forward
 
@@ -239,15 +240,19 @@ smokes passed. One inert MSI cache left when the old parent lost its staging
 guard was inspected and removed as the exact test fixture; it was not an active
 duplicate. Task #w413 and milestone #v41 are complete.
 
-The separate ND-300 v3.7.3 acceptances are queued as #nd372 and must not start
-until TR-300 is complete. First return proof that no Alienware MSI/Inno/UAC
-transaction remains so the separate ND task can retry its Windows lane without
-the prior code-1602 overlap. A physical-Mac task may then reuse TR-300's proven
-legacy bridge: verify an immutable old DMG and nested PKG, install that exact
-baseline, run its JSON updater into the public direct PKG, complete Apple
-Installer, and prove fresh-shell receipt/file ownership, paired paths/versions,
-no shadow copy, and one-object JSON. The ND task must provide the exact baseline
-and final v3.7.3 URL; this TR task must not guess assets or change ND files. Run
+The separate ND-300 v3.7.3 acceptance is complete as #nd372. Its owning task
+reported an operator-approved v3.7.2 Global MSI → public v3.7.3 exit-0 update,
+matching public hashes for both installed binaries, one ARP/marker/machine-PATH
+owner, no Cargo/retired/staged duplicate, passing already-latest JSON and
+migration dry-run, installed read-only smokes, and zero active installer
+transactions. It accepted the completed native Intel/ARM direct-PKG plus
+legacy-DMG gates and classified physical-Mac GUI acceptance as optional/
+deferred. If that optional batch is ever reopened, reuse TR-300's proven legacy
+bridge: verify an immutable old DMG and nested PKG, install that exact baseline,
+run its JSON updater into the public direct PKG, complete Apple Installer, and
+prove fresh-shell receipt/file ownership, paired paths/versions, no shadow copy,
+and one-object JSON. The ND task must provide the exact baseline and final URL;
+this TR task must not guess assets or change ND files. Run
 only `--version`, `--fast --json`, and `--fast --ascii` smokes. Never run ND
 network fixes, change channels, clean unrelated files, or uninstall the active
 setup; stop on ambiguity.

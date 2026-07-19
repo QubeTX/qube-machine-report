@@ -7,12 +7,12 @@
 - [ ] **Validate TR-300 on the AMD64 Linux laptop** - full/fast reports, shell/Cargo update preservation, permissions, networking, and graceful optional probes (ms #hw4) #amd
 - [ ] **Validate TR-300 on Raspberry Pi 4 ARM64** - native ARM asset, full/fast reports, shell/Cargo updates, permissions, networking, and graceful optional probes (ms #hw4) #pi4
 - [ ] **Complete the Alienware Global MSI v4.1.3 → v4.2.2 UAC update** - approve the same-channel transaction, then reprove one Program Files owner, registry/PATH, cleanup, JSON, functionality, and hardware (needs #v42) (ms #hw4) #w422
-- [ ] **Hand off the bounded ND-300 v3.7.3 native-installer acceptance lanes** - only after TR-300 is complete and no installer/UAC process remains; run the Alienware lane first, then reuse the proven legacy-DMG-to-direct-PKG Mac procedure only when the user is on the testing Mac (needs #w422) (ms #hw4) #nd372
 
 ## Active
 
 ## Done
 
+- [x] **Record the completed ND-300 v3.7.3 native-installer acceptance** - external operator-approved Alienware update completed without overlap; physical Mac GUI acceptance is optional/deferred behind native Intel/ARM direct-PKG and legacy-DMG gates (ms #hw4) (done 2026-07-18) #nd372
 - [x] **Codify and ship MIC-1 managed installation behavior** - make CLI installers the documented default, preserve update origin, make fresh managed intent authoritative, and fail closed across unsupported native scope transitions (ms #v42) (owner codex) (done 2026-07-18) #mic1
   - [x] Define the reusable managed-install/update state machine and raw-Cargo boundary
   - [x] Add stable public wrappers over exact-tag cargo-dist installer transactions
