@@ -1,11 +1,11 @@
 {
   "name": "TR-300 Machine Report",
-  "install": "bash .cursor/install.sh",
+  "install": "if [ -f qube-machine-report/.cursor/install.sh ]; then bash qube-machine-report/.cursor/install.sh; elif [ -f .cursor/install.sh ]; then bash .cursor/install.sh; else echo 'TR-300 install.sh not found' >&2; exit 1; fi",
   "terminals": [
     {
       "name": "homepage-dev",
       "description": "Vite dev server for the sibling marketing homepage on http://127.0.0.1:5173/. Idles with a message when the homepage repo is not checked out.",
-      "command": "HOMEPAGE_ROOT=\"$(cd .. 2>/dev/null && pwd)/qube-machine-report-homepage\"; if [ -f \"$HOMEPAGE_ROOT/package.json\" ]; then cd \"$HOMEPAGE_ROOT\" && npm run dev -- --host 127.0.0.1 --port 5173; else echo '[homepage-dev] qube-machine-report-homepage not checked out in this workspace; nothing to serve.'; fi"
+      "command": "HP=\"\"; for c in qube-machine-report-homepage ../qube-machine-report-homepage; do if [ -f \"$c/package.json\" ]; then HP=\"$c\"; break; fi; done; if [ -n \"$HP\" ]; then cd \"$HP\" && npm run dev -- --host 127.0.0.1 --port 5173; else echo '[homepage-dev] qube-machine-report-homepage not checked out; nothing to serve.'; fi"
     }
   ],
   "ports": [
