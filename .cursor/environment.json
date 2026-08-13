@@ -1,11 +1,11 @@
 {
   "name": "TR-300 Machine Report",
-  "install": "if [ -f qube-machine-report/.cursor/install.sh ]; then bash qube-machine-report/.cursor/install.sh; elif [ -f .cursor/install.sh ]; then bash .cursor/install.sh; else echo 'TR-300 install.sh not found' >&2; exit 1; fi",
+  "install": "for p in repos/qube-machine-report/.cursor/install.sh qube-machine-report/.cursor/install.sh .cursor/install.sh /agent/repos/qube-machine-report/.cursor/install.sh; do if [ -f \"$p\" ]; then bash \"$p\"; exit $?; fi; done; echo 'TR-300 install.sh not found' >&2; exit 1",
   "terminals": [
     {
       "name": "homepage-dev",
-      "description": "Vite dev server for the sibling marketing homepage on http://127.0.0.1:5173/. Idles with a message when the homepage repo is not checked out.",
-      "command": "HP=\"\"; for c in qube-machine-report-homepage ../qube-machine-report-homepage; do if [ -f \"$c/package.json\" ]; then HP=\"$c\"; break; fi; done; if [ -n \"$HP\" ]; then cd \"$HP\" && npm run dev -- --host 127.0.0.1 --port 5173; else echo '[homepage-dev] qube-machine-report-homepage not checked out; nothing to serve.'; fi"
+      "description": "Vite dev server for the sibling marketing homepage on http://127.0.0.1:5173/. Prints a message and idles when the homepage repo is not checked out.",
+      "command": "for d in repos/qube-machine-report-homepage qube-machine-report-homepage ../qube-machine-report-homepage /agent/repos/qube-machine-report-homepage; do if [ -f \"$d/package.json\" ]; then cd \"$d\" && exec npm run dev -- --host 127.0.0.1 --port 5173; fi; done; echo '[homepage-dev] qube-machine-report-homepage not checked out; nothing to serve.'"
     }
   ],
   "ports": [
