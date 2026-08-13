@@ -1,0 +1,20 @@
+{
+  "name": "TR-300 Machine Report",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "homepage-dev",
+      "description": "Vite dev server for the sibling marketing homepage on http://127.0.0.1:5173/. Idles with a message when the homepage repo is not checked out.",
+      "command": "HOMEPAGE_ROOT=\"$(cd .. 2>/dev/null && pwd)/qube-machine-report-homepage\"; if [ -f \"$HOMEPAGE_ROOT/package.json\" ]; then cd \"$HOMEPAGE_ROOT\" && npm run dev -- --host 127.0.0.1 --port 5173; else echo '[homepage-dev] qube-machine-report-homepage not checked out in this workspace; nothing to serve.'; fi"
+    }
+  ],
+  "ports": [
+    {
+      "name": "homepage-dev",
+      "port": 5173
+    }
+  ],
+  "repositoryDependencies": [
+    "github.com/QubeTX/qube-machine-report-homepage"
+  ]
+}
