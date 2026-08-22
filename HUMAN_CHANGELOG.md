@@ -13,6 +13,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-08-21
+
+### Added
+- **Temperature readings are now part of the report.** On Linux the report
+  shows CPU and GPU temperatures, including the processor temperature on
+  Raspberry Pis — useful when you SSH into a headless board. On Windows,
+  machines with an NVIDIA graphics card show the GPU temperature. If a
+  computer has no readable sensor, the rows simply don't appear instead of
+  showing made-up numbers. Temperatures also show in the quick startup view.
+- **A new `--full` flag** does what it says: runs the complete report. It's
+  the opposite of `--fast` and matches the default behavior.
+
+### Changed
+- **The full report on Windows is now about twice as fast.** A slow security
+  check that doesn't apply to most home editions of Windows was holding
+  everything up; it now runs in the background with its own short time limit.
+  Several other lookups were streamlined so they run once instead of twice.
+
+### Fixed
+- **Computers without batteries no longer show a fake battery percentage.**
+  Some machines — notably Raspberry Pis with a wireless mouse or gamepad
+  plugged in — reported a mysterious battery level that actually belonged to
+  the mouse or controller. The report now only shows battery information it
+  can prove belongs to the machine itself.
+- The same care now applies on Mac: the battery reading is taken only from
+  the laptop's real battery line.
+
 ## [4.2.2] - 2026-07-18
 
 ### Fixed

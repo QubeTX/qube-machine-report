@@ -46,6 +46,7 @@ The high-level collection/report APIs remain available.
 - Read-only ordinary reports with explicit, collision-safe Markdown saving via
   `-r`/`--report`/`-s`/`--save`
 - Fast mode (`--fast`) for sub-second auto-run startup
+- Thermal reporting (`CPU TEMP` / `GPU TEMP`): Linux reads hwmon package/SoC sensors with a cpu/soc thermal-zone fallback (Raspberry Pi SoC temperature included), Windows reports discrete NVIDIA GPU temperature via the driver tool when an NVIDIA adapter is present; rows appear in both fast and full runs and omit themselves when no trusted sensor exists
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Origin-preserving self-update: MSI, EXE, Cargo, shell/PowerShell, and macOS
   PKG installs update through the same channel and never silently create a
@@ -325,6 +326,7 @@ exclusive with each other and with the legacy action flags.
 | `-t, --title <TITLE>` | Custom title for the report header |
 | `--no-color` | Disable colored output |
 | `--fast` | Fast mode: skip slow collectors for quick auto-run |
+| `-f, --full` | Explicit full collection (already the default; conflicts with `--fast`) |
 | `-r, -s, --report, --save` | Save this full table report as Markdown in Downloads |
 | `--no-elevation-hint` | Suppress the optional Linux `sudo` detail hint |
 | `--update` | Legacy flag form of `tr300 update` |

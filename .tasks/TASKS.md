@@ -10,6 +10,15 @@
 
 ## Active
 
+- [ ] **Ship v4.3.0 - battery hardening, Windows latency, thermals** - stacked work on `feature/v4.3.0-battery-perf-thermals`, PR open for review, then tag and publish through exact-SHA gates (ms #v43) #v430
+  - [x] Harden Linux battery selection against phantom supplies (scope/present/measurement/cross-validation, deterministic order)
+  - [x] Cut Windows full-mode latency ~2.5x on the Alienware (BitLocker concurrency + dedicated budget, WMI/registry dedupe)
+  - [x] Add CPU/GPU temperature rows on Linux + Windows with additive schema-v1 JSON keys
+  - [x] Add `-f/--full` explicit flag
+  - [x] Update the documentation set (changelogs in lockstep, README, AGENTS/CLAUDE, MASTER_PLAN, TESTING, ADR)
+  - [ ] Pass hosted CI on all platforms; merge after user review
+  - [ ] Tag v4.3.0 and watch CI/crates/release workflows
+
 ## Done
 
 - [x] **Record the completed ND-300 v3.7.3 native-installer acceptance** - external operator-approved Alienware update completed without overlap; physical Mac GUI acceptance is optional/deferred behind native Intel/ARM direct-PKG and legacy-DMG gates (ms #hw4) (done 2026-07-18) #nd372

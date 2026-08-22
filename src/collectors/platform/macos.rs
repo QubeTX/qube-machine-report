@@ -549,7 +549,13 @@ fn get_battery() -> Option<String> {
 }
 
 fn parse_pmset_battery(output: &str) -> Option<String> {
-    let line = output.lines().find(|line| line.contains('%'))?;
+    // Anchor on the `-InternalBattery-N` line when present so a stray
+    // percentage elsewhere in pmset output (wear info, warnings) cannot
+    // masquerade as the system battery charge level.
+    let line = output
+        .lines()
+        .find(|line| line.to_ascii_lowercase().contains("internalbattery") && line.contains('%'))
+        .or_else(|| output.lines().find(|line| line.contains('%')))?;
     let percentage = line.split_whitespace().find_map(|word| {
         let word = word.trim_matches(|c: char| c == ';' || c == ',');
         let number = word.strip_suffix('%')?.parse::<u8>().ok()?;
@@ -905,6 +911,17 @@ mod tests {
         assert_eq!(
             parse_pmset_battery(" -InternalBattery-0\t255%; charging\n"),
             None
+        );
+    }
+
+    #[test]
+    fn pmset_battery_ignores_stray_percentages_outside_the_battery_line() {
+        // A battery-wear percentage (or any other stray value) earlier in the
+        // output must not be misattributed to the system charge level.
+        let output = "Battery wear info: 12%\n -InternalBattery-0 (id=7)\t61%; discharging; 2:00 remaining\n";
+        assert_eq!(
+            parse_pmset_battery(output),
+            Some("61% (Discharging)".to_string())
         );
     }
 

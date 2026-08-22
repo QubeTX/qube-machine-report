@@ -7,6 +7,47 @@ as passed.
 
 ## Per-version verification log
 
+### v4.3.0 — 2026-08-21 (pending review — branch `feature/v4.3.0-battery-perf-thermals`)
+
+Verified on Windows 11 25H2 (build 26200.9168), unelevated session,
+Alienware m16 R2 (Core Ultra 7 155H + RTX 4070 Laptop GPU), full local gate
+(`cargo fmt --check`, `clippy --all-targets --workspace -- -D warnings`,
+`cargo test --workspace --all-targets` = 167 lib + 22 integration green,
+`cargo build --release`):
+
+- **Thermal reporting (Windows):** `GPU TEMP` renders live in fast mode
+  (68–69 °C via `nvidia-smi`) and full mode; ASCII renders `68 C`; JSON emits
+  `cpu.gpu_temperature_c` as a number with `cpu.temperature_c` null.
+  `MSAcpi_ThermalZoneTemperature` verified **unsupported** on this consumer
+  Dell/Alienware board (`Get-CimInstance root/wmi ... → "Not supported"`), so
+  the CPU row omits itself by design here — matching the accuracy contract.
+  Linux paths are covered by tempdir unit tests (hwmon package-label
+  preference, Pi-style `cpu_thermal` zone fallback, amdgpu hwmon, garbage
+  rejection); execution lands with CI's Ubuntu job because the linux module is
+  cfg-gated off on Windows dev hosts.
+- **Full-mode latency:** measured 5206 ms before the change (v4.2.2 baseline)
+  → 2094–2113 ms after (three consecutive runs). Root cause identified by
+  env-gated instrumentation: the BitLocker security-namespace probe hung to
+  its full 5 s shared timeout on this Win11 Home SKU; every individual WMI
+  class in the batch answers in <30 ms. Fast mode: 236 ms → ~300 ms
+  (+64 ms nvidia-smi spawn, accepted per product decision to show GPU temp in
+  auto-run).
+- **Battery hardening (Linux):** selection rules unit-tested via tempdir
+  fixtures — device-scope rejection (wireless mouse battery), capacity-only
+  ghost rejection, energy/charge cross-validation mismatch rejection,
+  deterministic BAT* priority across directory-order variation, absent-pack
+  skip, bare-percentage output when status is missing. Execution on real
+  sysfs lands with CI's Ubuntu job.
+- **macOS pmset anchor:** covered by existing parser tests plus the new
+  stray-percentage fixture; macOS execution lands with hosted CI.
+- **CLI:** `-f/--full` accepted alone, rejected combined with `--fast`
+  (integration-tested).
+- **Pi diagnostics still open (maintainer action):** run
+  `tr300 --version` plus a `/sys/class/power_supply/*` type/scope/capacity
+  dump on the Raspberry Pi to confirm which node produced the historical
+  "30%" reading (leading hypotheses: `scope=Device` peripheral battery or a
+  pre-v3.14 install reading BAT nodes blindly).
+
 ### v4.2.2 — 2026-07-18 (published package-transaction fix-forward)
 
 - **Immutable release qualification:** final source

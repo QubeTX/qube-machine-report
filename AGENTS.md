@@ -11,7 +11,7 @@ Companion docs:
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-07-18
+Last verified against source: 2026-08-21
 
 ## Task management system
 
@@ -53,7 +53,11 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version and working manifest: `4.2.2` (`Cargo.toml`).
+- Current published version: `4.2.2`. Working manifest on the
+  `feature/v4.3.0-battery-perf-thermals` branch: `4.3.0`
+  (battery hardening, Windows full-mode latency, thermal reporting — pending
+  review/merge and release). v4.2.2 remains the last fully published
+  distribution state.
   v4.2.2 passed exact-SHA CI/crates, signed archives, every Windows package and
   transition job, and universal PKG/compatibility-DMG sign/notary/install/
   update/uninstall gates on native Intel and Apple Silicon. It fixes the
@@ -230,6 +234,8 @@ Current supported flags:
 - `-t, --title <TITLE>` -> custom title
 - `--no-color` -> disables update-flow ANSI styling
 - `--fast` -> skip slow collectors for quick auto-run startup
+- `-f, --full` -> explicit full collection (the default when neither flag is
+  given; conflicts with `--fast`)
 - `-r, --report` with visible aliases `-s, --save` -> manually persist a full
   table Markdown report; conflicts with fast/JSON/action modes
 - `--no-save` -> hidden backwards-compatible no-op; reports are not saved by default
@@ -329,6 +335,7 @@ Rendered order:
    - optional `HYPERVISOR`
    - optional `MAX FREQ` or `REPORTED FREQ`
    - optional `CPU USAGE`
+   - optional `CPU TEMP`, `GPU TEMP`
    - `LOAD/CPU 1m`, `LOAD/CPU 5m`, `LOAD/CPU 15m` bars when available
 5. Disk section
    - `VOLUME`
@@ -390,7 +397,9 @@ Important implementation details:
   decision and consumer review.
 - Additive nullable/context keys also include OS build/codename/session uptime,
   boot/display details, default-route/SSH scopes, frequency provenance, root
-  mount/filesystem, available/swap bytes, and exact uptime seconds.
+  mount/filesystem, available/swap bytes, exact uptime seconds, and thermal
+  readings (`cpu.temperature_c` / `cpu.gpu_temperature_c`, null when no
+  trusted sensor answers).
 
 ## Collector Behavior By Module
 
@@ -478,8 +487,8 @@ Collects:
 Last-login strategy:
 - Linux: `lastlog2`, fallback `lastlog`, fallback `last`
 - macOS: `last`
-- Windows: current WTS session data first, then bounded PowerShell fallback;
-  address parsing follows the `WTS_CLIENT_ADDRESS` family/layout contract
+- Windows: native WTS session APIs (`WTSQuerySessionInformation`); address
+  parsing follows the `WTS_CLIENT_ADDRESS` family/layout contract
 
 ### `collectors/platform/*`
 
@@ -499,12 +508,18 @@ Adds OS-specific enrichments, some not currently rendered:
 - desktop/display server/edition/codename/boot mode metadata
 
 Platform implementations:
-- `linux.rs`: `/proc`, `lscpu`, `/sys`, `ip`, resolver files, ZFS and elevated `dmidecode` commands where available
+- `linux.rs`: `/proc`, `lscpu`, `/sys` (including hwmon/thermal-zone
+  temperatures and hardened power_supply battery selection), `ip`, resolver
+  files, ZFS and elevated `dmidecode` commands where available
 - `macos.rs`: quick `sysctl`/`sw_vers`/environment/`pmset`/`ioreg` probes plus
   one full-mode `system_profiler` JSON snapshot for hardware, displays, power,
   and software. Under Rosetta it requests the native arm64 profiler slice, then
-  falls back to translated output. It never surfaces serial/UUID fields.
-- `windows.rs`: Win32 APIs and registry first, WMI/PowerShell fallbacks in full mode only
+  falls back to translated output. It never surfaces serial/UUID fields. No
+  thermal collection (SMC requires unsafe IOKit or sudo).
+- `windows.rs`: Win32 APIs and registry first, WMI/PowerShell fallbacks in full
+  mode only. Thermal: NVIDIA GPU temperature via `nvidia-smi` when an NVIDIA
+  adapter was detected (both modes), ACPI thermal-zone probe on a bounded
+  worker thread with a 1 s cap; unsupported boards return `None`.
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should

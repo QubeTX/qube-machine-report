@@ -211,7 +211,9 @@ Windows-specific accuracy rules are extensive — load the **`windows-accuracy`*
 
 ### Fast Mode (`CollectMode::Fast`)
 
-`--fast` skips slow subprocess calls for sub-second startup. Auto-run uses `tr300 --fast`; the `report` alias runs full mode. What gets skipped varies by platform — see the table in each platform collector.
+`--fast` skips slow subprocess calls for sub-second startup. Auto-run uses `tr300 --fast`; the `report` alias runs full mode. What gets skipped varies by platform — see the table in each platform collector. `-f/--full` is the explicit counterpart to `--fast` (full collection is already the default; the two flags conflict).
+
+Thermal rows (`CPU TEMP` / `GPU TEMP`) render in BOTH modes by product decision: Linux reads are pure sysfs (hwmon package sensors → cpu/soc thermal-zone fallback, Raspberry Pi included); Windows probes `nvidia-smi` only when an NVIDIA adapter was detected, and the ACPI thermal-zone query runs on its own bounded worker thread. Absence omits the row — never fabricate. macOS reports no thermals this release. JSON keys: additive schema-v1 `cpu.temperature_c` / `cpu.gpu_temperature_c`. Linux battery selection requires positive proof of a system pack (scope ≠ Device, live measurement attribute, capacity cross-validation, deterministic BAT*-first ordering) — see the v4.3.0 ADR before loosening any rule.
 
 ### Build Script (`build.rs`)
 

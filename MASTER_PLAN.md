@@ -4,12 +4,21 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-18
-**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.2.2
+**Last updated:** 2026-08-21
+**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.3.0
+(working manifest `4.3.0` on branch `feature/v4.3.0-battery-perf-thermals`,
+pending review/merge and release; v4.2.2 remains the last fully published state)
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
+**In flight (v4.3.0, this branch):** Linux battery phantom-supply hardening,
+Windows full-mode latency (~5.2 s → ~2.1 s on the Alienware), thermal
+reporting (`CPU TEMP`/`GPU TEMP` on Linux + Windows, additive schema-v1 JSON),
+and an explicit `-f/--full` flag. Open maintainer action: capture
+`/sys/class/power_supply/*` diagnostics on the Raspberry Pi to confirm which
+node produced the historical phantom "30%" reading; AMD64 Linux laptop and
+Pi runtime verification remain open for the thermal/battery rows.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 

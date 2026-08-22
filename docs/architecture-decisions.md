@@ -2960,3 +2960,49 @@ script, cmd wins.
 contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
+
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0)
+
+**Decision 1 — thermals report only trusted sensors, in both `--fast` and
+full mode.** Linux CPU temperature prefers hwmon package sensors (coretemp
+`Package id`, k10temp/zenpower `Tctl`/`Tdie`) with a cpu/soc-labeled
+thermal-zone fallback; this covers the Raspberry Pi SoC sensor at sysfs-read
+cost, which is why temperatures ride along in auto-run fast mode there.
+Windows GPU temperature comes from `nvidia-smi` only when an NVIDIA adapter
+was already detected — AMD/Intel-only machines never pay the spawn. Windows
+CPU temperature uses the ACPI thermal-zone WMI class behind plausibility
+bounds with a 5 °C floor: the documented disabled-sensor sentinel
+(2732 tenths-Kelvin ≈ 0.05 °C) and its kin must fail rather than render.
+Verified on a consumer Dell/Alienware board that this class is unsupported;
+absence omits the row instead of mislabeling a motherboard zone as CPU
+temperature. macOS is intentionally `None` — reading SMC requires unsafe
+IOKit code or sudo `powermetrics`, neither acceptable for an optional row.
+
+**Rejected alternatives:** NVML bindings (new unsafe dependency for one
+number), LibreHardwareMonitor-style kernel drivers (contradicts the install-
+safety posture), labeling ACPI zones as "CPU" unconditionally (fabricates
+accuracy the platform does not provide).
+
+**Decision 2 — Linux battery selection requires positive proof of a system
+pack.** The v3.14.0 type-only walk admitted per-device batteries
+(`scope=Device` peripherals such as wireless mice and gamepads, typically
+25–35%) and capacity-only gauge nodes, producing phantom BATTERY rows on
+headless SBCs. Selection now demands: scope ≠ Device, present ≠ 0 when
+exposed, at least one live measurement attribute, `capacity` cross-validated
+against an energy/charge pair within 20 points, and deterministic BAT*-first
+ordering. A missing status renders a bare percentage rather than fabricating
+"(Unknown)". The rules are conservative for real laptops: mainline x86 packs
+satisfy every check by construction.
+
+**Decision 3 — independent bounded probes run concurrently under dedicated
+budgets.** Profiling showed the Windows full-mode critical path dominated not
+by any query (each <30 ms healthy) but by the BitLocker security-namespace
+probe hanging to the full shared WMI timeout on SKUs without the BitLocker
+provider, serialized after the batch. Independent probes now launch before
+the batch and await after it, each under its own tight cap (BitLocker 2 s,
+ACPI thermal 1 s). Sharing one timeout across differently-hang-prone probes
+was the root defect: one pathological namespace must not define every other
+probe's budget. Registry reads moved from `reg.exe` spawns to native APIs,
+duplicate queries (`Win32_ComputerSystem`, `Win32_NetworkAdapterConfiguration`,
+process-table snapshots) collapsed to one each, and post-batch PowerShell
+rescues no longer stack on top of the single batched fallback.
