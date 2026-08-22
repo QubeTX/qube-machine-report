@@ -26,6 +26,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             shell: get_shell(),       // Fast: reads env var + quick subprocess
             display_resolution: None, // Skip system_profiler SPDisplaysDataType
             battery: get_battery(),   // Fast: pmset is quick
+            cpu_temp_celsius: None, // No thermal collection on macOS (SMC requires unsafe IOKit or sudo)
+            gpu_temp_celsius: None,
             zfs_health: None,
             motherboard: None,
             bios: None,
@@ -71,6 +73,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         shell: get_shell(),
         display_resolution,
         battery,
+        cpu_temp_celsius: None, // No thermal collection on macOS (SMC requires unsafe IOKit or sudo)
+        gpu_temp_celsius: None,
         zfs_health: None,
         motherboard: None,
         bios: None,
