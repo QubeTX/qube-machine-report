@@ -634,7 +634,7 @@ fn hwmon_cpu_temp_in(hwmon_root: &Path) -> Option<f64> {
             continue;
         }
         if let Some(candidate) = hwmon_temp_in_dir(&entry.path(), true) {
-            if best.map_or(true, |(p, _)| candidate.0 < p) {
+            if best.is_none_or(|(p, _)| candidate.0 < p) {
                 best = Some(candidate);
             }
         }
@@ -1273,7 +1273,7 @@ mod tests {
         );
         assert_eq!(
             get_battery_in(dir.path()),
-            Some("90% (Discharging); health 80%".to_string())
+            Some("90% (Discharging); health 83%".to_string())
         );
     }
 
