@@ -484,20 +484,94 @@ fn get_display_resolution() -> Option<String> {
 
 /// Get battery status
 fn get_battery() -> Option<String> {
-    let entries = fs::read_dir("/sys/class/power_supply").ok()?;
-    for entry in entries.flatten() {
-        let base = entry.path();
-        let Ok(supply_type) = fs::read_to_string(base.join("type")) else {
+    get_battery_in(Path::new("/sys/class/power_supply"))
+}
+
+/// Select and summarize the most plausible *system* battery under a
+/// power_supply-class directory.
+///
+/// Hardening over the v3.14.0 type-only walk, which admitted phantom
+/// supplies:
+/// - `scope == "Device"` nodes are per-device batteries (wireless mice,
+///   gamepads, HID peripherals), never the system pack — a Logitech dongle
+///   reporting ~30% was user-visible as a bogus laptop-style BATTERY row on
+///   headless SBCs.
+/// - Capacity-only gauges with no measurement file (voltage/current/power)
+///   report floating register junk; real packs and UPS HATs always expose at
+///   least one live measurement attribute.
+/// - `capacity` is cross-checked against an available `energy_now`/`energy_full`
+///   pair so a stale percentage cannot masquerade as a live reading.
+/// - `read_dir` order is unspecified; candidates are sorted with `BAT*`
+///   packs first so multi-supply selection is deterministic across boots.
+fn get_battery_in(dir: &Path) -> Option<String> {
+    let mut candidates: Vec<(bool, String)> = Vec::new();
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
+        let supply_type = fs::read_to_string(dir.join(&name).join("type")).unwrap_or_default();
         if !supply_type.trim().eq_ignore_ascii_case("Battery") {
             continue;
         }
-        if let Some(summary) = battery_summary_from_path(&base) {
-            return Some(summary);
+        candidates.push((name.to_ascii_uppercase().starts_with("BAT"), name));
+    }
+    // `BAT*`-named packs first, then everything else; each group alphabetical.
+    candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    candidates
+        .into_iter()
+        .map(|(_, name)| dir.join(name))
+        .find_map(|base| {
+            is_plausible_system_battery(&base)
+                .then(|| battery_summary_from_path(&base))
+                .flatten()
+        })
+}
+
+/// Eligibility gate for one power_supply node: scope, presence, measurement
+/// corroboration, and capacity cross-validation. Absence of optional files
+/// (scope/present) stays acceptable — mainline x86 batteries often omit them —
+/// but positive contradicting evidence always rejects.
+fn is_plausible_system_battery(base: &Path) -> bool {
+    if fs::read_to_string(base.join("scope"))
+        .map(|s| s.trim().eq_ignore_ascii_case("Device"))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    if read_u64_from_file(base.join("present")) == Some(0) {
+        return false;
+    }
+    let corroborated = [
+        "voltage_now",
+        "current_now",
+        "power_now",
+        "charge_now",
+        "energy_now",
+    ]
+    .iter()
+    .any(|attr| read_u64_from_file(base.join(attr)).is_some());
+    if !corroborated {
+        return false;
+    }
+    // Cross-validate capacity against a charge/energy ratio from one unit
+    // family when both exist. A disagreement beyond tolerance means stale or
+    // mismatched data — reject rather than guess which side lies.
+    let Some(capacity) = read_u64_from_file(base.join("capacity")) else {
+        return true;
+    };
+    for (now_attr, full_attr) in [("energy_now", "energy_full"), ("charge_now", "charge_full")] {
+        if let (Some(now), Some(full)) = (
+            read_u64_from_file(base.join(now_attr)),
+            read_u64_from_file(base.join(full_attr)),
+        ) {
+            if full == 0 {
+                return false;
+            }
+            let computed = (now.min(full) as f64 / full as f64 * 100.0).round() as u64;
+            return computed.abs_diff(capacity) <= 20;
         }
     }
-    None
+    true
 }
 
 /// Get system locale
@@ -597,8 +671,13 @@ fn battery_summary_from_path(base: &Path) -> Option<String> {
     let status = fs::read_to_string(base.join("status"))
         .ok()
         .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
-    let mut summary = format!("{}% ({})", capacity, status);
+        .filter(|s| !s.is_empty());
+    // A missing/empty status renders as a bare percentage — synthesizing
+    // "(Unknown)" fabricated a state the kernel never reported.
+    let mut summary = match status {
+        Some(status) => format!("{}% ({})", capacity, status),
+        None => format!("{}%", capacity),
+    };
 
     // Health must be computed from a single unit family: energy_* is in µWh,
     // charge_* is in µAh. Mixing energy_full with charge_full_design (which can
@@ -1008,6 +1087,179 @@ mod tests {
         fs::write(dir.path().join("capacity"), "255\n").unwrap();
         fs::write(dir.path().join("status"), "Unknown\n").unwrap();
         assert_eq!(battery_summary_from_path(dir.path()), None);
+    }
+
+    /// Build one synthetic power_supply node under a tempdir root.
+    fn write_supply_node(root: &Path, name: &str, files: &[(&str, &str)]) {
+        let dir = root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        for (attr, contents) in files {
+            fs::write(dir.join(attr), contents).unwrap();
+        }
+    }
+
+    const BATTERY_TYPE: (&str, &str) = ("type", "Battery\n");
+
+    #[test]
+    fn battery_selector_rejects_device_scope_peripherals() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "hidpp_battery_0",
+            &[
+                BATTERY_TYPE,
+                ("scope", "Device\n"),
+                ("capacity", "30\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "3800000\n"),
+            ],
+        );
+        // Corroborated and plausible except for scope=Device — a wireless
+        // mouse battery must never render as the machine's BATTERY row.
+        assert_eq!(get_battery_in(dir.path()), None);
+    }
+
+    #[test]
+    fn battery_selector_requires_live_measurement() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[BATTERY_TYPE, ("capacity", "30\n"), ("status", "Unknown\n")],
+        );
+        // Capacity-only nodes are how phantom/floating gauges masquerade as
+        // real packs.
+        assert_eq!(get_battery_in(dir.path()), None);
+    }
+
+    #[test]
+    fn battery_selector_accepts_corroborated_pack() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "90\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "11400000\n"),
+                ("energy_now", "4500\n"),
+                ("energy_full", "5000\n"),
+                ("energy_full_design", "6000\n"),
+            ],
+        );
+        assert_eq!(
+            get_battery_in(dir.path()),
+            Some("90% (Discharging); health 80%".to_string())
+        );
+    }
+
+    #[test]
+    fn battery_selector_cross_validates_capacity_against_charge_ratio() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "30\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "11400000\n"),
+                ("energy_now", "4500\n"),
+                ("energy_full", "5000\n"),
+            ],
+        );
+        write_supply_node(
+            dir.path(),
+            "BAT1",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "88\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "11400000\n"),
+                ("charge_now", "2200\n"),
+                ("charge_full", "2500\n"),
+            ],
+        );
+        // BAT0's capacity (30) contradicts its energy ratio (90) by 60 points
+        // — stale data. The charge-family pair on BAT1 agrees (88 vs 88).
+        assert_eq!(
+            get_battery_in(dir.path()),
+            Some("88% (Discharging)".to_string())
+        );
+    }
+
+    #[test]
+    fn battery_selector_prefers_bat_named_nodes_deterministically() {
+        for peripheral_first in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let pack = [
+                BATTERY_TYPE,
+                ("capacity", "80\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "11400000\n"),
+            ];
+            let peripheral = [
+                BATTERY_TYPE,
+                ("scope", "System\n"),
+                ("capacity", "42\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "3800000\n"),
+            ];
+            if peripheral_first {
+                write_supply_node(dir.path(), "hidpp_battery_0", &peripheral);
+                write_supply_node(dir.path(), "BAT0", &pack);
+            } else {
+                write_supply_node(dir.path(), "BAT0", &pack);
+                write_supply_node(dir.path(), "hidpp_battery_0", &peripheral);
+            }
+            // read_dir order is unspecified; sorted selection must be stable.
+            assert_eq!(
+                get_battery_in(dir.path()),
+                Some("80% (Discharging)".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn battery_selector_skips_absent_packs() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[
+                BATTERY_TYPE,
+                ("present", "0\n"),
+                ("capacity", "55\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "11400000\n"),
+            ],
+        );
+        write_supply_node(
+            dir.path(),
+            "BAT1",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "61\n"),
+                ("status", "Discharging\n"),
+                ("voltage_now", "11400000\n"),
+            ],
+        );
+        assert_eq!(
+            get_battery_in(dir.path()),
+            Some("61% (Discharging)".to_string())
+        );
+    }
+
+    #[test]
+    fn battery_summary_without_status_is_bare_percent() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("capacity"), "42\n").unwrap();
+        fs::write(dir.path().join("voltage_now"), "11400000\n").unwrap();
+        assert_eq!(
+            battery_summary_from_path(dir.path()),
+            Some("42%".to_string())
+        );
     }
 
     #[test]
