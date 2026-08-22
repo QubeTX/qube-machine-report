@@ -35,6 +35,14 @@ const WMI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// provider without dragging out the report on a real hang. (F22)
 const WMI_BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Budget for the concurrent BitLocker probe. Healthy security-namespace
+/// queries answer in tens of milliseconds, but on SKUs without the BitLocker
+/// WMI provider (observed: Windows 11 Home without Device Encryption) the
+/// namespace connect hangs instead of failing fast — historically consuming
+/// the entire shared WMI_TIMEOUT as dead tail on the platform thread. A tight
+/// dedicated cap bounds that waste while leaving healthy probes untouched.
+const BITLOCKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Result tuple returned by the F22 WMI worker closure: edition,
 /// virtualization, GPU list, battery. Each field carries the raw WMI
 /// answer (or `None` / `Vec::new()` when that specific query was skipped
@@ -52,7 +60,9 @@ type WmiBatchResult = (
     Option<String>,
 );
 
-fn with_timeout<F, T>(budget: std::time::Duration, f: F) -> Option<T>
+/// Spawn `f` on a fresh worker thread and return the receiver so callers can
+/// overlap independent bounded probes instead of serializing them.
+fn spawn_with_timeout<F, T>(f: F) -> std::sync::mpsc::Receiver<Option<T>>
 where
     F: FnOnce() -> Option<T> + Send + 'static,
     T: Send + 'static,
@@ -61,11 +71,21 @@ where
     std::thread::spawn(move || {
         let _ = tx.send(f());
     });
-    rx.recv_timeout(budget).ok().flatten()
+    rx
+}
+
+fn with_timeout<F, T>(budget: std::time::Duration, f: F) -> Option<T>
+where
+    F: FnOnce() -> Option<T> + Send + 'static,
+    T: Send + 'static,
+{
+    spawn_with_timeout(f).recv_timeout(budget).ok().flatten()
 }
 use crate::collectors::command::{run_stdout, CommandTimeout};
 use serde::Deserialize;
 use std::env;
+use winreg::enums::HKEY_LOCAL_MACHINE;
+use winreg::RegKey;
 use wmi::{COMLibrary, WMIConnection};
 
 // --- WMI query structs ---
@@ -217,12 +237,26 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     let battery_native = get_battery_native();
     let need_battery_wmi = battery_native.is_none();
 
+    // BitLocker used to run serially AFTER this batch on the platform thread
+    // — and on SKUs without its WMI provider it hangs to the full timeout,
+    // so even overlapped it would dominate the critical path. It now gets a
+    // tight dedicated budget (BITLOCKER_TIMEOUT) on its own fresh-COM worker.
+    let bitlocker_rx = spawn_with_timeout(bitlocker_status_inner);
+
     let wmi_results: Option<WmiBatchResult> = with_timeout(WMI_BATCH_TIMEOUT, move || {
         let com = COMLibrary::new().ok()?;
         let wmi = WMIConnection::new(com).ok()?;
+        // One Win32_ComputerSystem record feeds BOTH virtualization and the
+        // machine model — querying twice paid a duplicate provider round-trip
+        // inside this closure. Each consumer keeps its own interpretation
+        // logic untouched (the VBS disambiguation stays exactly as audited).
+        let computer_system = wmi
+            .query::<Win32ComputerSystem>()
+            .ok()
+            .and_then(|results| results.into_iter().next());
         Some((
             get_windows_edition_wmi(&wmi),
-            detect_virtualization_wmi(&wmi),
+            detect_virtualization_from_cs(computer_system.as_ref()),
             if need_gpu_wmi {
                 get_gpus_wmi(&wmi)
             } else {
@@ -233,12 +267,15 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             } else {
                 None
             },
-            get_machine_model_wmi(&wmi),
+            machine_model_from_cs(computer_system.as_ref()),
             get_motherboard_wmi(&wmi),
             get_bios_wmi(&wmi),
             get_ram_slots_wmi(&wmi),
         ))
     });
+
+    // Await the BitLocker probe that started before the batch.
+    let encryption = bitlocker_rx.recv_timeout(BITLOCKER_TIMEOUT).ok().flatten();
 
     let (
         windows_edition,
@@ -300,17 +337,24 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         } else {
             fallback.gpus
         });
+        // The batched script already queried every field with ONE PowerShell
+        // spawn — do not stack per-field PowerShell rescues on top of it
+        // (worst case was 4 × CommandTimeout::Slow serialized on this thread).
         (
-            fallback.windows_edition.or_else(get_windows_edition_ps),
-            fallback.virtualization.or_else(detect_virtualization_ps),
+            fallback.windows_edition,
+            fallback.virtualization,
             gpus,
-            battery_native.or(fallback.battery).or_else(get_battery_ps),
+            battery_native.or(fallback.battery),
             fallback.machine_model,
             fallback.motherboard,
             fallback.bios,
             fallback.ram_slots,
         )
     };
+
+    // One Toolhelp snapshot serves both terminal and shell detection — they
+    // each walked the full process table before.
+    let ancestry = process_ancestry();
 
     PlatformInfo {
         os_build: None,
@@ -324,8 +368,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         architecture: get_architecture(),
         machine_model,
         cpu_core_topology: get_cpu_core_topology_native(),
-        terminal: get_terminal(),
-        shell: get_shell(),
+        terminal: get_terminal(&ancestry),
+        shell: get_shell(&ancestry),
         display_resolution: get_display_resolution(),
         battery,
         zfs_health: None,
@@ -333,7 +377,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         bios,
         ram_slots,
         locale: get_locale(),
-        encryption: get_bitlocker_status(),
+        encryption,
         elevation_unlocks_more: false,
     }
 }
@@ -348,12 +392,10 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
 /// encryption claim because permission and feature availability are
 /// indistinguishable here.
 ///
-/// Wrapped in `with_timeout(WMI_TIMEOUT, ...)` (v3.15.7+) so a hung
-/// security-namespace WMI provider can't stall the full-mode report.
-fn get_bitlocker_status() -> Option<String> {
-    with_timeout(WMI_TIMEOUT, bitlocker_status_inner)
-}
-
+/// Launched on its own bounded fresh-COM worker thread (`spawn_with_timeout`)
+/// concurrently with the F22 WMI batch — a hung security-namespace WMI
+/// provider is capped at `WMI_TIMEOUT` and no longer serializes behind the
+/// batch on the platform thread.
 fn bitlocker_status_inner() -> Option<String> {
     use serde::Deserialize;
 
@@ -463,30 +505,29 @@ fn get_terminal_fast() -> Option<String> {
     None
 }
 
-/// Get GPU names from registry (fast, no WMI/PowerShell needed, ~5-10ms)
+/// Get GPU names from the registry Display class (fast, no WMI/PowerShell,
+/// no subprocess — native reads are sub-millisecond vs a reg.exe spawn).
 fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
-    if let Some(stdout) = run_stdout(
-        "reg",
-        [
-            "query",
-            r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
-            "/s",
-            "/v",
-            "DriverDesc",
-        ],
-        CommandTimeout::Normal,
-    ) {
-        for line in stdout.lines() {
-            if line.contains("DriverDesc") {
-                // Format: "    DriverDesc    REG_SZ    NVIDIA GeForce RTX 4090"
-                if let Some(value) = line.split("REG_SZ").nth(1) {
-                    let gpu = value.trim();
-                    if !gpu.is_empty() && !gpus.contains(&gpu.to_string()) {
-                        gpus.push(gpu.to_string());
-                    }
-                }
-            }
+    let Ok(class_root) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(
+        r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
+    ) else {
+        return gpus;
+    };
+    // enum_keys() yields subkeys in name order ("0000", "0001", …) — same
+    // walk order the previous `reg.exe /s` output produced. DriverDesc lives
+    // on the adapter keys; software adapters (Microsoft Basic Render Driver,
+    // Hyper-V Video) don't appear under this class.
+    for name in class_root.enum_keys().flatten() {
+        let Ok(subkey) = class_root.open_subkey(&name) else {
+            continue;
+        };
+        let Ok(desc): Result<String, _> = subkey.get_value("DriverDesc") else {
+            continue;
+        };
+        let gpu = desc.trim();
+        if !gpu.is_empty() && !gpus.contains(&gpu.to_string()) {
+            gpus.push(gpu.to_string());
         }
     }
     gpus
@@ -499,17 +540,25 @@ fn get_windows_edition_wmi(wmi: &WMIConnection) -> Option<String> {
     results.into_iter().next()?.caption
 }
 
-fn detect_virtualization_wmi(wmi: &WMIConnection) -> Option<String> {
+/// Virtualization from the already-fetched `Win32_ComputerSystem` record.
+///
+/// The record is fetched once per collect and shared with
+/// `machine_model_from_cs`; this function's VBS disambiguation logic is kept
+/// byte-for-byte equivalent to the previously audited version.
+fn detect_virtualization_from_cs(cs: Option<&Win32ComputerSystem>) -> Option<String> {
     // Pull CPUID brand AND DMI manufacturer/model. CPUID is precise but
     // ambiguous on Win11 with VBS: a physical Win11 host running on top of the
     // VBS Hyper-V layer reports "Microsoft Hv" via CPUID even though the user
     // is on bare metal. We disambiguate by checking the SMBIOS manufacturer.
     let cpuid_brand = cpuid_hypervisor_brand();
+    let cs = cs?;
 
-    let results: Vec<Win32ComputerSystem> = wmi.query().ok()?;
-    let cs = results.into_iter().next()?;
-    let manufacturer = cs.manufacturer.unwrap_or_default().to_lowercase();
-    let model = cs.model.unwrap_or_default().to_lowercase();
+    let manufacturer = cs
+        .manufacturer
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+    let model = cs.model.as_deref().unwrap_or_default().to_lowercase();
     let dmi = format!("{}|{}", manufacturer, model);
 
     // Definite VM signals from DMI (regardless of CPUID).
@@ -554,11 +603,10 @@ fn detect_virtualization_wmi(wmi: &WMIConnection) -> Option<String> {
 /// Machine model from `Win32_ComputerSystem` (manufacturer + model), for parity
 /// with the macOS (`hw.model`) and Linux (DMI product name) `MODEL` rows.
 ///
-/// A separate query from `detect_virtualization_wmi` so that function's VBS
-/// disambiguation stays untouched. Runs inside the same WMI worker thread.
-fn get_machine_model_wmi(wmi: &WMIConnection) -> Option<String> {
-    let results: Vec<Win32ComputerSystem> = wmi.query().ok()?;
-    let cs = results.into_iter().next()?;
+/// Consumes the same shared record as `detect_virtualization_from_cs`; the
+/// composition logic is unchanged.
+fn machine_model_from_cs(cs: Option<&Win32ComputerSystem>) -> Option<String> {
+    let cs = cs?;
     compose_machine_model(cs.manufacturer.as_deref(), cs.model.as_deref())
 }
 
@@ -748,17 +796,31 @@ fn get_battery_wmi(wmi: &WMIConnection) -> Option<String> {
 /// frozen at "Windows 10" even on Win11) and enrich the version with the
 /// release ID (DisplayVersion, e.g. "24H2") and UBR (Update Build Revision).
 ///
+/// Values are read natively via `winreg` — a reg.exe spawn cost ~20–100 ms
+/// per report for five values one open handle provides. The existing tested
+/// parser stays the single composition authority; we feed it lines shaped
+/// like its historical reg.exe input.
+///
 /// Returns `(name, version, kernel)` on success.
 pub fn get_os_info_from_registry() -> Option<(String, String, String)> {
-    let stdout = run_stdout(
-        "reg",
-        [
-            "query",
-            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-        ],
-        CommandTimeout::Normal,
-    )?;
-    parse_os_info_registry(&stdout)
+    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+        .ok()?;
+    let mut synthetic = String::new();
+    for name in [
+        "DisplayVersion",
+        "CurrentBuild",
+        "ProductName",
+        "InstallationType",
+    ] {
+        if let Ok(value) = key.get_value::<String, _>(name) {
+            synthetic.push_str(&format!("{name} REG_SZ {value}\n"));
+        }
+    }
+    if let Ok(ubr) = key.get_value::<u32, _>("UBR") {
+        synthetic.push_str(&format!("UBR REG_DWORD {ubr}\n"));
+    }
+    parse_os_info_registry(&synthetic)
 }
 
 fn parse_os_info_registry(stdout: &str) -> Option<(String, String, String)> {
@@ -1301,7 +1363,7 @@ fn detect_boot_mode() -> Option<String> {
 }
 
 /// Get terminal emulator name
-fn get_terminal() -> Option<String> {
+fn get_terminal(ancestry: &[String]) -> Option<String> {
     // Check env vars first (instant)
     if env::var("WT_SESSION").is_ok_and(|value| !value.trim().is_empty()) {
         return Some("Windows Terminal".to_string());
@@ -1321,19 +1383,15 @@ fn get_terminal() -> Option<String> {
     // the user spawned a fresh subshell that lost the parent's environment,
     // or launched via a desktop shortcut). ~5 ms cost; full-mode-only via
     // the existing collect()-time call site.
-    if let Some(name) = detect_terminal_via_parent_walk() {
-        return Some(name);
-    }
-
-    None
+    detect_terminal_via_parent_walk(ancestry)
 }
 
 /// Walk the parent-process chain (cap 10 levels) looking for a known
 /// terminal-host executable name. Returns `None` if no match.
-fn detect_terminal_via_parent_walk() -> Option<String> {
-    process_ancestry()
-        .into_iter()
-        .find_map(|name| match_terminal_name(&name).map(str::to_string))
+fn detect_terminal_via_parent_walk(ancestry: &[String]) -> Option<String> {
+    ancestry
+        .iter()
+        .find_map(|name| match_terminal_name(name).map(str::to_string))
 }
 
 fn process_ancestry() -> Vec<String> {
@@ -1425,7 +1483,7 @@ fn match_terminal_name(exe: &str) -> Option<&'static str> {
 }
 
 /// Get shell name and version
-fn get_shell() -> Option<String> {
+fn get_shell(ancestry: &[String]) -> Option<String> {
     // SHELL is authoritative for Unix-like Windows environments.
     if let Ok(shell) = env::var("SHELL") {
         if let Some(name) = std::path::Path::new(&shell).file_name() {
@@ -1438,8 +1496,8 @@ fn get_shell() -> Option<String> {
 
     // Parent-process evidence describes the invoking shell. Installed-version
     // registry probes do not, so never report an arbitrary installed shell.
-    process_ancestry()
-        .into_iter()
+    ancestry
+        .iter()
         .find_map(|name| match name.to_ascii_lowercase().as_str() {
             "pwsh.exe" => Some(
                 get_powershell_core_version()
@@ -1456,41 +1514,33 @@ fn get_shell() -> Option<String> {
         })
 }
 
-/// Recursive `reg query` of `HKLM\SOFTWARE\Microsoft\PowerShellCore\
-/// InstalledVersions` returns lines like:
-///   HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions\<GUID>
-///       SemanticVersion    REG_SZ    7.4.6
-/// We pick the highest version found. Returns `None` if no PSCore subkey.
+/// Enumerate `HKLM\SOFTWARE\Microsoft\PowerShellCore\
+/// InstalledVersions\<GUID>` natively (winreg) and read each key's
+/// `SemanticVersion`. We pick the highest version found. Returns `None` if no
+/// PSCore subkey.
 ///
 /// Versions are compared as semver tuples `(u64, u64, u64)` rather than by
 /// string compare — naive string compare puts `"7.9.0" > "7.10.0"` because
 /// `'9' > '1'`. PowerShell Core is at 7.5 today but will eventually ship a
 /// 2-digit segment. (Caught in v3.13.0 Codex review.)
 fn get_powershell_core_version() -> Option<String> {
-    let stdout = run_stdout(
-        "reg",
-        [
-            "query",
-            r"HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions",
-            "/s",
-            "/v",
-            "SemanticVersion",
-        ],
-        CommandTimeout::Normal,
-    )?;
+    let root = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\PowerShellCore\InstalledVersions")
+        .ok()?;
     let mut best_tuple: Option<(u64, u64, u64)> = None;
     let mut best_string: Option<String> = None;
-    for line in stdout.lines() {
-        if line.contains("SemanticVersion") {
-            // Format: "    SemanticVersion    REG_SZ    7.4.6"
-            if let Some(version) = line.split_whitespace().last() {
-                let version_clean = version.trim();
-                if let Some(tuple) = parse_semver_tuple(version_clean) {
-                    if best_tuple.map(|b| tuple > b).unwrap_or(true) {
-                        best_tuple = Some(tuple);
-                        best_string = Some(version_clean.to_string());
-                    }
-                }
+    for guid in root.enum_keys().flatten() {
+        let Ok(subkey) = root.open_subkey(&guid) else {
+            continue;
+        };
+        let Ok(version) = subkey.get_value::<String, _>("SemanticVersion") else {
+            continue;
+        };
+        let version_clean = version.trim();
+        if let Some(tuple) = parse_semver_tuple(version_clean) {
+            if best_tuple.map(|b| tuple > b).unwrap_or(true) {
+                best_tuple = Some(tuple);
+                best_string = Some(version_clean.to_string());
             }
         }
     }
