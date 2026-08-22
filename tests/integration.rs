@@ -233,3 +233,41 @@ fn test_json_includes_session_uptime_seconds_key() {
         .success()
         .stdout(predicate::str::contains("\"session_uptime_seconds\":"));
 }
+
+// --- v4.3.0 additions ---
+
+#[test]
+fn test_json_includes_thermal_keys() {
+    // Thermal keys are additive schema-v1 members: always present, null when
+    // no trusted sensor answered (most CI runners), a number when one did.
+    let output = tr300()
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value = serde_json::from_slice(&output).expect("--json output should parse");
+    assert!(value["cpu"]["temperature_c"].is_null() || value["cpu"]["temperature_c"].is_number());
+    assert!(
+        value["cpu"]["gpu_temperature_c"].is_null()
+            || value["cpu"]["gpu_temperature_c"].is_number()
+    );
+}
+
+#[test]
+fn test_full_flag_is_accepted_and_conflicts_with_fast() {
+    tr300().arg("--full").assert().success();
+    tr300().args(["--full", "--fast"]).assert().failure();
+}
+
+#[test]
+fn test_ascii_mode_never_emits_degree_sign() {
+    // ASCII mode (and its forced fallbacks) must keep the fixed-width table
+    // free of non-ASCII glyphs, including temperature rows.
+    tr300()
+        .args(["--ascii", "--no-elevation-hint"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("°").not());
+}

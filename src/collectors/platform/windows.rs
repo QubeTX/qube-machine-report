@@ -43,6 +43,11 @@ const WMI_BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10
 /// dedicated cap bounds that waste while leaving healthy probes untouched.
 const BITLOCKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Budget for the ACPI thermal-zone probe (`root\WMI`). Supported boards
+/// answer in tens of milliseconds and most consumer boards fail fast with
+/// "not supported"; a hung provider gets this cap on its own worker thread.
+const THERMAL_WMI_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
+
 /// Result tuple returned by the F22 WMI worker closure: edition,
 /// virtualization, GPU list, battery. Each field carries the raw WMI
 /// answer (or `None` / `Vec::new()` when that specific query was skipped
@@ -114,6 +119,16 @@ struct Win32VideoController {
 }
 
 #[derive(Deserialize)]
+#[serde(rename = "MSAcpi_ThermalZoneTemperature")]
+#[serde(rename_all = "PascalCase")]
+struct AcpiThermalZone {
+    #[allow(dead_code)]
+    instance_name: Option<String>,
+    /// Tenths of degrees Kelvin per the ACPI thermal zone spec.
+    current_temperature: Option<u32>,
+}
+
+#[derive(Deserialize)]
 #[serde(rename = "Win32_Battery")]
 #[serde(rename_all = "PascalCase")]
 struct Win32Battery {
@@ -176,8 +191,19 @@ struct Win32PhysicalMemory {
 
 /// Collect Windows-specific information
 pub fn collect(mode: CollectMode) -> PlatformInfo {
-    // In fast mode, skip all slow calls — return only env-var-based fields
+    // Cheap native registry walk serves both modes.
+    let gpus_fast = get_gpus_fast();
+
+    // In fast mode, skip slow collectors — but keep the two bounded thermal
+    // reads by explicit product decision: nvidia-smi is a single short spawn
+    // gated on an NVIDIA adapter, and the ACPI probe is capped on its own
+    // worker thread (auto-run output shows GPU temperature).
     if mode == CollectMode::Fast {
+        let gpu_temp_celsius = get_gpu_temp_windows(&gpus_fast);
+        let cpu_temp_celsius = spawn_with_timeout(acpi_cpu_temp_worker)
+            .recv_timeout(THERMAL_WMI_TIMEOUT)
+            .ok()
+            .flatten();
         return PlatformInfo {
             os_build: None,
             architecture: get_architecture(),
@@ -187,13 +213,15 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             boot_mode: None,
             virtualization: None,
             macos_codename: None,
-            gpus: get_gpus_fast(),
+            gpus: gpus_fast.clone(),
             terminal: get_terminal_fast(),
             shell: None,
             machine_model: None,
             cpu_core_topology: get_cpu_core_topology_native(),
             display_resolution: None,
             battery: None,
+            cpu_temp_celsius,
+            gpu_temp_celsius,
             zfs_health: None,
             motherboard: None,
             bios: None,
@@ -227,8 +255,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     // C.8 (v3.13.0+): the registry path used by `--fast` already returns
     // only hardware adapters (the {4d36e968-...} Display class doesn't
     // enumerate Microsoft Basic Render Driver or Hyper-V Video). Prefer it
-    // in full mode too, with WMI / PowerShell as fallbacks. ~1 ms, no COM.
-    let gpus_fast = get_gpus_fast();
+    // in full mode too, with WMI / PowerShell as fallbacks.
     let need_gpu_wmi = gpus_fast.is_empty();
 
     // C.10: prefer the native GetSystemPowerStatus call (~1 ms, no COM, no
@@ -242,6 +269,9 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     // so even overlapped it would dominate the critical path. It now gets a
     // tight dedicated budget (BITLOCKER_TIMEOUT) on its own fresh-COM worker.
     let bitlocker_rx = spawn_with_timeout(bitlocker_status_inner);
+    // The ACPI thermal-zone probe rides the same concurrency slot: its own
+    // fresh-COM worker, launched now, awaited after the batch.
+    let acpi_rx = spawn_with_timeout(acpi_cpu_temp_worker);
 
     let wmi_results: Option<WmiBatchResult> = with_timeout(WMI_BATCH_TIMEOUT, move || {
         let com = COMLibrary::new().ok()?;
@@ -276,6 +306,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
 
     // Await the BitLocker probe that started before the batch.
     let encryption = bitlocker_rx.recv_timeout(BITLOCKER_TIMEOUT).ok().flatten();
+    let cpu_temp_celsius = acpi_rx.recv_timeout(THERMAL_WMI_TIMEOUT).ok().flatten();
 
     let (
         windows_edition,
@@ -355,6 +386,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     // One Toolhelp snapshot serves both terminal and shell detection — they
     // each walked the full process table before.
     let ancestry = process_ancestry();
+    let gpu_temp_celsius = get_gpu_temp_windows(&gpus);
 
     PlatformInfo {
         os_build: None,
@@ -372,6 +404,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         shell: get_shell(&ancestry),
         display_resolution: get_display_resolution(),
         battery,
+        cpu_temp_celsius,
+        gpu_temp_celsius,
         zfs_health: None,
         motherboard,
         bios,
@@ -494,7 +528,69 @@ fn bitlocker_method_name(method: u32) -> String {
     }
 }
 
-/// Get terminal name using only env vars (no subprocess)
+/// Hottest plausible ACPI thermal zone in °C, via `root\WMI`.
+///
+/// Zones are motherboard-defined and frequently absent on consumer boards
+/// ("Not supported" — verified on Dell/Alienware consumer SKUs); absence is
+/// `None` and the row omits itself rather than mislabeling a board sensor as
+/// CPU temperature. When zones exist, the hottest plausible reading is the
+/// closest proxy to an active package sensor.
+fn acpi_cpu_temp_worker() -> Option<f64> {
+    let com = COMLibrary::new().ok()?;
+    let wmi = WMIConnection::with_namespace_path("root\\WMI", com).ok()?;
+    let zones: Vec<AcpiThermalZone> = wmi.query().ok()?;
+    let mut hottest: Option<f64> = None;
+    for zone in &zones {
+        if let Some(celsius) = zone.current_temperature.and_then(kelvin_tenths_to_celsius) {
+            hottest = Some(match hottest {
+                Some(current) if current >= celsius => current,
+                _ => celsius,
+            });
+        }
+    }
+    hottest
+}
+
+/// Pure + testable: tenths of Kelvin → °C inside the plausibility window.
+///
+/// Floor is deliberately 5 °C, above operating ambient for any real chassis:
+/// the documented disabled-sensor sentinel 2732 (≈ 0.05 °C) and its kin must
+/// fail here rather than render as a live reading.
+fn kelvin_tenths_to_celsius(tenths: u32) -> Option<f64> {
+    let celsius = f64::from(tenths) / 10.0 - 273.15;
+    (5.0..150.0).contains(&celsius).then_some(celsius)
+}
+
+/// Discrete GPU temperature via `nvidia-smi` — probed only when an NVIDIA
+/// adapter was detected, so AMD/Intel-only machines never pay the spawn.
+/// Works in both fast and full modes by explicit product decision.
+fn get_gpu_temp_windows(gpus: &[String]) -> Option<f64> {
+    if !gpus
+        .iter()
+        .any(|gpu| gpu.to_ascii_lowercase().contains("nvidia"))
+    {
+        return None;
+    }
+    let stdout = run_stdout(
+        "nvidia-smi",
+        [
+            "--query-gpu=temperature.gpu",
+            "--format=csv,noheader,nounits",
+        ],
+        CommandTimeout::Normal,
+    )?;
+    parse_nvidia_smi_temp(&stdout)
+}
+
+/// First CSV line's leading value inside the plausibility window.
+/// Pure + testable.
+fn parse_nvidia_smi_temp(stdout: &str) -> Option<f64> {
+    let first = stdout.lines().next()?;
+    let value = first.split(',').next()?.trim().parse::<f64>().ok()?;
+    (-20.0..150.0).contains(&value).then_some(value)
+}
+
+/// Get terminal name using only env vars (no PowerShell)
 fn get_terminal_fast() -> Option<String> {
     if env::var("WT_SESSION").is_ok_and(|value| !value.trim().is_empty()) {
         return Some("Windows Terminal".to_string());
@@ -2329,5 +2425,40 @@ mod powershell_fallback_tests {
                 .interface_index,
             Some(5)
         );
+    }
+}
+
+#[cfg(test)]
+mod thermal_tests {
+    use super::*;
+
+    #[test]
+    fn parses_nvidia_smi_first_gpu_temperature() {
+        assert_eq!(parse_nvidia_smi_temp("61\n"), Some(61.0));
+        // CRLF-tolerant; first line wins on multi-GPU output.
+        assert_eq!(parse_nvidia_smi_temp("55\r\n61\r\n"), Some(55.0));
+        assert_eq!(parse_nvidia_smi_temp(""), None);
+        assert_eq!(parse_nvidia_smi_temp("not-a-number\n"), None);
+    }
+
+    #[test]
+    fn nvidia_smi_implausible_values_are_rejected() {
+        assert_eq!(parse_nvidia_smi_temp("999\n"), None);
+        // Below the -20 C floor — no real GPU reports this.
+        assert_eq!(parse_nvidia_smi_temp("-40\n"), None);
+        assert_eq!(parse_nvidia_smi_temp("-999\n"), None);
+    }
+
+    #[test]
+    fn kelvin_tenths_conversion_rejects_disabled_sensor_sentinel() {
+        let warm = kelvin_tenths_to_celsius(3007).unwrap();
+        assert!((warm - 27.55).abs() < 1e-9);
+        let hot = kelvin_tenths_to_celsius(3132).unwrap();
+        assert!((hot - 40.05).abs() < 1e-9);
+        // 2732 tenths-K = 0 C is the known disabled/absent sensor sentinel.
+        assert_eq!(kelvin_tenths_to_celsius(2732), None);
+        // Absurd readings fail the plausibility window.
+        assert_eq!(kelvin_tenths_to_celsius(0), None);
+        assert_eq!(kelvin_tenths_to_celsius(u32::MAX), None);
     }
 }

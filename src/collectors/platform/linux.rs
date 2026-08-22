@@ -35,6 +35,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             get_display_resolution()
         }, // xrandr subprocess
         battery: get_battery(), // Fast: reads /sys
+        cpu_temp_celsius: get_cpu_temp_celsius(),
+        gpu_temp_celsius: get_gpu_temp_celsius(),
         zfs_health: if mode == CollectMode::Fast {
             None
         } else {
@@ -572,6 +574,127 @@ fn is_plausible_system_battery(base: &Path) -> bool {
         }
     }
     true
+}
+
+// ── Thermal collection ──────────────────────────────────────────────
+//
+// Pure sysfs reads (microseconds) — safe for auto-run fast mode. CPU
+// temperature prefers hwmon drivers that expose the package/die sensor
+// (coretemp on Intel, k10temp/zenpower on AMD, cpu_thermal/soc_thermal on
+// ARM SBCs such as the Raspberry Pi), then falls back to a cpu/soc-labeled
+// thermal zone. GPU temperature reads amdgpu/nouveau/nvidia hwmon devices.
+
+/// A reading is trusted only inside the physical plausibility window.
+/// Sensor faults report absurd values; absence is better than nonsense.
+fn plausible_temp(celsius: f64) -> bool {
+    celsius.is_finite() && (-20.0..150.0).contains(&celsius)
+}
+
+fn get_cpu_temp_celsius() -> Option<f64> {
+    let sys_root = Path::new("/sys");
+    hwmon_cpu_temp_in(&sys_root.join("class/hwmon"))
+        .or_else(|| thermal_zone_cpu_temp_in(&sys_root.join("class/thermal")))
+}
+
+/// Scan one hwmon device's tempN inputs. Returns `(priority, celsius)`:
+/// priority 0 for an explicitly labeled package/die sensor, 1 for the first
+/// available input.
+fn hwmon_temp_in_dir(dir: &Path, cpu_labels: bool) -> Option<(u8, f64)> {
+    let mut first: Option<f64> = None;
+    for n in 1..=16u8 {
+        let Some(milli) = read_u64_from_file(dir.join(format!("temp{n}_input"))) else {
+            continue;
+        };
+        let celsius = milli as f64 / 1000.0;
+        let label = fs::read_to_string(dir.join(format!("temp{n}_label")))
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let package_hit = cpu_labels
+            && (label.contains("package") || matches!(label.as_str(), "tdie" | "tctl" | "cpu"));
+        if package_hit {
+            return Some((0, celsius));
+        }
+        if first.is_none() {
+            first = Some(celsius);
+        }
+    }
+    first.map(|t| (1, t))
+}
+
+fn hwmon_cpu_temp_in(hwmon_root: &Path) -> Option<f64> {
+    const CPU_HWMON_NAMES: [&str; 4] = ["coretemp", "k10temp", "zenpower", "cpu_thermal"];
+    let mut best: Option<(u8, f64)> = None;
+    for entry in fs::read_dir(hwmon_root).ok()?.flatten() {
+        let name = fs::read_to_string(entry.path().join("name"))
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if !CPU_HWMON_NAMES.contains(&name.as_str()) {
+            continue;
+        }
+        if let Some(candidate) = hwmon_temp_in_dir(&entry.path(), true) {
+            if best.map_or(true, |(p, _)| candidate.0 < p) {
+                best = Some(candidate);
+            }
+        }
+    }
+    best.map(|(_, t)| t).filter(|t| plausible_temp(*t))
+}
+
+fn thermal_zone_cpu_temp_in(thermal_root: &Path) -> Option<f64> {
+    let mut zones: Vec<String> = fs::read_dir(thermal_root)
+        .ok()?
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.starts_with("thermal_zone"))
+        .collect();
+    zones.sort();
+    for zone in zones {
+        let dir = thermal_root.join(&zone);
+        let zone_type = fs::read_to_string(dir.join("type"))
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        // x86_pkg_temp is the kernel's package-temp zone; cpu/soc cover the
+        // SBC device-tree zones (Raspberry Pi exposes `cpu_thermal` here).
+        let is_cpu =
+            zone_type.contains("cpu") || zone_type.contains("soc") || zone_type == "x86_pkg_temp";
+        if !is_cpu {
+            continue;
+        }
+        if let Some(milli) = read_u64_from_file(dir.join("temp")) {
+            let celsius = milli as f64 / 1000.0;
+            if plausible_temp(celsius) {
+                return Some(celsius);
+            }
+        }
+    }
+    None
+}
+
+const GPU_HWMON_NAMES: [&str; 3] = ["amdgpu", "nouveau", "nvidia"];
+
+fn get_gpu_temp_celsius() -> Option<f64> {
+    get_gpu_temp_celsius_in_hwmons(Path::new("/sys/class/hwmon"))
+}
+
+fn get_gpu_temp_celsius_in_hwmons(hwmon_root: &Path) -> Option<f64> {
+    for entry in fs::read_dir(hwmon_root).ok()?.flatten() {
+        let name = fs::read_to_string(entry.path().join("name"))
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if !GPU_HWMON_NAMES.contains(&name.as_str()) {
+            continue;
+        }
+        if let Some((_, t)) = hwmon_temp_in_dir(&entry.path(), false) {
+            if plausible_temp(t) {
+                return Some(t);
+            }
+        }
+    }
+    None
 }
 
 /// Get system locale
@@ -1296,5 +1419,59 @@ Memory Device
             parse_dmidecode_memory_summary(output),
             Some("1x32GB DDR5 5200MT/s Micron".to_string())
         );
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_prefers_package_label() {
+        let root = tempfile::tempdir().unwrap();
+        let coretemp = root.path().join("hwmon0");
+        fs::create_dir_all(&coretemp).unwrap();
+        fs::write(coretemp.join("name"), "coretemp\n").unwrap();
+        fs::write(coretemp.join("temp1_label"), "Package id 0\n").unwrap();
+        fs::write(coretemp.join("temp1_input"), "45500\n").unwrap();
+        fs::write(coretemp.join("temp2_input"), "50000\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), Some(45.5));
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_ignores_non_cpu_devices_and_garbage() {
+        let root = tempfile::tempdir().unwrap();
+        let nvme = root.path().join("hwmon0");
+        fs::create_dir_all(&nvme).unwrap();
+        fs::write(nvme.join("name"), "nvme\n").unwrap();
+        fs::write(nvme.join("temp1_input"), "42000\n").unwrap();
+        // A CPU device with an implausible reading is rejected outright.
+        let coretemp = root.path().join("hwmon1");
+        fs::create_dir_all(&coretemp).unwrap();
+        fs::write(coretemp.join("name"), "coretemp\n").unwrap();
+        fs::write(coretemp.join("temp1_input"), "999999\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), None);
+    }
+
+    #[test]
+    fn thermal_zone_fallback_matches_pi_style_cpu_zones() {
+        let root = tempfile::tempdir().unwrap();
+        let acpitz = root.path().join("thermal_zone0");
+        fs::create_dir_all(&acpitz).unwrap();
+        fs::write(acpitz.join("type"), "acpitz\n").unwrap();
+        fs::write(acpitz.join("temp"), "40000\n").unwrap();
+        let cpu_zone = root.path().join("thermal_zone1");
+        fs::create_dir_all(&cpu_zone).unwrap();
+        // Raspberry Pi exposes its SoC sensor as `cpu_thermal`.
+        fs::write(cpu_zone.join("type"), "cpu_thermal\n").unwrap();
+        fs::write(cpu_zone.join("temp"), "52123\n").unwrap();
+        assert_eq!(thermal_zone_cpu_temp_in(root.path()), Some(52.123));
+    }
+
+    #[test]
+    fn gpu_hwmon_temp_reads_amdgpu_device() {
+        let root = tempfile::tempdir().unwrap();
+        let amdgpu = root.path().join("hwmon3");
+        fs::create_dir_all(&amdgpu).unwrap();
+        fs::write(amdgpu.join("name"), "amdgpu\n").unwrap();
+        fs::write(amdgpu.join("temp1_input"), "38000\n").unwrap();
+        assert_eq!(get_gpu_temp_celsius_in_hwmons(root.path()), Some(38.0));
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(get_gpu_temp_celsius_in_hwmons(empty.path()), None);
     }
 }

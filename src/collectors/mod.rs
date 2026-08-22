@@ -99,6 +99,10 @@ pub struct SystemInfo {
     pub terminal: Option<String>,
     pub locale: Option<String>,
     pub battery: Option<String>,
+    /// CPU temperature in degrees Celsius when the platform can establish it
+    pub cpu_temp_celsius: Option<f64>,
+    /// Discrete GPU temperature in degrees Celsius when readable
+    pub gpu_temp_celsius: Option<f64>,
     pub encryption: Option<String>,
     pub desktop_environment: Option<String>,
     pub display_server: Option<String>,
@@ -256,6 +260,8 @@ impl SystemInfo {
             terminal: platform_info.terminal.or(fallback_terminal),
             locale: platform_info.locale,
             battery: platform_info.battery,
+            cpu_temp_celsius: platform_info.cpu_temp_celsius,
+            gpu_temp_celsius: platform_info.gpu_temp_celsius,
             encryption: platform_info.encryption,
             desktop_environment: platform_info.desktop_environment,
             display_server: platform_info.display_server,
