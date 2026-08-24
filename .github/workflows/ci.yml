@@ -622,15 +622,30 @@ jobs:
 
           fixture_phase='custom-home ownership rejection'
           fixture_phase_log="$custom_fixture_log"
+          # On hosted runners, PackageKit reduces preinstall stderr to a generic
+          # PKInstallErrorDomain failure in the installer's detailed output. First
+          # execute the byte-identical extracted script under the same stripped
+          # environment to bind the expected fail-closed reason to this state.
+          # Then require the real component package to report script failure and
+          # preserve every payload, receipt, and ownership invariant below.
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            /bin/sh "$preinstall" package-path / / \
             > "$custom_fixture_log" 2>&1; then
-            echo 'custom-home managed evidence was incorrectly accepted by PackageKit' >&2
+            echo 'custom-home managed evidence was incorrectly accepted by extracted preinstall' >&2
             exit 1
           fi
           grep -Fq "managed receipt or link evidence at \"${custom_fixture_home}\"" \
             "$custom_fixture_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            >> "$custom_fixture_log" 2>&1; then
+            echo 'custom-home managed evidence was incorrectly accepted by PackageKit' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$custom_fixture_log"
+          grep -Fq 'NSFilePath=./preinstall' "$custom_fixture_log"
           test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
             "$custom_fixture_hash"
           test ! -e "$fixture_install_root/payload-marker"
@@ -675,13 +690,22 @@ jobs:
           fixture_phase_log="$custom_fixture_newline_log"
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            /bin/sh "$preinstall" package-path / / \
             > "$custom_fixture_newline_log" 2>&1; then
-            echo 'trailing-newline eligible home was incorrectly accepted by PackageKit' >&2
+            echo 'trailing-newline eligible home was incorrectly accepted by extracted preinstall' >&2
             exit 1
           fi
           grep -Fq 'could not inspect eligible local home' \
             "$custom_fixture_newline_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            >> "$custom_fixture_newline_log" 2>&1; then
+            echo 'trailing-newline eligible home was incorrectly accepted by PackageKit' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$custom_fixture_newline_log"
+          grep -Fq 'NSFilePath=./preinstall' "$custom_fixture_newline_log"
           test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
             "$custom_fixture_hash"
           test ! -e "$fixture_install_root/payload-marker"
@@ -703,15 +727,24 @@ jobs:
           # must fail closed rather than becoming an ownership blind spot.
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            /bin/sh "$preinstall" package-path / / \
             > "$custom_fixture_missing_home_log" 2>&1; then
-            echo 'uninspectable eligible home was incorrectly accepted by PackageKit' >&2
+            echo 'uninspectable eligible home was incorrectly accepted by extracted preinstall' >&2
             exit 1
           fi
           grep -Fq "could not inspect eligible local home \"${custom_fixture_home}\"" \
             "$custom_fixture_missing_home_log"
           grep -Fq 'Make the declared home available and inspectable' \
             "$custom_fixture_missing_home_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            >> "$custom_fixture_missing_home_log" 2>&1; then
+            echo 'uninspectable eligible home was incorrectly accepted by PackageKit' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$custom_fixture_missing_home_log"
+          grep -Fq 'NSFilePath=./preinstall' "$custom_fixture_missing_home_log"
           test ! -e "$fixture_install_root/payload-marker"
           test ! -L "$fixture_install_root/payload-marker"
           if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
@@ -739,13 +772,22 @@ jobs:
               "$custom_fixture_plist")" = "$malformed_uid"
             # shellcheck disable=SC2024
             if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-              /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+              /bin/sh "$preinstall" package-path / / \
               > "$malformed_uid_log" 2>&1; then
-              echo "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit" >&2
+              echo "malformed positive UID $malformed_uid was incorrectly accepted by extracted preinstall" >&2
               exit 1
             fi
             grep -Fq 'UID outside the supported unsigned 32-bit range' \
               "$malformed_uid_log"
+            # shellcheck disable=SC2024
+            if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+              /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+              >> "$malformed_uid_log" 2>&1; then
+              echo "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit" >&2
+              exit 1
+            fi
+            grep -Fq 'PKInstallErrorDomain Code=112' "$malformed_uid_log"
+            grep -Fq 'NSFilePath=./preinstall' "$malformed_uid_log"
             test ! -e "$fixture_install_root/payload-marker"
             test ! -L "$fixture_install_root/payload-marker"
             if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
@@ -766,8 +808,8 @@ jobs:
           # A component package can be pointed at another mounted macOS volume.
           # The exact preinstall must reject that target before payload or
           # receipt placement, because its ownership inventory is for the
-          # running system. Requiring our diagnostic proves PackageKit ran the
-          # script instead of rejecting the test volume for an unrelated reason.
+          # running system. The direct invocation binds the expected diagnostic;
+          # PackageKit must then identify its packaged script as the failure.
           fixture_phase='alternate-volume rejection'
           fixture_phase_log="$fixture_alt_log"
           hdiutil create -size 64m -fs HFS+ -volname TR300PkgAltTarget \
@@ -779,15 +821,26 @@ jobs:
           alternate_payload="${fixture_alt_mount}${fixture_install_root}/payload-marker"
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount" \
-            -dumplog \
+            /bin/sh "$preinstall" package-path / "$fixture_alt_mount" \
             > "$fixture_alt_log" 2>&1; then
-            echo 'alternate-volume package target was incorrectly accepted' >&2
+            echo 'alternate-volume target was incorrectly accepted by extracted preinstall' >&2
             exit 1
           fi
           grep -Fq 'supports only the current system volume (/)' "$fixture_alt_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount" \
+            -dumplog \
+            >> "$fixture_alt_log" 2>&1; then
+            echo 'alternate-volume package target was incorrectly accepted' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$fixture_alt_log"
+          grep -Fq 'NSFilePath=./preinstall' "$fixture_alt_log"
           test ! -e "$alternate_payload"
           test ! -L "$alternate_payload"
+          test ! -e "$fixture_install_root/payload-marker"
+          test ! -L "$fixture_install_root/payload-marker"
           if pkgutil --volume "$fixture_alt_mount" --pkg-info "$fixture_identifier" \
             >/dev/null 2>&1; then
             echo 'alternate-volume rejection left a target receipt behind' >&2

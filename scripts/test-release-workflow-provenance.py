@@ -4312,6 +4312,9 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit",
         "UID outside the supported unsigned 32-bit range",
         "malformed UID $malformed_uid left its fixture receipt behind",
+        "PKInstallErrorDomain Code=112",
+        "NSFilePath=./preinstall",
+        "incorrectly accepted by extracted preinstall",
         "diagnose_direct_pkg_failure() {",
         'trap \'diagnose_direct_pkg_failure "$?" "$LINENO" "$BASH_COMMAND"\' ERR',
         "trap - ERR",
@@ -4324,56 +4327,170 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "fixture_phase='custom fixture account cleanup'",
     ):
         require(preinstall_behavior, needle, f"{CI_WORKFLOW.name} custom-home PackageKit fixture")
-    if preinstall_behavior.count("-dumplog") != 5:
+    dumplog_command_lines = [
+        line
+        for line in preinstall_behavior.splitlines()
+        if "-dumplog" in line and not line.lstrip().startswith("#")
+    ]
+    if len(dumplog_command_lines) != 5:
         raise AssertionError(
             f"{CI_WORKFLOW.name}: every rejecting PackageKit fixture must retain detailed logs"
         )
-    for phase, phase_log, installer_target, redirect in (
+    if preinstall_behavior.count("PKInstallErrorDomain Code=112") != 5:
+        raise AssertionError(
+            f"{CI_WORKFLOW.name}: every rejecting PackageKit fixture must prove packaged-script failure"
+        )
+    if preinstall_behavior.count("NSFilePath=./preinstall") != 5:
+        raise AssertionError(
+            f"{CI_WORKFLOW.name}: every rejecting PackageKit fixture must bind failure to preinstall"
+        )
+    if preinstall_behavior.count("incorrectly accepted by extracted preinstall") != 5:
+        raise AssertionError(
+            f"{CI_WORKFLOW.name}: every rejecting PackageKit fixture must bind its direct preinstall reason"
+        )
+    for (
+        phase,
+        phase_log,
+        direct_target,
+        direct_redirect,
+        direct_diagnostic,
+        installer_target,
+        installer_redirect,
+        postconditions,
+        phase_end,
+    ) in (
         (
             "fixture_phase='custom-home ownership rejection'",
             'fixture_phase_log="$custom_fixture_log"',
+            '/bin/sh "$preinstall" package-path / /',
+            '> "$custom_fixture_log" 2>&1; then',
+            'managed receipt or link evidence at \\"${custom_fixture_home}\\"',
             '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
-            '"$custom_fixture_log" 2>&1',
+            '>> "$custom_fixture_log" 2>&1; then',
+            (
+                'shasum -a 256 "$custom_fixture_receipt"',
+                'test ! -e "$fixture_install_root/payload-marker"',
+                'test ! -L "$fixture_install_root/payload-marker"',
+                'pkgutil --pkg-info "$fixture_identifier"',
+            ),
+            "failed custom-home package left its fixture receipt behind",
         ),
         (
             "fixture_phase='trailing-newline home rejection'",
             'fixture_phase_log="$custom_fixture_newline_log"',
+            '/bin/sh "$preinstall" package-path / /',
+            '> "$custom_fixture_newline_log" 2>&1; then',
+            "could not inspect eligible local home",
             '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
-            '"$custom_fixture_newline_log" 2>&1',
+            '>> "$custom_fixture_newline_log" 2>&1; then',
+            (
+                'shasum -a 256 "$custom_fixture_receipt"',
+                'test ! -e "$fixture_install_root/payload-marker"',
+                'test ! -L "$fixture_install_root/payload-marker"',
+                'pkgutil --pkg-info "$fixture_identifier"',
+            ),
+            "trailing-newline rejection left its fixture receipt behind",
         ),
         (
             "fixture_phase='missing declared home rejection'",
             'fixture_phase_log="$custom_fixture_missing_home_log"',
+            '/bin/sh "$preinstall" package-path / /',
+            '> "$custom_fixture_missing_home_log" 2>&1; then',
+            'could not inspect eligible local home \\"${custom_fixture_home}\\"',
             '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
-            '"$custom_fixture_missing_home_log" 2>&1',
+            '>> "$custom_fixture_missing_home_log" 2>&1; then',
+            (
+                'test ! -e "$fixture_install_root/payload-marker"',
+                'test ! -L "$fixture_install_root/payload-marker"',
+                'pkgutil --pkg-info "$fixture_identifier"',
+            ),
+            "uninspectable-home rejection left its fixture receipt behind",
         ),
         (
             'fixture_phase="malformed UID $malformed_uid rejection"',
             'fixture_phase_log="$malformed_uid_log"',
+            '/bin/sh "$preinstall" package-path / /',
+            '> "$malformed_uid_log" 2>&1; then',
+            "UID outside the supported unsigned 32-bit range",
             '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
-            '"$malformed_uid_log" 2>&1',
+            '>> "$malformed_uid_log" 2>&1; then',
+            (
+                'test ! -e "$fixture_install_root/payload-marker"',
+                'test ! -L "$fixture_install_root/payload-marker"',
+                'pkgutil --pkg-info "$fixture_identifier"',
+            ),
+            "malformed UID $malformed_uid left its fixture receipt behind",
         ),
         (
             "fixture_phase='alternate-volume rejection'",
             'fixture_phase_log="$fixture_alt_log"',
+            '/bin/sh "$preinstall" package-path / "$fixture_alt_mount"',
+            '> "$fixture_alt_log" 2>&1; then',
+            "supports only the current system volume (/)",
             '/usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount"',
-            '"$fixture_alt_log" 2>&1',
+            '>> "$fixture_alt_log" 2>&1; then',
+            (
+                'test ! -e "$alternate_payload"',
+                'test ! -L "$alternate_payload"',
+                'test ! -e "$fixture_install_root/payload-marker"',
+                'test ! -L "$fixture_install_root/payload-marker"',
+                'pkgutil --volume "$fixture_alt_mount" --pkg-info "$fixture_identifier"',
+                'pkgutil --pkg-info "$fixture_identifier"',
+            ),
+            "alternate-volume rejection left a host receipt behind",
         ),
     ):
         phase_index = preinstall_behavior.index(phase)
-        phase_log_index = preinstall_behavior.index(phase_log, phase_index)
-        installer_index = preinstall_behavior.index(installer_target, phase_log_index)
-        dumplog_index = preinstall_behavior.index("-dumplog", installer_index)
-        redirect_index = preinstall_behavior.index(redirect, dumplog_index)
+        phase_end_index = preinstall_behavior.index(phase_end, phase_index)
+        phase_block = preinstall_behavior[phase_index:phase_end_index]
+        phase_marker_index = phase_block.index(phase)
+        phase_log_index = phase_block.index(phase_log)
+        direct_index = phase_block.index(direct_target, phase_log_index)
+        direct_redirect_match = re.search(
+            rf"(?m)^[ \t]*{re.escape(direct_redirect)}[ \t]*$", phase_block
+        )
+        if direct_redirect_match is None:
+            raise AssertionError(
+                f"{CI_WORKFLOW.name}: direct rejection must truncate its phase log: {phase}"
+            )
+        direct_redirect_index = direct_redirect_match.start()
+        direct_diagnostic_index = phase_block.index(direct_diagnostic, direct_redirect_index)
+        installer_index = phase_block.index(installer_target, direct_diagnostic_index)
+        dumplog_index = phase_block.index("-dumplog", installer_index)
+        installer_redirect_match = re.search(
+            rf"(?m)^[ \t]*{re.escape(installer_redirect)}[ \t]*$", phase_block
+        )
+        if installer_redirect_match is None:
+            raise AssertionError(
+                f"{CI_WORKFLOW.name}: PackageKit rejection must append its phase log: {phase}"
+            )
+        installer_redirect_index = installer_redirect_match.start()
+        package_failure_index = phase_block.index(
+            "PKInstallErrorDomain Code=112", installer_redirect_index
+        )
+        package_preinstall_index = phase_block.index(
+            "NSFilePath=./preinstall", package_failure_index
+        )
+        postcondition_index = package_preinstall_index
+        for postcondition in postconditions:
+            postcondition_index = phase_block.index(
+                postcondition, postcondition_index + 1
+            )
         if not (
-            phase_index
+            phase_marker_index
             < phase_log_index
+            < direct_index
+            < direct_redirect_index
+            < direct_diagnostic_index
             < installer_index
             < dumplog_index
-            < redirect_index
+            < installer_redirect_index
+            < package_failure_index
+            < package_preinstall_index
+            < postcondition_index
         ):
             raise AssertionError(
-                f"{CI_WORKFLOW.name}: rejecting PackageKit phase is out of order: {phase}"
+                f"{CI_WORKFLOW.name}: direct and packaged rejection phase is out of order: {phase}"
             )
     newline_value_index = preinstall_behavior.index(
         "fixture_newline_framed=$(printf '\\nx')"
@@ -4421,16 +4538,20 @@ def check_macos_publish_boundary(workflow: str) -> None:
     malformed_uid_write_index = preinstall_behavior.index(
         'UniqueID "$malformed_uid"', malformed_uid_loop_index
     )
-    malformed_uid_packagekit_index = preinstall_behavior.index(
-        '/usr/sbin/installer -pkg "$fixture_pkg" -target /', malformed_uid_write_index
+    malformed_uid_direct_index = preinstall_behavior.index(
+        '/bin/sh "$preinstall" package-path / /', malformed_uid_write_index
     )
     malformed_uid_diagnostic_index = preinstall_behavior.index(
         "UID outside the supported unsigned 32-bit range",
-        malformed_uid_packagekit_index,
+        malformed_uid_direct_index,
+    )
+    malformed_uid_packagekit_index = preinstall_behavior.index(
+        '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+        malformed_uid_diagnostic_index,
     )
     malformed_uid_receipt_index = preinstall_behavior.index(
         "malformed UID $malformed_uid left its fixture receipt behind",
-        malformed_uid_diagnostic_index,
+        malformed_uid_packagekit_index,
     )
     malformed_uid_cleanup_index = preinstall_behavior.index(
         'sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"',
@@ -4443,8 +4564,9 @@ def check_macos_publish_boundary(workflow: str) -> None:
         < valid_uid_packagekit_index
         < malformed_uid_loop_index
         < malformed_uid_write_index
-        < malformed_uid_packagekit_index
+        < malformed_uid_direct_index
         < malformed_uid_diagnostic_index
+        < malformed_uid_packagekit_index
         < malformed_uid_receipt_index
         < malformed_uid_cleanup_index
     ):
