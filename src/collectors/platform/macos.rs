@@ -26,6 +26,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             shell: get_shell(),       // Fast: reads env var + quick subprocess
             display_resolution: None, // Skip system_profiler SPDisplaysDataType
             battery: get_battery(),   // Fast: pmset is quick
+            cpu_temp_celsius: None, // No thermal collection on macOS (SMC requires unsafe IOKit or sudo)
+            gpu_temp_celsius: None,
             zfs_health: None,
             motherboard: None,
             bios: None,
@@ -71,6 +73,8 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         shell: get_shell(),
         display_resolution,
         battery,
+        cpu_temp_celsius: None, // No thermal collection on macOS (SMC requires unsafe IOKit or sudo)
+        gpu_temp_celsius: None,
         zfs_health: None,
         motherboard: None,
         bios: None,
@@ -549,7 +553,25 @@ fn get_battery() -> Option<String> {
 }
 
 fn parse_pmset_battery(output: &str) -> Option<String> {
-    let line = output.lines().find(|line| line.contains('%'))?;
+    // Anchor on a recognizable `-InternalBattery-N` record. A stray
+    // percentage elsewhere in pmset output (wear info, warnings) must never
+    // masquerade as the system battery charge level.
+    output.lines().find_map(parse_pmset_battery_line)
+}
+
+fn parse_pmset_battery_line(line: &str) -> Option<String> {
+    let lower = line.trim_start().to_ascii_lowercase();
+    let suffix = lower.strip_prefix("-internalbattery-")?;
+    let digits = suffix.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0
+        || !suffix[digits..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_whitespace() || c == '(')
+        || !line.contains('%')
+    {
+        return None;
+    }
     let percentage = line.split_whitespace().find_map(|word| {
         let word = word.trim_matches(|c: char| c == ';' || c == ',');
         let number = word.strip_suffix('%')?.parse::<u8>().ok()?;
@@ -905,6 +927,32 @@ mod tests {
         assert_eq!(
             parse_pmset_battery(" -InternalBattery-0\t255%; charging\n"),
             None
+        );
+    }
+
+    #[test]
+    fn pmset_battery_ignores_stray_percentages_outside_the_battery_line() {
+        // A battery-wear percentage (or any other stray value) earlier in the
+        // output must not be misattributed to the system charge level.
+        let output = "Battery wear info: 12%\n -InternalBattery-0 (id=7)\t61%; discharging; 2:00 remaining\n";
+        assert_eq!(
+            parse_pmset_battery(output),
+            Some("61% (Discharging)".to_string())
+        );
+    }
+
+    #[test]
+    fn pmset_battery_rejects_stray_percentage_without_internal_battery() {
+        let output = "Battery wear info: 12%\nAC adapter efficiency: 91%\n";
+        assert_eq!(parse_pmset_battery(output), None);
+    }
+
+    #[test]
+    fn pmset_battery_skips_invalid_internal_record_before_valid_one() {
+        let output = " -InternalBattery-0\t255%; charging\n -InternalBattery-1 (id=8)\t72%; discharging; 3:00 remaining\n";
+        assert_eq!(
+            parse_pmset_battery(output),
+            Some("72% (Discharging)".to_string())
         );
     }
 

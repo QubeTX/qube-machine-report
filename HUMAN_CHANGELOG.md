@@ -13,6 +13,48 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.0] - Unreleased
+
+### Added
+- **Temperature readings are now part of the report.** On Linux the report
+  chooses the hottest trustworthy CPU and GPU readings in a repeatable way,
+  ignores sensors that report faults or nonsense, and recognizes the SoC
+  sensor names used by systems such as Raspberry Pi. On Windows, machines with
+  an NVIDIA graphics card can show GPU temperature; Windows CPU temperature is
+  left blank because the available system zones cannot reliably prove they are
+  the CPU. Macs report no temperature this release. If no trusted sensor
+  answers, the row simply stays hidden. Linux and Windows NVIDIA readings are
+  available in the quick startup view under their respective time budgets.
+- **A new `--full` flag** does what it says: runs the complete report. It's
+  the opposite of `--fast` and matches the default behavior.
+
+### Changed
+- **The full report on the Windows benchmark machine is substantially faster.**
+  Seven controlled alternating runs per version put the median at 5146.9 ms
+  before and 2120.2 ms after — about 3026.6 ms or 58.8% less time, a 2.43×
+  speedup. A slow security
+  check now overlaps other work under its own deadline, and repeated lookups
+  were consolidated. Eleven quick-report runs per version produced medians of
+  257.3 ms before and 260.4 ms after; that small 1.2% difference is
+  background-level, so there is no
+  quick-mode speedup claim.
+- **Switching from the managed Mac install to the system package is now a clear
+  three-step process.** Update or reinstall the managed v4.3 copy, choose
+  Complete uninstall so TR-300 safely removes both its command and matching
+  receipt, then open the PKG. A normal PKG upgrade still works, and switching
+  from an exact PKG back to the managed installer remains supported.
+
+### Fixed
+- **Linux is more careful about which battery belongs to the computer.** It
+  rejects supplies explicitly marked as devices or absent, accepts both
+  current and averaged live readings (including normal signed current/power
+  discharge values), and chooses consistently when several supplies exist. This closes
+  plausible paths to a fake percentage, but the source of the historical
+  Raspberry Pi "30%" report has not been proven; physical diagnostics remain
+  open.
+- The same care now applies to the Mac fallback: it accepts only the named
+  internal-battery line, not an unrelated percentage elsewhere in the output.
+
 ### Security
 - **Release packaging now proves it is using the exact trusted release before
   it can access signing credentials or upload files.** Forks, unrelated runs,
@@ -23,17 +65,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checks that proof and every accepted download byte before making the complete
   34-file release public. Public updater checks happen only after publication,
   so an unpublished candidate is never mistaken for the public latest release.
-- **Crates.io publishing now uses a short-lived login created for one protected
-  release run.** The package is fully rehearsed with only read-only GitHub
+- **After the required protected cutover, crates.io publishing will use a
+  short-lived login created for one release run.** The package is fully
+  rehearsed with only read-only GitHub
   access and no registry login, a fresh
   runner proves it has the same source and package bytes, and only the final
   upload receives the temporary credential. The old reusable credential is a
   one-time setup bridge and must be removed after the new login is proven.
-- **Mac signing credentials are isolated from project code.** A one-time copy
+- **Mac signing credentials will be isolated from project code after the
+  required migration and environment-only native preflight.** A one-time copy
   moves the exact credentials into a protected environment, both kinds of Mac
   runner must prove signing and notarization access there, and the old copies
-  plus the temporary migration access are then removed. Credentialed jobs start
-  fresh and receive only fixed package data.
+  plus the temporary migration access are then removed. Credentialed jobs then
+  start fresh and receive only fixed package data.
 - **Windows installer builds now use one verified official Inno Setup
   download.** Both ordinary CI and release packaging check the compiler's
   download hash, publisher signature, attestation, path, and exact version
@@ -55,13 +99,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
    folder plus every eligible local account's declared home, including custom
    locations. It preserves any matching command or receipt it finds and asks the
    user to complete the supported switch before trying again.
-
-### Changed
-- **Switching from the managed Mac install to the system package is now a clear
-  three-step process.** Update or reinstall the managed v4.3 copy, choose
-  Complete uninstall so TR-300 safely removes both its command and matching
-  receipt, then open the PKG. A normal PKG upgrade still works, and switching
-  from an exact PKG back to the managed installer remains supported.
 
 ## [4.2.2] - 2026-07-18
 

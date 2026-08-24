@@ -7,15 +7,93 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.0 — Unreleased
+### v4.3.0 — Unreleased candidate (as of 2026-08-24; open PR #14)
 
+Release status: v4.2.2 is the last published GitHub/crates.io version. The
+working `4.3.0` manifest remains unreleased on
+`feature/v4.3.0-battery-perf-thermals`. Release-chain hardening exact head
+`8ea060f` passed complete local, hosted, security, and native fixture gates and
+merged through PR #15 as `1ffb0cc`; exact-main CI `32759430269` then passed all
+19 jobs. The local PR #14 branch integrated hardened `main` through merge
+`4e962b6` and source/test head `8471d95`. That head passed the complete local
+gate, controlled benchmark, and independent code/security reviews; it was not
+yet pushed at this checkpoint, so exact pushed-head hosted and review-thread
+qualification remain open. Earlier `56b92d7`/remote `b068f65` runs are
+historical evidence only.
+
+- **Integrated local qualification — pass through source/test head `8471d95`:**
+  locked fmt; warnings-denied workspace/all-target Clippy; 185 library and 22
+  integration tests; release build; 39-file package list; locked publish
+  dry-run with no upload; RustSec audit of 221 dependencies; cargo-dist 0.31.0
+  plan; actionlint; source and extracted-preinstall ShellCheck; release
+  provenance fixtures; Bash, PowerShell 7, and Windows PowerShell managed-
+  transaction fixtures; pinned-Inno parser; Linux/macOS cross-target
+  check/Clippy; and full/fast table, JSON, and ASCII smokes. Three independent
+  final reviews reported no source or release-security P0–P3 finding; the
+  documentation review's state corrections are incorporated here. Hosted
+  exact-head and signed/tagged gates remain separate.
+
+- **Earlier repaired-code local gates — pass on exact head `56b92d7`:** locked fmt; warnings-denied
+  all-target/workspace Clippy; 173 library and 22 integration tests; release
+  build; 39-file package list; publish dry-run (no upload); audit of 221 locked
+  dependencies; cargo-dist plan; actionlint and shellcheck; Linux/macOS cross-
+  target check/Clippy; and full/fast table, ASCII, JSON, and thermal runtime
+  smokes all passed. Exact repaired-head hosted CI is recorded above.
+- **Windows thermal contract:** only an already-detected NVIDIA adapter may
+  trigger `nvidia-smi`, and its timeout follows the active collection mode.
+  A trusted answer renders `GPU TEMP` and a numeric
+  `cpu.gpu_temperature_c`; failure remains absent/`null`. Windows CPU
+  temperature is deliberately always absent/`null`: ACPI thermal-zone identity
+  cannot establish that a zone belongs to the CPU. No ACPI CPU probe is part of
+  the candidate acceptance surface. A targeted post-repair Alienware smoke
+  recorded `GPU TEMP` at 54 °C in both full and fast modes, with CPU temperature
+  `null`; one ASCII invocation had 49 nonempty lines and every line was exactly
+  51 display columns.
+- **Recorded Windows latency benchmark:** seven alternating Alienware m16 R2
+  full-mode runs per version against integrated source/test head `8471d95`
+  produced medians of 5146.9 ms for the installed v4.2.2 baseline and 2120.2 ms
+  for the candidate, a reduction of about 3026.6 ms (58.8%) and a 2.43× runtime
+  ratio. Eleven alternating fast-mode runs per version produced medians of
+  257.3 ms and 260.4 ms; the candidate's +1.2% difference is background-level,
+  so make no fast-mode gain claim. Candidate JSON kept Windows CPU
+  present-and-`null`; its 54 °C GPU value exactly matched direct `nvidia-smi`.
+  Independent reviewer runs reproduced the material full-mode improvement and
+  statistically unchanged fast behavior.
+- **Linux thermal contract:** both modes use pure sysfs. CPU/GPU selection is
+  deterministic, chooses the hottest plausible healthy sensor within the
+  preferred class, rejects faulted/unreadable/malformed channels, recognizes
+  `soc_thermal`, and falls back only to CPU/SoC-labeled thermal zones. Fixtures,
+  output parity, and Linux cross-target check/Clippy passed locally; hosted
+  Linux x86_64 and ARM64 feature-baseline tests/builds also passed. Physical
+  sensor acceptance remains open on the AMD64 laptop and Raspberry Pi.
+- **Linux battery contract:** reject explicit `scope=Device` and `present=0`
+  evidence; accept well-formed `*_now` or `*_avg` corroboration, including
+  valid signed current/power readings; cross-validate compatible energy/charge
+  pairs; and choose deterministically. These rules harden plausible
+  misattribution paths but do not prove which sysfs node produced the historical
+  Raspberry Pi "30%" report.
+- **macOS contract:** the `pmset` fallback requires a recognized
+  `-InternalBattery-N` record and cannot use an unrelated percentage. macOS
+  reports no thermal values in v4.3. Cross-target check/Clippy passes locally,
+  and hosted Intel/Apple Silicon tests, builds, and Apple Silicon speed gate pass.
+- **Physical gates still open:** capture the Raspberry Pi's real
+  `/sys/class/power_supply/*` and thermal layout, then run the full
+  thermal/battery/output matrix there; run the corresponding matrix on the
+  AMD64 Linux laptop. Hosted Linux fixtures do not close either physical gate.
+- **Release-chain hardening closure:** exact head `8ea060f` passed the complete
+  local gate, five sealed complete-coverage security scans with zero findings,
+  all 19 jobs and 26 reported checks in CI run `32758484378`, and release-plan
+  run `32758484335`. Both native Intel and Apple Silicon PackageKit fixtures
+  passed the preinstall-only refusal, no-mutation invariants, and clean-package
+  control before PR #15 merged as `1ffb0cc`. These results qualify the hardened
+  release chain, not the final pushed integrated v4.3 product head.
 - **Mac transaction finding:** exact hardening head `dae0857` CI run
   `32710504501` passed workflow validation, formatting, Clippy, Linux/Windows
   tests and release builds, audit, cargo-dist, Windows installer custody, and
   speed gates. Both native Mac architectures then proved that Apple Installer
   retained `/usr/local/bin/tr300` after the deliberate failing `postinstall`,
-  even though the old managed binary and receipt restored exactly. That is a
-  release blocker, not acceptable rollback behavior.
+  even though the old managed binary and receipt restored exactly. That design
+  was release-blocking and directly motivated the preinstall-only policy below.
 - **Superseding package policy:** the candidate direct PKG contains exactly one
   non-mutating `preinstall`; it rejects the standard managed binary or receipt
   paths (`~/.cargo/bin/tr300` and
@@ -56,10 +134,16 @@ as passed.
   before profile mutation and transactionally remove the running binary and
   receipt. Raw Cargo stays binary-only; malformed, foreign, linked, or changed
   receipts fail closed. Exact PKG-to-managed takeover remains supported.
-- **Open native acceptance:** both `macos-15` and `macos-15-intel` must prove
-  binary-only, receipt-only, pair, malformed, broken-link, second-home, and
-  custom-home managed conflicts plus alternate target volumes leave all old
-  bytes and native payload/receipt state unchanged; then prove clean install,
+- **Pre-tag native fixture acceptance — pass:** hosted `macos-15` and
+  `macos-15-intel` proved the hardening fixtures for binary-only, receipt-only,
+  pair, malformed, broken-link, second-home, custom-home, and alternate-volume
+  conflicts on PR #15 and again on exact `main` in jobs `97534440875` and
+  `97534440916` of CI `32759430269`.
+- **Signed/tagged release-native acceptance still open:** the future signed
+  v4.3 release candidate must
+  repeat the applicable transition contract and prove those managed-conflict
+  cases leave all old bytes and native payload/receipt state unchanged; then
+  prove clean install,
   same-version repair, v4.2.2 native upgrade, and the checksum-bound public
   v4.2.2 managed wrapper -> rejected candidate PKG -> candidate managed refresh
   -> receipt-aware Complete -> candidate PKG sequence, plus PKG-to-managed
@@ -1085,7 +1169,7 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | Post-v4.0.1 personal-hardware task open |
 | **AWS EC2 (Graviton or Intel)** | Hypervisor shows "amazon" / "kvm"; cloud detection works | — |
 | **WSL2 on Win11** | Hypervisor shows "WSL2"; terminal shows "Windows Terminal" via WT_SESSION | — |
-| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Personal Alienware post-v4.0.1 retest open; prior 3.10.0 evidence remains historical |
+| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Alienware report/hardware and v4.1.3 same-channel evidence complete; natural v4.2.2 UAC update remains open |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
 | **Windows 11 (BitLocker OFF)** | "Encryption" row shows an evidence-backed Off state or remains absent; no promise that elevation alone unlocks it | — |
 | **Windows 11 as Administrator** | Encryption shows evidence-backed method + protection level when available; no blanket elevation footer | — |

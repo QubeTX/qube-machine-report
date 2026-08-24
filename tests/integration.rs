@@ -236,3 +236,55 @@ fn test_json_includes_session_uptime_seconds_key() {
         .success()
         .stdout(predicate::str::contains("\"session_uptime_seconds\":"));
 }
+
+// --- v4.3.0 additions ---
+
+#[test]
+fn test_json_includes_thermal_keys() {
+    // Thermal keys are additive schema-v1 members: always present, null when
+    // no trusted sensor answered (most CI runners), a number when one did.
+    let output = tr300()
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value = serde_json::from_slice(&output).expect("--json output should parse");
+    let cpu = value
+        .get("cpu")
+        .and_then(Value::as_object)
+        .expect("cpu should be a JSON object");
+    for key in ["temperature_c", "gpu_temperature_c"] {
+        let reading = cpu
+            .get(key)
+            .unwrap_or_else(|| panic!("cpu.{key} should always be present"));
+        assert!(
+            reading.is_null() || reading.is_number(),
+            "cpu.{key} should be null or a number, got {reading}"
+        );
+    }
+    #[cfg(windows)]
+    assert_eq!(
+        cpu.get("temperature_c"),
+        Some(&Value::Null),
+        "Windows CPU temperature must remain explicitly null"
+    );
+}
+
+#[test]
+fn test_full_flag_is_accepted_and_conflicts_with_fast() {
+    tr300().arg("--full").assert().success();
+    tr300().args(["--full", "--fast"]).assert().failure();
+}
+
+#[test]
+fn test_ascii_mode_never_emits_degree_sign() {
+    // Live CLI smoke for the final output contract. Deterministic fixture tests
+    // in report.rs exercise populated thermal rows on sensorless CI runners.
+    tr300()
+        .args(["--ascii", "--no-elevation-hint"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("°").not());
+}

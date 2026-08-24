@@ -10,18 +10,29 @@
 
 ## Active
 
-- [ ] **Harden, merge, and release TR-300 v4.3.0** - qualify the release chain, complete credential cutovers, reconcile PR #14, then run exact-SHA crates/tag/native/public/deployment gates (ms #v43) (owner codex) #r43
-  - [ ] Remediate and independently validate every confirmed release/privilege security finding
-  - [ ] Retire Mac postinstall takeover, reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload, prove managed refresh plus receipt-aware Complete uninstall, and pass native Intel/ARM requalification
+- [ ] **Integrate, qualify, and release TR-300 v4.3.0** - complete credential cutovers, reconcile hardened `main` into PR #14, then run exact-SHA crates/tag/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+  - [x] Remediate and independently validate every confirmed release/privilege security finding
+  - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
+  - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
+  - [x] Pass PR #15 exact-head local/hosted/security/native qualification, merge it, and pass exact-main CI
   - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
   - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
-  - [ ] Merge hardened main into PR #14 and pass final exact-head review and hosted gates
+  - [x] Merge hardened main into the local PR #14 branch and pass the complete local gate plus controlled benchmark
+  - [ ] Push the integrated candidate and pass final exact-head hosted, security, and review gates
   - [ ] Merge only the accepted candidate and verify exact-main CI plus crates.io custody
   - [ ] Push only v4.3.0 and pass the private 24-to-30-to-validated-to-34 publication chain
   - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
 
 ## Done
 
+- [x] **Repair and revalidate v4.3.0 PR #14** - correct platform accuracy, preserve the measurable Windows full-mode gain, prove exact-head CI, and leave the PR open (ms #v43) (owner codex) (done 2026-08-23) #v430
+  - [x] Repair Windows launch-relative deadlines and trustworthy NVIDIA-only thermals
+  - [x] Repair Linux battery compatibility and deterministic fault-aware thermals
+  - [x] Tighten macOS battery parsing and cross-format thermal rendering tests
+  - [x] Add `-f/--full` explicit flag
+  - [x] Reconcile unreleased docs, task state, and PR claims with measured evidence
+  - [x] Pass the full local gate and controlled v4.2.2 comparison
+  - [x] Push the corrected exact head and pass hosted CI/review without merging
 - [x] **Record the completed ND-300 v3.7.3 native-installer acceptance** - external operator-approved Alienware update completed without overlap; physical Mac GUI acceptance is optional/deferred behind native Intel/ARM direct-PKG and legacy-DMG gates (ms #hw4) (done 2026-07-18) #nd372
 - [x] **Codify and ship MIC-1 managed installation behavior** - make CLI installers the documented default, preserve update origin, make fresh managed intent authoritative, and fail closed across unsupported native scope transitions (ms #v42) (owner codex) (done 2026-07-18) #mic1
   - [x] Define the reusable managed-install/update state machine and raw-Cargo boundary

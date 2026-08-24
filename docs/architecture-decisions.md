@@ -12,13 +12,17 @@
 >
 > **Coverage reconciled through 2026-08-24.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
-> one file per decision. Accepted decisions remain binding until a later dated
-> section explicitly supersedes them. Historical failure evidence is retained
-> because it explains why the guardrails exist.
+> one file per decision. v4.2.2 is the last accepted published release; the
+> v4.3.0 section is explicitly an unreleased PR #14 candidate. Its original
+> repaired-code local/hosted PR gates passed; release-chain hardening landed on
+> `main`, and the integrated candidate is being requalified under the operator's
+> explicit merge and release authority. Accepted decisions remain binding
+> until a later dated section explicitly supersedes them. Historical failure
+> evidence is retained because it explains why the guardrails exist.
 
 ## Table of contents
 
-- [Decision ledger status (through v4.2.2)](#decision-ledger-status-through-v422)
+- [Decision ledger status (published through v4.2.2; v4.3.0 candidate)](#decision-ledger-status-published-through-v422-v430-candidate)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -71,33 +75,38 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-candidate)
 
 ---
 
-## Decision ledger status (through v4.2.2)
+## Decision ledger status (published through v4.2.2; v4.3.0 candidate)
 
 This reconciliation compared the ledger against current source, all release
-and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
-ledger, technical and human changelogs, agent guides, and the public v4.0.1
-release state. The result is an accepted decision set, not a claim that every
-future hardware row has already been exercised.
+and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
+the testing ledger, technical and human changelogs, agent guides, and the public
+v4.2.2 release state. The accepted published decision set ends at v4.2.2. The
+v4.3.0 rows describe an unreleased candidate: the original feature head and
+the release-chain hardening on PR #15 and exact `main` passed their respective
+gates, while the newly integrated candidate and release-only gates still
+require exact-SHA proof.
 
 | Decision family | Status | Enforcement / source of truth |
 |---|---|---|
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; integrated source/test head passed local gates and review; final pushed exact-head hosted/security requalification required | candidate source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
 | Developer ID plus Apple `Accepted` before Mac artifact upload | Accepted and release-blocking | signing script and protected cargo-dist workflow step |
-| Frozen Mac surface during personal Windows/Linux/Pi continuation | Accepted | agent guides, current handoff, release workflow, hardware task boundary |
-| Personal hardware evidence | Alienware complete; AMD64 laptop and Pi 4 still open | `#win`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
+| Frozen Mac surface during personal Windows/Linux/Pi continuation | Superseded for the v4.3 campaign; every Mac/shared change reopens native Intel/ARM qualification | agent guides, current handoff, release workflow, hardware task boundary |
+| Personal hardware evidence | Alienware report/hardware and v4.1.3 same-channel evidence complete; natural v4.2.2 UAC update, AMD64 laptop, and Pi 4 still open | `#win`, `#w422`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
 | GitHub default branch `main` and checkout v6/Node 24 | Accepted and hosted-verified | GitHub default metadata, workflow filters/actions, exact-SHA CI/crates runs |
 | Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
-| Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; hosted candidate proof pending | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
+| Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; PR #15 head and exact-`main` workflow/provenance gates pass; integrated/tagged 24-to-30-to-34 proof remains | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
 | Privileged Windows Installer launches use the OS-owned absolute executable | Accepted and release-blocking | native system-directory resolution, pinned working directory, hostile-search-path fixtures |
-| Direct macOS PKG rejects standard managed ownership before payload installation | Accepted and release-blocking; native hosted proof pending | preinstall-only package, `/Users` plus local Directory Service custom-home refusal fixtures, Intel/ARM package jobs |
+| Direct macOS PKG rejects standard managed ownership before payload installation | Accepted and release-blocking; native Intel/ARM pre-tag PackageKit fixtures pass on PR #15 and exact `main`; signed/notarized tagged lifecycle remains | preinstall-only package, `/Users` plus local Directory Service custom-home refusal fixtures, Intel/ARM package jobs |
 | Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS direct PKG plus v4.1.x DMG bridge | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel direct install and legacy-update gates |
@@ -1490,8 +1499,7 @@ planning did not receive the values. The v4.3 protected-environment decision at
 lines 1698ff supersedes that storage topology after cutover: release jobs must
 consume Apple credentials only from `apple-signing`, and release is blocked
 until the one-time migration, native ARM/Intel environment-only preflight,
-repository-
-secret deletion, and migration-workflow removal are proven.
+repository-secret deletion, and migration-workflow removal are proven.
 
 This bare-archive conclusion applied to the v4.0 cargo-dist artifacts and is
 superseded for the installer-first path by the v4.1.0 PKG-in-DMG decision. The
@@ -1742,8 +1750,10 @@ their values must never enter this ADR, git, task memory, or logs.
 
 ### Stable-only release chain and privileged supplemental provenance (v4.3 candidate)
 
-**Status:** Accepted and release-blocking; hosted exact-SHA validation remains
-required before publication.
+**Status:** Accepted and release-blocking. PR #15 exact head and its merge on
+exact `main` passed the implementation, workflow, provenance, and native
+fixture gates. The integrated v4.3 exact SHA and tagged end-to-end publication
+chain remain required before publication.
 
 Cargo-dist's generic generated workflow recognizes prerelease and alternate tag
 shapes, but TR-300 publishes one crate plus a coupled 34-asset native installer
@@ -3288,3 +3298,88 @@ script, cmd wins.
 contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
+
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)
+
+**Status:** Unreleased candidate in open PR #14. Original feature head
+`b068f65` passed CI 32681025189 and PR-mode Release plan 32681025173 after the
+earlier `56b92d7` local/hosted qualification and resolution of all four review
+threads. Release-chain hardening landed on `main` as `1ffb0cc`, whose exact-main
+CI 32759430269 passed all 19 jobs, including native Intel and Apple Silicon
+PackageKit fixtures. Those are historical component results: the newly
+integrated PR head and all release-only gates still require exact-SHA proof.
+This section records the intended product contract and rationale, not release
+acceptance.
+
+**Decision 1 — thermals report only trusted sensors, in both `--fast` and full
+mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,
+zenpower, `cpu_thermal`, and `soc_thermal`; it prefers explicitly labeled
+package/die/CPU channels and selects the hottest plausible healthy reading
+within the best available class. GPU collection recognizes amdgpu, nouveau,
+and nvidia hwmon devices and likewise selects the hottest valid channel.
+Directory/channel order cannot determine the answer. An absent hwmon fault
+file is allowed, but a present `tempN_fault` must parse as zero; unreadable,
+malformed, nonzero, non-finite, and implausible readings are rejected. If no
+CPU hwmon candidate survives, only CPU/SoC-labeled thermal zones participate
+in the deterministic hottest-valid fallback.
+
+Windows reports only NVIDIA GPU temperature, and only when adapter discovery
+already found NVIDIA hardware. `nvidia-smi` uses the command timeout selected
+by collection mode, so fast mode never silently inherits a full-mode budget.
+Windows CPU temperature remains `None` and JSON `null`: an ACPI thermal-zone
+instance does not reliably identify its physical source, so labeling it as CPU
+would violate the evidence-backed optional-value contract. macOS is also
+intentionally `None` for CPU/GPU thermals because SMC access would require
+unsafe IOKit code or sudo `powermetrics` for an optional row.
+
+Table and saved Markdown rows are omitted on absence and stay in the CPU
+section when present. JSON adds nullable schema-v1
+`cpu.temperature_c`/`cpu.gpu_temperature_c` keys without renaming or changing
+existing keys.
+
+**Rejected alternatives:** NVML bindings (new unsafe dependency for one
+number), LibreHardwareMonitor-style kernel drivers (contradicts the install-
+safety posture), any Windows ACPI zone-to-CPU label without trustworthy sensor
+identity (fabricates provenance), and macOS sudo/unsafe-SMC collection for an
+optional report field.
+
+**Decision 2 — Linux battery selection requires corroboration without rejecting
+valid kernel ABI forms.** Selection rejects explicit `scope=Device` and
+`present=0` evidence, requires at least one well-formed live measurement, and
+uses deterministic BAT*-first ordering. The Linux power_supply ABI permits
+averaged attributes plus signed current/power discharge direction, so
+`voltage_avg`, `current_avg`, `power_avg`, `charge_avg`, and `energy_avg`
+participate alongside their `*_now` forms, and negative or zero current/power
+readings remain valid evidence.
+When compatible energy/charge now-or-average and full values exist, reported
+capacity is cross-validated within the established tolerance. A missing status
+renders a bare percentage rather than fabricating "(Unknown)".
+
+These checks address plausible peripheral, absent-pack, and stale-gauge
+misattribution paths; they do **not** establish which node produced the
+historical Raspberry Pi "30%" row. That causal claim remains open until physical
+Pi sysfs diagnostics are captured. On macOS, the `pmset` fallback requires a
+recognized `-InternalBattery-N` record and never substitutes a generic stray
+percentage. macOS still has no thermal collection.
+
+**Decision 3 — independent bounded probes overlap under launch-relative
+deadlines.** Profiling identified the Windows full-mode critical path as a
+BitLocker security-namespace probe that could consume the shared WMI timeout
+after the main batch. The BitLocker worker now launches before independent work
+and is awaited only for the remainder of its dedicated two-second deadline;
+elapsed time elsewhere cannot start a fresh full wait. Registry reads moved
+from `reg.exe` spawns to native APIs, duplicate
+`Win32_ComputerSystem`/`Win32_NetworkAdapterConfiguration` queries and process-
+table snapshots collapsed, and post-batch fallbacks no longer stack redundant
+work. The separate NVIDIA subprocess follows Fast/Normal command budgets rather
+than an unbounded or one-size-fits-all wait.
+
+On the controlled Alienware m16 R2 benchmark, seven alternating full-mode runs
+per version produced medians of 5146.9 ms for the v4.2.2 baseline and 2120.2 ms
+for the candidate: about 3026.6 ms (58.8%) less, a 2.43× runtime ratio. Eleven
+alternating fast-mode runs per version produced medians of 257.3 ms and
+260.4 ms; the candidate's +1.2% is background-level, so this decision makes no
+fast-mode performance-gain claim. The integrated source/test head's full local
+gate is recorded in `TESTING.md`; the final pushed exact head still requires
+hosted, security, and review proof. Neither result establishes release
+acceptance or independent AMD64 Linux/Raspberry Pi physical acceptance.

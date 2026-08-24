@@ -89,6 +89,11 @@ pub struct Cli {
     #[arg(long)]
     pub fast: bool,
 
+    /// Explicit full collection (the default when neither --fast nor --full
+    /// is given; provided as a symmetric counterpart to --fast)
+    #[arg(short = 'f', long, conflicts_with = "fast")]
+    pub full: bool,
+
     /// Suppress the "Run with sudo / Administrator for more details" footer hint
     #[arg(long)]
     pub no_elevation_hint: bool,

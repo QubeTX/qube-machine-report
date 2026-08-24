@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - Unreleased
+
+### Added
+- **Thermal reporting (`CPU TEMP` / `GPU TEMP` rows).** Linux reads CPU
+  package/SoC temperature from hwmon devices (coretemp `Package id`,
+  k10temp/zenpower `Tctl`/`Tdie`, ARM SBC `cpu_thermal`/`soc_thermal`) with a
+  cpu/soc-labeled thermal-zone fallback, and GPU temperature from
+  amdgpu/nouveau/nvidia hwmon devices. The pure-sysfs scan runs in both modes,
+  rejects faulted, malformed, non-finite, and implausible channels, and chooses
+  the hottest valid sensor deterministically within the preferred class.
+  Windows reports only discrete NVIDIA GPU temperature via `nvidia-smi` when
+  an NVIDIA adapter was detected, using the timeout budget for the active
+  collection mode; Windows CPU temperature intentionally remains unavailable
+  because an ACPI thermal-zone instance cannot be trusted to identify the CPU.
+  macOS intentionally reports no thermal data this release (SMC access requires
+  unsafe IOKit or sudo). JSON gains additive schema-v1 keys
+  `cpu.temperature_c` / `cpu.gpu_temperature_c` (null when no trusted sensor
+  answered); saved Markdown mirrors the CPU-section rows.
+- **Explicit `-f/--full` flag** as the symmetric counterpart to `--fast`.
+  Full collection remains the default; the flag conflicts with `--fast`.
+
+### Changed
+- **Windows full-mode report is materially faster on the benchmark machine.**
+  Seven alternating Alienware m16 R2 runs per version produced
+  baseline/candidate medians of 5146.9 ms and 2120.2 ms: about 3026.6 ms
+  (58.8%) less elapsed time, a 2.43× runtime ratio.
+  The BitLocker security-namespace probe now starts concurrently with the main
+  WMI batch under a dedicated 2-second, launch-relative deadline instead of
+  serially consuming the shared timeout. Duplicate WMI/process lookups and
+  unnecessary registry subprocesses are also consolidated. Eleven alternating
+  fast-mode runs per version produced medians of 257.3 ms and 260.4 ms; the
+  candidate's 1.2% difference is background-level, so this release makes no
+  fast-mode performance-gain claim.
+- **Managed-to-PKG switching is now an explicit, receipt-aware sequence.** A
+  managed user updates or reinstalls v4.3, chooses Complete uninstall, and then
+  runs the PKG. On Unix, Complete validates an exact cargo-dist provider, app,
+  and install prefix before changing profiles, then removes the running binary
+  and receipt as one fail-closed transaction. Raw Cargo remains binary-only;
+  malformed, foreign, linked, or concurrently changed receipt evidence is
+  preserved.
+
+### Fixed
+- **Linux system-battery selection is hardened against phantom supplies.**
+  Selection rejects explicit `scope=Device` and `present=0` evidence, requires
+  a well-formed live `*_now` or `*_avg` measurement (including valid signed
+  current/power readings), cross-validates capacity when a compatible energy
+  or charge pair is available, and uses deterministic BAT*-first ordering. A
+  missing status renders a bare percentage instead of fabricating
+  "(Unknown)". These rules address plausible misattribution paths, but the
+  source of the historical Raspberry Pi "30%" reading is not yet proven and
+  still requires physical sysfs diagnostics.
+- **macOS `pmset` battery parsing requires an `-InternalBattery-N` record**, so
+  a stray percentage elsewhere in `pmset -g batt` output cannot be
+  misattributed to the system battery.
+
 ### Security
 - **Privileged supplemental release workflows now bind every build to one
   trusted stable release commit.** Automatic Windows and macOS packaging runs
@@ -74,15 +129,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   eligible local Directory Service home (including broken links), and contains
   no migration probe, rollback helper, or `postinstall`. Clean/native upgrades
   remain supported, as does exact PKG-to-managed takeover.
-
-### Changed
-- **Managed-to-PKG switching is now an explicit, receipt-aware sequence.** A
-  managed user updates or reinstalls v4.3, chooses Complete uninstall, and then
-  runs the PKG. On Unix, Complete validates an exact cargo-dist provider, app,
-  and install prefix before changing profiles, then removes the running binary
-  and receipt as one fail-closed transaction. Raw Cargo remains binary-only;
-  malformed, foreign, linked, or concurrently changed receipt evidence is
-  preserved.
 
 ## [4.2.2] - 2026-07-18
 

@@ -8,12 +8,12 @@ cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
 notarization. v4.1 added origin-preserving updates and a native universal
 package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
-  MIC-1 baseline:
-  managed CLI installers are the recommended default, fresh installer intent is
-  authoritative only within a proven platform transaction, and the Mac native artifact is a direct PKG with a compatibility-
-only DMG bridge. v4.3 is an unreleased performance/battery/thermal and release-
-custody candidate. Alienware Windows evidence is captured; AMD64 Linux laptop
-and Raspberry Pi 4 checks remain open.
+MIC-1 baseline: managed CLI installers are the recommended default, fresh
+installer intent is authoritative only within a proven platform transaction,
+and the Mac native artifact is a direct PKG with a compatibility-only DMG
+bridge. v4.3.0 is an unreleased performance/battery/thermal and release-custody
+candidate developed through PR #14. Alienware Windows evidence is captured;
+AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
 [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md),
@@ -27,17 +27,22 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
   direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
   stable-`latest` audit passed.
-- PR #14 candidate manifest / unreleased candidate: `4.3.0` on the feature branch and
-  open PR #14. It hardens Linux battery/thermal selection, reports only trusted
-  NVIDIA GPU temperature on Windows, leaves unsupported Windows CPU temperature
-  null, and reduces measured Windows full-mode median from about 5.14 seconds to
-  2.09 seconds. Fast mode is statistically unchanged. AMD64 Linux laptop and
+- Working manifest / unreleased candidate: `4.3.0` on
+  `feature/v4.3.0-battery-perf-thermals`, developed through PR #14. It adds
+  deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
+  `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
+  recognizable-`InternalBattery`-only macOS fallback, mode-bounded NVIDIA GPU
+  thermals on Windows while CPU stays absent/JSON `null`, and `-f/--full`.
+  Seven alternating full runs per version measured 5146.9 ms versus 2120.2 ms
+  (~58.8%, 2.43×); 11 fast runs per version measured 257.3 ms versus 260.4 ms
+  (+1.2%), so no fast-mode gain is claimed. It remains unreleased; AMD64 Linux laptop and
   Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
-- Personal-fleet evidence: the Alienware Global MSI update and report/hardware
-  facts now have real evidence; never claim the AMD laptop or Pi 4 is verified
-  until its board task contains real evidence
+- Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel
+  evidence are real; the natural v4.1.3 → v4.2.2 UAC update remains open. Never
+  claim the AMD laptop or Pi 4 is verified until its board task contains real
+  evidence.
 - Major-version reason: public Rust structs gained fields and selected public
   collector helpers changed signature. CLI and schema-v1 JSON compatibility are
   retained; changed record types are now `#[non_exhaustive]` for safer future
@@ -75,6 +80,11 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   launch-relative probe deadlines. NVIDIA temperature uses bounded
   `nvidia-smi`; Windows CPU temperature remains absent/null because ACPI zones
   cannot be mapped reliably. macOS accepts only a real `InternalBattery` record.
+- Seven alternating Windows full-mode runs per version produced medians of
+  5146.9 ms before and 2120.2 ms after (~3026.6 ms, 58.8%, 2.43×). Eleven
+  alternating fast runs per version produced 257.3 ms and 260.4 ms medians; the
+  apparent +1.2% is background-level and supports no fast-mode performance
+  claim.
 - The release-security candidate keeps every stable release private at 24 base
   assets, extends it to 30 Windows assets, proves those exact bytes through
   private fresh-install plus authenticated direct prior-to-candidate transition
@@ -93,6 +103,12 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   pre-macOS-12-compatible plist parsing and a `/`-only PackageKit target. It
   requires managed-installer refresh -> receipt-aware Complete uninstall ->
   PKG. Clean/native upgrades and exact PKG-to-managed takeover remain supported.
+- Release-chain hardening head `8ea060f` passed its complete local gate, five
+  zero-finding security scans, exact-head CI/release-plan runs, and native Intel
+  and Apple Silicon PackageKit fixtures before PR #15 merged as `1ffb0cc`.
+  Exact-main CI then passed. Integrated source/test head `8471d95` passed the
+  complete local gate, benchmark, and independent review; final pushed-head
+  hosted/security/review proof remains open.
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
@@ -134,6 +150,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Alienware validation confirmed the existing Global MSI v3.17.0 upgraded in
   place through v4.0.1 to v4.1.3 at the same Program Files path/registration;
   corrected hybrid topology reports `6P + 10E`, 16 physical, 22 logical cores.
+- v4.2.2 published 34 stable-name assets after the full local/clean-tree gate
+  set, exact-SHA CI/crates, disposable Windows managed/native matrices, both
+  Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
+  update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
 - The v4.3.0 release target remains 34 stable-name assets. Required pending
   evidence is the clean exact-commit local/hosted gate, explicit trusted-OIDC
   crates publication, private Windows byte/matrix proof, both Apple-native
@@ -203,15 +223,17 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
-1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.3.0`, clearly labeled `Unreleased` until publication.
+1. Preserve `4.2.2` as the last published boundary. Keep `Cargo.toml`,
+   `Cargo.lock`, generated man page, and the full docs set synchronized at
+   `4.3.0`, clearly labeled `Unreleased` until publication.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
    sign/notary/staple/install proof.
-3. Commit on a focused branch, open/resolve a protected PR, and merge only after
-   every strict required check passes. Wait for CI on the exact current `main`
-   SHA; never push release work directly to `main`.
+3. Resolve PR #14 on the current merge-result SHA, rerun the complete local
+   gate, and merge only through protected `main` after every strict required
+   check and review thread passes. Earlier-head checks are not evidence for the
+   merge result; never push release work directly to `main`.
 4. Explicitly dispatch the owner-only `crates-publish.yml operation=publish` and
    require exact package bytes plus trusted OIDC/public provenance. No push or
    `workflow_run` automatically publishes a crate.
@@ -226,10 +248,10 @@ do not have to infer platform semantics.
 8. Only then update/test/push the homepage through its own protected workflow;
    keep AMD/Pi physical tasks open and patch forward from real findings.
 
-Observed v4.0.1 runs: CI 29391956665, crates 29392101640, cargo-dist
-29392185522, and Windows Installers 29392382949. The public tag/release targets
-the exact source SHA above; the complete hashes and Apple submission IDs live
-in `TESTING.md` and the tracked handoff.
+Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,
+native macOS 29664824418, Windows packaging 29664824432, and Windows transition
+validation 29664948031. The current v4.3.0 candidate has no publication run or
+release evidence yet.
 
 Never publish locally merely because a credential exists. Never tag before
 exact-current-main CI and the explicit trusted-OIDC crates operation settle.

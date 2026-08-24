@@ -150,6 +150,11 @@ impl Config {
         }
     }
 
+    /// True when ASCII-only output was requested (or locale-forced)
+    pub fn is_ascii(&self) -> bool {
+        !self.use_unicode
+    }
+
     /// Get bar graph characters
     pub fn bar_chars(&self) -> (char, char) {
         if self.use_unicode {
