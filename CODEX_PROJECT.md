@@ -8,9 +8,9 @@ cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
 notarization. v4.1 added origin-preserving updates and a native universal
 package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
-MIC-1 baseline:
-managed CLI installers are the recommended default, fresh installer intent is
-authoritative, and the Mac native artifact is a direct PKG with a compatibility-
+  MIC-1 baseline:
+  managed CLI installers are the recommended default, fresh installer intent is
+  authoritative only within a proven platform transaction, and the Mac native artifact is a direct PKG with a compatibility-
 only DMG bridge. v4.3 is an unreleased performance/battery/thermal and release-
 custody candidate. Alienware Windows evidence is captured; AMD64 Linux laptop
 and Raspberry Pi 4 checks remain open.
@@ -27,7 +27,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
   direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
   stable-`latest` audit passed.
-- Working manifest / unreleased candidate: `4.3.0` on the feature branch and
+- PR #14 candidate manifest / unreleased candidate: `4.3.0` on the feature branch and
   open PR #14. It hardens Linux battery/thermal selection, reports only trusted
   NVIDIA GPU temperature on Windows, leaves unsupported Windows CPU temperature
   null, and reduces measured Windows full-mode median from about 5.14 seconds to
@@ -56,8 +56,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   29559148638 with zero annotations; exact-SHA crates run 29559305341 safely
   skipped already-published 4.0.1 without token or publish access.
 - Architecture ledger: `docs/architecture-decisions.md` is reconciled through
-  2026-08-24. It includes the v4.3 collector candidate, descriptor-bound Mac
-  rollback, trusted executable/CWD rules, exact stable release provenance,
+  2026-08-24. It includes the v4.3 collector candidate, preinstall-only Mac
+  managed-conflict refusal and receipt-aware transition, trusted executable/CWD rules, exact stable release provenance,
   protected environments/rulesets, explicit OIDC crates publishing, and the
   private 24→30→validated→34 publication chain.
 - Release tooling: cargo-dist `0.31.0`
@@ -82,6 +82,17 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   finalizer expose the exact 34-asset result. The real updater-to-candidate
   matrix runs post-public; crates publication is an explicit protected OIDC
   gate.
+- Native Apple runners disproved automatic managed-to-PKG takeover: a failing
+  `postinstall` can leave the native payload behind even when prior managed
+  state restores exactly. v4.3 removes the helper and postinstall, checks
+  standard managed binary/receipt paths in every `/Users` home, including
+  dot-prefixed unregistered residue, plus all eligible local Directory Service
+  homes non-mutatingly in `preinstall`, independent of console or launch
+  environment. It enumerates only the fixed parent levels and rejects abnormal
+  or unlistable intermediates rather than treating them as absent, with
+  pre-macOS-12-compatible plist parsing and a `/`-only PackageKit target. It
+  requires managed-installer refresh -> receipt-aware Complete uninstall ->
+  PKG. Clean/native upgrades and exact PKG-to-managed takeover remain supported.
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
@@ -104,8 +115,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   and use the new binary for delayed backup cleanup. Legacy updater failure is
   valid only when it retains the old binary and returns recovery; a fresh exact
   same-channel install must then converge to one current registration.
-- A deliberately launched fresh installer is the user's newest channel intent,
-  including same-version or downgrade repair; automatic updates remain latest-
+- A deliberately launched fresh installer is the user's newest channel intent
+  only inside a safe platform transaction; automatic updates remain latest-
   only. Same-edition MSI/Inno format changes remove the exact competing product.
   Opposite-edition native packages stop before mutation and point to the managed
   PowerShell path, which can request UAC for exact cross-scope convergence.
@@ -113,7 +124,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   `tr300-universal-apple-darwin.pkg`. It owns `/usr/local/bin/tr300` and the
   `com.qubetx.tr300.pkg` receipt. The DMG remains only for immutable v4.1.x
   clients and contains a byte-identical PKG. Current updaters download the
-  direct exact-tag PKG/sidecar and wait for Apple Installer.
+  direct exact-tag PKG/sidecar and wait for Apple Installer. The package ships
+  only `preinstall`; standard-path managed binary or receipt evidence stops it
+  before payload placement.
 - Native GitHub `macos-15` and `macos-15-intel` runners are release gates; a
   physical Mac is optional visual smoke testing unless CI exposes a GUI-only
   defect. Installer-identity preflight run 29637224793 signed and verified a
@@ -301,12 +314,10 @@ excluded. The tracked project tree is:
 ├── scripts
 │   ├── build-sign-notarize-macos-installer.sh
 │   ├── install-pinned-inno-setup.ps1
-│   ├── macos-pkg-rollback.c
 │   ├── managed-installers
 │   │   ├── tr300-installer.ps1
 │   │   └── tr300-installer.sh
 │   ├── sign-notarize-macos.sh
-│   ├── test-macos-pkg-rollback.sh
 │   ├── test-managed-installer-transaction.ps1
 │   ├── test-managed-installer-transaction.sh
 │   ├── test-release-workflow-provenance.py

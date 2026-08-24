@@ -63,13 +63,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Corporate user-scope behavior remains intact; regression tests plant
   hostile executable names and caller directories and verify the actual
   process boundaries.
-- **Native macOS package takeover now restores prior managed state through
-  descriptor-bound transactions.** The PKG rejects symlinked, multiply linked,
-  malformed, or concurrently changed managed files; snapshots the exact pair
-  through open descriptors; and stages, commits, or restores only inside the
-  already-bound user-owned directories. Anonymous backups preserve bounded
-  data plus macOS ACLs, extended attributes, ownership, modes, and safe flags,
-  including when staged names are modified or deleted before rollback.
+- **The direct macOS PKG now refuses managed ownership before payload
+  installation and never mutates user homes as root.** Native Intel and Apple
+  Silicon runs proved that Apple Installer can retain a new payload after a
+  failing `postinstall`, so even exact descriptor-bound restoration of the old
+  managed state could not make the overall operation atomic. The PKG now ships
+  only a non-mutating `preinstall`, rejects standard-path managed binary or
+  receipt evidence (`~/.cargo/bin/tr300` or
+  `~/.config/tr300/tr300-receipt.json`) in every `/Users` home plus every
+  eligible local Directory Service home (including broken links), and contains
+  no migration probe, rollback helper, or `postinstall`. Clean/native upgrades
+  remain supported, as does exact PKG-to-managed takeover.
+
+### Changed
+- **Managed-to-PKG switching is now an explicit, receipt-aware sequence.** A
+  managed user updates or reinstalls v4.3, chooses Complete uninstall, and then
+  runs the PKG. On Unix, Complete validates an exact cargo-dist provider, app,
+  and install prefix before changing profiles, then removes the running binary
+  and receipt as one fail-closed transaction. Raw Cargo remains binary-only;
+  malformed, foreign, linked, or concurrently changed receipt evidence is
+  preserved.
 
 ## [4.2.2] - 2026-07-18
 

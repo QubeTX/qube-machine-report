@@ -72,8 +72,15 @@ personal Windows field-accuracy proof.
 The v4.2 series implements ADR MIC-1. Recommend the versionless managed PowerShell
 wrapper on Windows and managed shell wrapper on macOS/Linux; keep MSI/EXE/PKG
 as optional native choices and raw Cargo as advanced/unmanaged. `tr300 update`
-preserves the proven channel, while a deliberately launched fresh installer is
-authoritative channel intent. The direct signed/notarized/stapled universal PKG
+preserves the proven channel. Fresh Windows installers and managed wrappers are
+authoritative only inside their proven convergence transactions; beginning with
+v4.3, a direct Mac PKG refuses standard managed ownership in `preinstall` and
+requires a managed-installer refresh followed by receipt-aware Complete
+  uninstall before switching channels. The fixed standard-path parent levels
+  are enumerated non-recursively; dot-prefixed `/Users` residue is included and
+  abnormal or unlistable intermediates fail closed. Its plist parser remains
+  compatible with pre-macOS-12 systems and PackageKit may target only `/`. The direct
+signed/notarized/stapled universal PKG
 is the current Mac native artifact; the DMG remains only as an immutable-v4.1
 updater bridge. v4.2.2 publishes 34 stable-name assets and passed its own
 exact-SHA plus hosted package matrices. The Alienware's natural Global MSI
@@ -319,7 +326,7 @@ These three are the most frequently touched; their full rules are in the matchin
   includes `manual_install_url`; a known installer channel also includes
   `exact_installer_url`; blocked JSON additionally includes
   `official_releases_url`.
-- **Cross-method convergence (`tr300 migrate-cleanup`):** hidden subcommand (`src/migrate.rs`; hidden flags in `cli.rs`) bounded to the allowlisted TR-300 binary and exact cargo-dist receipt. Legacy direct calls without `--strict` retain v3.17 advisory semantics; every v4.2+ native MSI/EXE/PKG passes `--strict`, exposes no checkbox/task opt-out, and must fail visibly when requested ownership cannot converge. Strict Cargo/receipt cleanup prevalidates the pair and quarantines/restores the prior binary transactionally. It never deletes cargo/rustup, the shared Cargo PATH entry, Downloads, unrelated receipts, or the running image. Registered or exact-path orphaned opposite-scope Windows products stop before mutation; the managed PowerShell wrapper is the supported cross-scope path. WiX uses deferred `Impersonate='yes'` `FileKey`, `Return='check'` actions. Inno extracts the candidate for a strict non-mutating `PrepareToInstall` preflight before MSI removal/files and reconfirms after registration; Global Inno uses `ExecAsOriginalUser`. The PKG postinstall snapshots/restores the managed pair. **Edition paths, marker strings, product identities, and receipt paths stay in lockstep** with installers and `update.rs`.
+- **Cross-method convergence (`tr300 migrate-cleanup`):** hidden subcommand (`src/migrate.rs`; hidden flags in `cli.rs`) bounded to the allowlisted TR-300 binary and exact cargo-dist receipt. Legacy direct calls without `--strict` retain v3.17 advisory semantics; every current Windows native MSI/EXE passes `--strict`, exposes no checkbox/task opt-out, and must fail visibly when requested ownership cannot converge. Strict Cargo/receipt cleanup prevalidates the pair and quarantines/restores the prior binary transactionally. It never deletes cargo/rustup, the shared Cargo PATH entry, Downloads, unrelated receipts, or the running image. Registered or exact-path orphaned opposite-scope Windows products stop before mutation; the managed PowerShell wrapper is the supported cross-scope path. WiX uses deferred `Impersonate='yes'` `FileKey`, `Return='check'` actions. Inno extracts the candidate for a strict non-mutating `PrepareToInstall` preflight before MSI removal/files and reconfirms after registration; Global Inno uses `ExecAsOriginalUser`. The direct Mac PKG does not invoke this cleanup: its non-mutating `preinstall` checks the standard managed paths `~/.cargo/bin/tr300` and `~/.config/tr300/tr300-receipt.json` in every `/Users` home, including dot-prefixed unregistered residue, plus all eligible local Directory Service homes, independent of console or launch environment. It enumerates only those fixed parent levels and fails closed on abnormal or unlistable intermediates, uses pre-macOS-12-compatible plist parsing, accepts only target volume `/`, and has no `postinstall`. Unix Complete uninstall separately removes an exact running managed binary/receipt pair transactionally after the user refreshes through the receipt-aware managed installer and before the PKG is launched. **Edition paths, marker strings, product identities, and receipt paths stay in lockstep** with installers and `update.rs`.
 
 ## Output & Runtime Contracts
 
@@ -435,8 +442,10 @@ repro commands are in the
   public `latest` remains unchanged, and run the real updater-to-candidate
   matrix only after finalization.
 - **`macos-installer.yml`** — binds exact Release-run inputs, uses fresh
-  `apple-signing` jobs for credentials, validates native ARM/Intel PKG/DMG
-  lifecycles, consumes the exact Windows acceptance proof, and is the sole fresh
+  `apple-signing` jobs for credentials, validates native ARM/Intel scoped-home
+  managed refusal, checksum-bound public-v4.2.2-managed refresh and
+  receipt-aware preparation, PKG/DMG lifecycles, native upgrades, and
+  PKG-to-managed takeover, consumes the exact Windows acceptance proof, and is the sole fresh
   publisher that may expose the exact 34-asset stable release.
 
 Workflow sequencing is product logic. Apple-signing and contents-write jobs are

@@ -97,14 +97,14 @@ future hardware row has already been exercised.
 | Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
 | Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; hosted candidate proof pending | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
 | Privileged Windows Installer launches use the OS-owned absolute executable | Accepted and release-blocking | native system-directory resolution, pinned working directory, hostile-search-path fixtures |
-| Native PKG takeover uses descriptor-bound, metadata-preserving rollback | Accepted and release-blocking; native hosted proof pending | signed universal helper, adversarial rollback fixture, Intel/ARM package jobs |
+| Direct macOS PKG rejects standard managed ownership before payload installation | Accepted and release-blocking; native hosted proof pending | preinstall-only package, `/Users` plus local Directory Service custom-home refusal fixtures, Intel/ARM package jobs |
 | Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS direct PKG plus v4.1.x DMG bridge | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel direct install and legacy-update gates |
 | Hosted package inputs survive source checkout; builder and validation tool syntax stay identical | Accepted and release-blocking | checkout-before-download ordering plus Xcode 16.4 `lipo <file> -verify_arch ...` checks |
 | Hosted updater probes authenticate and expose captured JSON/exit evidence | Accepted | read-only Actions token plus explicit `errexit` boundary in native Mac validation |
 | macOS installed-package ownership uses supported receipt, file-owner, and Developer ID checks | Accepted and release-blocking | `pkgutil --pkg-info/--files/--file-info`, strict `codesign`, native ARM/Intel install gates |
-| Explicit fresh-installer choice supersedes the prior channel | Accepted and release-blocking | MIC-1 strict native convergence, managed-wrapper rollback, scoped markers/receipts |
+| Explicit fresh-installer choice supersedes the prior channel where the platform owns a safe transaction | Accepted and release-blocking | Windows strict convergence and managed-wrapper rollback; direct macOS PKG refuses managed conflicts before payload |
 | Global Program Files updates use one-UAC elevated live-image handoff | Accepted and release-blocking | strict hidden worker, `ShellExecuteExW` process wait, rollback/cleanup, Windows transition matrix |
 | Physical Mac requirement | Superseded; optional visual smoke only | GitHub `macos-15` and `macos-15-intel` are the required native gates |
 
@@ -157,7 +157,7 @@ state this limitation directly. TR-300 supplies the wrappers.
 |---|---|---|---|
 | `tr300 update` | latest resolved release only | preserve proven current channel, edition, scope, and prefix | transactional replacement; never cross-fallback |
 | Fresh managed CLI installer | exact version bound into that downloaded wrapper; upgrade, same-version reinstall, or downgrade allowed | chosen managed CLI channel becomes authoritative | verify new copy/receipt, retire recognized prior native owner, then verify one active owner |
-| Fresh native installer | exact downloaded package version; upgrade, same-version reinstall, or downgrade allowed | chosen native format/edition/scope becomes authoritative | platform transaction removes recognized competing CLI/same-scope owner; insufficient authority fails visibly |
+| Fresh native installer | exact downloaded package version; upgrade, same-version reinstall, or downgrade allowed | chosen native format/edition/scope becomes authoritative only when the platform can prove a safe transition | Windows retires recognized competing owners; direct macOS PKG refuses standard managed ownership before payload and requires the supported uninstall-first transition |
 | Raw Cargo or portable copy | caller-selected bytes | unmanaged until current-executable plus durable metadata prove one channel | no claim that other registered installers were removed |
 
 “Latest” has two meanings and they must not be conflated. The versionless
@@ -177,9 +177,12 @@ installed version. That fresh installer may downgrade; the updater may not.
    payload, sidecar, and Cargo version to that exact tag.
 3. **Updates preserve ownership.** No failed strategy may fall through to a
    different installer, scope, edition, prefix, or package manager.
-4. **Fresh explicit choice is authoritative.** A recognized prior owner is
-   retired through its real uninstall/receipt mechanism. Reinstall and
-   downgrade are supported where the platform owns rollback.
+4. **Fresh explicit choice is authoritative only inside a proven transaction.**
+   A recognized prior owner is retired through its real uninstall/receipt
+   mechanism where the platform owns rollback. Reinstall and downgrade remain
+   supported within a native channel. A direct macOS PKG does not mutate
+   user-owned managed state: it rejects that conflict before payload placement
+   and requires the managed owner to be removed first.
 5. **Ambiguity fails closed.** Unknown/conflicting identity, cancelled
    elevation, policy block, or incomplete cleanup never becomes a success.
    Existing working bytes are preserved when mutation has not begun. Managed
@@ -188,9 +191,9 @@ installed version. That fresh installer may downgrade; the updater may not.
    If a real native uninstaller or `pkgutil --forget` already commits and has no
    supported inverse, retain the already-verified new managed owner and report
    the exact partial native state; never delete both sides to imitate rollback.
-   Current native packages invoke the bounded cleanup helper with mandatory
-   `--strict`; its Cargo/receipt pair is prevalidated and transactionally
-   quarantined/restored. Inno additionally runs that exact check in dry-run
+   Current Windows native packages invoke the bounded cleanup helper with
+   mandatory `--strict`; its Cargo/receipt pair is prevalidated and
+   transactionally quarantined/restored. Inno additionally runs that exact check in dry-run
    form from an extracted candidate during `PrepareToInstall`, before removing
    a same-edition MSI or writing native files. Packages never invent native
    registration rollback. Failure states exactly which recognized owner
@@ -209,11 +212,24 @@ installed version. That fresh installer may downgrade; the updater may not.
 
 The public managed wrappers retain cargo-dist's generated installers as
 stable-name internal assets (`tr300-dist-installer.ps1` and
-`tr300-dist-installer.sh`). The release workflow renders only the immutable tag
-and version into the public wrappers. This keeps cargo-dist's download,
-checksum, atomic-copy, PATH, and receipt behavior while giving the product a
-safe cross-channel convergence layer. It adds two release assets, so a complete
+`tr300-dist-installer.sh`). The release workflow renders the immutable tag,
+version, and exact SHA-256 of the corresponding raw `tr300-dist-installer.*`
+asset into each public wrapper; downloaded raw-script bytes must match before
+execution. The shell wrapper also supplies cargo-dist with a private,
+child-process-only `sha256sum` path backed by the fixed system
+`/usr/bin/shasum -a 256` on macOS (or a fixed native `sha256sum` elsewhere), so
+the archive checksum cannot take cargo-dist's optional-tool skip branch. This
+keeps cargo-dist's download, atomic-copy, PATH, and receipt behavior while
+making its checksum boundary mandatory and giving the product a safe
+cross-channel convergence layer. It adds two release assets, so a complete
 v4.2-series distribution target is 34.
+
+The managed shell transaction assigns cleanup only to `EXIT`; `HUP`, `INT`, and
+`TERM` first force a nonzero exit so execution cannot resume after rollback or
+after PKG-receipt retirement. Cleanup is one-shot and never marks an interrupted
+transaction committed. The executable fixture sends a real signal immediately
+after simulating receipt retirement and requires one cleanup, no resumed code,
+and no commit marker.
 
 Pre-tag validation must compile with warnings denied on native Windows, Linux,
 Intel Mac, and Apple Silicon; a helper hidden by host `cfg` is not considered
@@ -262,6 +278,18 @@ exists, may commit the allowlisted cleanup and exercise its rollback. Hosted
 negative tests must name and check the old binary, old receipt, rejected
 payload, and rejected native receipt separately; a silent `test` behind shell
 `errexit` is not sufficient evidence.
+
+That v4.2.2 rule is retained as shipped history but is superseded for the direct
+macOS PKG by the v4.3 decision below. Native Intel and Apple Silicon hosted runs
+later proved that Apple Installer can retain the new payload after an intended
+`postinstall` failure even when the prior user-owned state is restored exactly.
+The overall managed-to-PKG operation therefore cannot be made atomic by a
+postinstall rollback helper. The direct PKG now contains only a non-mutating
+`preinstall`: any standard managed binary or receipt in a `/Users` home or an
+eligible local Directory Service home stops the package before
+`/usr/local/bin/tr300` or its native receipt is laid down. The scan is
+independent of console identity and PackageKit's launch environment. There
+is no PKG `postinstall` and no privileged user-home mutation.
 
 The same immutable-release principle applies to transition-fixture discovery.
 A previous complete release is evaluated against the asset contract that
@@ -393,12 +421,22 @@ PATH, and receipt creation to the exact-tag cargo-dist script. On macOS only,
 an existing package receipt triggers takeover after the wrapper proves the
 receipt ID/root/payload/per-file owner and `/usr/local/bin/tr300` Developer ID
 Application identity/Team. One ordinary `sudo` ceremony removes that exact
-payload and forgets that exact receipt. The native PKG's postinstall implements
-the reverse transition by asking the newly installed, signed system binary to
-remove only the active user's allowlisted Cargo-path copy and matching
-cargo-dist receipt. Native ARM and Intel jobs prove both directions. Linux has
-no native package competitor, so the same wrapper is a straight managed
-per-user install.
+payload and forgets that exact receipt. The reverse transition is intentionally
+asymmetric beginning with v4.3: a direct PKG scans every `/Users` home,
+including dot-prefixed unregistered residue, plus all eligible local Directory
+Service homes during `preinstall`, independent of the console and launch
+environment, and refuses any
+standard managed binary or receipt without changing it. A managed user who
+wants the PKG first refreshes or reinstalls through the managed installer to a
+receipt-aware version, runs Complete uninstall, and then launches the PKG from
+a clean state. Native ARM and Intel jobs must begin that proof from the exact
+public v4.2.2 managed wrapper bound to its immutable release target and GitHub
+SHA-256 asset digest, prove candidate PKG refusal leaves it unchanged, refresh
+through the candidate managed wrapper, then run receipt-aware Complete and the
+candidate PKG. They must separately prove clean install, native upgrade/repair,
+and the still-supported PKG-to-managed direction. Linux has no
+native package competitor, so the same wrapper is a straight managed per-user
+install.
 
 Within a Windows edition, an MSI detects and removes the matching Inno
 registration before writing shared-path files, and Inno enumerates and removes
@@ -418,8 +456,8 @@ its already-published launch policy and may still block when launched against a
 newer installation; that safe stop cannot be fixed retroactively and must not
 be bypassed by deleting registered product state behind Windows Installer.
 
-The v3.17 `migrate-cleanup` remains the bounded native post-install mechanism
-for a shadowing Cargo copy and the other Global/Corporate executable, but MIC-1
+The v3.17 `migrate-cleanup` remains the bounded Windows native post-install
+mechanism for a shadowing Cargo copy and the other Global/Corporate executable, but MIC-1
 supersedes its installer-facing advisory mode. v4.2.0 native packages pass
 mandatory `--strict` and expose no task/checkbox opt-out. Strict cleanup
 prevalidates an existing cargo-dist receipt before moving its binary, then uses
@@ -1062,11 +1100,12 @@ portable architecture:
    backward-compatible object; child progress is stderr-only.
 8. **Test transitions, not only clean installs.** Every release gate covers
    old-to-new and very-old-to-new updates, same-version repair, explicit
-   downgrade, both directions of cross-format takeover, missing metadata,
-   conflicting metadata, cancellation/UAC denial, restart-required exits,
-   corrupted downloads, PATH/registration cleanup, uninstall, and the absence
-   of duplicate active binaries. Tests deliberately remove markers/receipts so
-   recovery behavior is evidence rather than an unexercised branch.
+   downgrade, every supported cross-format transition (including deliberate
+   refusal and uninstall-first flows), missing metadata, conflicting metadata,
+   cancellation/UAC denial, restart-required exits, corrupted downloads,
+   PATH/registration cleanup, uninstall, and the absence of duplicate active
+   binaries. Tests deliberately remove markers/receipts so recovery behavior
+   is evidence rather than an unexercised branch.
 9. **Treat workflow ordering and validator syntax as product code.** Establish
    the immutable source checkout before downloading transient release inputs,
    or preserve those inputs outside the cleaned workspace. Keep every builder
@@ -1746,6 +1785,15 @@ fresh checkout-free publisher. That publisher revalidates artifact ID/digest,
 source/run custody, current `main`, CI, and the exact private draft, then adds six
 literal collision-free paths. The draft now has 30 assets and remains private.
 
+The prepared 24-asset artifact is also the managed-wrapper source of truth. Its
+private checksum manifest binds each public wrapper, raw cargo-dist script, and
+per-architecture archive. Each rendered wrapper embeds its corresponding raw
+script digest, and native transition tests snapshot the wrapper/raw/archive API
+records (including asset IDs, sizes, and digests) before execution and require
+the identical records afterward. Historical v4.2.2 transition fixtures use
+hardcoded public byte pins plus the same record sandwich; candidate fixtures
+derive their pins only from the exact source artifact.
+
 Windows installer acceptance happens before public visibility. A workflow run
 triggered by the exact Windows Installers completion snapshots all 30 Release
 assets, requiring each API asset ID, size, and `sha256:` digest to match the
@@ -1771,6 +1819,14 @@ graph, then rebinds tag/current-main/CI/run/artifacts/draft immediately before
 changing only `draft` visibility. A failed upload leaves a private draft. A
 lost PATCH response is adjudicated by a fresh authoritative Release GET and
 byte/digest comparison rather than blind retry.
+
+For a tagged `workflow_run` or recovery dispatch, the macOS resolver queries
+protected `main` and requires the downstream workflow-code SHA, current remote
+main, and resolved tag source SHA to be identical before it emits any custody or
+build output. This check occurs before the `apple-signing` preflight/build jobs
+can receive credentials. Tagless credential preflight remains bound to the
+current protected-main SHA. Default-branch workflow code is therefore never
+implicitly trusted merely because an upstream tagged run succeeded.
 
 After publication, Windows Installer Validation runs again from the successful
 macOS finalizer and performs the real `/releases/latest` updater matrix against
@@ -1868,6 +1924,84 @@ attacker-controlled resolution step or cannot prove restoration after a race.
 Revalidate this decision when the Windows process boundary, MSI scope, managed
 receipt paths, macOS user-home selection, package-script timing, supported
 macOS floor, or preserved metadata set changes.
+
+#### v4.3 supersession: reject managed ownership before macOS payload placement
+
+**Status:** Accepted and release-blocking. This supersedes the descriptor-bound
+PKG takeover helper above; the earlier text remains as the implemented v4.2.2
+design and as evidence for why the stronger boundary was required.
+
+Native Apple Silicon and Intel hosted runs proved that an Apple Installer
+transaction can leave `/usr/local/bin/tr300` behind after an intentionally
+failing `postinstall`, even when the helper restores the old managed binary and
+receipt byte-for-byte. A descriptor-safe rollback of user state cannot provide
+atomicity for PackageKit's separately committed payload or receipt, nor can it
+cover termination between package phases. The safe transaction boundary is
+therefore before payload placement.
+
+The v4.3 direct PKG has exactly one package script, `preinstall`. It examines
+the standard managed binary and receipt paths (`~/.cargo/bin/tr300` and
+`~/.config/tr300/tr300-receipt.json`) in every `/Users` home, including
+dot-prefixed unregistered residue, plus local Directory Service homes without
+relying on console identity or inherited `sudo` variables. Before a fixed child
+is treated as absent, the script proves `/Users` itself enumerable, then
+enumerates the home and each present `.cargo/bin`
+or `.config/tr300` parent level. A symlinked, non-directory, permission-denied,
+or I/O-failed root/intermediate blocks the PKG; this is fixed-depth inspection, not a
+recursive traversal. Fixed ASCII components are matched case-insensitively:
+that follows default APFS/HFS+ resolution and deliberately over-blocks a case
+variant on a case-sensitive volume. Zero matches is proven absence, exactly one
+may be inspected, and multiple folded matches are blocking ambiguity. It validates `dscl -plist` output with the long-standing
+`plutil -lint` contract, then reads the escaped attribute's sole array value
+with `/usr/libexec/PlistBuddy`; typed `plutil` extraction flags introduced in
+macOS 12 are forbidden so the package retains its older Intel/Big Sur support.
+PlistBuddy output is captured with a non-newline sentinel and assigned through a
+function-global result after removing exactly its one record terminator; callers
+do not nest another command substitution. Thus a newline belonging to the
+Directory Service value survives into the one-line home validation and blocks
+instead of being normalized into a different path.
+It requires one exact absolute existing home for every normal human-range
+record (UID 501–4294967295); UID 0 and negative sentinels are excluded, while
+safely resolvable positive lower-UID homes are scanned defensively and
+deduplicated. This uses the complete unsigned 32-bit width: Apple defines Open
+Directory `UniqueID` as a [32-bit identifier](https://developer.apple.com/documentation/opendirectory/general-attribute-types),
+and FSKit exposes file ownership as [`UInt32`](https://developer.apple.com/documentation/fskit/fsitem/attributes/uid).
+Positive values outside that range fail closed rather than being skipped.
+Because that inventory describes the running system, PackageKit's
+target-volume argument must be exactly `/`; an alternate target is rejected
+before payload or receipt placement.
+
+PackageKit cannot infer arbitrary custom Cargo homes, cargo-dist install
+prefixes, or XDG configuration roots from a local account record. Those custom
+locations are outside this refusal inventory; an operator using one must retain
+the managed channel or explicitly retire that owner before launching the PKG.
+
+This mandatory human-account range is an intentional availability tradeoff: a
+missing, offline, or otherwise uninspectable declared home blocks the PKG. The
+operator must make that home inspectable, repair the Directory Service record,
+or retain the managed installer channel; there is no unsafe override.
+Broken symlinks and malformed or partial managed state are conflicts, and the
+script exits nonzero before payload installation. It performs
+no privileged mutation in user homes, ships no migration probe or rollback
+helper, and has no `postinstall`. This is conservative detection, not an atomic
+lock against a separate managed installer started after preinstall.
+
+The refusal path always tells even a runnable managed owner to refresh through
+the managed installer before choosing Complete. That makes the recovery
+sequence safe for older public clients whose Complete uninstall could remove
+the binary but leave a cargo-dist receipt that would make the next PKG attempt
+fail again.
+
+Clean PKG installation, same-version repair, native-to-native upgrade, the
+v4.1.x compatibility-DMG bridge, and exact PKG-to-managed takeover remain
+supported. Managed-to-PKG becomes an explicit three-step transition: refresh or
+reinstall through the managed installer to a receipt-aware version, choose
+Complete uninstall so the exact binary/receipt pair is removed transactionally,
+then run the PKG.
+Malformed, foreign, linked, or concurrently changed receipt evidence fails
+closed and stays available for manual review. Both native architectures must
+prove rejection without payload/receipt mutation and the supported clean
+transition before release.
 
 ### MSRV policy (v3.11.1+, addendum v3.13.1)
 
@@ -2814,12 +2948,14 @@ retains this advisory exit behavior.
 
 ##### v4.2.0 strict fresh-installer convergence
 
-**Status:** Accepted; supersedes the preceding advisory installer integration.
+**Status:** Accepted for current Windows native packages. The macOS PKG clauses
+below describe the shipped v4.2.2 design and are superseded by the v4.3
+preinstall-only refusal decision above.
 
 MIC-1 distinguishes an ordinary report or legacy diagnostic call from a fresh
-installer the user deliberately launched. The latter is authoritative channel
-intent and must not report success while an exact older managed/Cargo owner
-still shadows it. Current MSI, EXE, and PKG packages therefore:
+installer the user deliberately launched. On Windows, the latter is
+authoritative channel intent and must not report success while an exact older
+managed/Cargo owner still shadows it. Current MSI and EXE packages therefore:
 
 1. expose no cleanup task or checkbox and always request the bounded targets;
 2. invoke `migrate-cleanup --strict`, where absent/exactly removed targets are
@@ -2833,8 +2969,7 @@ still shadows it. Current MSI, EXE, and PKG packages therefore:
    impersonated `Return='check'` actions; Inno candidate extraction plus strict
    non-mutating `PrepareToInstall` preflight before any native change and final
    `ssPostInstall` convergence after registry/ARP exists (Global runs both with
-   `ExecAsOriginalUser`); and a PKG postinstall snapshot/restore inside Apple's
-   package transaction; and
+   `ExecAsOriginalUser`); and
 6. retain the versionless fresh-installer/release recovery link on every visible
    stop without guessing a different scope or deleting native registration.
 
@@ -2861,13 +2996,17 @@ transactional quarantine/restore, platform package rollback where supported,
 and exact recovery evidence;
 allowing a partial cleanup to return zero would now counterfeit MIC-1 success.
 Legacy calls without `--strict` remain compatible and advisory, but no current
-native package may use them.
+Windows native package may use them. The current direct macOS PKG uses neither
+mode; it rejects standard-path managed binary or receipt evidence
+non-mutatingly in `preinstall`.
 
 **Revalidation trigger:** any change to a product identity, install scope/path,
 receipt schema/path, custom-action token, Inno execution context, package
-rollback timing, or additional binary requires source guards plus real fresh
-managed↔native transition, cancellation/failure restoration, duplicate/PATH,
-and uninstall evidence on the affected platform.
+rollback timing, or additional binary requires source guards plus the
+platform's supported transition matrix, cancellation/failure restoration,
+duplicate/PATH, and uninstall evidence. macOS requires managed-conflict
+rejection, managed Complete-uninstall-to-PKG, and PKG-to-managed proof rather
+than an automatic bidirectional takeover claim.
 
 ### v3.15.1 addendum — Why corporate.wxs lives in `wix-corporate/`, not `wix/`
 

@@ -47,11 +47,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nearby lookalike program or library cannot inherit the elevated launch.
   Company and personal installation choices keep their existing permission
   behavior.
-- **The Mac installer now preserves a prior terminal-managed copy through a
-  tightly bound rollback transaction.** It refuses ambiguous files and can
-  recover the original command and receipt—including normal Mac permissions
-  and metadata—even if their visible paths are swapped, redirected, changed,
-  or removed during the handoff.
+- **The Mac package now stops before installing anything when a per-user copy
+   already exists.** Mac testing proved that a failed late installer step can
+   still leave the new system command behind, so the package no longer tries to
+   remove or roll back files in a user's home. It checks the standard managed
+   command and receipt locations in every home under the Mac's standard Users
+   folder plus every eligible local account's declared home, including custom
+   locations. It preserves any matching command or receipt it finds and asks the
+   user to complete the supported switch before trying again.
+
+### Changed
+- **Switching from the managed Mac install to the system package is now a clear
+  three-step process.** Update or reinstall the managed v4.3 copy, choose
+  Complete uninstall so TR-300 safely removes both its command and matching
+  receipt, then open the PKG. A normal PKG upgrade still works, and switching
+  from an exact PKG back to the managed installer remains supported.
 
 ## [4.2.2] - 2026-07-18
 

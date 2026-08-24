@@ -5,6 +5,10 @@
 Done. v4.2.2 publishes the direct PKG and byte-identical compatibility DMG;
 native Intel/ARM trust, lifecycle, legacy bridge, and public-byte gates pass.
 
+v4.3 supersession: task `#r43` retains this shipped history but replaces
+automatic managed-to-PKG postinstall cleanup with scoped-home preinstall refusal
+and receipt-aware Complete uninstall. New native Intel/ARM proof is required.
+
 ## Activity
 
 - 2026-07-18 — replaced the current DMG-first builder/updater with a signed,

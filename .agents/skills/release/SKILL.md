@@ -84,9 +84,45 @@ scripts/test-managed-installer-transaction.sh
 
 On Windows, also run `scripts/test-managed-installer-transaction.ps1` under
 both `pwsh` and Windows PowerShell and parse
-`scripts/install-pinned-inno-setup.ps1`. On Unix with a C compiler, run
-`scripts/test-macos-pkg-rollback.sh`; on macOS it must enforce the native
-metadata cases as CI does.
+`scripts/install-pinned-inno-setup.ps1`. Extract the single `PREINSTALL`
+template from `scripts/build-sign-notarize-macos-installer.sh` and run
+ShellCheck on that exact script. The native macOS CI matrix is the runtime
+authority for clean pass, ordinary and dot-prefixed `/Users` residue plus
+environment-independent local Directory Service custom-home standard-path
+managed-evidence refusal through a real PKG, negative system-UID handling,
+broken links, unlistable/abnormal fixed-path parents, and unchanged evidence. The
+preinstall must validate `dscl -plist` output with `plutil -lint`, extract the
+escaped attribute's sole array value with `/usr/libexec/PlistBuddy`, and never
+use typed `plutil` extraction flags that require macOS 12. Require one absolute
+existing home for UID 501–4294967295 accounts, exclude UID 0/negative sentinels,
+and defensively scan safely resolved positive lower-UID homes. Reject every
+target volume except `/`, before payload or receipt placement. Before accepting
+a fixed standard path as absent, require `/Users` itself plus non-recursive enumeration of its home
+and present parent levels; symlinked, non-directory, or unlistable intermediates
+must fail closed, and fixed ASCII components must have at most one
+case-insensitive match. Its refusal
+diagnostic must first refresh a runnable managed copy through the managed
+installer before receipt-aware Complete uninstall, so an older client cannot
+leave a stale receipt. A missing, offline, or otherwise uninspectable mandatory
+home deliberately blocks the PKG; recovery is to make it inspectable, repair the
+Directory Service home record, or keep using the managed installer, never to
+override the gate. The release workflow must also inspect the built PKG's exact
+payload/script inventory.
+
+Both public managed wrappers must be rendered from the exact prepared release
+artifact with the SHA-256 of their corresponding raw `tr300-dist-installer.*`
+asset. The wrapper verifies those downloaded bytes before execution. On macOS,
+the shell wrapper must additionally prepend a private `/usr/bin/shasum -a 256`-
+backed `sha256sum` shim only for the cargo-dist child so archive verification is
+mandatory. The public v4.2.2 lifecycle baseline must receive the same private
+shim because that historical cargo-dist script otherwise treats a missing
+`sha256sum` as permission to skip archive verification. Native managed-transition
+tests bind wrapper, raw script, and target archive IDs/sizes/digests before
+execution and require identical records after.
+For tagged macOS `workflow_run` or recovery dispatch, require the downstream
+workflow-code SHA, protected remote `main`, and resolved tag source SHA to be
+identical before any `apple-signing` credential job can run. Tagless credential
+preflight remains pinned to current protected `main`.
 
 Then runtime smoke on the freshly-built binary:
 
@@ -181,7 +217,7 @@ Green means all of these passed:
 - `audit` (cargo audit, blocking)
 - `dist-plan` (cargo-dist config parses)
 - `workflow-validation` (actionlint, ShellCheck, executable provenance, managed
-  transaction, and macOS rollback/lifecycle guards)
+  transaction, and macOS preinstall/package-lifecycle guards)
 - `windows-installer-sources` (managed PowerShell transaction plus both WiX and
   Inno source/transition gates)
 
@@ -325,7 +361,10 @@ only after publication.
 
 Only then may `macos-installer.yml` use that exact proof. Native Intel and Apple
 Silicon jobs must pass signature, notarization, staple, Gatekeeper, install,
-update, takeover, and uninstall gates. Its sole fresh `release-publishing`
+managed-conflict refusal before payload/receipt creation, receipt-aware
+managed-to-PKG preparation beginning from the checksum-bound public v4.2.2
+managed wrapper, published-native-to-candidate upgrade, same-version repair,
+PKG-to-managed takeover, update, and uninstall gates. Its sole fresh `release-publishing`
 finalizer rebinds the draft and proof, adds the universal direct PKG and v4.1.x
 compatibility DMG pairs, verifies the exact 34-asset inventory and every asset
 byte, and changes the draft to a public stable release. A failed supplement

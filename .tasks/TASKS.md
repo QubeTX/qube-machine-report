@@ -12,6 +12,7 @@
 
 - [ ] **Harden, merge, and release TR-300 v4.3.0** - qualify the release chain, complete credential cutovers, reconcile PR #14, then run exact-SHA crates/tag/native/public/deployment gates (ms #v43) (owner codex) #r43
   - [ ] Remediate and independently validate every confirmed release/privilege security finding
+  - [ ] Retire Mac postinstall takeover, reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload, prove managed refresh plus receipt-aware Complete uninstall, and pass native Intel/ARM requalification
   - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
   - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
   - [ ] Merge hardened main into PR #14 and pass final exact-head review and hosted gates

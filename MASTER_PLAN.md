@@ -5,9 +5,9 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-08-24
-**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.3.0
-**Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
-takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
+**Complete GitHub distribution / crates.io / PR #14 candidate manifest:** 4.2.2 / 4.2.2 / 4.3.0
+**Release scope:** MIC-1 managed-install defaults, safe platform-specific
+fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
@@ -23,6 +23,20 @@ migration plus native ARM/Intel environment-only preflight and cleanup, and the
 crates.io publisher bootstrap/`trustpub_only` cutover, legacy-token removal,
 bootstrap-code removal, and OIDC-only probe. AMD64 Linux laptop and Raspberry Pi
 physical qualification remain separate open acceptance gates.
+
+Native Intel and Apple Silicon hardening runs exposed a further release
+blocker: Apple Installer retained the new system payload after a deliberate
+`postinstall` failure even though the managed binary/receipt restored exactly.
+The v4.3 candidate therefore supersedes automatic managed-to-PKG takeover with
+a non-mutating `preinstall` refusal of standard-path managed evidence across
+ordinary and dot-prefixed `/Users` homes plus all eligible local Directory
+Service homes, with fixed-depth parent enumeration that fails closed on
+abnormal or unlistable intermediates, independent of
+console or launch environment, with
+pre-macOS-12 plist parsing, a `/`-only target-volume gate, and no
+helper/postinstall. The supported switch is a refresh through the managed v4.3
+installer, receipt-aware Complete uninstall, then PKG; native upgrade/repair
+and PKG-to-managed remain supported.
 
 The v4.0.1 branch migration/release baseline remains complete: commit
 `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed all 13 hosted CI jobs on
@@ -89,15 +103,16 @@ as sufficient.
 - macOS and Linux recommend the versionless `tr300-installer.sh` command. On
   macOS it validates an exact TR-300 package receipt, payload owner, install
   path, and Developer ID identity before removing that native owner and
-  retaining the verified managed-shell install. The reciprocal PKG
-  `postinstall` invokes the bounded migration helper to remove an exact managed
-  shell/Cargo copy and matching receipt. Linux retains the managed-shell
+  retaining the verified managed-shell install. This describes the shipped
+  v4.2.2 baseline. v4.3 supersedes the reciprocal direction: the PKG refuses
+  any standard managed binary/receipt before payload placement and users run
+  receipt-aware Complete uninstall first. Linux retains the managed-shell
   channel without inventing a native package owner.
 - A fresh Windows MSI/EXE still authoritatively changes format within the same
   edition. Opposite-edition or cross-scope native installers now detect the
   conflict before mutation and direct the user to the managed PowerShell path;
   that path is allowed to perform the exact elevated convergence. Automatic
-  updates never cross a channel. Current native MSI/EXE/PKG packages expose no
+  updates never cross a channel. Current native MSI/EXE packages expose no
   cleanup opt-out: their mandatory strict helper validates an exact managed
   receipt before quarantining its binary and restores the pair if convergence
   cannot commit. Legacy direct helper calls remain advisory for compatibility.
@@ -517,9 +532,11 @@ patch fix-forward.
   must remain in lockstep across WiX, Inno, updater, and migration code.
 - Shared/macOS/release changes require native Apple Silicon and native Intel
   hosted validation. Direct-PKG or compatibility-DMG changes also require
-  sign/notary/staple/Gatekeeper/install/update/uninstall proof on both
-  architectures. A physical Mac is optional unless those runners expose a
-  GUI-only defect.
+  sign/notary/staple/Gatekeeper, scoped-home managed refusal without payload or
+  receipt mutation, clean/native install/update/uninstall, checksum-bound public
+  v4.2.2 managed -> candidate refresh -> receipt-aware Complete -> PKG, and
+  PKG-to-managed proof on both architectures.
+  A physical Mac is optional unless those runners expose a GUI-only defect.
 
 ## 10. Completion state
 

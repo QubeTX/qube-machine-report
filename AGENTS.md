@@ -68,6 +68,20 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   is required because public Rust records gained fields and collector helpers
   changed signature; the CLI and additive schema-v1 JSON stay compatible.
   Changed public records are `#[non_exhaustive]`.
+  v4.3 release hardening supersedes only the automatic managed-to-PKG Mac
+  transition: native Intel/ARM runners proved a failed `postinstall` can leave
+  the new payload behind. The candidate direct PKG therefore rejects standard
+  managed evidence (`~/.cargo/bin/tr300` or
+  `~/.config/tr300/tr300-receipt.json`) in every `/Users` home, including
+  dot-prefixed unregistered residue, plus all eligible local Directory Service
+  homes during `preinstall`, independent of console or launch environment. Each
+  `/Users` itself and every fixed parent level must be real listable directories
+  before absence is accepted; the scan is non-recursive. It uses the pre-macOS-12 plist-reader
+  contract and accepts only the current system volume (`/`). It ships no
+  `postinstall`/migration helper.
+  A managed user must first refresh through the managed installer, then run
+  receipt-aware Complete uninstall before switching to PKG. PKG-to-managed
+  remains supported.
 - Last fully published distribution state: release source
   `db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA CI/crates,
   both signed Apple archive jobs, all Windows packaging/transitions, and the
@@ -175,8 +189,6 @@ scripts/
   sign-notarize-macos.sh       # fail-closed Developer ID + Apple notary archive gate
   build-sign-notarize-macos-installer.sh # universal PKG/DMG data-only builder
   install-pinned-inno-setup.ps1 # official Inno 6.7.3 custody/installation gate
-  macos-pkg-rollback.c         # descriptor-bound privileged rollback helper
-  test-macos-pkg-rollback.sh   # concurrency/metadata rollback fixture
   test-release-workflow-provenance.py # executable resolver/security contract
 
 wix/
@@ -539,10 +551,15 @@ Entry points in `src/install/mod.rs`:
 
 Prompt options:
 - profile-only cleanup
-- complete uninstall (profile + binary)
+- complete uninstall (profile + binary + exact matching cargo-dist receipt, when present)
 - cancel
 
-Complete uninstall requires explicit confirmation and shows the binary path before deletion. Do not bypass the prompt unless implementing a clearly requested non-interactive variant.
+Complete uninstall requires explicit confirmation and shows every ownership
+path before deletion. On Unix, it must preflight an exact managed receipt before
+profile mutation and remove the running managed binary/receipt pair
+transactionally; malformed, foreign, linked, or changing evidence fails closed.
+Do not bypass the prompt unless implementing a clearly requested
+non-interactive variant.
 
 ### Unix install (`src/install/unix.rs`)
 
@@ -614,21 +631,35 @@ Public installation guidance recommends the versionless managed wrappers:
 - Windows: `irm .../tr300-installer.ps1 | iex`
 - macOS/Linux: `curl .../tr300-installer.sh | sh`
 
-The release workflow renders each wrapper with one exact tag/version and keeps
-cargo-dist's raw scripts under the internal stable `tr300-dist-installer.*`
-names. A wrapper first establishes and verifies its own managed install, then
+The release workflow renders each wrapper with one exact tag/version plus the
+SHA-256 of its corresponding raw cargo-dist script, and keeps those scripts
+under the internal stable `tr300-dist-installer.*` names. A wrapper verifies the
+downloaded raw script before execution; the shell wrapper supplies a private
+system-backed `sha256sum` shim so cargo-dist cannot skip archive verification on
+macOS. A wrapper first establishes and verifies its own managed install, then
 converges only exact recognized prior ownership. Windows enumerates the fixed
 TR-300 MSI UpgradeCodes/Inno AppIds and uses UAC only for machine-wide removal.
 macOS removes a PKG only after receipt, root payload, per-file owner, path, and
-Developer ID identity all agree. The direct PKG performs the reciprocal bounded
-cleanup of an exact managed-shell/Cargo copy and matching receipt. Before
+Developer ID identity all agree. The direct PKG intentionally does not perform
+the reciprocal cleanup: it rejects standard managed binary/receipt evidence in
+  every `/Users` home (including dot-prefixed unregistered residue) plus all
+  eligible local Directory Service homes before payload installation,
+  independent of console or launch environment. It first proves `/Users`
+  itself enumerable, then enumerates only the fixed
+  parent levels and fails closed on symlinked, non-directory, or unlistable
+  intermediates; it does not recursively traverse homes or discover arbitrary
+  custom Cargo/cargo-dist/XDG locations, and
+rejects non-root PackageKit target volumes. A managed user first refreshes or
+reinstalls through the v4.3-or-later managed installer, runs receipt-aware
+Complete uninstall, then launches the PKG. Before
 cargo-dist mutates the managed path, each wrapper snapshots any prior
 managed/Cargo binary and receipt; a failed native convergence restores that
 snapshot and reports the surviving native owner.
 
 `tr300 update` is latest-only and preserves the proven channel. A deliberately
-launched fresh managed/native installer is authoritative user intent even for a
-same-version or downgrade repair. Opposite-edition native Windows installers
+launched fresh installer is authoritative user intent only inside its proven
+platform transaction, including same-version or downgrade repair. A direct Mac
+PKG refuses managed ownership instead of taking it over. Opposite-edition native Windows installers
 stop before mutation and direct users to the managed PowerShell convergence
 path; they do not cross scope behind Windows Installer. Raw `cargo install` is
 advanced/unmanaged because Cargo has no TR-300 post-install hook. Ambiguous
@@ -703,9 +734,11 @@ Behavior:
   proceeds. Ordinary MSI UpgradeCode/Inno AppId upgrades stay within format.
   Cross-edition native Windows attempts stop before mutation. The managed
   wrappers provide the supported cross-scope/native convergence path. On Mac,
-  managed shell and direct PKG can replace each other only after exact ownership
-  proof. The hidden bounded `migrate-cleanup` never deletes the running install,
-  toolchain, shared Cargo PATH, or Downloads. Current native packages always use
+  an exact PKG may still transition to managed shell; the reverse transition
+  requires receipt-aware Complete uninstall before the direct PKG runs. The
+  direct PKG has no postinstall and never mutates user-owned managed state. The
+  hidden bounded `migrate-cleanup` never deletes the running install, toolchain,
+  shared Cargo PATH, or Downloads. Current Windows native packages always use
   its mandatory `--strict` mode with no cleanup opt-out; a present cargo-dist
   receipt is validated before its binary is quarantined, and the prior pair is
   restored if strict cleanup cannot commit. Legacy direct calls without
@@ -767,8 +800,10 @@ native installer path is `.github/workflows/macos-installer.yml` plus
 tagged archives into one universal Mach-O, signs/notarizes it, and builds the
 signed, notarized, stapled system-wide `com.qubetx.tr300.pkg`. The direct PKG is
 the recommended native download and the v4.2+ updater payload because the PKG,
-not a DMG, owns `/usr/local/bin/tr300`, supplies the stable receipt, and provides
-the privileged transaction. A signed/notarized/stapled DMG containing the
+  not a DMG, owns `/usr/local/bin/tr300` and supplies the stable receipt. Its only
+  package script is a non-mutating `preinstall` that refuses standard managed
+  ownership before payload placement; it contains no postinstall helper. A
+  signed/notarized/stapled DMG containing the
 byte-identical PKG is still published only so immutable v4.1.x updaters can cross
 the transition; current clients never use that bridge.
 
@@ -896,8 +931,10 @@ see the candidate, and emits an immutable acceptance proof. The real updater-
 to-candidate matrix remains post-public. `macos-installer.yml` then builds the
 universal direct PKG plus
 compatibility DMG from exact Release-run artifacts, validates trust,
-install/update/uninstall and channel takeover on native Intel and Apple
-Silicon, and its sole fresh finalizer publishes only after matching the proof,
+  managed-conflict rejection, clean/native install/update/uninstall,
+  checksum-bound public-v4.2.2-managed refresh plus receipt-aware
+  managed-to-PKG preparation, and PKG-to-managed takeover on
+  native Intel and Apple Silicon, and its sole fresh finalizer publishes only after matching the proof,
 the exact 34-asset inventory, and every asset byte. It adds:
 - `tr300-universal-apple-darwin.pkg`
 - `tr300-universal-apple-darwin.pkg.sha256`

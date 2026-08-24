@@ -21,6 +21,38 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
+## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
+
+The v4.2.2 evidence and behavior below remain immutable shipped history, but
+the automatic managed-to-PKG direction is not the current v4.3 contract.
+Hardening head `dae0857` CI run `32710504501` passed every non-Mac gate; both
+native Apple architectures then proved that Apple Installer can retain
+`/usr/local/bin/tr300` after an intended failing `postinstall` even when the
+old managed binary and receipt restore exactly. That disproves the overall
+cross-phase transaction premise.
+
+The v4.3 direct PKG therefore contains only a non-mutating `preinstall`. It
+checks the standard `~/.cargo/bin/tr300` binary and
+`~/.config/tr300/tr300-receipt.json` receipt in every `/Users` home, including
+dot-prefixed unregistered residue, plus all eligible local Directory Service
+homes, independent of console or launch environment, including broken links,
+and exits before payload or native receipt creation. It enumerates only the
+fixed standard-path parent levels and treats abnormal or unlistable
+intermediates as blocking ambiguity rather than absence.
+It ships no migration probe, rollback helper, or `postinstall` and never
+mutates user-owned managed state as root. It uses pre-macOS-12-compatible
+`plutil -lint` plus escaped-key `PlistBuddy` reads and accepts only PackageKit's
+`/` target volume. Managed-to-PKG is now: refresh or reinstall through the
+managed installer to this receipt-aware version, choose Complete uninstall,
+then run the PKG. Clean/native PKG upgrade and exact PKG-to-managed takeover
+remain supported. New source, provenance, security, and native Intel/ARM
+evidence must begin from the checksum-bound public v4.2.2 managed wrapper,
+reject its unchanged state, refresh through the candidate wrapper, then prove
+receipt-aware Complete and PKG install. The v4.2.2 runs below do not qualify the
+changed package.
+Arbitrary custom Cargo/cargo-dist/XDG locations are outside PackageKit's account
+inventory and must not be claimed as detected by this preinstall.
+
 ## 2026-07-18 v4.2.2 MIC-1 and direct-PKG fix-forward candidate
 
 The v4.2 implementation is complete. Exact v4.2.0 source
@@ -67,11 +99,13 @@ fresh-channel cleanup by itself.
 The Unix public wrapper similarly drives internal
 `tr300-dist-installer.sh`. On macOS it will surrender an existing PKG only when
 the fixed receipt, root payload, per-file package owner, install path, and
-Developer ID identity all agree. The reciprocal native PKG postinstall invokes
-the bounded migration helper to remove an exact managed-shell/Cargo copy and
-matching cargo-dist receipt. Linux stays on the managed-shell channel.
+Developer ID identity all agree. In the superseding v4.3 direction, the native
+PKG has no reciprocal postinstall or migration helper: its preinstall preserves
+and refuses managed state until the user refreshes the managed copy, chooses
+receipt-aware Complete uninstall, and retries from a clean state. Linux stays
+on the managed-shell channel.
 
-All current native packages use the hidden helper's mandatory `--strict` mode;
+All current Windows native packages use the hidden helper's mandatory `--strict` mode;
 the v3.17 interactive cleanup tasks/checkboxes are gone. A present cargo-dist
 receipt must exactly match provider, app, prefix, and platform path semantics
 before its binary moves. The pair is quarantined transactionally and restored
@@ -81,9 +115,9 @@ extracts the candidate and requires a strict non-mutating
 then reconfirms from `ssPostInstall` after registry/ARP ownership exists (Global
 uses the original user's token). MSI performs the same embedded-candidate
 preflight before any same-edition Inno uninstall; both Windows formats reject
-registered or exact-path opposite-scope state. PKG postinstall
-snapshots/restores the managed pair inside Apple's package transaction.
-Legacy no-`--strict` calls
+registered or exact-path opposite-scope state. The v4.2 PKG postinstall
+snapshot/restore design is immutable shipped history and is not present in the
+v4.3 candidate. Legacy no-`--strict` calls
 remain advisory only so immutable integrations and diagnostics keep working.
 
 The preferred Mac download is now the direct signed/notarized/stapled universal
