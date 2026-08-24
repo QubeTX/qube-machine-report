@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import textwrap
 import zipfile
@@ -86,13 +87,6 @@ MACOS_RELEASE_PAYLOADS = (
 )
 MACOS_RELEASE_ASSETS = tuple(
     name for payload in MACOS_RELEASE_PAYLOADS for name in (payload, f"{payload}.sha256")
-)
-MACOS_UPSTREAM_SENTINELS = (
-    "dist-manifest.json",
-    "tr300-aarch64-apple-darwin.tar.xz",
-    "tr300-aarch64-apple-darwin.tar.xz.sha256",
-    "tr300-x86_64-apple-darwin.tar.xz",
-    "tr300-x86_64-apple-darwin.tar.xz.sha256",
 )
 MACOS_RELEASE_RUN_ARTIFACTS = (
     "artifacts-build-local-aarch64-apple-darwin",
@@ -1459,14 +1453,1236 @@ def run_windows_publisher_case(
             raise AssertionError(f"{name}: rejected case reached release upload")
 
 
-def write_macos_release_artifact(directory: Path) -> None:
+def payloads_with_sidecars(names: tuple[str, ...], label: str) -> dict[str, bytes]:
+    payloads: dict[str, bytes] = {}
+    for index, name in enumerate(names, start=1):
+        content = f"fixture {label} payload {index} for {name}\n".encode()
+        payloads[name] = content
+        payloads[f"{name}.sha256"] = (
+            f"{hashlib.sha256(content).hexdigest()} *{name}\n".encode()
+        )
+    return payloads
+
+
+def initial_release_asset_payloads() -> dict[str, bytes]:
+    payloads = {
+        name: f"fixture initial Release asset for {name}\n".encode()
+        for name in INITIAL_RELEASE_ASSETS
+        if name != "sha256.sum" and not name.endswith(".sha256")
+    }
+    checksum_lines = []
+    for sidecar in (name for name in INITIAL_RELEASE_ASSETS if name.endswith(".sha256")):
+        payload_name = sidecar.removesuffix(".sha256")
+        content = payloads[payload_name]
+        sidecar_content = (
+            f"{hashlib.sha256(content).hexdigest()} *{payload_name}\n".encode()
+        )
+        payloads[sidecar] = sidecar_content
+        checksum_lines.append(sidecar_content)
+    payloads["sha256.sum"] = b"".join(checksum_lines)
+    if set(payloads) != set(INITIAL_RELEASE_ASSETS):
+        raise AssertionError("initial Release fixture inventory drifted")
+    return payloads
+
+
+def write_payload_directory(directory: Path, payloads: dict[str, bytes]) -> None:
     directory.mkdir()
-    for index, payload_name in enumerate(MACOS_RELEASE_PAYLOADS, start=1):
-        payload = directory / payload_name
-        payload.write_bytes(f"fixture macOS package {index}\n".encode())
-        digest = hashlib.sha256(payload.read_bytes()).hexdigest()
-        (directory / f"{payload_name}.sha256").write_bytes(
-            f"{digest} *{payload_name}\n".encode()
+    for name, content in payloads.items():
+        (directory / name).write_bytes(content)
+
+
+def write_payload_zip(path: Path, payloads: dict[str, bytes]) -> str:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name in sorted(payloads):
+            archive.writestr(name, payloads[name])
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def release_asset_records(
+    payloads: dict[str, bytes], *, first_id: int
+) -> list[dict[str, object]]:
+    return [
+        {
+            "id": first_id + index,
+            "name": name,
+            "size": len(payloads[name]),
+            "digest": f"sha256:{hashlib.sha256(payloads[name]).hexdigest()}",
+        }
+        for index, name in enumerate(sorted(payloads))
+    ]
+
+
+def artifact_record(
+    *,
+    artifact_id: int,
+    name: str,
+    digest: str,
+    size: int,
+    run_id: int,
+) -> dict[str, object]:
+    return {
+        "id": artifact_id,
+        "name": name,
+        "digest": f"sha256:{digest}",
+        "expired": False,
+        "size_in_bytes": size,
+        "workflow_run": {
+            "id": run_id,
+            "repository_id": int(REPOSITORY_ID),
+            "head_repository_id": int(REPOSITORY_ID),
+            "head_sha": TRUSTED_SHA,
+        },
+    }
+
+
+def write_macos_publisher_jq(bin_dir: Path) -> None:
+    mock = bin_dir / "jq"
+    mock.write_text(
+        textwrap.dedent(
+            r'''
+            #!/usr/bin/env python3
+            import json
+            import re
+            import sys
+
+            sys.stdout.reconfigure(newline="\n")
+            arguments = sys.argv[1:]
+            variables = {}
+            raw_output = False
+            raw_input = False
+            slurp = False
+            index = 0
+            while index < len(arguments):
+                argument = arguments[index]
+                if argument in ("-e", "-r", "-c", "-R", "-s", "-er", "-re"):
+                    raw_output = raw_output or "r" in argument
+                    raw_input = raw_input or argument == "-R"
+                    slurp = slurp or argument == "-s"
+                    index += 1
+                    continue
+                if argument in ("--arg", "--argjson", "--slurpfile"):
+                    if index + 2 >= len(arguments):
+                        raise SystemExit(2)
+                    name, value = arguments[index + 1], arguments[index + 2]
+                    if argument == "--argjson":
+                        variables[name] = json.loads(value)
+                    elif argument == "--slurpfile":
+                        with open(value, "r", encoding="utf-8") as source:
+                            variables[name] = [json.load(source)]
+                    else:
+                        variables[name] = value
+                    index += 3
+                    continue
+                break
+
+            if index >= len(arguments):
+                raise SystemExit(2)
+            query = arguments[index]
+            index += 1
+
+            def normalized_query(value):
+                parts = re.split(r'("(?:\\.|[^"\\])*")', value)
+                return "".join(
+                    part if part_index % 2 else re.sub(r"\s+", " ", part)
+                    for part_index, part in enumerate(parts)
+                ).strip()
+
+            normalized = normalized_query(query)
+
+            if raw_input:
+                if query != "." or index != len(arguments):
+                    raise SystemExit("publisher jq fixture rejects raw-input filter")
+                for line in sys.stdin.read().splitlines():
+                    print(json.dumps(line))
+                raise SystemExit(0)
+            if slurp:
+                if normalized != "sort" or index != len(arguments):
+                    raise SystemExit("publisher jq fixture rejects slurp filter")
+                values = [json.loads(line) for line in sys.stdin.read().splitlines() if line]
+                print(json.dumps(sorted(values), separators=(",", ":")))
+                raise SystemExit(0)
+            if index + 1 != len(arguments):
+                raise SystemExit(f"publisher jq fixture rejects arguments: {arguments!r}")
+            path = arguments[index]
+            with open(path, "r", encoding="utf-8") as source:
+                data = json.load(source)
+
+            def nested(record, *parts):
+                value = record
+                for part in parts:
+                    if not isinstance(value, dict) or part not in value:
+                        return None
+                    value = value[part]
+                return value
+
+            def emit(value):
+                if raw_output and isinstance(value, str):
+                    print(value)
+                elif isinstance(value, bool):
+                    print("true" if value else "false")
+                elif value is not None:
+                    print(json.dumps(value, separators=(",", ":")))
+
+            def emit_tsv(values):
+                emit("\t".join(
+                    str(value).lower() if isinstance(value, bool) else str(value)
+                    for value in values
+                ))
+
+            def require(condition):
+                raise SystemExit(0 if condition else 1)
+
+            def artifact_projection(records):
+                return sorted(
+                    [
+                        {
+                            "id": record.get("id"),
+                            "name": record.get("name"),
+                            "size": record.get("size"),
+                            "digest": record.get("digest"),
+                        }
+                        for record in records
+                    ],
+                    key=lambda record: record["name"],
+                )
+
+            def bound_release_asset(records, name, digest, size):
+                matches = [record for record in records if record.get("name") == name]
+                return (
+                    len(matches) == 1
+                    and matches[0].get("digest") == digest
+                    and matches[0].get("size") == size
+                )
+
+            native_proof_inventory_query = normalized_query("""
+                [.artifacts[] | select(.name == $name)] |
+                if length != 1 then error("expected exactly one native proof artifact named " + $name)
+                else .[0] |
+                  [.id, .name, .digest, .expired, .size_in_bytes,
+                   .workflow_run.id, .workflow_run.repository_id,
+                   .workflow_run.head_repository_id, .workflow_run.head_sha] | @tsv
+                end
+            """)
+            direct_artifact_query = normalized_query("""
+                [.id, .name, .digest, .expired, .size_in_bytes,
+                 .workflow_run.id, .workflow_run.repository_id,
+                 .workflow_run.head_repository_id, .workflow_run.head_sha] | @tsv
+            """)
+            artifact_validator_queries = {
+                normalized_query("""
+                    .id == $id and .name == "tr300-universal-macos-installer" and
+                    .expired == false and (.size_in_bytes > 0 and .size_in_bytes <= 268435456) and
+                    .digest == $digest and .workflow_run.id == $run and
+                    .workflow_run.repository_id == $repository and
+                    .workflow_run.head_repository_id == $repository
+                """): ("tr300-universal-macos-installer", 268435456, False),
+                normalized_query("""
+                    .id == $id and .name == "windows-release-assets" and .expired == false and
+                    (.size_in_bytes > 0 and .size_in_bytes <= 268435456) and .digest == $digest and
+                    .workflow_run.id == $run and .workflow_run.repository_id == $repository and
+                    .workflow_run.head_repository_id == $repository and .workflow_run.head_sha == $sha
+                """): ("windows-release-assets", 268435456, True),
+                normalized_query("""
+                    .id == $id and .name == "windows-installer-validation-proof" and
+                    .expired == false and (.size_in_bytes > 0 and .size_in_bytes <= 1048576) and
+                    .digest == $digest and .workflow_run.id == $run and
+                    .workflow_run.repository_id == $repository and
+                    .workflow_run.head_repository_id == $repository and .workflow_run.head_sha == $sha
+                """): ("windows-installer-validation-proof", 1048576, True),
+                normalized_query("""
+                    .id == $id and .name == "windows-validation-inputs" and .expired == false and
+                    (.size_in_bytes > 0 and .size_in_bytes <= 1073741824) and .digest == $digest and
+                    .workflow_run.id == $run and .workflow_run.repository_id == $repository and
+                    .workflow_run.head_repository_id == $repository and .workflow_run.head_sha == $sha
+                """): ("windows-validation-inputs", 1073741824, True),
+            }
+            native_proof_query = normalized_query("""
+                .schema_version == 1 and .tag == $tag and .source_sha == $sha and
+                .workflow_run_id == $run and .workflow_run_attempt == $attempt and
+                .architecture == $arch and .build_artifact_id == $build_id and
+                .build_artifact_digest == $build_digest and
+                .managed_installer == {digest: $managed_digest, size: $managed_size} and
+                .dist_installer == {digest: $dist_digest, size: $dist_size} and
+                .aarch64_archive == {digest: $arm_digest, size: $arm_size} and
+                .x86_64_archive == {digest: $intel_digest, size: $intel_size} and
+                (keys | sort) == (["aarch64_archive", "architecture", "build_artifact_digest",
+                  "build_artifact_id", "dist_installer", "managed_installer", "schema_version",
+                  "source_sha", "tag", "workflow_run_attempt", "workflow_run_id",
+                  "x86_64_archive"] | sort)
+            """)
+            workflow_run_queries = {
+                normalized_query("""
+                    .workflow_runs[] |
+                    select(.workflow_id == $workflow_id and .name == "Windows Installers" and
+                           .path == ".github/workflows/windows-installers.yml" and
+                           .event == "workflow_run" and .status == "completed" and
+                           .conclusion == "success" and .repository.full_name == $repository and
+                           .head_repository.full_name == $repository and .head_branch == "main" and
+                           .head_sha == $sha) | .id
+                """): ("Windows Installers", ".github/workflows/windows-installers.yml", "workflow_run"),
+                normalized_query("""
+                    .workflow_runs[] |
+                    select(.workflow_id == $workflow_id and .name == "Windows Installer Validation" and
+                           .path == ".github/workflows/windows-installer-validation.yml" and
+                           .event == "workflow_run" and .status == "completed" and
+                           .conclusion == "success" and .repository.full_name == $repository and
+                           .head_repository.full_name == $repository and .head_branch == "main" and
+                           .head_sha == $sha) | .id
+                """): ("Windows Installer Validation", ".github/workflows/windows-installer-validation.yml", "workflow_run"),
+                normalized_query("""
+                    .workflow_runs[] |
+                    select(.workflow_id == $workflow_id and .name == "CI" and
+                           .path == ".github/workflows/ci.yml" and .event == "push" and
+                           .status == "completed" and .conclusion == "success" and
+                           .repository.full_name == $repository and
+                           .head_repository.full_name == $repository and
+                           .head_branch == "main" and .head_sha == $sha) | .id
+                """): ("CI", ".github/workflows/ci.yml", "push"),
+            }
+            windows_artifact_inventory_query = normalized_query("""
+                .artifacts[] | select(.name == "windows-release-assets" and .expired == false) |
+                [.id, .digest] | @tsv
+            """)
+            validation_artifact_inventory_query = normalized_query("""
+                .artifacts[] |
+                select(.name == "windows-installer-validation-proof" and .expired == false) |
+                [.id, .digest] | @tsv
+            """)
+            validation_proof_query = normalized_query("""
+                .schema_version == 1 and .result == "success" and .tag == $tag and
+                .source_sha == $sha and .windows_run_id == $windows_run and
+                .windows_run_attempt == $windows_attempt and
+                .windows_artifact_id == $windows_artifact and
+                .windows_artifact_digest == $windows_digest and
+                .validation_run_id == $validation_run and
+                .validation_run_attempt == $validation_attempt and
+                (.validation_input_artifact_id | type == "number") and
+                (.validation_input_artifact_digest | test("^sha256:[0-9a-f]{64}$"))
+            """)
+            validation_manifest_query = normalized_query("""
+                .schema_version == 1 and .validation_mode == "private" and
+                .tag == $tag and .source_sha == $sha and .upstream_run_id == $windows_run and
+                .upstream_run_attempt == $windows_attempt and
+                .windows_artifact_id == $windows_artifact and
+                .windows_artifact_digest == $windows_digest and
+                (.release_assets | length) == 30 and
+                ([.release_assets[] | select(.name == "tr300-installer.sh")] | length) == 1 and
+                ([.release_assets[] | select(.name == "tr300-installer.sh")][0] |
+                  .digest == $managed_digest and .size == $managed_size) and
+                ([.release_assets[] | select(.name == "tr300-dist-installer.sh")] | length) == 1 and
+                ([.release_assets[] | select(.name == "tr300-dist-installer.sh")][0] |
+                  .digest == $dist_digest and .size == $dist_size) and
+                ([.release_assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")] |
+                  length) == 1 and
+                ([.release_assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")][0] |
+                  .digest == $arm_digest and .size == $arm_size) and
+                ([.release_assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")] |
+                  length) == 1 and
+                ([.release_assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")][0] |
+                  .digest == $intel_digest and .size == $intel_size) and
+                ([.release_assets[] | (.id | type == "number") and (.size > 0) and
+                  (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
+            """)
+            validated_draft_query = normalized_query("""
+                .target_commitish == $sha and .draft == true and .prerelease == false and
+                ([.assets[] | select(.name == "tr300-installer.sh")] | length) == 1 and
+                ([.assets[] | select(.name == "tr300-installer.sh")][0] |
+                  .digest == $managed_digest and .size == $managed_size) and
+                ([.assets[] | select(.name == "tr300-dist-installer.sh")] | length) == 1 and
+                ([.assets[] | select(.name == "tr300-dist-installer.sh")][0] |
+                  .digest == $dist_digest and .size == $dist_size) and
+                ([.assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")] |
+                  length) == 1 and
+                ([.assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")][0] |
+                  .digest == $arm_digest and .size == $arm_size) and
+                ([.assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")] |
+                  length) == 1 and
+                ([.assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")][0] |
+                  .digest == $intel_digest and .size == $intel_size) and
+                ([.assets[] | {id, name, size, digest}] | sort_by(.name)) ==
+                  ($manifest[0].release_assets | sort_by(.name))
+            """)
+            release_manifest_query = normalized_query("""
+                .target_commitish == $sha and .draft == true and .prerelease == false and
+                ([.assets[] | {id, name, size, digest}] | sort_by(.name)) ==
+                  ($manifest[0].release_assets | sort_by(.name))
+            """)
+            draft_final_inventory_query = normalized_query("""
+                .target_commitish == $sha and .draft == true and .prerelease == false and
+                ([.assets[].name] | sort) == $names and ([.assets[].size > 0] | all) and
+                ([.assets[].digest | type == "string" and test("^sha256:[0-9a-f]{64}$")] | all)
+            """)
+            public_final_inventory_query = normalized_query("""
+                .target_commitish == $sha and .draft == false and .prerelease == false and
+                ([.assets[].name] | sort) == $names and ([.assets[].size > 0] | all) and
+                ([.assets[].digest | type == "string" and test("^sha256:[0-9a-f]{64}$")] | all)
+            """)
+            validated_subset_query = normalized_query("""
+                ($manifest[0].release_assets | map(.name)) as $validated_names |
+                ([.assets[] | select(.name as $name | $validated_names | index($name)) |
+                  {id, name, size, digest}] | sort_by(.name)) ==
+                  ($manifest[0].release_assets | sort_by(.name))
+            """)
+
+            if normalized == ".total_count":
+                emit(data.get("total_count"))
+            elif normalized == ".artifacts | length":
+                emit(len(data.get("artifacts", [])))
+            elif normalized == native_proof_inventory_query:
+                records = [
+                    record for record in data.get("artifacts", [])
+                    if record.get("name") == variables.get("name")
+                ]
+                if len(records) != 1:
+                    raise SystemExit(5)
+                record = records[0]
+                emit_tsv((
+                    record.get("id"), record.get("name"), record.get("digest"),
+                    record.get("expired"), record.get("size_in_bytes"),
+                    nested(record, "workflow_run", "id"),
+                    nested(record, "workflow_run", "repository_id"),
+                    nested(record, "workflow_run", "head_repository_id"),
+                    nested(record, "workflow_run", "head_sha"),
+                ))
+            elif normalized == direct_artifact_query:
+                emit_tsv((
+                    data.get("id"), data.get("name"), data.get("digest"),
+                    data.get("expired"), data.get("size_in_bytes"),
+                    nested(data, "workflow_run", "id"),
+                    nested(data, "workflow_run", "repository_id"),
+                    nested(data, "workflow_run", "head_repository_id"),
+                    nested(data, "workflow_run", "head_sha"),
+                ))
+            elif normalized in artifact_validator_queries:
+                expected_name, size_limit, require_sha = artifact_validator_queries[normalized]
+                size = data.get("size_in_bytes")
+                condition = (
+                    data.get("id") == variables.get("id")
+                    and data.get("name") == expected_name
+                    and data.get("expired") is False
+                    and isinstance(size, int) and 0 < size <= size_limit
+                    and data.get("digest") == variables.get("digest")
+                    and nested(data, "workflow_run", "id") == variables.get("run")
+                    and nested(data, "workflow_run", "repository_id") == variables.get("repository")
+                    and nested(data, "workflow_run", "head_repository_id") == variables.get("repository")
+                )
+                if require_sha:
+                    condition = condition and nested(data, "workflow_run", "head_sha") == variables.get("sha")
+                require(condition)
+            elif normalized == native_proof_query:
+                expected = {
+                    "schema_version": 1,
+                    "tag": variables.get("tag"),
+                    "source_sha": variables.get("sha"),
+                    "workflow_run_id": variables.get("run"),
+                    "workflow_run_attempt": variables.get("attempt"),
+                    "architecture": variables.get("arch"),
+                    "build_artifact_id": variables.get("build_id"),
+                    "build_artifact_digest": variables.get("build_digest"),
+                    "managed_installer": {
+                        "digest": variables.get("managed_digest"),
+                        "size": variables.get("managed_size"),
+                    },
+                    "dist_installer": {
+                        "digest": variables.get("dist_digest"),
+                        "size": variables.get("dist_size"),
+                    },
+                    "aarch64_archive": {
+                        "digest": variables.get("arm_digest"),
+                        "size": variables.get("arm_size"),
+                    },
+                    "x86_64_archive": {
+                        "digest": variables.get("intel_digest"),
+                        "size": variables.get("intel_size"),
+                    },
+                }
+                require(data == expected)
+            elif normalized in workflow_run_queries:
+                expected_name, expected_path, expected_event = workflow_run_queries[normalized]
+                for run in data.get("workflow_runs", []):
+                    if (
+                        run.get("workflow_id") == variables.get("workflow_id")
+                        and run.get("name") == expected_name
+                        and run.get("path") == expected_path
+                        and run.get("event") == expected_event
+                        and run.get("status") == "completed"
+                        and run.get("conclusion") == "success"
+                        and nested(run, "repository", "full_name") == variables.get("repository")
+                        and nested(run, "head_repository", "full_name") == variables.get("repository")
+                        and run.get("head_branch") == "main"
+                        and run.get("head_sha") == variables.get("sha")
+                    ):
+                        emit(run.get("id"))
+            elif normalized == windows_artifact_inventory_query:
+                for record in data.get("artifacts", []):
+                    if record.get("name") == "windows-release-assets" and record.get("expired") is False:
+                        emit_tsv((record.get("id"), record.get("digest")))
+            elif normalized == validation_artifact_inventory_query:
+                for record in data.get("artifacts", []):
+                    if record.get("name") == "windows-installer-validation-proof" and record.get("expired") is False:
+                        emit_tsv((record.get("id"), record.get("digest")))
+            elif normalized == ".validation_input_artifact_id":
+                emit(data.get("validation_input_artifact_id"))
+            elif normalized == ".validation_input_artifact_digest":
+                emit(data.get("validation_input_artifact_digest"))
+            elif normalized == validation_proof_query:
+                require(
+                    data.get("schema_version") == 1
+                    and data.get("result") == "success"
+                    and data.get("tag") == variables.get("tag")
+                    and data.get("source_sha") == variables.get("sha")
+                    and data.get("windows_run_id") == variables.get("windows_run")
+                    and data.get("windows_run_attempt") == variables.get("windows_attempt")
+                    and data.get("windows_artifact_id") == variables.get("windows_artifact")
+                    and data.get("windows_artifact_digest") == variables.get("windows_digest")
+                    and data.get("validation_run_id") == variables.get("validation_run")
+                    and data.get("validation_run_attempt") == variables.get("validation_attempt")
+                    and isinstance(data.get("validation_input_artifact_id"), int)
+                    and re.fullmatch(r"sha256:[0-9a-f]{64}", str(data.get("validation_input_artifact_digest"))) is not None
+                )
+            elif normalized == validation_manifest_query:
+                records = data.get("release_assets", [])
+                require(
+                    data.get("schema_version") == 1
+                    and data.get("validation_mode") == "private"
+                    and data.get("tag") == variables.get("tag")
+                    and data.get("source_sha") == variables.get("sha")
+                    and data.get("upstream_run_id") == variables.get("windows_run")
+                    and data.get("upstream_run_attempt") == variables.get("windows_attempt")
+                    and data.get("windows_artifact_id") == variables.get("windows_artifact")
+                    and data.get("windows_artifact_digest") == variables.get("windows_digest")
+                    and len(records) == 30
+                    and bound_release_asset(records, "tr300-installer.sh", variables.get("managed_digest"), variables.get("managed_size"))
+                    and bound_release_asset(records, "tr300-dist-installer.sh", variables.get("dist_digest"), variables.get("dist_size"))
+                    and bound_release_asset(records, "tr300-aarch64-apple-darwin.tar.xz", variables.get("arm_digest"), variables.get("arm_size"))
+                    and bound_release_asset(records, "tr300-x86_64-apple-darwin.tar.xz", variables.get("intel_digest"), variables.get("intel_size"))
+                    and all(
+                        isinstance(record.get("id"), int)
+                        and isinstance(record.get("size"), int) and record.get("size") > 0
+                        and re.fullmatch(r"sha256:[0-9a-f]{64}", str(record.get("digest"))) is not None
+                        for record in records
+                    )
+                )
+            elif normalized == ".release_assets[] | [.name, .digest, .size] | @tsv":
+                for record in data.get("release_assets", []):
+                    emit_tsv((record.get("name"), record.get("digest"), record.get("size")))
+            elif normalized in (validated_draft_query, release_manifest_query):
+                assets = data.get("assets", [])
+                manifest_assets = variables["manifest"][0].get("release_assets", [])
+                condition = (
+                    data.get("target_commitish") == variables.get("sha")
+                    and data.get("draft") is True
+                    and data.get("prerelease") is False
+                    and artifact_projection(assets) == artifact_projection(manifest_assets)
+                )
+                if normalized == validated_draft_query:
+                    condition = condition and all((
+                        bound_release_asset(assets, "tr300-installer.sh", variables.get("managed_digest"), variables.get("managed_size")),
+                        bound_release_asset(assets, "tr300-dist-installer.sh", variables.get("dist_digest"), variables.get("dist_size")),
+                        bound_release_asset(assets, "tr300-aarch64-apple-darwin.tar.xz", variables.get("arm_digest"), variables.get("arm_size")),
+                        bound_release_asset(assets, "tr300-x86_64-apple-darwin.tar.xz", variables.get("intel_digest"), variables.get("intel_size")),
+                    ))
+                require(condition)
+            elif normalized in (draft_final_inventory_query, public_final_inventory_query):
+                assets = data.get("assets", [])
+                expected_draft = normalized == draft_final_inventory_query
+                require(
+                    data.get("target_commitish") == variables.get("sha")
+                    and data.get("draft") is expected_draft
+                    and data.get("prerelease") is False
+                    and sorted(record.get("name") for record in assets) == variables.get("names")
+                    and all(isinstance(record.get("size"), int) and record.get("size") > 0 for record in assets)
+                    and all(re.fullmatch(r"sha256:[0-9a-f]{64}", str(record.get("digest"))) is not None for record in assets)
+                )
+            elif normalized == validated_subset_query:
+                assets = data.get("assets", [])
+                manifest_assets = variables["manifest"][0].get("release_assets", [])
+                validated_names = {record.get("name") for record in manifest_assets}
+                selected = [record for record in assets if record.get("name") in validated_names]
+                require(artifact_projection(selected) == artifact_projection(manifest_assets))
+            elif normalized == ".assets[].name":
+                for record in data.get("assets", []):
+                    emit(record.get("name"))
+            elif normalized == ".assets[] | [.name, .digest, .size] | @tsv":
+                for record in data.get("assets", []):
+                    emit_tsv((record.get("name"), record.get("digest"), record.get("size")))
+            elif normalized == ".id":
+                emit(data.get("id"))
+            else:
+                print(f"publisher jq fixture rejects unknown filter: {query!r}", file=sys.stderr)
+                raise SystemExit(3)
+            '''
+        ).lstrip(),
+        encoding="utf-8",
+        newline="\n",
+    )
+    mock.chmod(mock.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def write_macos_publisher_gh(bin_dir: Path) -> None:
+    mock = bin_dir / "gh"
+    mock.write_text(
+        textwrap.dedent(
+            r'''
+            #!/usr/bin/env python3
+            import copy
+            import hashlib
+            import json
+            import os
+            import shutil
+            import sys
+            from pathlib import Path
+
+            sys.stdout.reconfigure(newline="\n")
+            state = Path(os.environ["MOCK_MACOS_PUBLISHER_STATE"])
+            config_path = state / "config.json"
+            release_path = state / "release.json"
+            log_path = state / "gh-calls.jsonl"
+            arguments = sys.argv[1:]
+            with log_path.open("a", encoding="utf-8", newline="\n") as log:
+                log.write(json.dumps(arguments, separators=(",", ":")) + "\n")
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+
+            def write_json(value):
+                sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
+
+            def load_release():
+                return json.loads(release_path.read_text(encoding="utf-8"))
+
+            def save_release(value):
+                release_path.write_text(
+                    json.dumps(value, separators=(",", ":")),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+
+            def artifact_bytes(artifact_id):
+                path = config["artifact_zips"].get(str(artifact_id))
+                if path is None:
+                    raise SystemExit(89)
+                sys.stdout.buffer.write(Path(path).read_bytes())
+
+            def direct_artifact(artifact_id):
+                record = copy.deepcopy(config["artifacts"].get(str(artifact_id)))
+                if record is None:
+                    raise SystemExit(89)
+                counter_path = state / f"artifact-{artifact_id}-reads"
+                count = int(counter_path.read_text(encoding="utf-8")) if counter_path.exists() else 0
+                counter_path.write_text(str(count + 1), encoding="utf-8", newline="\n")
+                if (
+                    config.get("mutation") == "macos-artifact-replacement"
+                    and artifact_id == config["macos_artifact_id"]
+                    and count >= 1
+                ):
+                    record["digest"] = "sha256:" + "0" * 64
+                write_json(record)
+
+            if arguments[:2] == ["release", "upload"]:
+                tag = arguments[2]
+                if tag != config["tag"] or arguments[3:5] != ["--repo", config["repository"]]:
+                    raise SystemExit(45)
+                sources = [Path(value) for value in arguments[5:]]
+                if [source.name for source in sources] != config["macos_asset_names"]:
+                    raise SystemExit(46)
+                release = load_release()
+                existing = {record["name"] for record in release["assets"]}
+                if any(source.name in existing for source in sources):
+                    raise SystemExit(46)
+                next_id = max(record["id"] for record in release["assets"]) + 1
+                release_directory = state / "release-assets"
+                for offset, source in enumerate(sources):
+                    destination = release_directory / source.name
+                    shutil.copyfile(source, destination)
+                    content = destination.read_bytes()
+                    release["assets"].append({
+                        "id": next_id + offset,
+                        "name": source.name,
+                        "size": len(content),
+                        "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+                    })
+                save_release(release)
+                raise SystemExit(0)
+
+            if arguments[:2] == ["release", "download"]:
+                tag = arguments[2]
+                if tag != config["tag"]:
+                    raise SystemExit(45)
+                destination = None
+                patterns = []
+                index = 3
+                while index < len(arguments):
+                    if arguments[index] == "--repo":
+                        if arguments[index + 1] != config["repository"]:
+                            raise SystemExit(45)
+                        index += 2
+                    elif arguments[index] == "--dir":
+                        destination = Path(arguments[index + 1])
+                        index += 2
+                    elif arguments[index] == "--pattern":
+                        patterns.append(arguments[index + 1])
+                        index += 2
+                    else:
+                        raise SystemExit(45)
+                if destination is None:
+                    raise SystemExit(45)
+                release = load_release()
+                selected = [
+                    record for record in release["assets"]
+                    if not patterns or record["name"] in patterns
+                ]
+                if patterns and {record["name"] for record in selected} != set(patterns):
+                    raise SystemExit(45)
+                destination.mkdir(parents=True, exist_ok=True)
+                for record in selected:
+                    shutil.copyfile(
+                        state / "release-assets" / record["name"],
+                        destination / record["name"],
+                    )
+                raise SystemExit(0)
+
+            if not arguments or arguments[0] != "api":
+                raise SystemExit(97)
+            index = 1
+            method = "GET"
+            if arguments[index:index + 2] == ["--method", "PATCH"]:
+                method = "PATCH"
+                index += 2
+            endpoint = arguments[index]
+            options = arguments[index + 1:]
+            repository_prefix = f"repos/{config['repository']}"
+
+            if method == "PATCH":
+                if endpoint != f"{repository_prefix}/releases/{config['release_id']}":
+                    raise SystemExit(98)
+                if "draft=false" not in options or "make_latest=true" not in options:
+                    raise SystemExit(98)
+                release = load_release()
+                release["draft"] = False
+                save_release(release)
+                write_json(release)
+                raise SystemExit(0)
+
+            if endpoint == repository_prefix:
+                print(config["repository_id"])
+            elif endpoint == f"{repository_prefix}/git/ref/tags/{config['tag']}":
+                print(f"commit\t{config['sha']}")
+            elif endpoint == f"{repository_prefix}/git/ref/heads/main":
+                print(config["sha"])
+            elif endpoint.startswith(f"{repository_prefix}/actions/workflows/") and "/runs?" not in endpoint:
+                workflow = endpoint.rsplit("/", 1)[-1]
+                print(config["workflow_ids"][workflow])
+            elif endpoint.startswith(f"{repository_prefix}/actions/workflows/") and "/runs?" in endpoint:
+                workflow = endpoint.split("/actions/workflows/", 1)[1].split("/runs?", 1)[0]
+                write_json({"workflow_runs": config["workflow_runs"][workflow]})
+            elif endpoint.startswith(f"{repository_prefix}/actions/runs/") and endpoint.endswith("/artifacts?per_page=100"):
+                run_id = endpoint.split("/actions/runs/", 1)[1].split("/", 1)[0]
+                write_json(config["run_artifacts"][run_id])
+            elif endpoint.startswith(f"{repository_prefix}/actions/runs/"):
+                run_id = endpoint.rsplit("/", 1)[-1]
+                run = config["runs"].get(run_id)
+                if run is None:
+                    raise SystemExit(89)
+                if options[-2:] == ["--jq", ".event"]:
+                    print(run["event"])
+                else:
+                    fields = (
+                        run["id"], run["workflow_id"], run["name"], run["path"],
+                        run["event"], run["status"], run["conclusion"],
+                        run["repository"]["full_name"], run["head_repository"]["full_name"],
+                        run["head_branch"], run["head_sha"], run["run_attempt"],
+                    )
+                    print("\t".join(str(value) for value in fields))
+            elif endpoint.startswith(f"{repository_prefix}/actions/artifacts/"):
+                artifact_tail = endpoint.split("/actions/artifacts/", 1)[1]
+                if artifact_tail.endswith("/zip"):
+                    artifact_bytes(int(artifact_tail.removesuffix("/zip")))
+                else:
+                    direct_artifact(int(artifact_tail))
+            elif endpoint == f"{repository_prefix}/releases/tags/{config['tag']}":
+                write_json(load_release())
+            else:
+                print(f"unexpected publisher gh endpoint: {endpoint}", file=sys.stderr)
+                raise SystemExit(98)
+            '''
+        ).lstrip(),
+        encoding="utf-8",
+        newline="\n",
+    )
+    mock.chmod(mock.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def publisher_run_record(
+    *, run_id: int, workflow_id: int, name: str, path: str, event: str
+) -> dict[str, object]:
+    return {
+        "id": run_id,
+        "workflow_id": workflow_id,
+        "name": name,
+        "path": path,
+        "event": event,
+        "status": "completed",
+        "conclusion": "success",
+        "repository": {"full_name": REPOSITORY},
+        "head_repository": {"full_name": REPOSITORY},
+        "head_branch": "main",
+        "head_sha": TRUSTED_SHA,
+        "run_attempt": 1,
+    }
+
+
+def write_macos_publisher_fixture(
+    directory: Path, mutation: str | None
+) -> tuple[dict[str, str], Path, dict[str, bytes]]:
+    state = directory / "publisher-state"
+    state.mkdir()
+    fixture_bin = directory / "publisher-bin"
+    fixture_bin.mkdir()
+    write_macos_publisher_jq(fixture_bin)
+    write_macos_publisher_gh(fixture_bin)
+    write_windows_mkdir_compat(fixture_bin)
+    write_windows_shasum_compat(fixture_bin)
+
+    current_run_id = 41001
+    windows_run_id = 41002
+    validation_run_id = 41003
+    ci_run_id = 41004
+    macos_artifact_id = 51001
+    arm_proof_artifact_id = 51002
+    intel_proof_artifact_id = 51003
+    windows_artifact_id = 61001
+    validation_proof_artifact_id = 71001
+    validation_input_artifact_id = 71002
+    release_id = 81001
+
+    initial_payloads = initial_release_asset_payloads()
+    windows_payloads = payloads_with_sidecars(
+        WINDOWS_RELEASE_PAYLOADS, "Windows supplement"
+    )
+    macos_payloads = payloads_with_sidecars(MACOS_RELEASE_PAYLOADS, "macOS")
+    release_payloads = {**initial_payloads, **windows_payloads}
+    if mutation == "destination-collision":
+        del release_payloads["tr-300-installer.ps1"]
+        release_payloads[MACOS_RELEASE_ASSETS[0]] = b"pre-existing macOS destination\n"
+
+    release_directory = state / "release-assets"
+    write_payload_directory(release_directory, release_payloads)
+    release_records = release_asset_records(release_payloads, first_id=91000)
+    release = {
+        "id": release_id,
+        "tag_name": "v4.3.0",
+        "target_commitish": TRUSTED_SHA,
+        "draft": True,
+        "prerelease": False,
+        "assets": release_records,
+    }
+    (state / "release.json").write_text(
+        json.dumps(release, separators=(",", ":")),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    macos_zip = state / "macos-assets.zip"
+    macos_zip_digest = write_payload_zip(macos_zip, macos_payloads)
+    macos_artifact = artifact_record(
+        artifact_id=macos_artifact_id,
+        name="tr300-universal-macos-installer",
+        digest=macos_zip_digest,
+        size=macos_zip.stat().st_size,
+        run_id=current_run_id,
+    )
+
+    source_assets = {
+        "managed": release_payloads["tr300-installer.sh"],
+        "dist": release_payloads["tr300-dist-installer.sh"],
+        "arm": release_payloads["tr300-aarch64-apple-darwin.tar.xz"],
+        "intel": release_payloads["tr300-x86_64-apple-darwin.tar.xz"],
+    }
+    source_digests = {
+        name: hashlib.sha256(content).hexdigest()
+        for name, content in source_assets.items()
+    }
+    source_sizes = {name: len(content) for name, content in source_assets.items()}
+
+    proof_artifacts: list[dict[str, object]] = []
+    artifact_zips: dict[str, str] = {str(macos_artifact_id): macos_zip.as_posix()}
+    artifacts: dict[str, dict[str, object]] = {
+        str(macos_artifact_id): macos_artifact
+    }
+    for arch, proof_id in (
+        ("arm64", arm_proof_artifact_id),
+        ("x86_64", intel_proof_artifact_id),
+    ):
+        proof = {
+            "schema_version": 1,
+            "tag": "v4.3.0",
+            "source_sha": TRUSTED_SHA,
+            "workflow_run_id": current_run_id,
+            "workflow_run_attempt": (
+                2 if mutation == "stale-native-attempt" and arch == "arm64" else 1
+            ),
+            "architecture": arch,
+            "build_artifact_id": macos_artifact_id,
+            "build_artifact_digest": f"sha256:{macos_zip_digest}",
+            "managed_installer": {
+                "digest": f"sha256:{source_digests['managed']}",
+                "size": source_sizes["managed"],
+            },
+            "dist_installer": {
+                "digest": f"sha256:{source_digests['dist']}",
+                "size": source_sizes["dist"],
+            },
+            "aarch64_archive": {
+                "digest": f"sha256:{source_digests['arm']}",
+                "size": source_sizes["arm"],
+            },
+            "x86_64_archive": {
+                "digest": f"sha256:{source_digests['intel']}",
+                "size": source_sizes["intel"],
+            },
+        }
+        proof_name = f"tr300-macos-native-validation-{arch}.json"
+        proof_zip = state / f"{arch}-proof.zip"
+        proof_zip_digest = write_payload_zip(
+            proof_zip,
+            {
+                proof_name: (
+                    json.dumps(proof, separators=(",", ":")) + "\n"
+                ).encode()
+            },
+        )
+        proof_artifact = artifact_record(
+            artifact_id=proof_id,
+            name=f"tr300-macos-native-validation-{arch}-1",
+            digest=proof_zip_digest,
+            size=proof_zip.stat().st_size,
+            run_id=current_run_id,
+        )
+        proof_artifacts.append(proof_artifact)
+        artifacts[str(proof_id)] = proof_artifact
+        artifact_zips[str(proof_id)] = proof_zip.as_posix()
+
+    windows_zip = state / "windows-assets.zip"
+    windows_zip_digest = write_payload_zip(windows_zip, windows_payloads)
+    windows_artifact = artifact_record(
+        artifact_id=windows_artifact_id,
+        name="windows-release-assets",
+        digest=windows_zip_digest,
+        size=windows_zip.stat().st_size,
+        run_id=windows_run_id,
+    )
+    artifacts[str(windows_artifact_id)] = windows_artifact
+    artifact_zips[str(windows_artifact_id)] = windows_zip.as_posix()
+
+    validation_input_content = b"fixture exact Windows validation inputs\n"
+    validation_input_digest = hashlib.sha256(validation_input_content).hexdigest()
+    validation_input_artifact = artifact_record(
+        artifact_id=validation_input_artifact_id,
+        name="windows-validation-inputs",
+        digest=validation_input_digest,
+        size=len(validation_input_content),
+        run_id=validation_run_id,
+    )
+    artifacts[str(validation_input_artifact_id)] = validation_input_artifact
+
+    validation_manifest_records = json.loads(json.dumps(release_records))
+    if mutation == "manifest-draft-divergence":
+        source_record = next(
+            record
+            for record in validation_manifest_records
+            if record["name"] == "source.tar.gz"
+        )
+        source_record["digest"] = f"sha256:{'f' * 64}"
+    validation_manifest = {
+        "schema_version": 1,
+        "validation_mode": "private",
+        "tag": "v4.3.0",
+        "source_sha": TRUSTED_SHA,
+        "upstream_run_id": windows_run_id,
+        "upstream_run_attempt": 1,
+        "windows_artifact_id": windows_artifact_id,
+        "windows_artifact_digest": f"sha256:{windows_zip_digest}",
+        "release_assets": validation_manifest_records,
+    }
+    validation_proof = {
+        "schema_version": 1,
+        "result": "success",
+        "tag": "v4.3.0",
+        "source_sha": TRUSTED_SHA,
+        "windows_run_id": windows_run_id,
+        "windows_run_attempt": 1,
+        "windows_artifact_id": windows_artifact_id,
+        "windows_artifact_digest": f"sha256:{windows_zip_digest}",
+        "validation_run_id": validation_run_id,
+        "validation_run_attempt": 1,
+        "validation_input_artifact_id": validation_input_artifact_id,
+        "validation_input_artifact_digest": f"sha256:{validation_input_digest}",
+    }
+    validation_proof_zip = state / "windows-validation-proof.zip"
+    validation_proof_zip_digest = write_payload_zip(
+        validation_proof_zip,
+        {
+            "windows-installer-validation.json": (
+                json.dumps(validation_proof, separators=(",", ":")) + "\n"
+            ).encode(),
+            "validation-input-manifest.json": (
+                json.dumps(validation_manifest, separators=(",", ":")) + "\n"
+            ).encode(),
+        },
+    )
+    validation_proof_artifact = artifact_record(
+        artifact_id=validation_proof_artifact_id,
+        name="windows-installer-validation-proof",
+        digest=validation_proof_zip_digest,
+        size=validation_proof_zip.stat().st_size,
+        run_id=validation_run_id,
+    )
+    artifacts[str(validation_proof_artifact_id)] = validation_proof_artifact
+    artifact_zips[str(validation_proof_artifact_id)] = (
+        validation_proof_zip.as_posix()
+    )
+
+    windows_run = publisher_run_record(
+        run_id=windows_run_id,
+        workflow_id=int(WINDOWS_WORKFLOW_ID),
+        name="Windows Installers",
+        path=".github/workflows/windows-installers.yml",
+        event="workflow_run",
+    )
+    validation_run = publisher_run_record(
+        run_id=validation_run_id,
+        workflow_id=int(WINDOWS_VALIDATION_WORKFLOW_ID),
+        name="Windows Installer Validation",
+        path=".github/workflows/windows-installer-validation.yml",
+        event="workflow_run",
+    )
+    ci_run = publisher_run_record(
+        run_id=ci_run_id,
+        workflow_id=333333,
+        name="CI",
+        path=".github/workflows/ci.yml",
+        event="push",
+    )
+
+    config = {
+        "mutation": mutation,
+        "repository": REPOSITORY,
+        "repository_id": int(REPOSITORY_ID),
+        "tag": "v4.3.0",
+        "sha": TRUSTED_SHA,
+        "release_id": release_id,
+        "macos_artifact_id": macos_artifact_id,
+        "macos_asset_names": list(MACOS_RELEASE_ASSETS),
+        "workflow_ids": {
+            "ci.yml": 333333,
+            "windows-installers.yml": int(WINDOWS_WORKFLOW_ID),
+            "windows-installer-validation.yml": int(
+                WINDOWS_VALIDATION_WORKFLOW_ID
+            ),
+        },
+        "workflow_runs": {
+            "ci.yml": [ci_run],
+            "windows-installers.yml": [windows_run],
+            "windows-installer-validation.yml": [validation_run],
+        },
+        "runs": {
+            str(windows_run_id): windows_run,
+            str(validation_run_id): validation_run,
+        },
+        "run_artifacts": {
+            str(current_run_id): {
+                "total_count": 3,
+                "artifacts": [macos_artifact, *proof_artifacts],
+            },
+            str(windows_run_id): {
+                "total_count": 1,
+                "artifacts": [windows_artifact],
+            },
+            str(validation_run_id): {
+                "total_count": 2,
+                "artifacts": [validation_proof_artifact, validation_input_artifact],
+            },
+        },
+        "artifacts": artifacts,
+        "artifact_zips": artifact_zips,
+    }
+    (state / "config.json").write_text(
+        json.dumps(config, separators=(",", ":")),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    environment = {
+        "MOCK_MACOS_PUBLISHER_STATE": state.as_posix(),
+        "PUBLISHER_FIXTURE_BIN": fixture_bin.as_posix(),
+        "RELEASE_TAG": "v4.3.0",
+        "EXPECTED_SHA": TRUSTED_SHA,
+        "REPOSITORY": REPOSITORY,
+        "ASSET_DIRECTORY": (directory / "macos-release-assets").as_posix(),
+        "CURRENT_RUN_ID": str(current_run_id),
+        "CURRENT_RUN_ATTEMPT": "1",
+        "MACOS_ARTIFACT_ID": str(macos_artifact_id),
+        "MACOS_ARTIFACT_DIGEST": macos_zip_digest,
+        "SOURCE_MANAGED_INSTALLER_SHA256": source_digests["managed"],
+        "SOURCE_MANAGED_INSTALLER_SIZE": str(source_sizes["managed"]),
+        "SOURCE_DIST_INSTALLER_SHA256": source_digests["dist"],
+        "SOURCE_DIST_INSTALLER_SIZE": str(source_sizes["dist"]),
+        "SOURCE_AARCH64_ARCHIVE_SHA256": source_digests["arm"],
+        "SOURCE_AARCH64_ARCHIVE_SIZE": str(source_sizes["arm"]),
+        "SOURCE_X86_64_ARCHIVE_SHA256": source_digests["intel"],
+        "SOURCE_X86_64_ARCHIVE_SIZE": str(source_sizes["intel"]),
+        "EVENT_NAME": "workflow_run",
+        "DISPATCH_WINDOWS_RUN_ID": "",
+        "DISPATCH_WINDOWS_VALIDATION_RUN_ID": "",
+        "WORKFLOW_SHA": TRUSTED_SHA,
+        "RUNNER_TEMP": directory.as_posix(),
+    }
+    return environment, state, macos_payloads
+
+
+def publisher_gh_mutation(arguments: list[str]) -> str | None:
+    release_mutations = {"create", "delete", "edit", "upload"}
+    if "release" in arguments and any(
+        operation in arguments for operation in release_mutations
+    ):
+        operation = next(
+            operation for operation in release_mutations if operation in arguments
+        )
+        return f"release {operation}"
+
+    if "api" not in arguments:
+        return None
+    methods: list[str] = []
+    has_fields = False
+    for index, argument in enumerate(arguments):
+        if argument in ("--method", "-X"):
+            if index + 1 < len(arguments):
+                methods.append(arguments[index + 1].upper())
+        elif argument.startswith("--method="):
+            methods.append(argument.split("=", 1)[1].upper())
+        elif argument.startswith("-X") and len(argument) > 2:
+            methods.append(argument[2:].upper())
+        elif argument in ("-f", "-F", "--field", "--raw-field", "--input"):
+            has_fields = True
+        elif argument.startswith(("--field=", "--raw-field=", "--input=")):
+            has_fields = True
+    if not methods:
+        methods.append("POST" if has_fields else "GET")
+    mutating = [
+        method for method in methods if method in {"POST", "PUT", "PATCH", "DELETE"}
+    ]
+    return f"api {mutating[0]}" if mutating else None
+
+
+def publisher_gh_read_allowed(arguments: list[str], config: dict[str, object]) -> bool:
+    repository = str(config["repository"])
+    repository_prefix = f"repos/{repository}"
+    tag = str(config["tag"])
+    sha = str(config["sha"])
+
+    if arguments[:2] == ["release", "download"]:
+        if len(arguments) < 7 or arguments[2] != tag:
+            return False
+        repository_value = None
+        destination = None
+        patterns: list[str] = []
+        index = 3
+        while index < len(arguments):
+            option = arguments[index]
+            if option == "--repo" and index + 1 < len(arguments):
+                repository_value = arguments[index + 1]
+                index += 2
+            elif option == "--dir" and index + 1 < len(arguments):
+                destination = arguments[index + 1]
+                index += 2
+            elif option == "--pattern" and index + 1 < len(arguments):
+                patterns.append(arguments[index + 1])
+                index += 2
+            else:
+                return False
+        return (
+            repository_value == repository
+            and bool(destination)
+            and (
+                not patterns
+                or (
+                    len(patterns) == len(WINDOWS_RELEASE_ASSETS)
+                    and set(patterns) == set(WINDOWS_RELEASE_ASSETS)
+                )
+            )
+        )
+
+    if not arguments or arguments[0] != "api" or len(arguments) < 2:
+        return False
+    if publisher_gh_mutation(arguments) is not None:
+        return False
+    endpoint = arguments[1]
+    options = arguments[2:]
+    run_projection = (
+        "[.id, .workflow_id, .name, .path, .event, .status, .conclusion, "
+        ".repository.full_name, .head_repository.full_name, .head_branch, "
+        ".head_sha, .run_attempt] | @tsv"
+    )
+
+    exact_endpoints: dict[str, list[str]] = {
+        repository_prefix: ["--jq", ".id"],
+        f"{repository_prefix}/git/ref/tags/{tag}": [
+            "--jq",
+            ".object | [.type, .sha] | @tsv",
+        ],
+        f"{repository_prefix}/git/ref/heads/main": ["--jq", ".object.sha"],
+        f"{repository_prefix}/releases/tags/{tag}": [],
+    }
+    for workflow in config["workflow_ids"]:
+        exact_endpoints[f"{repository_prefix}/actions/workflows/{workflow}"] = [
+            "--jq",
+            ".id",
+        ]
+    exact_endpoints.update(
+        {
+            f"{repository_prefix}/actions/workflows/windows-installers.yml/runs?head_sha={sha}&status=success&per_page=100": [],
+            f"{repository_prefix}/actions/workflows/windows-installer-validation.yml/runs?head_sha={sha}&status=success&per_page=100": [],
+            f"{repository_prefix}/actions/workflows/ci.yml/runs?event=push&head_sha={sha}&per_page=100": [],
+        }
+    )
+    for run_id in config["runs"]:
+        exact_endpoints[f"{repository_prefix}/actions/runs/{run_id}"] = [
+            "--jq",
+            run_projection,
+        ]
+    for run_id in config["run_artifacts"]:
+        exact_endpoints[
+            f"{repository_prefix}/actions/runs/{run_id}/artifacts?per_page=100"
+        ] = []
+    for artifact_id in config["artifacts"]:
+        exact_endpoints[f"{repository_prefix}/actions/artifacts/{artifact_id}"] = []
+    for artifact_id in config["artifact_zips"]:
+        exact_endpoints[f"{repository_prefix}/actions/artifacts/{artifact_id}/zip"] = []
+    return endpoint in exact_endpoints and options == exact_endpoints[endpoint]
+
+
+def validate_publisher_gh_calls(
+    *,
+    calls: list[list[str]],
+    config: dict[str, object],
+    expected_mutations: list[list[str]],
+    name: str,
+) -> None:
+    mutations: list[list[str]] = []
+    unknown: list[list[str]] = []
+    for call in calls:
+        if publisher_gh_mutation(call) is not None:
+            mutations.append(call)
+        elif not publisher_gh_read_allowed(call, config):
+            unknown.append(call)
+    if unknown:
+        raise AssertionError(f"{name}: non-allowlisted gh invocation(s): {unknown!r}")
+    if mutations != expected_mutations:
+        described_mutations = [
+            (publisher_gh_mutation(call), call) for call in mutations
+        ]
+        raise AssertionError(
+            f"{name}: mutating gh invocation(s) {described_mutations!r} != "
+            f"{expected_mutations!r}"
         )
 
 
@@ -1476,56 +2692,39 @@ def run_macos_publisher_case(
     mock_bin: Path,
     block: str,
     name: str,
-    overrides: dict[str, str] | None = None,
-    artifact_mutation: str | None = None,
+    mutation: str | None,
     expected_success: bool,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="tr300-macos-publisher-") as case_dir_raw:
         case_dir = Path(case_dir_raw)
-        artifact = case_dir / "artifact"
         output = case_dir / "github-output"
         log = case_dir / "gh-calls"
-        write_macos_release_artifact(artifact)
-
-        if artifact_mutation == "extra":
-            (artifact / "unexpected.asset").write_bytes(b"unexpected")
-        elif artifact_mutation == "missing":
-            (artifact / MACOS_RELEASE_ASSETS[-1]).unlink()
-        elif artifact_mutation == "empty":
-            (artifact / MACOS_RELEASE_PAYLOADS[0]).write_bytes(b"")
-        elif artifact_mutation == "directory":
-            target = artifact / MACOS_RELEASE_PAYLOADS[0]
-            target.unlink()
-            target.mkdir()
-        elif artifact_mutation == "bad-checksum":
-            (artifact / f"{MACOS_RELEASE_PAYLOADS[0]}.sha256").write_bytes(
-                f"{'0' * 64} *{MACOS_RELEASE_PAYLOADS[0]}\n".encode()
-            )
-        elif artifact_mutation is not None:
-            raise AssertionError(f"unknown macOS artifact mutation: {artifact_mutation}")
-
         environment = fixture_environment(mock_bin, output, log)
-        environment.update(
-            {
-                "RELEASE_TAG": "v4.3.0",
-                "EXPECTED_SHA": TRUSTED_SHA,
-                "REPOSITORY": REPOSITORY,
-                "ASSET_DIRECTORY": artifact.as_posix(),
-                "MOCK_CURRENT_ASSETS": "\n".join(MACOS_UPSTREAM_SENTINELS),
-            }
+        fixture_environment_values, state, macos_payloads = (
+            write_macos_publisher_fixture(case_dir, mutation)
         )
-        if overrides:
-            environment.update(overrides)
+        fixture_bin = fixture_environment_values.pop("PUBLISHER_FIXTURE_BIN")
+        environment.update(fixture_environment_values)
+        environment["PATH"] = fixture_bin + os.pathsep + environment["PATH"]
+        execution_block = block
+        if os.name == "nt":
+            if "mkdir -m 700 " not in execution_block:
+                raise AssertionError(f"{name}: hosted private-directory guard changed")
+            execution_block = execution_block.replace("mkdir -m 700 ", "mkdir ")
         script = case_dir / "workflow-run.sh"
-        script.write_text(block, encoding="utf-8", newline="\n")
+        script.write_text(execution_block, encoding="utf-8", newline="\n")
+        bash_arguments = [bash]
+        if os.environ.get("TR300_TEST_XTRACE") == "1":
+            bash_arguments.append("-x")
+        bash_arguments.append(str(script))
         result = subprocess.run(
-            [bash, str(script)],
+            bash_arguments,
             cwd=ROOT,
             env=environment,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=15,
+            timeout=45,
             check=False,
         )
         succeeded = result.returncode == 0
@@ -1535,28 +2734,192 @@ def run_macos_publisher_case(
                 f"{expected_success}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
             )
 
-        calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-        upload_arguments = [
-            line.removeprefix("release-upload:")
-            for line in calls
-            if line.startswith("release-upload:")
+        publisher_log = state / "gh-calls.jsonl"
+        calls = [
+            json.loads(line)
+            for line in publisher_log.read_text(encoding="utf-8").splitlines()
+        ]
+        config = json.loads(
+            (state / "config.json").read_text(encoding="utf-8")
+        )
+        asset_directory = Path(environment["ASSET_DIRECTORY"])
+        expected_upload = [
+            "release",
+            "upload",
+            "v4.3.0",
+            "--repo",
+            REPOSITORY,
+            *(f"{asset_directory.as_posix()}/{asset}" for asset in MACOS_RELEASE_ASSETS),
+        ]
+        expected_patch = [
+            "api",
+            "--method",
+            "PATCH",
+            f"repos/{REPOSITORY}/releases/{config['release_id']}",
+            "-F",
+            "draft=false",
+            "-f",
+            "make_latest=true",
+        ]
+        validate_publisher_gh_calls(
+            calls=calls,
+            config=config,
+            expected_mutations=[expected_upload, expected_patch]
+            if expected_success
+            else [],
+            name=name,
+        )
+        uploads = [call for call in calls if call[:2] == ["release", "upload"]]
+        patches = [
+            call
+            for call in calls
+            if call[:3] == ["api", "--method", "PATCH"]
+        ]
+        api_endpoints = [
+            call[1]
+            for call in calls
+            if len(call) >= 2 and call[0] == "api" and call[1] != "--method"
+        ]
+        download_calls = [
+            call for call in calls if call[:2] == ["release", "download"]
         ]
         if expected_success:
-            expected_arguments = [
-                "release",
-                "upload",
-                "v4.3.0",
-                "--repo",
-                REPOSITORY,
-                *(f"{artifact.as_posix()}/{asset}" for asset in MACOS_RELEASE_ASSETS),
-            ]
-            if upload_arguments != expected_arguments:
+            if uploads != [expected_upload]:
                 raise AssertionError(
-                    f"{name}: upload arguments {upload_arguments!r} != "
-                    f"{expected_arguments!r}"
+                    f"{name}: upload calls {uploads!r} != {[expected_upload]!r}"
                 )
-        elif upload_arguments:
-            raise AssertionError(f"{name}: rejected case reached release upload")
+            if patches != [expected_patch]:
+                raise AssertionError(f"{name}: draft promotion call changed: {patches!r}")
+            release = json.loads(
+                (state / "release.json").read_text(encoding="utf-8")
+            )
+            if release.get("draft") is not False or len(release.get("assets", [])) != 34:
+                raise AssertionError(f"{name}: final release state changed: {release!r}")
+            release_names = {record["name"] for record in release["assets"]}
+            expected_names = {
+                *INITIAL_RELEASE_ASSETS,
+                *WINDOWS_RELEASE_ASSETS,
+                *MACOS_RELEASE_ASSETS,
+            }
+            if release_names != expected_names:
+                raise AssertionError(f"{name}: final release inventory changed")
+            for asset_name, expected_bytes in macos_payloads.items():
+                actual = (state / "release-assets" / asset_name).read_bytes()
+                if actual != expected_bytes:
+                    raise AssertionError(f"{name}: uploaded bytes changed for {asset_name}")
+        elif uploads or patches:
+            raise AssertionError(
+                f"{name}: rejected case reached release mutation: "
+                f"uploads={uploads!r}, patches={patches!r}"
+            )
+        if mutation == "stale-native-attempt":
+            if not any(endpoint.endswith("/actions/artifacts/51002/zip") for endpoint in api_endpoints):
+                raise AssertionError(f"{name}: stale proof case did not reach proof validation")
+            if any("actions/workflows/windows-installers.yml" in endpoint for endpoint in api_endpoints):
+                raise AssertionError(f"{name}: stale proof escaped into Windows custody")
+        elif mutation == "manifest-draft-divergence":
+            if not any("/releases/tags/v4.3.0" in endpoint for endpoint in api_endpoints):
+                raise AssertionError(f"{name}: divergent manifest did not reach draft equality")
+            if download_calls:
+                raise AssertionError(f"{name}: divergent manifest reached draft byte download")
+        elif mutation == "macos-artifact-replacement":
+            macos_metadata_endpoint = (
+                f"repos/{REPOSITORY}/actions/artifacts/{environment['MACOS_ARTIFACT_ID']}"
+            )
+            if api_endpoints.count(macos_metadata_endpoint) != 2:
+                raise AssertionError(f"{name}: replacement did not reach the metadata reread")
+        elif mutation == "destination-collision":
+            if len(download_calls) != 1 or not any(
+                "actions/workflows/ci.yml/runs?" in endpoint for endpoint in api_endpoints
+            ):
+                raise AssertionError(f"{name}: collision did not reach the frozen 30-asset inventory")
+
+
+def check_macos_publisher_jq_literal_fidelity(publisher: str) -> None:
+    marker = '.name == "Windows Installers"'
+    marker_index = publisher.find(marker)
+    if marker_index < 0 or publisher.find(marker, marker_index + 1) >= 0:
+        raise AssertionError("macOS publisher jq string-literal marker changed")
+    query_start = publisher.rfind("'", 0, marker_index)
+    query_end = publisher.find("'", marker_index)
+    if query_start < 0 or query_end < 0:
+        raise AssertionError("macOS publisher Windows-run jq filter was not extractable")
+    query = publisher[query_start + 1 : query_end]
+    if not query.strip().startswith(".workflow_runs[] |") or not query.strip().endswith(
+        ") | .id"
+    ):
+        raise AssertionError("macOS publisher Windows-run jq filter boundary changed")
+
+    with tempfile.TemporaryDirectory(prefix="tr300-publisher-jq-fidelity-") as raw:
+        directory = Path(raw)
+        write_macos_publisher_jq(directory)
+        input_path = directory / "windows-runs.json"
+        input_path.write_text(
+            json.dumps(
+                {
+                    "workflow_runs": [
+                        publisher_run_record(
+                            run_id=41002,
+                            workflow_id=int(WINDOWS_WORKFLOW_ID),
+                            name="Windows Installers",
+                            path=".github/workflows/windows-installers.yml",
+                            event="workflow_run",
+                        )
+                    ]
+                },
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        arguments = [
+            sys.executable,
+            str(directory / "jq"),
+            "-r",
+            "--argjson",
+            "workflow_id",
+            WINDOWS_WORKFLOW_ID,
+            "--arg",
+            "repository",
+            REPOSITORY,
+            "--arg",
+            "sha",
+            TRUSTED_SHA,
+        ]
+        accepted = subprocess.run(
+            [*arguments, query, str(input_path)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+        if accepted.returncode != 0 or accepted.stdout.strip() != "41002":
+            raise AssertionError(
+                "macOS publisher jq fixture rejected the exact production filter: "
+                f"return code {accepted.returncode}, stdout={accepted.stdout!r}, "
+                f"stderr={accepted.stderr!r}"
+            )
+
+        mutated_query = query.replace(marker, '.name == "Windows  Installers"', 1)
+        rejected = subprocess.run(
+            [*arguments, mutated_query, str(input_path)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+        if (
+            rejected.returncode != 3
+            or rejected.stdout
+            or "publisher jq fixture rejects unknown filter" not in rejected.stderr
+        ):
+            raise AssertionError(
+                "macOS publisher jq fixture collapsed bytes inside a string literal: "
+                f"return code {rejected.returncode}, stdout={rejected.stdout!r}, "
+                f"stderr={rejected.stderr!r}"
+            )
 
 
 def check_actual_resolvers(
@@ -2102,6 +3465,63 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
             expected_outputs={"attempt": RELEASE_RUN_ATTEMPT} if succeeds else None,
         )
 
+    macos_publisher_cases = (
+        ("exact 30+4 asset publication", None, True),
+        ("stale native proof attempt", "stale-native-attempt", False),
+        (
+            "validation manifest and private draft divergence",
+            "manifest-draft-divergence",
+            False,
+        ),
+        (
+            "macOS build artifact digest replacement",
+            "macos-artifact-replacement",
+            False,
+        ),
+        ("pre-existing macOS destination collision", "destination-collision", False),
+    )
+    check_macos_publisher_jq_literal_fidelity(macos_publisher)
+    for name, mutation, succeeds in macos_publisher_cases:
+        run_macos_publisher_case(
+            bash=bash,
+            mock_bin=mock_bin,
+            block=macos_publisher,
+            name=f"macOS full publisher: {name}",
+            mutation=mutation,
+            expected_success=succeeds,
+        )
+
+    rejection_reach_marker = (
+        'gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \\\n'
+        '  > "$work_directory/validated-draft.json"\n'
+    )
+    if macos_publisher.count(rejection_reach_marker) != 1:
+        raise AssertionError("macOS publisher rejection reach marker changed")
+    adversarial_publisher = macos_publisher.replace(
+        rejection_reach_marker,
+        rejection_reach_marker
+        + 'gh release delete "$RELEASE_TAG" --repo "$REPOSITORY" --yes\n',
+        1,
+    )
+    try:
+        run_macos_publisher_case(
+            bash=bash,
+            mock_bin=mock_bin,
+            block=adversarial_publisher,
+            name="macOS full publisher: adversarial rejected-path mutation",
+            mutation="manifest-draft-divergence",
+            expected_success=False,
+        )
+    except AssertionError as error:
+        if "mutating gh invocation(s)" not in str(error) or "release delete" not in str(error):
+            raise AssertionError(
+                "macOS publisher mutation self-test failed for the wrong reason"
+            ) from error
+    else:
+        raise AssertionError(
+            "macOS publisher accepted an injected rejected-path release deletion"
+        )
+
     macos_outputs = {
         "build": "true",
         "tag": "v4.3.0",
@@ -2461,6 +3881,35 @@ def check_windows_validation_provenance(workflow: str) -> None:
         require(workflow, needle, f"{label} private/public custody")
     prepare = extract_job(workflow, "prepare-validation-inputs", label)
     attest = extract_job(workflow, "attest-private-validation", label)
+    freeze = extract_named_run(
+        prepare,
+        "Download, verify, and bind the exact release inventory",
+        f"{label} frozen release bytes",
+    )
+    downloaded_match_index = freeze.index(
+        '[[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]'
+    )
+    downloaded_capture_index = freeze.index(
+        "downloaded_digest=${BASH_REMATCH[1]}", downloaded_match_index
+    )
+    downloaded_size_index = freeze.index(
+        '[[ "$size" =~ ^[1-9][0-9]*$ ]]', downloaded_capture_index
+    )
+    downloaded_compare_index = freeze.index(
+        '[[ "$actual" == "$downloaded_digest" ]]', downloaded_size_index
+    )
+    if not (
+        downloaded_match_index
+        < downloaded_capture_index
+        < downloaded_size_index
+        < downloaded_compare_index
+    ):
+        raise AssertionError(f"{label}: downloaded digest capture is out of order")
+    if (
+        '[[ "$digest" =~ ^sha256:([0-9a-f]{64})$ &&' in freeze
+        or '[[ "$actual" == "${BASH_REMATCH[1]}" ]]' in freeze
+    ):
+        raise AssertionError(f"{label}: downloaded-byte loop clobbers BASH_REMATCH")
     channel_verify = extract_named_step(
         workflow,
         "Verify reports, channel, registration, PATH, and safe update result",
@@ -3489,6 +4938,34 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "Bind exact supplements, upload macOS assets, and publish the draft",
         f"{label} publisher",
     )
+    previous_digest_compare_index = -1
+    for digest_variable in ("validated_digest", "published_digest"):
+        digest_match_index = executable.index(
+            '[[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]',
+            previous_digest_compare_index + 1,
+        )
+        digest_capture_index = executable.index(
+            f"{digest_variable}=${{BASH_REMATCH[1]}}", digest_match_index
+        )
+        digest_size_index = executable.index(
+            '[[ "$size" =~ ^[1-9][0-9]*$ ]]', digest_capture_index
+        )
+        digest_compare_index = executable.index(
+            f'[[ "$actual" == "${digest_variable}" ]]', digest_size_index
+        )
+        if not (
+            digest_match_index
+            < digest_capture_index
+            < digest_size_index
+            < digest_compare_index
+        ):
+            raise AssertionError(f"{label}: {digest_variable} capture is out of order")
+        previous_digest_compare_index = digest_compare_index
+    if (
+        '[[ "$digest" =~ ^sha256:([0-9a-f]{64})$ &&' in executable
+        or '[[ "$actual" == "${BASH_REMATCH[1]}" ]]' in executable
+    ):
+        raise AssertionError(f"{label}: publisher byte loop clobbers BASH_REMATCH")
     require(executable, STABLE_TAG_PATTERN, f"{label} publisher")
     require(executable, "EXPECTED_SHA", f"{label} publisher")
     require(executable, "git/ref/tags/$tag", f"{label} publisher")
@@ -3609,6 +5086,10 @@ def check_macos_publish_boundary(workflow: str) -> None:
             f"{label}: managed-wrapper manifest/draft custody does not precede publication"
         )
     require(executable, "actions/workflows/ci.yml/runs?event=push", f"{label} exact CI rebind")
+    if executable.count("(.release_assets | length) == 30") != 1:
+        raise AssertionError(
+            f"{label}: publisher must require exactly 30 manifest release assets"
+        )
     require(executable, '[[ ${#existing_assets[@]} -eq 30 ]]', f"{label} draft inventory")
     require(executable, '[[ ${#final_entries[@]} -eq 34 ]]', f"{label} final inventory")
     require(executable, "sha256sum -c sha256.sum", f"{label} final checksums")

@@ -3052,11 +3052,13 @@ jobs:
           )
           [[ ${#validated_draft_entries[@]} -eq 30 ]]
           while IFS=$'\t' read -r name digest size; do
-            [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ && "$size" =~ ^[1-9][0-9]*$ ]]
+            [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]
+            validated_digest=${BASH_REMATCH[1]}
+            [[ "$size" =~ ^[1-9][0-9]*$ ]]
             path="$validated_draft_directory/$name"
             [[ -f "$path" && ! -L "$path" && -s "$path" && "$(stat -c %s "$path")" == "$size" ]]
             actual=$(sha256sum "$path"); actual=${actual%% *}
-            [[ "$actual" == "${BASH_REMATCH[1]}" ]]
+            [[ "$actual" == "$validated_digest" ]]
           done < <(jq -r '.release_assets[] | [.name, .digest, .size] | @tsv' "$validation_manifest")
 
           # Rebind the stable tag to current main, exact CI, and the private
@@ -3213,11 +3215,13 @@ jobs:
                 ($manifest[0].release_assets | sort_by(.name))
             ' "$work_directory/release-published.json" >/dev/null
           while IFS=$'\t' read -r name digest size; do
-            [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ && "$size" =~ ^[1-9][0-9]*$ ]]
+            [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]
+            published_digest=${BASH_REMATCH[1]}
+            [[ "$size" =~ ^[1-9][0-9]*$ ]]
             path="$final_directory/$name"
             [[ "$(stat -c %s "$path")" == "$size" ]]
             actual=$(sha256sum "$path"); actual=${actual%% *}
-            [[ "$actual" == "${BASH_REMATCH[1]}" ]]
+            [[ "$actual" == "$published_digest" ]]
           done < <(jq -r '.assets[] | [.name, .digest, .size] | @tsv' \
             "$work_directory/release-published.json")
           if [[ $patch_status -ne 0 ]]; then
