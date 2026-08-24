@@ -24,7 +24,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   34-file release public. Public updater checks happen only after publication,
   so an unpublished candidate is never mistaken for the public latest release.
 - **Crates.io publishing now uses a short-lived login created for one protected
-  release run.** The package is fully rehearsed without credentials, a fresh
+  release run.** The package is fully rehearsed with only read-only GitHub
+  access and no registry login, a fresh
   runner proves it has the same source and package bytes, and only the final
   upload receives the temporary credential. The old reusable credential is a
   one-time setup bridge and must be removed after the new login is proven.

@@ -297,7 +297,7 @@ jobs:
         env:
           CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
         run: RUSTUP_TOOLCHAIN=1.95 "$CARGO_BIN" test --workspace --all-targets
-      - name: Package and tokenless dry-run
+      - name: Package and registry-credential-free dry-run
         id: package
         env:
           CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}

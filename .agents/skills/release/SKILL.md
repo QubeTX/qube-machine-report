@@ -212,8 +212,9 @@ gh run list --workflow=crates-publish.yml --branch main --limit 3
 gh run watch <run-id>
 ```
 
-The tokenless validator builds and dry-runs the normalized package with exact
-Cargo 1.95, records the exact `.crate` hash, and passes only data to a fresh
+The read-only validator, which has no registry credential, builds and dry-runs
+the normalized package with exact Cargo 1.95, records the exact `.crate` hash,
+and passes only data to a fresh
 `crates-io` environment job. That job executes no package code while an OIDC
 credential exists: it repackages with `--no-verify`, requires byte identity,
 mints a short-lived token, publishes, and verifies the public checksum plus
@@ -295,7 +296,8 @@ fresh Apple signing/notarization customizations. Success looks like 13 jobs:
 - `build-local-artifacts` (6 jobs — one per target: `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`)
 - `sign-apple-artifacts` (2 fresh checkout-free jobs)
 - `build-global-artifacts` (1 job)
-- `prepare-host-assets` (1 tokenless fixed-inventory job)
+- `prepare-host-assets` (1 fixed-inventory job with read-only GitHub
+  authorization and no Release write credential)
 - `host` (1 job)
 - `announce` (1 job)
 

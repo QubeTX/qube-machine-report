@@ -1448,9 +1448,10 @@ At the v4.0.1 release boundary, repository secrets held the PKCS#12, its
 password, API private key, key ID, and issuer ID; repository variables selected
 the signing identity/team. Only the names were documented, and pull-request
 planning did not receive the values. The v4.3 protected-environment decision at
-lines 1698ff supersedes that storage topology: release jobs consume Apple
-credentials only from `apple-signing`, and release is blocked until the
-one-time migration, native ARM/Intel environment-only preflight, repository-
+lines 1698ff supersedes that storage topology after cutover: release jobs must
+consume Apple credentials only from `apple-signing`, and release is blocked
+until the one-time migration, native ARM/Intel environment-only preflight,
+repository-
 secret deletion, and migration-workflow removal are proven.
 
 This bare-archive conclusion applied to the v4.0 cargo-dist artifacts and is
@@ -1789,16 +1790,19 @@ semantics, updater ordering, latest-release behavior, all validators, and the
 complete asset contract; widening one regex is forbidden.
 
 Crates publication is an explicit owner-authorized `workflow_dispatch`, not an
-automatic main-push side effect. A tokenless job binds current protected `main`
+automatic main-push side effect. A read-only job with no registry credential
+binds current protected `main`
 to exact successful CI and performs locked verification plus a default-verifying
 package/publish dry run with Cargo 1.95. A fresh `crates-io` environment runner
-checks out only that exact SHA without credentials, rejects symlinks, special or
+checks out only that exact SHA with read-only GitHub authorization and persisted
+checkout credentials disabled, rejects symlinks, special or
 multiply linked inputs, unsafe Cargo configuration/manifest paths, and archive
 identity drift, then deterministically repackages from an empty private working
 directory under `env -i`. Only after its crate hash equals the validator's does
 the pinned crates.io authentication action mint a short-lived OIDC token. The
 token-bearing step runs only absolute Cargo `publish --locked --no-verify`; a
-separate tokenless step requires crates.io checksum and `trustpub_data` to bind
+separate post-publication step, after the OIDC token is removed, requires
+crates.io checksum and `trustpub_data` to bind
 the public crate to this repository, source SHA, and GitHub run.
 
 One-time cutover is explicit: configure the exact crates.io publisher tuple in

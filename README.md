@@ -460,14 +460,16 @@ protected, exact-source workflows:
   Intel macOS jobs plus AMD64/ARM64 Linux and Windows jobs are blocking, and
   workflow/shell validation runs in the same gate.
 - `Crates.io Publish` is an explicit owner-only dispatch after exact-current-
-  `main` CI. A tokenless Cargo 1.95 job builds and verifies the normalized
+  `main` CI. A read-only Cargo 1.95 job with no registry credential builds and
+  verifies the normalized
   package; a fresh protected `crates-io` job reproduces the exact crate bytes,
   mints a short-lived OIDC token only for `cargo publish --no-verify`, and
   requires the public checksum and trusted-publisher provenance to match the
   repository, run, and source SHA. No push or downstream `workflow_run`
   automatically publishes a crate.
 - `Release` is the cargo-dist workflow triggered by an explicit stable
-  `vX.Y.Z` tag. Tokenless builders and fresh checkout-free Apple signers produce
+  `vX.Y.Z` tag. Builders use only read-only GitHub authorization with checkout
+  credential persistence disabled; fresh checkout-free Apple signers produce
   the cross-platform archives, managed `tr300-installer.*` wrappers, internal
   `tr300-dist-installer.*` transactions, and `tr-300-installer.*` compatibility
   aliases. A fresh publisher creates a **private 24-asset draft**; it never

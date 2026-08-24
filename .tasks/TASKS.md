@@ -10,6 +10,15 @@
 
 ## Active
 
+- [ ] **Harden, merge, and release TR-300 v4.3.0** - qualify the release chain, complete credential cutovers, reconcile PR #14, then run exact-SHA crates/tag/native/public/deployment gates (ms #v43) (owner codex) #r43
+  - [ ] Remediate and independently validate every confirmed release/privilege security finding
+  - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
+  - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
+  - [ ] Merge hardened main into PR #14 and pass final exact-head review and hosted gates
+  - [ ] Merge only the accepted candidate and verify exact-main CI plus crates.io custody
+  - [ ] Push only v4.3.0 and pass the private 24-to-30-to-validated-to-34 publication chain
+  - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
+
 ## Done
 
 - [x] **Record the completed ND-300 v3.7.3 native-installer acceptance** - external operator-approved Alienware update completed without overlap; physical Mac GUI acceptance is optional/deferred behind native Intel/ARM direct-PKG and legacy-DMG gates (ms #hw4) (done 2026-07-18) #nd372

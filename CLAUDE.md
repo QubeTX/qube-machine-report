@@ -417,11 +417,13 @@ repro commands are in the
   `dist-plan`. macOS test/build/speed are hard gates; do not restore the old
   v3.14.5 `continue-on-error` workaround.
 - **`release.yml`** — cargo-dist v0.31.0, exact stable-tag-triggered
-  (`vX.Y.Z`); tokenless builders plus fresh checkout-free Apple signers and
+  (`vX.Y.Z`); read-only builders with no persisted checkout/signing/publication
+  credential plus fresh checkout-free Apple signers and
   publisher. It renders the MIC-1 wrappers and creates only a private exact
   24-asset draft.
 - **`crates-publish.yml`** — explicit owner-only dispatch after exact-main CI.
-  A tokenless Cargo 1.95 validator proves the package bytes; a fresh protected
+  A read-only Cargo 1.95 validator with no registry credential proves the
+  package bytes; a fresh protected
   `crates-io` runner executes no package code while a short-lived OIDC token is
   present, publishes with `--no-verify`, and verifies public hash/provenance.
 - **`windows-installers.yml`** — after the private cargo-dist draft, builds the
@@ -437,10 +439,13 @@ repro commands are in the
   lifecycles, consumes the exact Windows acceptance proof, and is the sole fresh
   publisher that may expose the exact 34-asset stable release.
 
-Workflow sequencing is product logic. Credentialed and contents-write jobs are
+Workflow sequencing is product logic. Apple-signing and contents-write jobs are
 fresh boundaries: no checkout, repository script, or package/dependency code may
-precede or run with Apple secrets or a Release write token. Uncredentialed prep
-binds fixed artifact IDs/digests, run attempts, repository, tag/current-main
+precede or run with Apple secrets or a Release write token. The fresh crates
+publisher is the deliberate exception: it checks out only the exact SHA with
+read-only GitHub authorization and no persisted checkout credential, then runs
+no repository or package code while the short-lived OIDC token exists. Read-only
+prep binds fixed artifact IDs/digests, run attempts, repository, tag/current-main
 SHA, and byte inventories. Keep Xcode 16.4 architecture checks input-first as
 `lipo <file> -verify_arch arm64 x86_64` in builder and validator. A second-hop
 `workflow_run` does not retain transitive tag identity; each resolver peels the
@@ -478,7 +483,8 @@ credentials or any Apple failure blocks the private draft; never add an
 unsigned fallback. The package workflow applies the same data-only-prep/fresh-
 secret boundary to its Installer/Application/notary credentials.
 
-All Apple secrets live in the protected `apple-signing` environment. The
+Before any v4.3 tag or signing run, all Apple secrets must be migrated into the
+protected `apple-signing` environment and the repository copies removed. The
 temporary no-checkout `apple-secret-migration.yml` only copies the exact secret
 set and verifies destination names/policy; it does not delete credentials or
 replace native proof. The operator creates a short-lived fine-grained token
@@ -552,8 +558,9 @@ and release-asset gates.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
 workflow use locked Cargo publication. The fresh OIDC runner executes no
-package code while credentialed: tokenless validation has already built the
-normalized package, and authenticated Cargo uses `--no-verify` only after
+package code while credentialed: read-only validation without a registry
+credential has already built the normalized package, and authenticated Cargo
+uses `--no-verify` only after
 reproducing the exact expected bytes in an empty/config-free boundary. The
 crate must enforce `trustpub_only=true`. The one-time bootstrap uses the legacy
 token only to create the exact publisher tuple, prove OIDC, and enable that

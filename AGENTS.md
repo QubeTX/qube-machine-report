@@ -86,8 +86,11 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   `origin/master` no longer exists)
 - Actions supply-chain runtime: every external action is pinned to a reviewed
   40-hex commit. Checkout jobs use `actions/checkout` v6.1.0 (Node 24) with
-  persisted credentials disabled; privileged publisher jobs deliberately have
-  no checkout. Do not restore mutable action refs or the Node 20-based v4
+  read-only GitHub authorization and persisted checkout credentials disabled.
+  Fresh Apple signers and GitHub Release asset publishers deliberately have no
+  checkout. The crates publisher checks out only the exact SHA under read-only
+  authorization before OIDC and executes no package code while the publish
+  token exists. Do not restore mutable action refs or the Node 20-based v4
   checkout.
 - Release tooling: cargo-dist `0.31.0`
 
@@ -769,8 +772,9 @@ the privileged transaction. A signed/notarized/stapled DMG containing the
 byte-identical PKG is still published only so immutable v4.1.x updaters can cross
 the transition; current clients never use that bridge.
 
-Hosted packaging order is load-bearing. Uncredentialed jobs bind the exact
-Release run ID, attempt, repository, tag/current-main SHA, artifact IDs/digests,
+Hosted packaging order is load-bearing. Read-only preparation jobs without Apple
+signing credentials bind the exact Release run ID, attempt, repository,
+tag/current-main SHA, artifact IDs/digests,
 and fixed input inventories before any Apple secret is available. Fresh
 `apple-signing` jobs have no checkout and execute only inline, reviewed system-
 tool logic over those data-only artifacts. Xcode 16.4 architecture verification
@@ -849,7 +853,8 @@ ceremony; do not invent a cross-signing workaround.
 
 High-level job flow:
 1. `plan` rejects anything except a stable `vX.Y.Z` tag before checkout/build.
-2. `build-local-artifacts` and `build-global-artifacts` run read-only/tokenless.
+2. `build-local-artifacts` and `build-global-artifacts` use read-only GitHub
+   authorization with no persisted checkout, signing, or publication credential.
 3. `sign-apple-artifacts` consumes fixed unsigned artifacts on fresh,
    checkout-free `apple-signing` runners and emits canonical signed archives.
 4. `prepare-host-assets` renders and validates the fixed 24-file base inventory
@@ -908,10 +913,11 @@ a private draft.
 
 The crates.io workflow is intentionally separate from `release.yml` and is
 **manual only** (`workflow_dispatch operation=publish`). It accepts only the
-repository owner on protected current `main` after exact-SHA CI. A tokenless
-validator uses exact Cargo 1.95 to build and dry-run the normalized package and
-records the exact `.crate` hash. A fresh `crates-io` environment job executes no
-repository/package code while credentialed: it repackages with `--no-verify`,
+repository owner on protected current `main` after exact-SHA CI. A read-only
+validator with no registry credential uses exact Cargo 1.95 to build and dry-run
+the normalized package and records the exact `.crate` hash. A fresh protected
+`crates-io` environment job executes no repository/package code while
+credentialed: it repackages with `--no-verify`,
 requires byte equality, mints a short-lived OIDC token, publishes, and proves
 the public checksum plus crates.io trusted-publisher repository/run/SHA
 metadata. `trustpub_only=true` is a blocking policy gate.

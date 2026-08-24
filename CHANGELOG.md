@@ -27,20 +27,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   updater matrix runs only after publication.
 - **Crates.io publication now uses explicit protected-environment OIDC instead
   of exposing a long-lived token to a build runner.** Owner-authorized manual
-  publication first performs locked/default-verifying package checks without
-  credentials. A fresh runner rejects unsafe source/config/archive shapes,
+  publication first performs locked/default-verifying package checks with only
+  read-only GitHub authorization and no registry credential. A fresh runner
+  rejects unsafe source/config/archive shapes,
   deterministically matches the candidate crate, and mints a short-lived token
-  only for the absolute `cargo publish --no-verify` command; tokenless
-  adjudication requires crates.io checksum and trusted-publisher provenance for
-  the exact repository, run, and source SHA. A one-time bootstrap enables
+  only for the absolute `cargo publish --no-verify` command; post-publication
+  adjudication, after the OIDC token is removed, requires crates.io checksum and
+  trusted-publisher provenance for the exact repository, run, and source SHA. A
+  one-time bootstrap enables
   `trustpub_only`; its legacy secret and bootstrap path must then be removed.
 - **Apple release credentials move behind a protected environment and fresh
   no-checkout runners.** The one-time migration copies only the exact secret
   inventory; native Apple Silicon and Intel preflights must then prove both
   Developer ID identities plus read-only notary authentication before the
-  repository copies and migration token are deleted. Release signing jobs use
-  only the `apple-signing` environment and fixed data artifacts, never a source
-  checkout or repository script while credentials are present.
+  repository copies and migration token are deleted. After that required
+  cutover, release signing jobs use only the `apple-signing` environment and
+  fixed data artifacts, never a source checkout or repository script while
+  credentials are present.
 - **Windows release builds use one pinned official Inno Setup toolchain.** CI
   and the installer builder share `install-pinned-inno-setup.ps1`, which fetches
   JRSoftware 6.7.3 and requires its exact size/SHA-256, GitHub attestation,

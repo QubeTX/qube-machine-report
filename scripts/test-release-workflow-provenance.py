@@ -2207,11 +2207,11 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "artifact_digest: ${{ steps.trusted-upload.outputs.artifact-digest }}",
         f"{label} normalized artifact digest output",
     )
-    require(prepare, f"uses: {CHECKOUT_ACTION}", f"{label} uncredentialed prep")
-    require(prepare, f"uses: {DOWNLOAD_ARTIFACT_ACTION}", f"{label} uncredentialed prep")
-    require(prepare, f"uses: {UPLOAD_ARTIFACT_ACTION}", f"{label} uncredentialed prep")
+    require(prepare, f"uses: {CHECKOUT_ACTION}", f"{label} read-only prep")
+    require(prepare, f"uses: {DOWNLOAD_ARTIFACT_ACTION}", f"{label} read-only prep")
+    require(prepare, f"uses: {UPLOAD_ARTIFACT_ACTION}", f"{label} read-only prep")
     if "${{ secrets." in prepare or "environment: apple-signing" in prepare:
-        raise AssertionError(f"{label}: uncredentialed prep gained Apple credentials")
+        raise AssertionError(f"{label}: read-only prep gained Apple credentials")
     require(
         prepare,
         "artifact-ids: ${{ needs.source-custody.outputs.artifact_id }}",
@@ -2380,9 +2380,9 @@ def check_release_token_boundary(workflow: str) -> None:
         raise AssertionError(f"{label}: unexpected fresh Apple signer actions: {signer_uses!r}")
 
     require(prepare, "permissions:\n      actions: read\n      contents: read", label)
-    require(prepare, f"uses: {CHECKOUT_ACTION}", f"{label} tokenless preparation")
-    require(prepare, f"uses: {DOWNLOAD_ARTIFACT_ACTION}", f"{label} tokenless preparation")
-    require(prepare, f"uses: {UPLOAD_ARTIFACT_ACTION}", f"{label} tokenless preparation")
+    require(prepare, f"uses: {CHECKOUT_ACTION}", f"{label} read-only preparation")
+    require(prepare, f"uses: {DOWNLOAD_ARTIFACT_ACTION}", f"{label} read-only preparation")
+    require(prepare, f"uses: {UPLOAD_ARTIFACT_ACTION}", f"{label} read-only preparation")
     require(prepare, "artifact_id: ${{ steps.prepared-upload.outputs.artifact-id }}", label)
     require(prepare, "artifact_digest: ${{ steps.prepared-upload.outputs.artifact-digest }}", label)
     require(prepare, "Render and validate the fixed 24-asset initial release", label)
@@ -2455,7 +2455,7 @@ def check_crates_token_boundary(workflow: str) -> None:
         configure_job, "Create the exact trusted-publisher configuration", label
     )
     validation_package = extract_named_step(
-        validation_job, "Package and tokenless dry-run", label
+        validation_job, "Package and registry-credential-free dry-run", label
     )
     source_gate = extract_named_step(
         validation_job, "Require successful CI for this exact main commit", label
@@ -2551,7 +2551,7 @@ def check_crates_token_boundary(workflow: str) -> None:
         require(validation_package if "package" in needle or "publish" in needle or "env -i" in needle or 'cd "' in needle else validation_job,
                 needle, f"{label} deterministic validator")
     if "--no-verify" in validation_package:
-        raise AssertionError(f"{label}: tokenless validator stopped building packaged bytes")
+        raise AssertionError(f"{label}: registry-credential-free validator stopped building packaged bytes")
 
     require(publish_job, "environment: crates-io", f"{label} publish environment")
     require(publish_job, "id-token: write", f"{label} publish OIDC")
