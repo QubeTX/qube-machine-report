@@ -14,7 +14,7 @@
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last accepted published release; the
 > v4.3.0 section is explicitly an unreleased PR #14 candidate. Its repaired-code
-> local gates pass; exact-head hosted gates remain pending, and the operator has
+> local/hosted PR gates and review pass, and the operator has
 > withheld merge authority. Accepted decisions remain binding
 > until a later dated section explicitly supersedes them. Historical failure
 > evidence is retained because it explains why the guardrails exist.
@@ -90,7 +90,7 @@ claim that its repaired head or every hardware row has passed acceptance.
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; repaired-code local gates pass; exact-head hosted checks pending; merge not authorized | candidate source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; repaired-code local/hosted PR gates and review pass; merge not authorized | candidate source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -2970,10 +2970,11 @@ unusual portable-install scenarios.
 ## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)
 
 **Status:** Unreleased candidate in open PR #14. Review repairs and the full
-repaired-code local gate pass at `d22c438`; exact-head hosted validation remains
-pending. The operator requires the PR to remain open after validation unless
-separately authorizing a merge. This section records the intended product
-contract and rationale, not release acceptance.
+repaired-code local gate pass; head `56b92d7` passed CI 32680492930 and PR-mode
+Release plan 32680492910 with all four review threads resolved. The operator
+requires the PR to remain open after validation unless separately authorizing a
+merge. This section records the intended product contract and rationale, not
+release acceptance.
 
 **Decision 1 — thermals report only trusted sensors, in both `--fast` and full
 mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,
@@ -3043,7 +3044,7 @@ produced medians of 5138.6 ms for the v4.2.2 baseline and 2092.3 ms for the
 candidate: about 3046.3 ms (59.3%) less, a 2.46× runtime ratio. Eleven
 alternating fast-mode runs produced medians of 247.0 ms and 238.9 ms; the
 apparent -3.3% is background-level, so this decision makes no fast-mode
-performance-gain claim. The full repaired-code local gate is recorded in
-`TESTING.md`; exact-head hosted checks remain pending. Passing them will validate
-the candidate but will not authorize merge, publication, or independent AMD64
-Linux/Raspberry Pi physical acceptance.
+performance-gain claim. The full repaired-code local and hosted PR gates are
+recorded in `TESTING.md`. Their success validates the candidate but does not
+authorize merge, publication, or independent AMD64 Linux/Raspberry Pi physical
+acceptance.

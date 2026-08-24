@@ -12,17 +12,16 @@
 
 ## Active
 
-- [ ] **Repair and revalidate v4.3.0 PR #14** - correct platform accuracy, preserve the measurable Windows full-mode gain, prove exact-head CI, and leave the PR open (ms #v43) (owner codex) #v430
+## Done
+
+- [x] **Repair and revalidate v4.3.0 PR #14** - correct platform accuracy, preserve the measurable Windows full-mode gain, prove exact-head CI, and leave the PR open (ms #v43) (owner codex) (done 2026-08-23) #v430
   - [x] Repair Windows launch-relative deadlines and trustworthy NVIDIA-only thermals
   - [x] Repair Linux battery compatibility and deterministic fault-aware thermals
   - [x] Tighten macOS battery parsing and cross-format thermal rendering tests
   - [x] Add `-f/--full` explicit flag
   - [x] Reconcile unreleased docs, task state, and PR claims with measured evidence
   - [x] Pass the full local gate and controlled v4.2.2 comparison
-  - [ ] Push the corrected exact head and pass hosted CI/review without merging
-
-## Done
-
+  - [x] Push the corrected exact head and pass hosted CI/review without merging
 - [x] **Record the completed ND-300 v3.7.3 native-installer acceptance** - external operator-approved Alienware update completed without overlap; physical Mac GUI acceptance is optional/deferred behind native Intel/ARM direct-PKG and legacy-DMG gates (ms #hw4) (done 2026-07-18) #nd372
 - [x] **Codify and ship MIC-1 managed installation behavior** - make CLI installers the documented default, preserve update origin, make fresh managed intent authoritative, and fail closed across unsupported native scope transitions (ms #v42) (owner codex) (done 2026-07-18) #mic1
   - [x] Define the reusable managed-install/update state machine and raw-Cargo boundary

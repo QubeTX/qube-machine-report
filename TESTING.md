@@ -12,16 +12,17 @@ as passed.
 Release status: v4.2.2 is the last published GitHub/crates.io version. The
 working `4.3.0` manifest is on
 `feature/v4.3.0-battery-perf-thermals`. Repairs and the repaired-code local gate
-pass; exact-head hosted revalidation remains pending. The operator requires PR
-#14 to remain open after validation. Earlier branch runs do not certify the
-repaired tree.
+pass. Head `56b92d7` passed CI 32680492930 and PR-mode Release plan 32680492910;
+the combined PR rollup was 20 successes, zero failures, and four publication
+jobs skipped as designed. All four review threads were answered and resolved.
+The operator requires PR #14 to remain open after validation.
 
-- **Repaired-code local gates — pass at `d22c438`:** locked fmt; warnings-denied
+- **Repaired-code local gates — pass on exact head `56b92d7`:** locked fmt; warnings-denied
   all-target/workspace Clippy; 173 library and 22 integration tests; release
   build; 39-file package list; publish dry-run (no upload); audit of 221 locked
   dependencies; cargo-dist plan; actionlint and shellcheck; Linux/macOS cross-
   target check/Clippy; and full/fast table, ASCII, JSON, and thermal runtime
-  smokes all passed. Hosted PR CI on the exact pushed head remains pending.
+  smokes all passed. Exact repaired-head hosted CI is recorded above.
 - **Windows thermal contract:** only an already-detected NVIDIA adapter may
   trigger `nvidia-smi`, and its timeout follows the active collection mode.
   A trusted answer renders `GPU TEMP` and a numeric
@@ -38,7 +39,7 @@ repaired tree.
   2.46× runtime ratio. Eleven alternating fast-mode runs produced medians of
   247.0 ms and 238.9 ms; the apparent -3.3% difference is background-level, so
   make no fast-mode gain claim. These controlled post-repair measurements and
-  the full local gate are complete; exact-head hosted checks remain pending.
+  the full local and exact repaired-head hosted gates are complete.
 - **Linux thermal contract:** both modes use pure sysfs. CPU/GPU selection is
   deterministic, chooses the hottest plausible healthy sensor within the
   preferred class, rejects faulted/unreadable/malformed channels, recognizes
@@ -53,8 +54,8 @@ repaired tree.
   Raspberry Pi "30%" report.
 - **macOS contract:** the `pmset` fallback requires a recognized
   `-InternalBattery-N` record and cannot use an unrelated percentage. macOS
-  reports no thermal values in v4.3. Cross-target check/Clippy passes locally;
-  hosted-native Intel/Apple Silicon candidate gates remain pending.
+  reports no thermal values in v4.3. Cross-target check/Clippy passes locally,
+  and hosted Intel/Apple Silicon tests, builds, and Apple Silicon speed gate pass.
 - **Physical gates still open:** capture the Raspberry Pi's real
   `/sys/class/power_supply/*` and thermal layout, then run the full
   thermal/battery/output matrix there; run the corresponding matrix on the

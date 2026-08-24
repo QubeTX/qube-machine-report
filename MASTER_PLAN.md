@@ -7,8 +7,8 @@
 **Last updated:** 2026-08-23
 **Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.3.0
 (working manifest `4.3.0` is the unreleased candidate in open PR #14 on branch
-`feature/v4.3.0-battery-perf-thermals`; repaired-code local gates pass and
-exact-head hosted revalidation remains pending. The operator requires the PR to
+`feature/v4.3.0-battery-perf-thermals`; repaired-code local/hosted PR gates and
+review pass. The operator requires the PR to
 stay open after validation. v4.2.2 remains the last fully published state.)
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
@@ -25,9 +25,9 @@ stays absent/JSON `null`. macOS requires an InternalBattery record for the
 produced medians of 5138.6 ms and 2092.3 ms (~3046.3 ms, 59.3%, 2.46×), while
 11 alternating fast runs at 247.0 ms and 238.9 ms (-3.3%) are background-level
 and support no gain claim. The explicit `-f/--full` flag is also included.
-The full repaired-code local gate passes at `d22c438`; exact-head hosted checks
-remain pending. Physical AMD64 Linux and Raspberry Pi verification is separate
-and remains open.
+The full repaired-code local gate passes; head `56b92d7` passed CI 32680492930
+and PR-mode Release plan 32680492910 with all four review threads resolved.
+Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 

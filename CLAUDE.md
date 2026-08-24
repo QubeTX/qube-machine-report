@@ -54,8 +54,8 @@ TR-300 is a cross-platform system information report tool written in Rust. It di
 
 Complete GitHub distribution and crates.io package: **4.2.2**. The working
 manifest is **4.3.0** only on the unreleased `feature/v4.3.0-battery-perf-thermals`
-candidate in open PR #14. Repaired-code local gates pass; exact-head hosted
-checks remain pending, and the operator requires the PR to remain open after
+candidate in open PR #14. Repaired-code local gates and exact-head hosted PR
+checks pass, and the operator requires the PR to remain open after
 validation unless separately authorizing a merge. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
@@ -240,9 +240,10 @@ Candidate benchmark contract: seven alternating Windows full-mode runs yielded
 medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
 Eleven alternating fast-mode runs yielded 247.0 ms and 238.9 ms medians; the
 apparent -3.3% is background-level, so never claim a fast-mode gain from this
-change. The full repaired-code local gate passes at `d22c438`; exact-head hosted
-PR #14 checks remain pending. A green PR is not merge, release, or physical-
-hardware acceptance.
+change. The full repaired-code local gate passes, and PR head `56b92d7` passed
+CI 32680492930 plus PR-mode Release plan 32680492910 with all four review
+threads resolved. A green PR is not merge, release, or physical-hardware
+acceptance.
 
 ### Build Script (`build.rs`)
 
@@ -548,7 +549,8 @@ and release-asset gates.
   `windows-installers.yml` and `macos-installer.yml` must finish. The latter
   requires native Intel and Apple Silicon direct-PKG/DMG-bridge validation.
   Verify all 34 expected assets before updating the homepage. For v4.3.0 this
-  remains future release work; PR #14 and its post-repair gates are still open.
+  remains future release work; PR #14 remains open, while merge/release gates
+  require separate operator authorization.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
 workflow use `cargo publish --locked`. `allow-dirty = ["ci", "msi"]` is

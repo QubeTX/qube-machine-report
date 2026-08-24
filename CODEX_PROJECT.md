@@ -11,8 +11,8 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the completed
 MIC-1 release: managed CLI installers are the recommended default, fresh
 installer intent is authoritative, and the Mac native artifact is a direct PKG
 with a compatibility-only DMG bridge. v4.3.0 is an unreleased candidate in open
-PR #14. Repairs and repaired-code local gates pass; exact-head hosted checks are
-pending, and the operator requires the PR to remain open after validation.
+PR #14. Repairs plus repaired-code local/hosted PR gates and review pass, and
+the operator requires the PR to remain open after validation.
 Alienware Windows evidence is captured; AMD64 Linux laptop and Raspberry Pi 4
 checks remain separate and open.
 
@@ -30,9 +30,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   lifecycles, and the fresh 34-asset public-byte audit.
 - Working manifest / candidate: `4.3.0` on
   `feature/v4.3.0-battery-perf-thermals`, open PR #14. It is unreleased and
-  repaired-code local gates pass at `d22c438`; exact-head hosted gates remain
-  pending. No earlier green run proves the repaired head, and the operator has
-  withheld merge authority even after validation.
+  repaired-code local gates pass; head `56b92d7` passed CI 32680492930 and
+  PR-mode Release plan 32680492910 with all four review threads resolved. The
+  operator has withheld merge authority even after validation.
 - The v4.3 candidate adds deterministic, fault-aware hottest-valid Linux
   CPU/GPU thermals (including `soc_thermal`), mode-bounded NVIDIA GPU thermals
   on Windows while Windows CPU stays absent/JSON `null`, no macOS thermals, and
@@ -96,8 +96,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   produced 247.0 ms and 238.9 ms medians; the apparent -3.3% is background-level
   and supports no fast-mode performance claim.
 - PR #14 is open and must remain unmerged by direct operator instruction. The
-  repaired-code local gate passes; exact-head hosted checks remain pending.
-  Physical AMD64 Linux and Raspberry Pi checks are independent evidence debts.
+  repaired candidate's local/hosted gates and review pass. Physical AMD64 Linux
+  and Raspberry Pi checks are independent evidence debts.
 
 ### v4.2.2 managed-install/direct-PKG release closure
 
@@ -217,10 +217,11 @@ do not have to infer platform semantics.
 3. Keep the complete locked local gate set green on the repaired tree: fmt, warnings-
    denied Clippy, all-target tests, package list, publish dry-run, release build,
    audit, cargo-dist plan, workflow/script checks, and required runtime smokes.
-   These gates passed on repaired code commit `d22c438`.
-4. Require hosted PR checks on the exact repaired commit and resolve the review.
-   Leave the PR open. Merge/default-branch/release work requires separate
-   operator authorization and remains in task `#r43`.
+   These gates passed on exact repaired source/docs head `56b92d7`.
+4. Exact repaired-head CI 32680492930 and PR-mode Release plan 32680492910 pass,
+   and all four review threads are resolved. Leave the PR open. Merge/default-
+   branch/release work requires separate operator authorization and remains in
+   task `#r43`.
 5. Create and push only tag `v4.3.0` after main CI and crates publication settle.
    Existing immutable v4 tags must not move.
 6. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify

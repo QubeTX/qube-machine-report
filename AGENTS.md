@@ -56,8 +56,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Current published version: `4.2.2`. Working manifest on the
   `feature/v4.3.0-battery-perf-thermals` branch: `4.3.0`
   (battery hardening, Windows full-mode latency, thermal reporting) in open PR
-  #14. The candidate is unreleased; repaired-code local gates pass and hosted
-  exact-head revalidation remains pending. The operator requires PR #14 to stay
+  #14. The candidate is unreleased; repaired-code local gates and exact-head
+  hosted PR checks pass. The operator requires PR #14 to stay
   open after validation unless separately authorizing a merge. v4.2.2 remains
   the last fully published distribution state.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
@@ -553,9 +553,10 @@ The v4.3 Windows benchmark records seven alternating full-mode runs with
 medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
 Eleven alternating fast runs produced 247.0 ms and 238.9 ms medians; the
 apparent -3.3% is background-level, so documentation and tests must not claim a
-fast-mode performance gain. The full repaired-code local gate passes at
-`d22c438`; exact-head hosted PR checks remain pending. A green PR does not
-authorize merge or establish AMD64 Linux/Raspberry Pi physical acceptance.
+fast-mode performance gain. The full repaired-code local gate passes, and PR
+head `56b92d7` passed CI 32680492930 plus PR-mode Release plan 32680492910 with
+all four review threads resolved. A green PR does not authorize merge or
+establish AMD64 Linux/Raspberry Pi physical acceptance.
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should
