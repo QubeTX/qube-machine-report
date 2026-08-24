@@ -118,9 +118,10 @@ TR300_SHA256SUM_SHIM
     fi
     /bin/chmod 700 "$sha256sum_shim" ||
         tr300_fail 'could not protect the private checksum shim'
-    [ -f "$sha256sum_shim" ] && [ ! -L "$sha256sum_shim" ] &&
-        [ -x "$sha256sum_shim" ] ||
+    if [ ! -f "$sha256sum_shim" ] || [ -L "$sha256sum_shim" ] ||
+        [ ! -x "$sha256sum_shim" ]; then
         tr300_fail 'the private checksum shim is not a regular executable file'
+    fi
     shim_output=$("$sha256sum_shim" -b "$verified_path") ||
         tr300_fail 'the private checksum shim could not hash the cargo-dist installer'
     shim_sha256=${shim_output%% *}

@@ -2605,10 +2605,18 @@ mod tests {
             .path()
             .join(OsString::from_vec(vec![b'p', b'r', b'e', b'f', 0xff]));
         let replacement = root.path().join("pref\u{fffd}");
-        std::fs::create_dir(&invalid).unwrap();
-        std::fs::create_dir(&replacement).unwrap();
 
+        // APFS rejects the invalid-byte component itself, so first exercise
+        // the non-existent-path fallback on every Unix host. Linux then also
+        // proves that successful canonicalization preserves the distinction.
         assert!(!same_path(&invalid, &replacement));
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            std::fs::create_dir(&invalid).unwrap();
+            std::fs::create_dir(&replacement).unwrap();
+            assert!(!same_path(&invalid, &replacement));
+        }
     }
 
     #[cfg(unix)]
