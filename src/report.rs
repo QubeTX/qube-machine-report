@@ -565,6 +565,18 @@ fn generate_markdown(info: &SystemInfo) -> String {
     if let Some(usage) = info.cpu_usage_percent {
         md.push_str(&format!("| CPU Usage | {:.2}% |\n", usage));
     }
+    if let Some(cpu_temp) = info.cpu_temp_celsius.filter(|t| t.is_finite()) {
+        md.push_str(&format!(
+            "| CPU Temp | {} |\n",
+            cell(&format_temperature(cpu_temp, false))
+        ));
+    }
+    if let Some(gpu_temp) = info.gpu_temp_celsius.filter(|t| t.is_finite()) {
+        md.push_str(&format!(
+            "| GPU Temp | {} |\n",
+            cell(&format_temperature(gpu_temp, false))
+        ));
+    }
     if let (Some(l1), Some(l5), Some(l15)) = (info.load_1m, info.load_5m, info.load_15m) {
         md.push_str(&format!("| Load / CPU 1m | {:.2}% |\n", l1));
         md.push_str(&format!("| Load / CPU 5m | {:.2}% |\n", l5));
@@ -644,18 +656,6 @@ fn generate_markdown(info: &SystemInfo) -> String {
     }
     if let Some(ref battery) = info.battery {
         md.push_str(&format!("| Battery | {} |\n", cell(battery)));
-    }
-    if let Some(cpu_temp) = info.cpu_temp_celsius.filter(|t| t.is_finite()) {
-        md.push_str(&format!(
-            "| CPU Temp | {} |\n",
-            cell(&format_temperature(cpu_temp, false))
-        ));
-    }
-    if let Some(gpu_temp) = info.gpu_temp_celsius.filter(|t| t.is_finite()) {
-        md.push_str(&format!(
-            "| GPU Temp | {} |\n",
-            cell(&format_temperature(gpu_temp, false))
-        ));
     }
     if let Some(ref encryption) = info.encryption {
         md.push_str(&format!("| Encryption | {} |\n", cell(encryption)));
@@ -909,6 +909,9 @@ mod tests {
         assert_eq!(value["network"]["machine_ip_scope"], "default_route");
         assert!(value["network"]["client_ip_scope"].is_null());
         assert_eq!(value["disk"]["used_definition"], "allocated_bytes");
+        let cpu = value["cpu"].as_object().expect("cpu should be an object");
+        assert_eq!(cpu.get("temperature_c"), Some(&serde_json::json!(42.0)));
+        assert_eq!(cpu.get("gpu_temperature_c"), Some(&serde_json::Value::Null));
     }
 
     #[test]
@@ -917,6 +920,8 @@ mod tests {
         info.cpu_freq_ghz = f64::NAN;
         info.cpu_usage_percent = Some(f64::INFINITY);
         info.load_1m = Some(f64::NEG_INFINITY);
+        info.cpu_temp_celsius = Some(f64::NAN);
+        info.gpu_temp_celsius = Some(f64::INFINITY);
         info.disk_percent = f64::NAN;
         info.mem_percent = f64::INFINITY;
         info.swap_percent = f64::NEG_INFINITY;
@@ -926,9 +931,84 @@ mod tests {
         assert!(value["cpu"]["frequency_ghz"].is_null());
         assert!(value["cpu"]["usage_percent"].is_null());
         assert!(value["cpu"]["load_1m"].is_null());
+        assert!(value["cpu"]["temperature_c"].is_null());
+        assert!(value["cpu"]["gpu_temperature_c"].is_null());
         assert!(value["disk"]["percent"].is_null());
         assert!(value["memory"]["percent"].is_null());
         assert!(value["memory"]["swap_percent"].is_null());
+    }
+
+    #[test]
+    fn table_formats_thermal_rows_for_unicode_and_ascii_at_fixed_width() {
+        use unicode_width::UnicodeWidthStr;
+
+        let mut info = fixture_info();
+        info.cpu_temp_celsius = Some(42.4);
+        info.gpu_temp_celsius = Some(67.6);
+
+        let unicode = generate_table(&info, &Config::default());
+        let unicode_rows: Vec<_> = unicode
+            .lines()
+            .filter(|line| line.contains("CPU TEMP") || line.contains("GPU TEMP"))
+            .collect();
+        assert_eq!(unicode_rows.len(), 2);
+        assert!(unicode_rows[0].contains("42°C"));
+        assert!(unicode_rows[1].contains("68°C"));
+        assert!(unicode_rows
+            .iter()
+            .all(|line| UnicodeWidthStr::width(*line) == 51));
+
+        let ascii_config = Config {
+            use_unicode: false,
+            ..Config::default()
+        };
+        let ascii = generate_table(&info, &ascii_config);
+        let ascii_rows: Vec<_> = ascii
+            .lines()
+            .filter(|line| line.contains("CPU TEMP") || line.contains("GPU TEMP"))
+            .collect();
+        assert_eq!(ascii_rows.len(), 2);
+        assert!(ascii_rows[0].contains("42 C"));
+        assert!(ascii_rows[1].contains("68 C"));
+        assert!(ascii_rows.iter().all(|line| line.len() == 51));
+        assert!(!ascii_rows.iter().any(|line| line.contains('°')));
+    }
+
+    #[test]
+    fn markdown_places_thermal_rows_in_cpu_section() {
+        let mut info = fixture_info();
+        info.cpu_temp_celsius = Some(42.4);
+        info.gpu_temp_celsius = Some(67.6);
+
+        let markdown = generate_markdown(&info);
+        let cpu_section = markdown
+            .split_once("## CPU\n\n")
+            .and_then(|(_, rest)| rest.split_once("## Storage\n\n"))
+            .map(|(cpu, _)| cpu)
+            .expect("markdown should contain CPU followed by Storage");
+        let session_section = markdown
+            .split_once("## Session\n\n")
+            .map(|(_, session)| session)
+            .expect("markdown should contain Session");
+
+        assert!(cpu_section.contains("| CPU Temp | 42°C |"));
+        assert!(cpu_section.contains("| GPU Temp | 68°C |"));
+        assert!(!session_section.contains("| CPU Temp |"));
+        assert!(!session_section.contains("| GPU Temp |"));
+    }
+
+    #[test]
+    fn table_and_markdown_omit_non_finite_thermal_values() {
+        let mut info = fixture_info();
+        info.cpu_temp_celsius = Some(f64::NAN);
+        info.gpu_temp_celsius = Some(f64::INFINITY);
+
+        let table = generate_table(&info, &Config::default());
+        let markdown = generate_markdown(&info);
+        assert!(!table.contains("CPU TEMP"));
+        assert!(!table.contains("GPU TEMP"));
+        assert!(!markdown.contains("| CPU Temp |"));
+        assert!(!markdown.contains("| GPU Temp |"));
     }
 
     #[test]

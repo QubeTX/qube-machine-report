@@ -553,13 +553,22 @@ fn get_battery() -> Option<String> {
 }
 
 fn parse_pmset_battery(output: &str) -> Option<String> {
-    // Anchor on the `-InternalBattery-N` line when present so a stray
-    // percentage elsewhere in pmset output (wear info, warnings) cannot
+    // Anchor on a recognizable `-InternalBattery-N` record. A stray
+    // percentage elsewhere in pmset output (wear info, warnings) must never
     // masquerade as the system battery charge level.
-    let line = output
-        .lines()
-        .find(|line| line.to_ascii_lowercase().contains("internalbattery") && line.contains('%'))
-        .or_else(|| output.lines().find(|line| line.contains('%')))?;
+    let line = output.lines().find(|line| {
+        let lower = line.trim_start().to_ascii_lowercase();
+        let Some(suffix) = lower.strip_prefix("-internalbattery-") else {
+            return false;
+        };
+        let digits = suffix.bytes().take_while(u8::is_ascii_digit).count();
+        digits > 0
+            && suffix[digits..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_whitespace() || c == '(')
+            && line.contains('%')
+    })?;
     let percentage = line.split_whitespace().find_map(|word| {
         let word = word.trim_matches(|c: char| c == ';' || c == ',');
         let number = word.strip_suffix('%')?.parse::<u8>().ok()?;
@@ -927,6 +936,12 @@ mod tests {
             parse_pmset_battery(output),
             Some("61% (Discharging)".to_string())
         );
+    }
+
+    #[test]
+    fn pmset_battery_rejects_stray_percentage_without_internal_battery() {
+        let output = "Battery wear info: 12%\nAC adapter efficiency: 91%\n";
+        assert_eq!(parse_pmset_battery(output), None);
     }
 
     #[test]

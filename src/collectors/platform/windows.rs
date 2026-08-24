@@ -43,11 +43,6 @@ const WMI_BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10
 /// dedicated cap bounds that waste while leaving healthy probes untouched.
 const BITLOCKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Budget for the ACPI thermal-zone probe (`root\WMI`). Supported boards
-/// answer in tens of milliseconds and most consumer boards fail fast with
-/// "not supported"; a hung provider gets this cap on its own worker thread.
-const THERMAL_WMI_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
-
 /// Result tuple returned by the F22 WMI worker closure: edition,
 /// virtualization, GPU list, battery. Each field carries the raw WMI
 /// answer (or `None` / `Vec::new()` when that specific query was skipped
@@ -65,18 +60,44 @@ type WmiBatchResult = (
     Option<String>,
 );
 
-/// Spawn `f` on a fresh worker thread and return the receiver so callers can
-/// overlap independent bounded probes instead of serializing them.
-fn spawn_with_timeout<F, T>(f: F) -> std::sync::mpsc::Receiver<Option<T>>
+/// Result receiver paired with the deadline established when its worker was
+/// launched. A later `recv` waits only for the budget that remains; it never
+/// starts a fresh timeout after unrelated work has already consumed it.
+struct DeadlineReceiver<T> {
+    receiver: std::sync::mpsc::Receiver<Option<T>>,
+    deadline: std::time::Instant,
+}
+
+impl<T> DeadlineReceiver<T> {
+    fn recv(self) -> Option<T> {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            self.receiver.try_recv().ok().flatten()
+        } else {
+            self.receiver.recv_timeout(remaining).ok().flatten()
+        }
+    }
+}
+
+/// Spawn `f` on a fresh worker thread and retain its launch-relative deadline
+/// so callers can overlap independent bounded probes without serializing their
+/// full timeout budgets.
+fn spawn_with_timeout<F, T>(budget: std::time::Duration, f: F) -> DeadlineReceiver<T>
 where
     F: FnOnce() -> Option<T> + Send + 'static,
     T: Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
+    let deadline = std::time::Instant::now() + budget;
     std::thread::spawn(move || {
         let _ = tx.send(f());
     });
-    rx
+    DeadlineReceiver {
+        receiver: rx,
+        deadline,
+    }
 }
 
 fn with_timeout<F, T>(budget: std::time::Duration, f: F) -> Option<T>
@@ -84,7 +105,7 @@ where
     F: FnOnce() -> Option<T> + Send + 'static,
     T: Send + 'static,
 {
-    spawn_with_timeout(f).recv_timeout(budget).ok().flatten()
+    spawn_with_timeout(budget, f).recv()
 }
 use crate::collectors::command::{run_stdout, CommandTimeout};
 use serde::Deserialize;
@@ -116,16 +137,6 @@ struct Win32ComputerSystem {
 #[serde(rename_all = "PascalCase")]
 struct Win32VideoController {
     name: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename = "MSAcpi_ThermalZoneTemperature")]
-#[serde(rename_all = "PascalCase")]
-struct AcpiThermalZone {
-    #[allow(dead_code)]
-    instance_name: Option<String>,
-    /// Tenths of degrees Kelvin per the ACPI thermal zone spec.
-    current_temperature: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -194,16 +205,11 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     // Cheap native registry walk serves both modes.
     let gpus_fast = get_gpus_fast();
 
-    // In fast mode, skip slow collectors — but keep the two bounded thermal
-    // reads by explicit product decision: nvidia-smi is a single short spawn
-    // gated on an NVIDIA adapter, and the ACPI probe is capped on its own
-    // worker thread (auto-run output shows GPU temperature).
+    // In fast mode, skip slow collectors but retain the bounded NVIDIA thermal
+    // read by explicit product decision. Windows does not expose a trusted
+    // built-in CPU package sensor, so CPU temperature remains absent.
     if mode == CollectMode::Fast {
-        let gpu_temp_celsius = get_gpu_temp_windows(&gpus_fast);
-        let cpu_temp_celsius = spawn_with_timeout(acpi_cpu_temp_worker)
-            .recv_timeout(THERMAL_WMI_TIMEOUT)
-            .ok()
-            .flatten();
+        let gpu_temp_celsius = get_gpu_temp_windows(&gpus_fast, mode);
         return PlatformInfo {
             os_build: None,
             architecture: get_architecture(),
@@ -220,7 +226,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
             cpu_core_topology: get_cpu_core_topology_native(),
             display_resolution: None,
             battery: None,
-            cpu_temp_celsius,
+            cpu_temp_celsius: None,
             gpu_temp_celsius,
             zfs_health: None,
             motherboard: None,
@@ -268,10 +274,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     // — and on SKUs without its WMI provider it hangs to the full timeout,
     // so even overlapped it would dominate the critical path. It now gets a
     // tight dedicated budget (BITLOCKER_TIMEOUT) on its own fresh-COM worker.
-    let bitlocker_rx = spawn_with_timeout(bitlocker_status_inner);
-    // The ACPI thermal-zone probe rides the same concurrency slot: its own
-    // fresh-COM worker, launched now, awaited after the batch.
-    let acpi_rx = spawn_with_timeout(acpi_cpu_temp_worker);
+    let bitlocker_rx = spawn_with_timeout(BITLOCKER_TIMEOUT, bitlocker_status_inner);
 
     let wmi_results: Option<WmiBatchResult> = with_timeout(WMI_BATCH_TIMEOUT, move || {
         let com = COMLibrary::new().ok()?;
@@ -305,8 +308,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     });
 
     // Await the BitLocker probe that started before the batch.
-    let encryption = bitlocker_rx.recv_timeout(BITLOCKER_TIMEOUT).ok().flatten();
-    let cpu_temp_celsius = acpi_rx.recv_timeout(THERMAL_WMI_TIMEOUT).ok().flatten();
+    let encryption = bitlocker_rx.recv();
 
     let (
         windows_edition,
@@ -386,7 +388,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
     // One Toolhelp snapshot serves both terminal and shell detection — they
     // each walked the full process table before.
     let ancestry = process_ancestry();
-    let gpu_temp_celsius = get_gpu_temp_windows(&gpus);
+    let gpu_temp_celsius = get_gpu_temp_windows(&gpus, mode);
 
     PlatformInfo {
         os_build: None,
@@ -404,7 +406,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
         shell: get_shell(&ancestry),
         display_resolution: get_display_resolution(),
         battery,
-        cpu_temp_celsius,
+        cpu_temp_celsius: None,
         gpu_temp_celsius,
         zfs_health: None,
         motherboard,
@@ -428,7 +430,7 @@ pub fn collect(mode: CollectMode) -> PlatformInfo {
 ///
 /// Launched on its own bounded fresh-COM worker thread (`spawn_with_timeout`)
 /// concurrently with the F22 WMI batch — a hung security-namespace WMI
-/// provider is capped at `WMI_TIMEOUT` and no longer serializes behind the
+/// provider is capped at `BITLOCKER_TIMEOUT` and no longer serializes behind the
 /// batch on the platform thread.
 fn bitlocker_status_inner() -> Option<String> {
     use serde::Deserialize;
@@ -528,43 +530,10 @@ fn bitlocker_method_name(method: u32) -> String {
     }
 }
 
-/// Hottest plausible ACPI thermal zone in °C, via `root\WMI`.
-///
-/// Zones are motherboard-defined and frequently absent on consumer boards
-/// ("Not supported" — verified on Dell/Alienware consumer SKUs); absence is
-/// `None` and the row omits itself rather than mislabeling a board sensor as
-/// CPU temperature. When zones exist, the hottest plausible reading is the
-/// closest proxy to an active package sensor.
-fn acpi_cpu_temp_worker() -> Option<f64> {
-    let com = COMLibrary::new().ok()?;
-    let wmi = WMIConnection::with_namespace_path("root\\WMI", com).ok()?;
-    let zones: Vec<AcpiThermalZone> = wmi.query().ok()?;
-    let mut hottest: Option<f64> = None;
-    for zone in &zones {
-        if let Some(celsius) = zone.current_temperature.and_then(kelvin_tenths_to_celsius) {
-            hottest = Some(match hottest {
-                Some(current) if current >= celsius => current,
-                _ => celsius,
-            });
-        }
-    }
-    hottest
-}
-
-/// Pure + testable: tenths of Kelvin → °C inside the plausibility window.
-///
-/// Floor is deliberately 5 °C, above operating ambient for any real chassis:
-/// the documented disabled-sensor sentinel 2732 (≈ 0.05 °C) and its kin must
-/// fail here rather than render as a live reading.
-fn kelvin_tenths_to_celsius(tenths: u32) -> Option<f64> {
-    let celsius = f64::from(tenths) / 10.0 - 273.15;
-    (5.0..150.0).contains(&celsius).then_some(celsius)
-}
-
 /// Discrete GPU temperature via `nvidia-smi` — probed only when an NVIDIA
 /// adapter was detected, so AMD/Intel-only machines never pay the spawn.
 /// Works in both fast and full modes by explicit product decision.
-fn get_gpu_temp_windows(gpus: &[String]) -> Option<f64> {
+fn get_gpu_temp_windows(gpus: &[String], mode: CollectMode) -> Option<f64> {
     if !gpus
         .iter()
         .any(|gpu| gpu.to_ascii_lowercase().contains("nvidia"))
@@ -577,17 +546,27 @@ fn get_gpu_temp_windows(gpus: &[String]) -> Option<f64> {
             "--query-gpu=temperature.gpu",
             "--format=csv,noheader,nounits",
         ],
-        CommandTimeout::Normal,
+        gpu_temp_timeout(mode),
     )?;
     parse_nvidia_smi_temp(&stdout)
 }
 
-/// First CSV line's leading value inside the plausibility window.
-/// Pure + testable.
+fn gpu_temp_timeout(mode: CollectMode) -> CommandTimeout {
+    match mode {
+        CollectMode::Fast => CommandTimeout::Fast,
+        CollectMode::Full => CommandTimeout::Normal,
+    }
+}
+
+/// Hottest valid CSV value inside the plausibility window. Malformed, `N/A`,
+/// non-finite, and out-of-range lines are ignored independently so one broken
+/// adapter cannot hide a valid reading from another NVIDIA GPU.
 fn parse_nvidia_smi_temp(stdout: &str) -> Option<f64> {
-    let first = stdout.lines().next()?;
-    let value = first.split(',').next()?.trim().parse::<f64>().ok()?;
-    (-20.0..150.0).contains(&value).then_some(value)
+    stdout
+        .lines()
+        .filter_map(|line| line.split(',').next()?.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (-20.0..150.0).contains(value))
+        .max_by(f64::total_cmp)
 }
 
 /// Get terminal name using only env vars (no PowerShell)
@@ -2433,10 +2412,13 @@ mod thermal_tests {
     use super::*;
 
     #[test]
-    fn parses_nvidia_smi_first_gpu_temperature() {
+    fn parses_hottest_valid_nvidia_smi_temperature() {
         assert_eq!(parse_nvidia_smi_temp("61\n"), Some(61.0));
-        // CRLF-tolerant; first line wins on multi-GPU output.
-        assert_eq!(parse_nvidia_smi_temp("55\r\n61\r\n"), Some(55.0));
+        assert_eq!(parse_nvidia_smi_temp("55\r\n61\r\n"), Some(61.0));
+        assert_eq!(
+            parse_nvidia_smi_temp("N/A\r\nnot-a-number\n48, ignored\n72\n"),
+            Some(72.0)
+        );
         assert_eq!(parse_nvidia_smi_temp(""), None);
         assert_eq!(parse_nvidia_smi_temp("not-a-number\n"), None);
     }
@@ -2447,18 +2429,68 @@ mod thermal_tests {
         // Below the -20 C floor — no real GPU reports this.
         assert_eq!(parse_nvidia_smi_temp("-40\n"), None);
         assert_eq!(parse_nvidia_smi_temp("-999\n"), None);
+        assert_eq!(parse_nvidia_smi_temp("NaN\ninf\nN/A\n"), None);
     }
 
     #[test]
-    fn kelvin_tenths_conversion_rejects_disabled_sensor_sentinel() {
-        let warm = kelvin_tenths_to_celsius(3007).unwrap();
-        assert!((warm - 27.55).abs() < 1e-9);
-        let hot = kelvin_tenths_to_celsius(3132).unwrap();
-        assert!((hot - 40.05).abs() < 1e-9);
-        // 2732 tenths-K = 0 C is the known disabled/absent sensor sentinel.
-        assert_eq!(kelvin_tenths_to_celsius(2732), None);
-        // Absurd readings fail the plausibility window.
-        assert_eq!(kelvin_tenths_to_celsius(0), None);
-        assert_eq!(kelvin_tenths_to_celsius(u32::MAX), None);
+    fn gpu_temperature_timeout_tracks_collection_mode() {
+        assert_eq!(gpu_temp_timeout(CollectMode::Fast), CommandTimeout::Fast);
+        assert_eq!(gpu_temp_timeout(CollectMode::Full), CommandTimeout::Normal);
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn spawned_probe_uses_its_launch_deadline() {
+        let (release_tx, release_rx) = mpsc::channel();
+        let probe = spawn_with_timeout(Duration::ZERO, move || {
+            release_rx.recv().ok()?;
+            Some(7u8)
+        });
+
+        assert_eq!(probe.recv(), None);
+        release_tx
+            .send(())
+            .expect("release the detached test worker");
+    }
+
+    #[test]
+    fn expired_deadline_does_not_wait_for_a_live_worker() {
+        let (worker_tx, worker_rx) = mpsc::channel::<Option<u8>>();
+        let probe = DeadlineReceiver {
+            receiver: worker_rx,
+            deadline: Instant::now() - Duration::from_secs(1),
+        };
+        let (result_tx, result_rx) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let _ = result_tx.send(probe.recv());
+        });
+
+        // Keep the worker side live so only the already-expired deadline can
+        // make `recv` return. The outer timeout prevents a regression from
+        // hanging the test process indefinitely.
+        let result = result_rx.recv_timeout(Duration::from_millis(250));
+        drop(worker_tx);
+        waiter.join().expect("deadline waiter should not panic");
+        assert_eq!(
+            result.expect("an expired deadline must not start a fresh wait"),
+            None
+        );
+    }
+
+    #[test]
+    fn completed_result_is_available_after_deadline_without_waiting() {
+        let (worker_tx, worker_rx) = mpsc::channel();
+        worker_tx.send(Some(9u8)).expect("queue test result");
+        let probe = DeadlineReceiver {
+            receiver: worker_rx,
+            deadline: Instant::now() - Duration::from_secs(1),
+        };
+        assert_eq!(probe.recv(), Some(9));
     }
 }

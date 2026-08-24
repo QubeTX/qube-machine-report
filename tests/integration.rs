@@ -248,11 +248,19 @@ fn test_json_includes_thermal_keys() {
         .stdout
         .clone();
     let value: Value = serde_json::from_slice(&output).expect("--json output should parse");
-    assert!(value["cpu"]["temperature_c"].is_null() || value["cpu"]["temperature_c"].is_number());
-    assert!(
-        value["cpu"]["gpu_temperature_c"].is_null()
-            || value["cpu"]["gpu_temperature_c"].is_number()
-    );
+    let cpu = value
+        .get("cpu")
+        .and_then(Value::as_object)
+        .expect("cpu should be a JSON object");
+    for key in ["temperature_c", "gpu_temperature_c"] {
+        let reading = cpu
+            .get(key)
+            .unwrap_or_else(|| panic!("cpu.{key} should always be present"));
+        assert!(
+            reading.is_null() || reading.is_number(),
+            "cpu.{key} should be null or a number, got {reading}"
+        );
+    }
 }
 
 #[test]
@@ -263,8 +271,8 @@ fn test_full_flag_is_accepted_and_conflicts_with_fast() {
 
 #[test]
 fn test_ascii_mode_never_emits_degree_sign() {
-    // ASCII mode (and its forced fallbacks) must keep the fixed-width table
-    // free of non-ASCII glyphs, including temperature rows.
+    // Live CLI smoke for the final output contract. Deterministic fixture tests
+    // in report.rs exercise populated thermal rows on sensorless CI runners.
     tr300()
         .args(["--ascii", "--no-elevation-hint"])
         .assert()

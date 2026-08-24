@@ -500,9 +500,9 @@ fn get_battery() -> Option<String> {
 ///   headless SBCs.
 /// - Capacity-only gauges with no measurement file (voltage/current/power)
 ///   report floating register junk; real packs and UPS HATs always expose at
-///   least one live measurement attribute.
-/// - `capacity` is cross-checked against an available `energy_now`/`energy_full`
-///   pair so a stale percentage cannot masquerade as a live reading.
+///   least one live `*_now` or `*_avg` measurement attribute.
+/// - `capacity` is cross-checked against available energy/charge live/full
+///   pairs so a stale percentage cannot masquerade as a live reading.
 /// - `read_dir` order is unspecified; candidates are sorted with `BAT*`
 ///   packs first so multi-supply selection is deterministic across boots.
 fn get_battery_in(dir: &Path) -> Option<String> {
@@ -543,16 +543,25 @@ fn is_plausible_system_battery(base: &Path) -> bool {
     if read_u64_from_file(base.join("present")) == Some(0) {
         return false;
     }
-    let corroborated = [
+    // The power_supply ABI permits signed current/power readings (negative is
+    // commonly used for discharge direction), while voltage/charge/energy
+    // remain nonnegative quantities. Several mainline drivers expose only the
+    // averaged form of a measurement. Any well-formed live reading, including
+    // zero, corroborates the gauge within those type constraints.
+    let nonnegative_measurement = [
         "voltage_now",
-        "current_now",
-        "power_now",
+        "voltage_avg",
         "charge_now",
+        "charge_avg",
         "energy_now",
+        "energy_avg",
     ]
     .iter()
     .any(|attr| read_u64_from_file(base.join(attr)).is_some());
-    if !corroborated {
+    let signed_flow = ["current_now", "current_avg", "power_now", "power_avg"]
+        .iter()
+        .any(|attr| read_i64_from_file(base.join(attr)).is_some());
+    if !nonnegative_measurement && !signed_flow {
         return false;
     }
     // Cross-validate capacity against a charge/energy ratio from one unit
@@ -561,7 +570,12 @@ fn is_plausible_system_battery(base: &Path) -> bool {
     let Some(capacity) = read_u64_from_file(base.join("capacity")) else {
         return true;
     };
-    for (now_attr, full_attr) in [("energy_now", "energy_full"), ("charge_now", "charge_full")] {
+    for (now_attr, full_attr) in [
+        ("energy_now", "energy_full"),
+        ("energy_avg", "energy_full"),
+        ("charge_now", "charge_full"),
+        ("charge_avg", "charge_full"),
+    ] {
         if let (Some(now), Some(full)) = (
             read_u64_from_file(base.join(now_attr)),
             read_u64_from_file(base.join(full_attr)),
@@ -597,33 +611,70 @@ fn get_cpu_temp_celsius() -> Option<f64> {
 }
 
 /// Scan one hwmon device's tempN inputs. Returns `(priority, celsius)`:
-/// priority 0 for an explicitly labeled package/die sensor, 1 for the first
-/// available input.
+/// priority 0 for an explicitly labeled package/die sensor, 1 for any other
+/// available input. Within a priority, the hottest plausible healthy sensor
+/// wins so directory/channel enumeration order cannot affect the result.
 fn hwmon_temp_in_dir(dir: &Path, cpu_labels: bool) -> Option<(u8, f64)> {
-    let mut first: Option<f64> = None;
-    for n in 1..=16u8 {
-        let Some(milli) = read_u64_from_file(dir.join(format!("temp{n}_input"))) else {
+    let mut best: Option<(u8, f64)> = None;
+    let mut channels: Vec<u32> = fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let number = name.strip_prefix("temp")?.strip_suffix("_input")?;
+            if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            let channel = number.parse::<u32>().ok()?;
+            (channel > 0).then_some(channel)
+        })
+        .collect();
+    channels.sort_unstable();
+    channels.dedup();
+    for n in channels {
+        if hwmon_temp_channel_faulted(dir, n) {
+            continue;
+        }
+        let Some(milli) = read_i64_from_file(dir.join(format!("temp{n}_input"))) else {
             continue;
         };
         let celsius = milli as f64 / 1000.0;
+        if !plausible_temp(celsius) {
+            continue;
+        }
         let label = fs::read_to_string(dir.join(format!("temp{n}_label")))
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase();
         let package_hit = cpu_labels
             && (label.contains("package") || matches!(label.as_str(), "tdie" | "tctl" | "cpu"));
-        if package_hit {
-            return Some((0, celsius));
-        }
-        if first.is_none() {
-            first = Some(celsius);
+        let candidate = (u8::from(!package_hit), celsius);
+        if best.is_none_or(|current| {
+            candidate.0 < current.0 || (candidate.0 == current.0 && candidate.1 > current.1)
+        }) {
+            best = Some(candidate);
         }
     }
-    first.map(|t| (1, t))
+    best
+}
+
+/// A present fault attribute must explicitly say zero. Malformed or
+/// unreadable fault state is treated conservatively as a bad channel.
+fn hwmon_temp_channel_faulted(dir: &Path, n: u32) -> bool {
+    match fs::read_to_string(dir.join(format!("temp{n}_fault"))) {
+        Ok(value) => value.trim().parse::<i64>() != Ok(0),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 fn hwmon_cpu_temp_in(hwmon_root: &Path) -> Option<f64> {
-    const CPU_HWMON_NAMES: [&str; 4] = ["coretemp", "k10temp", "zenpower", "cpu_thermal"];
+    const CPU_HWMON_NAMES: [&str; 5] = [
+        "coretemp",
+        "k10temp",
+        "zenpower",
+        "cpu_thermal",
+        "soc_thermal",
+    ];
     let mut best: Option<(u8, f64)> = None;
     for entry in fs::read_dir(hwmon_root).ok()?.flatten() {
         let name = fs::read_to_string(entry.path().join("name"))
@@ -634,12 +685,14 @@ fn hwmon_cpu_temp_in(hwmon_root: &Path) -> Option<f64> {
             continue;
         }
         if let Some(candidate) = hwmon_temp_in_dir(&entry.path(), true) {
-            if best.is_none_or(|(p, _)| candidate.0 < p) {
+            if best.is_none_or(|current| {
+                candidate.0 < current.0 || (candidate.0 == current.0 && candidate.1 > current.1)
+            }) {
                 best = Some(candidate);
             }
         }
     }
-    best.map(|(_, t)| t).filter(|t| plausible_temp(*t))
+    best.map(|(_, t)| t)
 }
 
 fn thermal_zone_cpu_temp_in(thermal_root: &Path) -> Option<f64> {
@@ -650,6 +703,7 @@ fn thermal_zone_cpu_temp_in(thermal_root: &Path) -> Option<f64> {
         .filter(|n| n.starts_with("thermal_zone"))
         .collect();
     zones.sort();
+    let mut best: Option<f64> = None;
     for zone in zones {
         let dir = thermal_root.join(&zone);
         let zone_type = fs::read_to_string(dir.join("type"))
@@ -663,14 +717,14 @@ fn thermal_zone_cpu_temp_in(thermal_root: &Path) -> Option<f64> {
         if !is_cpu {
             continue;
         }
-        if let Some(milli) = read_u64_from_file(dir.join("temp")) {
+        if let Some(milli) = read_i64_from_file(dir.join("temp")) {
             let celsius = milli as f64 / 1000.0;
-            if plausible_temp(celsius) {
-                return Some(celsius);
+            if plausible_temp(celsius) && best.is_none_or(|current| celsius > current) {
+                best = Some(celsius);
             }
         }
     }
-    None
+    best
 }
 
 const GPU_HWMON_NAMES: [&str; 3] = ["amdgpu", "nouveau", "nvidia"];
@@ -680,6 +734,7 @@ fn get_gpu_temp_celsius() -> Option<f64> {
 }
 
 fn get_gpu_temp_celsius_in_hwmons(hwmon_root: &Path) -> Option<f64> {
+    let mut best: Option<f64> = None;
     for entry in fs::read_dir(hwmon_root).ok()?.flatten() {
         let name = fs::read_to_string(entry.path().join("name"))
             .unwrap_or_default()
@@ -689,12 +744,12 @@ fn get_gpu_temp_celsius_in_hwmons(hwmon_root: &Path) -> Option<f64> {
             continue;
         }
         if let Some((_, t)) = hwmon_temp_in_dir(&entry.path(), false) {
-            if plausible_temp(t) {
-                return Some(t);
+            if best.is_none_or(|current| t > current) {
+                best = Some(t);
             }
         }
     }
-    None
+    best
 }
 
 /// Get system locale
@@ -844,6 +899,10 @@ fn battery_health_percent(full: u64, design: u64) -> Option<u8> {
 }
 
 fn read_u64_from_file(path: impl AsRef<Path>) -> Option<u64> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+fn read_i64_from_file(path: impl AsRef<Path>) -> Option<i64> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
@@ -1278,6 +1337,123 @@ mod tests {
     }
 
     #[test]
+    fn battery_selector_accepts_avg_only_measurement() {
+        for (attr, value) in [
+            ("voltage_avg", "11350000\n"),
+            ("current_avg", "125000\n"),
+            ("power_avg", "1418000\n"),
+            ("charge_avg", "3200000\n"),
+            ("energy_avg", "36500000\n"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write_supply_node(
+                dir.path(),
+                "BAT0",
+                &[
+                    BATTERY_TYPE,
+                    ("capacity", "64\n"),
+                    ("status", "Discharging\n"),
+                    (attr, value),
+                ],
+            );
+            assert_eq!(
+                get_battery_in(dir.path()),
+                Some("64% (Discharging)".to_string()),
+                "{attr} should corroborate a system battery"
+            );
+        }
+    }
+
+    #[test]
+    fn battery_selector_accepts_signed_and_zero_flow_measurements() {
+        for (attr, value) in [
+            ("current_now", "-125000\n"),
+            ("current_avg", "0\n"),
+            ("power_now", "-320000\n"),
+            ("power_avg", "0\n"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write_supply_node(
+                dir.path(),
+                "BAT0",
+                &[
+                    BATTERY_TYPE,
+                    ("capacity", "58\n"),
+                    ("status", "Discharging\n"),
+                    (attr, value),
+                ],
+            );
+            assert_eq!(
+                get_battery_in(dir.path()),
+                Some("58% (Discharging)".to_string()),
+                "{attr}={value:?} should corroborate a system battery"
+            );
+        }
+    }
+
+    #[test]
+    fn battery_selector_rejects_device_scope_with_avg_measurement() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "hidpp_battery_1",
+            &[
+                BATTERY_TYPE,
+                ("scope", "Device\n"),
+                ("capacity", "71\n"),
+                ("status", "Discharging\n"),
+                ("current_avg", "-4000\n"),
+            ],
+        );
+        assert_eq!(get_battery_in(dir.path()), None);
+    }
+
+    #[test]
+    fn battery_selector_rejects_malformed_measurement() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "77\n"),
+                ("status", "Discharging\n"),
+                ("current_now", "not-a-reading\n"),
+            ],
+        );
+        assert_eq!(get_battery_in(dir.path()), None);
+    }
+
+    #[test]
+    fn battery_selector_rejects_negative_nonnegative_measurements() {
+        for attr in [
+            "voltage_now",
+            "voltage_avg",
+            "charge_now",
+            "charge_avg",
+            "energy_now",
+            "energy_avg",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            write_supply_node(
+                dir.path(),
+                "BAT0",
+                &[
+                    BATTERY_TYPE,
+                    ("capacity", "73\n"),
+                    ("status", "Discharging\n"),
+                    (attr, "-1\n"),
+                ],
+            );
+            assert_eq!(
+                get_battery_in(dir.path()),
+                None,
+                "negative {attr} must not corroborate a system battery"
+            );
+        }
+    }
+
+    #[test]
     fn battery_selector_cross_validates_capacity_against_charge_ratio() {
         let dir = tempfile::tempdir().unwrap();
         write_supply_node(
@@ -1310,6 +1486,25 @@ mod tests {
             get_battery_in(dir.path()),
             Some("88% (Discharging)".to_string())
         );
+    }
+
+    #[test]
+    fn battery_selector_cross_validates_capacity_against_avg_energy_ratio() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "20\n"),
+                ("status", "Discharging\n"),
+                ("energy_avg", "4500\n"),
+                ("energy_full", "5000\n"),
+            ],
+        );
+        // Average-only corroboration must not bypass the existing capacity
+        // safeguard: the live/full ratio is 90%, not the reported 20%.
+        assert_eq!(get_battery_in(dir.path()), None);
     }
 
     #[test]
@@ -1449,6 +1644,94 @@ Memory Device
     }
 
     #[test]
+    fn hwmon_cpu_temp_accepts_signed_millidegrees() {
+        let root = tempfile::tempdir().unwrap();
+        let coretemp = root.path().join("hwmon0");
+        fs::create_dir_all(&coretemp).unwrap();
+        fs::write(coretemp.join("name"), "coretemp\n").unwrap();
+        fs::write(coretemp.join("temp1_label"), "Package id 0\n").unwrap();
+        fs::write(coretemp.join("temp1_input"), "-10000\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), Some(-10.0));
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_skips_faulted_and_malformed_channels() {
+        let root = tempfile::tempdir().unwrap();
+        let coretemp = root.path().join("hwmon0");
+        fs::create_dir_all(&coretemp).unwrap();
+        fs::write(coretemp.join("name"), "coretemp\n").unwrap();
+        fs::write(coretemp.join("temp1_label"), "Package id 0\n").unwrap();
+        fs::write(coretemp.join("temp1_input"), "90000\n").unwrap();
+        fs::write(coretemp.join("temp1_fault"), "1\n").unwrap();
+        fs::write(coretemp.join("temp2_label"), "Package id 1\n").unwrap();
+        fs::write(coretemp.join("temp2_input"), "85000\n").unwrap();
+        fs::write(coretemp.join("temp2_fault"), "unknown\n").unwrap();
+        fs::write(coretemp.join("temp3_label"), "Package id 2\n").unwrap();
+        fs::write(coretemp.join("temp3_input"), "47000\n").unwrap();
+        fs::write(coretemp.join("temp3_fault"), "0\n").unwrap();
+        fs::write(coretemp.join("temp4_input"), "not-a-temperature\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), Some(47.0));
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_rejects_only_faulted_channel() {
+        let root = tempfile::tempdir().unwrap();
+        let coretemp = root.path().join("hwmon0");
+        fs::create_dir_all(&coretemp).unwrap();
+        fs::write(coretemp.join("name"), "coretemp\n").unwrap();
+        fs::write(coretemp.join("temp1_label"), "Package id 0\n").unwrap();
+        fs::write(coretemp.join("temp1_input"), "55000\n").unwrap();
+        fs::write(coretemp.join("temp1_fault"), "1\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), None);
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_discovers_high_numbered_channels_and_honors_faults() {
+        let root = tempfile::tempdir().unwrap();
+        let coretemp = root.path().join("hwmon0");
+        fs::create_dir_all(&coretemp).unwrap();
+        fs::write(coretemp.join("name"), "coretemp\n").unwrap();
+        fs::write(coretemp.join("temp1_label"), "Package id 0\n").unwrap();
+        fs::write(coretemp.join("temp1_input"), "45000\n").unwrap();
+        fs::write(coretemp.join("temp17_label"), "Package id 1\n").unwrap();
+        fs::write(coretemp.join("temp17_input"), "72000\n").unwrap();
+
+        assert_eq!(hwmon_cpu_temp_in(root.path()), Some(72.0));
+
+        fs::write(coretemp.join("temp17_fault"), "1\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), Some(45.0));
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_chooses_hottest_package_across_devices() {
+        for hotter_in_first_name in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            for (name, temp) in if hotter_in_first_name {
+                [("hwmon0", "71000\n"), ("hwmon9", "43000\n")]
+            } else {
+                [("hwmon0", "43000\n"), ("hwmon9", "71000\n")]
+            } {
+                let device = root.path().join(name);
+                fs::create_dir_all(&device).unwrap();
+                fs::write(device.join("name"), "coretemp\n").unwrap();
+                fs::write(device.join("temp1_label"), "Package id 0\n").unwrap();
+                fs::write(device.join("temp1_input"), temp).unwrap();
+            }
+            assert_eq!(hwmon_cpu_temp_in(root.path()), Some(71.0));
+        }
+    }
+
+    #[test]
+    fn hwmon_cpu_temp_recognizes_soc_thermal() {
+        let root = tempfile::tempdir().unwrap();
+        let soc = root.path().join("hwmon0");
+        fs::create_dir_all(&soc).unwrap();
+        fs::write(soc.join("name"), "soc_thermal\n").unwrap();
+        fs::write(soc.join("temp1_input"), "52123\n").unwrap();
+        assert_eq!(hwmon_cpu_temp_in(root.path()), Some(52.123));
+    }
+
+    #[test]
     fn thermal_zone_fallback_matches_pi_style_cpu_zones() {
         let root = tempfile::tempdir().unwrap();
         let acpitz = root.path().join("thermal_zone0");
@@ -1464,6 +1747,24 @@ Memory Device
     }
 
     #[test]
+    fn thermal_zone_fallback_chooses_hottest_cpu_zone() {
+        for hotter_in_first_name in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            for (name, temp) in if hotter_in_first_name {
+                [("thermal_zone0", "68000\n"), ("thermal_zone9", "41000\n")]
+            } else {
+                [("thermal_zone0", "41000\n"), ("thermal_zone9", "68000\n")]
+            } {
+                let zone = root.path().join(name);
+                fs::create_dir_all(&zone).unwrap();
+                fs::write(zone.join("type"), "cpu_thermal\n").unwrap();
+                fs::write(zone.join("temp"), temp).unwrap();
+            }
+            assert_eq!(thermal_zone_cpu_temp_in(root.path()), Some(68.0));
+        }
+    }
+
+    #[test]
     fn gpu_hwmon_temp_reads_amdgpu_device() {
         let root = tempfile::tempdir().unwrap();
         let amdgpu = root.path().join("hwmon3");
@@ -1473,5 +1774,29 @@ Memory Device
         assert_eq!(get_gpu_temp_celsius_in_hwmons(root.path()), Some(38.0));
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(get_gpu_temp_celsius_in_hwmons(empty.path()), None);
+    }
+
+    #[test]
+    fn gpu_hwmon_temp_chooses_hottest_channel_across_devices() {
+        for hotter_in_first_name in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let (first_temp, second_temp) = if hotter_in_first_name {
+                ("73000\n", "61000\n")
+            } else {
+                ("61000\n", "73000\n")
+            };
+            let amdgpu = root.path().join("hwmon0");
+            fs::create_dir_all(&amdgpu).unwrap();
+            fs::write(amdgpu.join("name"), "amdgpu\n").unwrap();
+            fs::write(amdgpu.join("temp1_input"), "42000\n").unwrap();
+            fs::write(amdgpu.join("temp2_input"), first_temp).unwrap();
+
+            let nouveau = root.path().join("hwmon9");
+            fs::create_dir_all(&nouveau).unwrap();
+            fs::write(nouveau.join("name"), "nouveau\n").unwrap();
+            fs::write(nouveau.join("temp1_input"), second_temp).unwrap();
+
+            assert_eq!(get_gpu_temp_celsius_in_hwmons(root.path()), Some(73.0));
+        }
     }
 }
