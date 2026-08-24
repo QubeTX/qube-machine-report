@@ -915,6 +915,22 @@ mod tests {
     }
 
     #[test]
+    fn json_preserves_absent_cpu_and_finite_gpu_temperature_keys() {
+        let mut info = fixture_info();
+        info.cpu_temp_celsius = None;
+        info.gpu_temp_celsius = Some(67.5);
+
+        let value: serde_json::Value = serde_json::from_str(&generate_json(&info))
+            .expect("thermal fixture should produce valid JSON");
+        let cpu = value
+            .get("cpu")
+            .and_then(serde_json::Value::as_object)
+            .expect("cpu should be a JSON object");
+        assert_eq!(cpu.get("temperature_c"), Some(&serde_json::Value::Null));
+        assert_eq!(cpu.get("gpu_temperature_c"), Some(&serde_json::json!(67.5)));
+    }
+
+    #[test]
     fn json_converts_non_finite_metrics_to_null() {
         let mut info = fixture_info();
         info.cpu_freq_ghz = f64::NAN;

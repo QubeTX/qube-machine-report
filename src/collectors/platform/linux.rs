@@ -1511,6 +1511,25 @@ mod tests {
     }
 
     #[test]
+    fn battery_selector_cross_validates_capacity_against_avg_charge_ratio() {
+        let dir = tempfile::tempdir().unwrap();
+        write_supply_node(
+            dir.path(),
+            "BAT0",
+            &[
+                BATTERY_TYPE,
+                ("capacity", "20\n"),
+                ("status", "Discharging\n"),
+                ("charge_avg", "4000\n"),
+                ("charge_full", "5000\n"),
+            ],
+        );
+        // The charge-family average/full ratio is 80%, so it must reject the
+        // contradictory 20% capacity just like the energy-family path does.
+        assert_eq!(get_battery_in(dir.path()), None);
+    }
+
+    #[test]
     fn battery_selector_prefers_bat_named_nodes_deterministically() {
         for peripheral_first in [true, false] {
             let dir = tempfile::tempdir().unwrap();
@@ -1801,5 +1820,24 @@ Memory Device
 
             assert_eq!(get_gpu_temp_celsius_in_hwmons(root.path()), Some(73.0));
         }
+    }
+
+    #[test]
+    fn gpu_hwmon_temp_ignores_hotter_faulted_channel() {
+        let root = tempfile::tempdir().unwrap();
+        let amdgpu = root.path().join("hwmon0");
+        fs::create_dir_all(&amdgpu).unwrap();
+        fs::write(amdgpu.join("name"), "amdgpu\n").unwrap();
+        fs::write(amdgpu.join("temp1_input"), "95000\n").unwrap();
+        fs::write(amdgpu.join("temp1_fault"), "1\n").unwrap();
+        fs::write(amdgpu.join("temp2_input"), "60000\n").unwrap();
+        fs::write(amdgpu.join("temp2_fault"), "0\n").unwrap();
+
+        let nouveau = root.path().join("hwmon9");
+        fs::create_dir_all(&nouveau).unwrap();
+        fs::write(nouveau.join("name"), "nouveau\n").unwrap();
+        fs::write(nouveau.join("temp1_input"), "70000\n").unwrap();
+
+        assert_eq!(get_gpu_temp_celsius_in_hwmons(root.path()), Some(70.0));
     }
 }

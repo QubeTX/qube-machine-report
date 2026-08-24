@@ -264,6 +264,12 @@ fn test_json_includes_thermal_keys() {
             "cpu.{key} should be null or a number, got {reading}"
         );
     }
+    #[cfg(windows)]
+    assert_eq!(
+        cpu.get("temperature_c"),
+        Some(&Value::Null),
+        "Windows CPU temperature must remain explicitly null"
+    );
 }
 
 #[test]

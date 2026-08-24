@@ -302,6 +302,15 @@ mod tests {
     use super::{run_output, CommandTimeout};
 
     #[test]
+    fn command_timeout_durations_match_probe_contract() {
+        assert_eq!(CommandTimeout::Fast.duration(), Duration::from_millis(300));
+        assert_eq!(
+            CommandTimeout::Normal.duration(),
+            Duration::from_millis(1500)
+        );
+    }
+
+    #[test]
     fn command_helper_returns_successful_output() {
         #[cfg(unix)]
         let output = run_output("sh", ["-c", "printf ok"], CommandTimeout::Normal)

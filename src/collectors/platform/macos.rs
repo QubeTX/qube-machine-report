@@ -556,19 +556,22 @@ fn parse_pmset_battery(output: &str) -> Option<String> {
     // Anchor on a recognizable `-InternalBattery-N` record. A stray
     // percentage elsewhere in pmset output (wear info, warnings) must never
     // masquerade as the system battery charge level.
-    let line = output.lines().find(|line| {
-        let lower = line.trim_start().to_ascii_lowercase();
-        let Some(suffix) = lower.strip_prefix("-internalbattery-") else {
-            return false;
-        };
-        let digits = suffix.bytes().take_while(u8::is_ascii_digit).count();
-        digits > 0
-            && suffix[digits..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_whitespace() || c == '(')
-            && line.contains('%')
-    })?;
+    output.lines().find_map(parse_pmset_battery_line)
+}
+
+fn parse_pmset_battery_line(line: &str) -> Option<String> {
+    let lower = line.trim_start().to_ascii_lowercase();
+    let suffix = lower.strip_prefix("-internalbattery-")?;
+    let digits = suffix.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0
+        || !suffix[digits..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_whitespace() || c == '(')
+        || !line.contains('%')
+    {
+        return None;
+    }
     let percentage = line.split_whitespace().find_map(|word| {
         let word = word.trim_matches(|c: char| c == ';' || c == ',');
         let number = word.strip_suffix('%')?.parse::<u8>().ok()?;
@@ -942,6 +945,15 @@ mod tests {
     fn pmset_battery_rejects_stray_percentage_without_internal_battery() {
         let output = "Battery wear info: 12%\nAC adapter efficiency: 91%\n";
         assert_eq!(parse_pmset_battery(output), None);
+    }
+
+    #[test]
+    fn pmset_battery_skips_invalid_internal_record_before_valid_one() {
+        let output = " -InternalBattery-0\t255%; charging\n -InternalBattery-1 (id=8)\t72%; discharging; 3:00 remaining\n";
+        assert_eq!(
+            parse_pmset_battery(output),
+            Some("72% (Discharging)".to_string())
+        );
     }
 
     #[test]
