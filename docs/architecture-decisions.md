@@ -13,10 +13,9 @@
 > **Coverage reconciled through 2026-08-24.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last accepted published release; the
-> v4.3.0 section is explicitly an unreleased PR #14 candidate. Its original
-> repaired-code local/hosted PR gates passed; release-chain hardening landed on
-> `main`, and the integrated candidate is being requalified under the operator's
-> explicit merge and release authority. Accepted decisions remain binding
+> v4.3.0 section describes a merged but not-yet-published release candidate.
+> PR #14 exact head passed local, hosted, security, review, and benchmark gates,
+> merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
 > until a later dated section explicitly supersedes them. Historical failure
 > evidence is retained because it explains why the guardrails exist.
 
@@ -85,17 +84,17 @@ This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
 the testing ledger, technical and human changelogs, agent guides, and the public
 v4.2.2 release state. The accepted published decision set ends at v4.2.2. The
-v4.3.0 rows describe an unreleased candidate: the original feature head and
-the release-chain hardening on PR #15 and exact `main` passed their respective
-gates, while the newly integrated candidate and release-only gates still
-require exact-SHA proof.
+v4.3.0 rows describe a merged, unreleased candidate: release-chain hardening and
+the final integrated PR #14 head passed their local/hosted gates, PR #14 merged
+as `2f997d2`, and exact-main CI `32766014047` passed. Automatic crates
+publication and the tagged release-only gates remain separate exact-SHA proof.
 
 | Decision family | Status | Enforcement / source of truth |
 |---|---|---|
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; integrated source/test head passed local gates and review; final pushed exact-head hosted/security requalification required | candidate source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Merged unreleased candidate; PR head and exact-main local/hosted/security/review gates passed; tagged release and physical Linux/Pi proof remain open | candidate source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -1603,19 +1602,18 @@ Before mutation, the audit established:
 4. Update canonical release skills, agent guides, project status, testing
    ledger, handoff, changelogs, and planning documents. Preserve historical
    `master` references where rewriting them would falsify old evidence.
-5. Deliver release work through the protected pull-request path. The v4.3
-   rulesets and privileged-workflow decision supersede the original direct-
-   default-branch delivery route; branch naming changes the route, not the
-   standard.
+5. Deliver release work through a focused, reviewed pull request and merge only
+   after its required checks pass. Hosted enforcement may evolve, but the
+   evidence standard must not depend on adding routine maintainer ceremony.
 
 #### Workflow topology and exact-SHA boundary
 
-The current protected release topology is:
+The current release topology is:
 
 ```text
-protected PR merge to main
-  -> exact-current-main CI (strict required contexts)
-  -> owner-only manual Crates.io Publish (fresh protected OIDC boundary)
+reviewed PR merge to main
+  -> exact-current-main CI (required contexts)
+  -> automatic Crates.io Publish for that successful CI run (fresh protected OIDC boundary)
   -> explicit stable vX.Y.Z tag
        -> Release creates a private 24-asset draft
        -> Windows Installers assembles 30 private assets
@@ -1624,11 +1622,11 @@ protected PR merge to main
        -> public updater and published Linux/macOS smokes
 ```
 
-The post-rename `workflow_run` crates chain and its already-published 4.0.1
-skip remain valid historical evidence, but they are no longer an active
-publication route. The v4.3 decision at lines 1698ff replaces that long-lived-
-token/same-runner design with explicit exact-main dispatch, protected OIDC,
-private-draft composition, and byte-bound acceptance before visibility.
+The post-rename `workflow_run` crates chain and its already-published 4.0.1 skip
+remain historical evidence for automatic/idempotent ergonomics. v4.3 retains
+that no-click successful-main-CI trigger while replacing its long-lived-token,
+same-runner design with protected OIDC, exact tested-SHA custody, fresh-runner
+byte reproduction, and post-public provenance adjudication.
 
 Tags remain the only binary-release trigger. A branch/workflow/documentation
 change with unchanged `Cargo.toml` does not justify a version bump, retag, or
@@ -1855,10 +1853,10 @@ decision covering crates, MSI version mapping and bounds, macOS package version
 semantics, updater ordering, latest-release behavior, all validators, and the
 complete asset contract; widening one regex is forbidden.
 
-Crates publication is an explicit owner-authorized `workflow_dispatch`, not an
-automatic main-push side effect. A read-only job with no registry credential
-binds current protected `main`
-to exact successful CI and performs locked verification plus a default-verifying
+Crates publication automatically consumes a successful same-repository `CI`
+push run on `main`. A read-only job with no registry credential revalidates the
+upstream workflow ID, path, event, repository, branch, run attempt, SHA, and
+conclusion, binds current `main` to that exact successful CI, and performs locked verification plus a default-verifying
 package/publish dry run with Cargo 1.95. A fresh `crates-io` environment runner
 checks out only that exact SHA with read-only GitHub authorization and persisted
 checkout credentials disabled, rejects symlinks, special or
@@ -1871,19 +1869,20 @@ separate post-publication step, after the OIDC token is removed, requires
 crates.io checksum and `trustpub_data` to bind
 the public crate to this repository, source SHA, and GitHub run.
 
-One-time cutover is explicit: configure the exact crates.io publisher tuple in
-the protected `crates-io` environment, prove OIDC, enable `trustpub_only`, then
-revoke the legacy token in the authenticated crates.io UI and delete the GitHub
-secret. A protected follow-up PR removes the bootstrap operation and every
-`CARGO_REGISTRY_TOKEN` reference; an explicit OIDC-only probe must still pass
-after removal. Routine publication fails closed unless public
+The one-time cutover configured the exact crates.io publisher tuple, proved
+OIDC, and enabled `trustpub_only`. Steady-state workflow code contains no
+bootstrap operation or reusable-token reference; the optional OIDC probe is
+diagnostics only. Retire the now-unused legacy token and GitHub secret after the
+first automatic publication proves the no-click path, so the cutover cannot
+interrupt a release. Routine publication fails closed unless public
 `trustpub_only == true`.
 
-Hosted repository enforcement recorded on 2026-08-24 is part of this decision:
-main ruleset `21268055` requires a PR, resolved conversations, and the strict 19
-Actions contexts bound to integration ID `15368`, with delete/force blocked;
-tag-creation ruleset `21268058` permits only actor `30877743` to create `v*`;
-immutable-tag ruleset `21268059` blocks every `v*` update and deletion.
+Hosted tag enforcement recorded on 2026-08-24 is part of this decision:
+tag-creation ruleset `21268058` permits actor `30877743` to create `v*`, and
+immutable-tag ruleset `21268059` blocks every `v*` update and deletion. The
+same-day main-only PR ruleset was removed because it added maintainer ceremony
+beyond the requested release workflow; reviewed PRs and green CI remain the
+release procedure without a new mandatory approval mechanism.
 
 ### Privileged package launch and rollback boundaries (v4.3 candidate)
 
@@ -3301,15 +3300,13 @@ unusual portable-install scenarios.
 
 ## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)
 
-**Status:** Unreleased candidate in open PR #14. Original feature head
-`b068f65` passed CI 32681025189 and PR-mode Release plan 32681025173 after the
-earlier `56b92d7` local/hosted qualification and resolution of all four review
-threads. Release-chain hardening landed on `main` as `1ffb0cc`, whose exact-main
-CI 32759430269 passed all 19 jobs, including native Intel and Apple Silicon
-PackageKit fixtures. Those are historical component results: the newly
-integrated PR head and all release-only gates still require exact-SHA proof.
-This section records the intended product contract and rationale, not release
-acceptance.
+**Status:** Merged, unreleased candidate. Final PR #14 head `8f5919b` passed the
+complete local gate, controlled benchmark, zero-finding full/delta security
+scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
+reviews, and every review thread. It merged as `2f997d2`; exact-main CI
+`32766014047` passed all 19 jobs. Tagged release, public distribution, and
+physical AMD64 Linux/Raspberry Pi acceptance remain separate gates. This
+section records the product contract and rationale, not those later results.
 
 **Decision 1 — thermals report only trusted sensors, in both `--fast` and full
 mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,
@@ -3378,8 +3375,8 @@ On the controlled Alienware m16 R2 benchmark, seven alternating full-mode runs
 per version produced medians of 5146.9 ms for the v4.2.2 baseline and 2120.2 ms
 for the candidate: about 3026.6 ms (58.8%) less, a 2.43× runtime ratio. Eleven
 alternating fast-mode runs per version produced medians of 257.3 ms and
-260.4 ms; the candidate's +1.2% is background-level, so this decision makes no
-fast-mode performance-gain claim. The integrated source/test head's full local
-gate is recorded in `TESTING.md`; the final pushed exact head still requires
-hosted, security, and review proof. Neither result establishes release
-acceptance or independent AMD64 Linux/Raspberry Pi physical acceptance.
+260.4 ms; the measured +1.2% is background-level, so this decision makes no
+fast-mode performance-gain claim. The full local and final pushed exact-head
+hosted/security/review gates are recorded in `TESTING.md`. Neither result
+establishes tagged release acceptance or independent AMD64 Linux/Raspberry Pi
+physical acceptance.

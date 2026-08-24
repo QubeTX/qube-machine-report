@@ -7,19 +7,21 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.0 — Unreleased candidate (as of 2026-08-24; open PR #14)
+### v4.3.0 — Merged release candidate (as of 2026-08-24)
 
 Release status: v4.2.2 is the last published GitHub/crates.io version. The
-working `4.3.0` manifest remains unreleased on
-`feature/v4.3.0-battery-perf-thermals`. Release-chain hardening exact head
+working `4.3.0` manifest is merged to `main` but remains unpublished.
+Release-chain hardening exact head
 `8ea060f` passed complete local, hosted, security, and native fixture gates and
 merged through PR #15 as `1ffb0cc`; exact-main CI `32759430269` then passed all
 19 jobs. The local PR #14 branch integrated hardened `main` through merge
-`4e962b6` and source/test head `8471d95`. That head passed the complete local
-gate, controlled benchmark, and independent code/security reviews; it was not
-yet pushed at this checkpoint, so exact pushed-head hosted and review-thread
-qualification remain open. Earlier `56b92d7`/remote `b068f65` runs are
-historical evidence only.
+`4e962b6` and source/test head `8471d95`, then final head `8f5919b` passed the
+complete local gate, controlled benchmark, zero-finding full/delta security
+scans, all 19 jobs in CI `32764677640`, release plan `32764677784`, independent
+review, and every review thread. PR #14 merged as
+`2f997d2e1a1dac764ca170abd0c227264858a8c9`; exact-main CI `32766014047` passed
+all 19 jobs. Crates publication, the tag, native artifact chain, public smokes,
+and deployment remain separate release gates.
 
 - **Integrated local qualification — pass through source/test head `8471d95`:**
   locked fmt; warnings-denied workspace/all-target Clippy; 185 library and 22
@@ -30,8 +32,8 @@ historical evidence only.
   transaction fixtures; pinned-Inno parser; Linux/macOS cross-target
   check/Clippy; and full/fast table, JSON, and ASCII smokes. Three independent
   final reviews reported no source or release-security P0–P3 finding; the
-  documentation review's state corrections are incorporated here. Hosted
-  exact-head and signed/tagged gates remain separate.
+  documentation review's state corrections are incorporated here. The hosted
+  exact-head result is recorded above; signed/tagged gates remain separate.
 
 - **Earlier repaired-code local gates — pass on exact head `56b92d7`:** locked fmt; warnings-denied
   all-target/workspace Clippy; 173 library and 22 integration tests; release
@@ -86,7 +88,8 @@ historical evidence only.
   run `32758484335`. Both native Intel and Apple Silicon PackageKit fixtures
   passed the preinstall-only refusal, no-mutation invariants, and clean-package
   control before PR #15 merged as `1ffb0cc`. These results qualify the hardened
-  release chain, not the final pushed integrated v4.3 product head.
+  release chain; the final integrated v4.3 product head is qualified separately
+  above.
 - **Mac transaction finding:** exact hardening head `dae0857` CI run
   `32710504501` passed workflow validation, formatting, Clippy, Linux/Windows
   tests and release builds, audit, cargo-dist, Windows installer custody, and

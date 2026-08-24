@@ -1,12 +1,12 @@
 ---
 name: tr300-dev-workflow
-description: TR-300's canonical 7-phase development workflow for any non-trivial change, plus the CI gates. Use when starting feature work, planning a multi-PR change, asking "how are changes developed/documented here", setting up task tracking, running the local gate, or reproducing CI. Encodes plan → implementation → documentation → verification → protected PR merge, plus the private-draft release and explicit trusted-OIDC publication gates. Triggers on "development workflow", "how do I add a feature", "plan this change", "the F-block", "CI gates", "reproduce CI", "phases". For cutting an actual release, use the `release` skill instead.
+description: TR-300's canonical 7-phase development workflow for any non-trivial change, plus the CI gates. Use when starting feature work, planning a multi-PR change, asking "how are changes developed/documented here", setting up task tracking, running the local gate, or reproducing CI. Encodes plan → implementation → documentation → verification → reviewed PR merge, plus the private-draft release and automatic trusted-OIDC publication gates. Triggers on "development workflow", "how do I add a feature", "plan this change", "the F-block", "CI gates", "reproduce CI", "phases". For cutting an actual release, use the `release` skill instead.
 ---
 
 # TR-300 development workflow + CI
 
 The canonical cadence for any non-trivial change, and the CI gates that guard it. The actual
-release procedure (version bump → protected PR → explicit crates publication → tag → private
+release procedure (version bump → reviewed PR → automatic crates publication → tag → private
 draft → exact acceptance → public release) is the separate
 [`release`](../release/SKILL.md) skill; this skill stops at a protected PR merge. Summary +
 pointers are in [`CLAUDE.md`](../../../CLAUDE.md); the historical ledger is in
@@ -72,8 +72,8 @@ Every PR completes this block before commit:
 ### Phase 6 — Commit + push
 
 - **Local commit**: `git-master` agent. No `ci-tester` needed for local-only operations.
-- **Push to remote**: `ci-tester` agent first. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`) or bypass signing. Push a focused branch, open a PR, resolve review threads, and merge only after repository ruleset `21268055` reports every strict required check green. Never push feature or release work directly to `main`.
-- **Do not tag from this development workflow.** A release tag is irreversible and follows exact-current-main CI plus an explicit owner-authorized trusted-OIDC crates publication. Use the [`release`](../release/SKILL.md) skill for that sequence; it pushes only one exact stable `vX.Y.Z` tag.
+- **Push to remote**: `ci-tester` agent first. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`) or bypass signing. Push a focused branch, open a PR, resolve review threads, and merge only after every required check is green.
+- **Do not tag from this development workflow.** A release tag is irreversible and follows exact-current-main CI plus its automatic trusted-OIDC crates publication. Use the [`release`](../release/SKILL.md) skill for that sequence; it pushes only one exact stable `vX.Y.Z` tag.
 
 ### Phase 7 — Close out
 
@@ -93,7 +93,7 @@ cutover:
   - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
   - `audit` — blocking `cargo audit` against RustSec advisories; a finding fails CI
   - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
-- **`.github/workflows/crates-publish.yml`** — manual owner-only publication from exact protected `main` after CI. A read-only Cargo 1.95 validator with no registry credential proves the package; a fresh `crates-io` runner executes no package code while a short-lived OIDC token exists and verifies public bytes/provenance. Automatic push/`workflow_run` publication is forbidden.
+- **`.github/workflows/crates-publish.yml`** — automatic publication after a successful same-repository `main` CI run. A read-only Cargo 1.95 validator with no registry credential proves the exact tested package; a fresh `crates-io` runner executes no package code while a short-lived OIDC token exists and verifies public bytes/provenance. Manual dispatch is diagnostics only.
 - **`.github/workflows/release.yml`** — exact stable-tag cargo-dist v0.31.0 builds, fresh checkout-free Apple signers, and a fresh publisher that creates a private 24-asset draft. Preserve the stable-tag, fixed-artifact, MIC-1 alias, private-host, and Apple trust zones after `dist init`.
 - **`.github/workflows/windows-installers.yml`** — adds six exact Windows installer/sidecar assets to the private draft through a separate checkout-free publisher, producing 30 assets.
 - **`.github/workflows/windows-installer-validation.yml`** — freezes those 30 exact bytes and runs pre-public fresh-install plus authenticated direct prior-to-candidate transition/uninstall/takeover checks while public `latest` remains unchanged; after final publication it separately runs the real updater-to-candidate matrix.

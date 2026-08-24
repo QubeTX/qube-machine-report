@@ -7,14 +7,14 @@
 **Last updated:** 2026-08-24
 **Complete GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.2.2 / 4.3.0
 (v4.2.2 remains the last fully published state. Release-chain hardening merged
-to `main` as `1ffb0cc`; the local PR #14 branch integrated it through merge
-`4e962b6` and source/test head `8471d95`, which passed the complete local gate
-and benchmark. Pushed-head hosted/security/review qualification remains open.)
+to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
+hosted, security, review, and benchmark gates before merge as `2f997d2`.
+Exact-main CI run `32766014047` passed all 19 jobs.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.0 candidate; PR #14):** Linux battery-selection hardening accepts
+**In flight (v4.3.0 merged candidate):** Linux battery-selection hardening accepts
 well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
 contradictory device/absence evidence; the historical Pi "30%" source remains
 unproven. Linux thermals choose the hottest valid sensor deterministically,
@@ -26,23 +26,25 @@ per version produced medians of 5146.9 ms and 2120.2 ms (~3026.6 ms, 58.8%,
 2.43×), while 11 alternating fast runs per version at 257.3 ms and 260.4 ms
 (+1.2%) are background-level and support no gain claim. The explicit
 `-f/--full` flag is also included.
-The integrated source/test head `8471d95` passed fresh local gates and review;
-the final pushed exact head still requires hosted CI/release-plan, security,
-and review-thread qualification.
+PR #14 exact head `8f5919b` and merge `2f997d2` passed their hosted gates; the
+final release-automation/metadata PR and its exact-main CI plus automatic crates
+run remain before tagging.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
-The active v4.3 campaign remains unreleased. Its code candidate adds battery,
-thermal, and Windows full-mode improvements; its release hardening moves crate
-publication to owner-only protected OIDC and makes GitHub publication a private
+The active v4.3 campaign remains unreleased. Its merged code candidate adds
+battery, thermal, and Windows full-mode improvements. Crate publication
+automatically follows successful exact-main CI through protected OIDC, and
+GitHub publication remains a private
 24-asset draft → private 30-asset Windows candidate → exact private Windows
-acceptance proof → macOS-only 34-asset finalization chain. Before release, the
-exact committed SHA still needs hosted CI, the one-time Apple environment-secret
-migration plus native ARM/Intel environment-only preflight and cleanup, and the
-crates.io publisher bootstrap/`trustpub_only` cutover, legacy-token removal,
-bootstrap-code removal, and OIDC-only probe. AMD64 Linux laptop and Raspberry Pi
-physical qualification remain separate open acceptance gates.
+acceptance proof → macOS-only 34-asset finalization chain. The Apple secrets are
+in `apple-signing`; native ARM/Intel preflight passed, repository copies and the
+temporary migration token are gone, and the one-time workflow is removed in
+the release-source PR. The crates.io publisher tuple and `trustpub_only` probe
+passed; the first automatic exact-main publication remains the decisive proof.
+AMD64 Linux laptop and Raspberry Pi physical qualification remain separate open
+acceptance gates.
 
 Native Intel and Apple Silicon hardening runs exposed a further release
 blocker: Apple Installer retained the new system payload after a deliberate
@@ -545,8 +547,8 @@ patch fix-forward.
 - Table output remains 51 display columns unless explicitly redesigned.
 - Do not surface unique device identifiers.
 - Keep `Cargo.toml` `rust-version` and `rust-toolchain.toml` channel in lockstep.
-- Never tag before exact-current-main CI and the explicit owner-only trusted-
-  OIDC crates publication settle.
+- Never tag before exact-current-main CI and its automatic trusted-OIDC crates
+  publication settle.
 - Never publish locally just because registry credentials are available.
 - Windows installer GUIDs and `InstallSource` marker strings are permanent and
   must remain in lockstep across WiX, Inno, updater, and migration code.
@@ -574,9 +576,8 @@ incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
 
-The v4.3 candidate and release-security campaign are **not complete**. Do not
-tag, publish, update the homepage, or close the release milestone until the
-protected OIDC/Apple cutovers above are complete, the exact source SHA passes
-all hosted gates, the private 30-asset Windows proof succeeds, macOS solely
-publishes the exact 34-asset release, and every post-public smoke/public-byte
-audit is green.
+The v4.3 release campaign is **not complete**. Do not tag, update the homepage,
+or close the release milestone until the release-source PR and exact-main CI
+pass, automatic OIDC crates publication succeeds, the private 30-asset Windows
+proof succeeds, macOS solely publishes the exact 34-asset release, and every
+post-public smoke/public-byte audit is green.

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.3.0] - Unreleased
+## [4.3.0] - 2026-08-24
 
 ### Added
 - **Thermal reporting (`CPU TEMP` / `GPU TEMP` rows).** Linux reads CPU
@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serially consuming the shared timeout. Duplicate WMI/process lookups and
   unnecessary registry subprocesses are also consolidated. Eleven alternating
   fast-mode runs per version produced medians of 257.3 ms and 260.4 ms; the
-  candidate's 1.2% difference is background-level, so this release makes no
+  measured 1.2% difference is background-level, so this release makes no
   fast-mode performance-gain claim.
 - **Managed-to-PKG switching is now an explicit, receipt-aware sequence.** A
   managed user updates or reinstalls v4.3, chooses Complete uninstall, and then
@@ -80,25 +80,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   revalidates the successful Windows validation run, attempt, proof artifact,
   current protected `main`, tag, CI, and all 30 accepted bytes. The real public
   updater matrix runs only after publication.
-- **Crates.io publication now uses explicit protected-environment OIDC instead
-  of exposing a long-lived token to a build runner.** Owner-authorized manual
-  publication first performs locked/default-verifying package checks with only
-  read-only GitHub authorization and no registry credential. A fresh runner
-  rejects unsafe source/config/archive shapes,
-  deterministically matches the candidate crate, and mints a short-lived token
-  only for the absolute `cargo publish --no-verify` command; post-publication
-  adjudication, after the OIDC token is removed, requires crates.io checksum and
-  trusted-publisher provenance for the exact repository, run, and source SHA. A
-  one-time bootstrap enables
-  `trustpub_only`; its legacy secret and bootstrap path must then be removed.
-- **Apple release credentials move behind a protected environment and fresh
-  no-checkout runners.** The one-time migration copies only the exact secret
-  inventory; native Apple Silicon and Intel preflights must then prove both
-  Developer ID identities plus read-only notary authentication before the
-  repository copies and migration token are deleted. After that required
-  cutover, release signing jobs use only the `apple-signing` environment and
-  fixed data artifacts, never a source checkout or repository script while
-  credentials are present.
+- **Crates.io publication uses automatic protected-environment OIDC instead of
+  exposing a reusable token to a build runner.** Every successful same-repository
+  `main` CI run automatically starts publication for that exact tested commit.
+  Locked/default-verifying package checks run with read-only GitHub authorization
+  and no registry credential; a fresh runner rejects unsafe source, config, and
+  archive shapes, deterministically matches the candidate crate, and mints a
+  short-lived token only for the absolute `cargo publish --no-verify` command.
+  Post-publication adjudication, after that token is removed, requires the
+  crates.io checksum and trusted-publisher provenance for the exact repository,
+  run, and source SHA. An already-published matching version exits successfully.
+- **Apple release credentials live behind the `apple-signing` environment and
+  fresh no-checkout runners.** Native Apple Silicon and Intel preflights prove
+  both Developer ID identities plus read-only notary authentication. Release
+  signing jobs receive only fixed data artifacts, never a source checkout or
+  repository script while credentials are present.
 - **Windows release builds use one pinned official Inno Setup toolchain.** CI
   and the installer builder share `install-pinned-inno-setup.ps1`, which fetches
   JRSoftware 6.7.3 and requires its exact size/SHA-256, GitHub attestation,

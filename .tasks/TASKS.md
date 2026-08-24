@@ -10,16 +10,16 @@
 
 ## Active
 
-- [ ] **Integrate, qualify, and release TR-300 v4.3.0** - complete credential cutovers, reconcile hardened `main` into PR #14, then run exact-SHA crates/tag/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+- [ ] **Integrate, qualify, and release TR-300 v4.3.0** - finish the no-click credential/automation cutover, then run exact-SHA crates/tag/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
   - [x] Remediate and independently validate every confirmed release/privilege security finding
   - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
   - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
   - [x] Pass PR #15 exact-head local/hosted/security/native qualification, merge it, and pass exact-main CI
-  - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
-  - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
+  - [ ] Finish Apple environment-only reproof and merge removal of the temporary migration workflow
+  - [ ] Merge automatic post-CI OIDC publication, prove v4.3.0 public, then revoke/delete the unused legacy crates token and secret
   - [x] Merge hardened main into the local PR #14 branch and pass the complete local gate plus controlled benchmark
-  - [ ] Push the integrated candidate and pass final exact-head hosted, security, and review gates
-  - [ ] Merge only the accepted candidate and verify exact-main CI plus crates.io custody
+  - [x] Push the integrated candidate and pass final exact-head hosted, security, and review gates
+  - [x] Merge only the accepted candidate and verify exact-main CI
   - [ ] Push only v4.3.0 and pass the private 24-to-30-to-validated-to-34 publication chain
   - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
 

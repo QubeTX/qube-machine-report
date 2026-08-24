@@ -53,17 +53,14 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.2.2`. The working manifest on
-  `feature/v4.3.0-battery-perf-thermals` is `4.3.0` (battery hardening, Windows
-  full-mode latency, thermal reporting), developed through PR #14. Release-chain
-  hardening merged to `main` as `1ffb0cc` and passed exact-main CI. The local
-  integration through source/test head `8471d95` passed the complete local gate
-  and controlled benchmark, but still requires fresh pushed-head hosted,
-  security, and review qualification. Merging
-  the protected PR does not publish the crate; v4.2.2 remains the last fully
-  published state until explicit trusted-OIDC crates publication, the single
-  tag/private 24-to-30-to-validated-to-34 asset chain, and post-public smokes
-  complete.
+- Current published version: `4.2.2`. The working manifest on `main` is `4.3.0`
+  (battery hardening, Windows full-mode latency, thermal reporting). PR #14
+  merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
+  local, hosted, security, review, and benchmark gates; exact-main CI run
+  `32766014047` passed all 19 jobs. v4.2.2 remains the last fully published
+  state until the final release-source merge passes CI, its automatic OIDC
+  crates publication succeeds, and the single tag/private
+  24-to-30-to-validated-to-34 asset chain plus post-public smokes complete.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
   Windows exposes NVIDIA GPU temperature only through mode-bounded
@@ -151,7 +148,7 @@ keys remain available. The exact v4 boundary includes `Action`, `Cli`,
 
 .github/workflows/
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
-  crates-publish.yml          # explicit exact-main trusted-OIDC crates.io publication
+  crates-publish.yml          # automatic post-CI exact-main trusted-OIDC crates.io publication
   release.yml                 # cargo-dist builds + fresh private-draft publisher
   windows-installers.yml      # adds six Windows assets to the private draft
   windows-installer-validation.yml # exact-byte pre-public matrix + public updater smoke
@@ -581,12 +578,11 @@ Platform implementations:
 The v4.3 Windows benchmark records seven alternating full-mode runs per version
 with medians of 5146.9 ms before and 2120.2 ms after (~3026.6 ms, 58.8%,
 2.43×). Eleven alternating fast runs per version produced 257.3 ms and 260.4 ms
-medians; the candidate's +1.2% is background-level, so documentation and tests
-must not claim a fast-mode performance gain. Integrated source/test head
-`8471d95` passed the complete local gate and benchmark after merging hardened
-`main`; repeat hosted/security/review qualification against the final pushed
-exact head. These results do not establish AMD64 Linux/Raspberry Pi physical
-acceptance.
+medians; the measured +1.2% is background-level, so documentation and tests
+must not claim a fast-mode performance gain. PR #14 exact head `8f5919b` passed
+the complete local, hosted, security, review, and benchmark gates before merge
+as `2f997d2`; exact-main CI run `32766014047` passed all 19 jobs. These results
+do not establish AMD64 Linux/Raspberry Pi physical acceptance.
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should
@@ -1005,26 +1001,22 @@ a private draft.
 
 ### crates.io publishing (`.github/workflows/crates-publish.yml`)
 
-The crates.io workflow is intentionally separate from `release.yml` and is
-**manual only** (`workflow_dispatch operation=publish`). It accepts only the
-repository owner on protected current `main` after exact-SHA CI. A read-only
-validator with no registry credential uses exact Cargo 1.95 to build and dry-run
-the normalized package and records the exact `.crate` hash. A fresh protected
+The crates.io workflow is intentionally separate from `release.yml`. A
+successful same-repository push to `main` automatically starts it after `CI`,
+bound to that exact tested SHA. A read-only validator with no registry
+credential uses exact Cargo 1.95 to build and dry-run the normalized package and
+records the exact `.crate` hash. A fresh protected
 `crates-io` environment job executes no repository/package code while
 credentialed: it repackages with `--no-verify`,
 requires byte equality, mints a short-lived OIDC token, publishes, and proves
 the public checksum plus crates.io trusted-publisher repository/run/SHA
 metadata. `trustpub_only=true` is a blocking policy gate.
 
-The temporary `configure_trusted_publisher` operation idempotently creates the
-exact crates.io tuple, proves OIDC, and enables `trustpub_only` with the existing
-scoped legacy token. Once that operation succeeds and the public policy is
-confirmed, revoke that exact token through the authenticated crates.io UI,
-delete the GitHub `CARGO_REGISTRY_TOKEN` secret, merge a protected follow-up
-that removes the bootstrap operation and every legacy-token reference, then
-dispatch `probe_trusted_publisher` to prove OIDC still works. The real version
-publication remains a later explicit release gate; never retain the legacy
-credential until then or restore automatic push/`workflow_run` publication.
+The exact trusted-publisher tuple and `trustpub_only=true` are steady-state
+configuration. The optional `probe_trusted_publisher` dispatch is diagnostics
+only; normal publication must remain automatic after successful exact-main CI.
+An already-published matching version exits successfully without minting a
+publish token.
 
 `Cargo.lock` is tracked and included in the crate package because both local
 release verification and the GitHub publish workflow use `--locked`. Do not
@@ -1109,11 +1101,10 @@ Mac/local/hosted gate below remains blocking for future releases.
      and smokes; after Apple-input changes, real archive, direct-PKG, and
      compatibility-DMG sign/notary/staple/install/checksum round-trips
 4. Commit on a focused release branch, open a PR, resolve review threads, and
-   wait for all strict required checks. Merge through protected `main`; direct
-   release pushes are not allowed.
-5. Wait for `ci.yml` to go green on the exact current `main` SHA, then explicitly
-   dispatch `crates-publish.yml` with `operation=publish` and require the exact
-   trusted-OIDC/public-byte proof.
+   wait for all required checks. Merge only the reviewed exact commit.
+5. Wait for `ci.yml` to go green on the exact current `main` SHA, then require
+   the automatically triggered `crates-publish.yml` run to prove the exact
+   trusted-OIDC/public bytes and provenance.
 6. Tag the proven exact-main SHA with `git tag vX.Y.Z`.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
    workflow trigger; an explicit single-tag push is sufficient).

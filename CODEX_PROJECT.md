@@ -11,8 +11,8 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
 MIC-1 baseline: managed CLI installers are the recommended default, fresh
 installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
-bridge. v4.3.0 is an unreleased performance/battery/thermal and release-custody
-candidate developed through PR #14. Alienware Windows evidence is captured;
+bridge. v4.3.0 is the merged, not-yet-published performance/battery/thermal and
+release-custody candidate developed through PR #14. Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
@@ -27,8 +27,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
   direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
   stable-`latest` audit passed.
-- Working manifest / unreleased candidate: `4.3.0` on
-  `feature/v4.3.0-battery-perf-thermals`, developed through PR #14. It adds
+- Working manifest / unreleased candidate: `4.3.0` on `main`, merged through
+  PR #14 as `2f997d2`. It adds
   deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
   `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
   recognizable-`InternalBattery`-only macOS fallback, mode-bounded NVIDIA GPU
@@ -63,7 +63,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Architecture ledger: `docs/architecture-decisions.md` is reconciled through
   2026-08-24. It includes the v4.3 collector candidate, preinstall-only Mac
   managed-conflict refusal and receipt-aware transition, trusted executable/CWD rules, exact stable release provenance,
-  protected environments/rulesets, explicit OIDC crates publishing, and the
+  protected environments, automatic OIDC crates publishing, and the
   private 24→30→validated→34 publication chain.
 - Release tooling: cargo-dist `0.31.0`
 - Last physical-Mac source verification: 2026-07-15 on a MacBook Pro M2,
@@ -90,8 +90,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   private fresh-install plus authenticated direct prior-to-candidate transition
   checks while public `latest` stays unchanged, and lets only the fresh macOS
   finalizer expose the exact 34-asset result. The real updater-to-candidate
-  matrix runs post-public; crates publication is an explicit protected OIDC
-  gate.
+  matrix runs post-public; crates publication automatically follows successful
+  exact-main CI through protected OIDC.
 - Native Apple runners disproved automatic managed-to-PKG takeover: a failing
   `postinstall` can leave the native payload behind even when prior managed
   state restores exactly. v4.3 removes the helper and postinstall, checks
@@ -106,9 +106,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Release-chain hardening head `8ea060f` passed its complete local gate, five
   zero-finding security scans, exact-head CI/release-plan runs, and native Intel
   and Apple Silicon PackageKit fixtures before PR #15 merged as `1ffb0cc`.
-  Exact-main CI then passed. Integrated source/test head `8471d95` passed the
-  complete local gate, benchmark, and independent review; final pushed-head
-  hosted/security/review proof remains open.
+  Exact-main CI then passed. PR #14 head `8f5919b` passed the complete local,
+  hosted, security, benchmark, and independent-review gates before merge as
+  `2f997d2`; exact-main CI run `32766014047` passed all 19 jobs.
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
@@ -155,7 +155,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
   update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
 - The v4.3.0 release target remains 34 stable-name assets. Required pending
-  evidence is the clean exact-commit local/hosted gate, explicit trusted-OIDC
+  evidence is the release-source PR/local/hosted gate, automatic trusted-OIDC
   crates publication, private Windows byte/matrix proof, both Apple-native
   lifecycles/finalization, post-public smokes, public-byte audit, and homepage
   update. Physical AMD64 Linux and Pi qualification stay separately open.
@@ -225,18 +225,17 @@ do not have to infer platform semantics.
 
 1. Preserve `4.2.2` as the last published boundary. Keep `Cargo.toml`,
    `Cargo.lock`, generated man page, and the full docs set synchronized at
-   `4.3.0`, clearly labeled `Unreleased` until publication.
+   `4.3.0`; date the release-note blocks on the final source commit while
+   keeping status ledgers explicit that publication is still pending.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
    sign/notary/staple/install proof.
-3. Resolve PR #14 on the current merge-result SHA, rerun the complete local
-   gate, and merge only through protected `main` after every strict required
-   check and review thread passes. Earlier-head checks are not evidence for the
-   merge result; never push release work directly to `main`.
-4. Explicitly dispatch the owner-only `crates-publish.yml operation=publish` and
-   require exact package bytes plus trusted OIDC/public provenance. No push or
-   `workflow_run` automatically publishes a crate.
+3. Prepare the final release-source correction on a focused PR, rerun the
+   complete local gate, and merge only after every required check and review
+   thread passes. Earlier-head checks are not evidence for the merge result.
+4. Let successful exact-main `CI` automatically start `crates-publish.yml`, then
+   require exact package bytes plus trusted OIDC/public provenance.
 5. Create and push only tag `v4.3.0` after exact-main CI/crates proof. Existing
    immutable `v*` tags must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers
@@ -254,7 +253,7 @@ validation 29664948031. The current v4.3.0 candidate has no publication run or
 release evidence yet.
 
 Never publish locally merely because a credential exists. Never tag before
-exact-current-main CI and the explicit trusted-OIDC crates operation settle.
+exact-current-main CI and its automatic trusted-OIDC crates run settle.
 
 The v4 release notes must include a concise Rust migration section: downstream
 code should obtain `SystemInfo`/`Config` through collection/default APIs rather
