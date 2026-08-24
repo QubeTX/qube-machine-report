@@ -203,8 +203,11 @@ fn test_help_documents_positional_actions() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[ACTION]"))
+        .stdout(predicate::str::contains("Possible values:"))
+        .stdout(predicate::str::contains("- update"))
+        .stdout(predicate::str::contains("- install"))
         .stdout(predicate::str::contains(
-            "[possible values: update, install, uninstall]",
+            "- uninstall: Open the uninstall menu for profile-only or Complete removal",
         ));
 }
 

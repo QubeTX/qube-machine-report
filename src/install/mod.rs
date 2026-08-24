@@ -23,7 +23,12 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 static WINDOWS_ATOMIC_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub use prompt::{confirm_complete_uninstall, prompt_uninstall_option, UninstallOption};
+pub use prompt::{
+    confirm_complete_uninstall, confirm_complete_uninstall_paths, prompt_uninstall_option,
+    UninstallOption,
+};
+#[cfg(unix)]
+pub use unix::{prepare_complete_uninstall, uninstall_complete_prepared, CompleteUninstallPreview};
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
