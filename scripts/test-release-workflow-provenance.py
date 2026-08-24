@@ -2885,13 +2885,20 @@ def check_structural_contract(
         "& $iscc '/Qp'",
     ):
         require(inno_installer, needle, "pinned Inno Setup helper")
-    iscc_signature = inno_installer.index(
-        "Get-AuthenticodeSignature -LiteralPath $iscc"
-    )
+    iscc_validation = """$isccSignature = Get-AuthenticodeSignature -LiteralPath $iscc
+if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+    $null -eq $isccSignature.SignerCertificate -or
+    $isccSignature.SignerCertificate.Subject -cne $expectedSigner) {
+    throw "the Inno Setup compiler has an invalid publisher signature: $($isccSignature.Status)"
+}
+"""
+    iscc_validation_start = inno_installer.index(iscc_validation)
+    iscc_validation_end = iscc_validation_start + len(iscc_validation)
     iscc_execution = inno_installer.index("& $iscc '/Qp'")
-    if iscc_signature > iscc_execution:
+    if iscc_validation_end > iscc_execution:
         raise AssertionError(
-            "pinned Inno Setup helper executes ISCC before authenticating it"
+            "pinned Inno Setup helper executes ISCC before completing its "
+            "publisher-signature validation"
         )
     require(ci, "cargo install --locked cargo-audit --version 0.22.2", "ci cargo-audit pin")
     require(ci, "cargo-audit-audit 0.22.2", "ci cargo-audit version proof")
