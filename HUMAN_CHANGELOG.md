@@ -13,7 +13,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [4.3.0] - Unreleased
+## [4.3.0] - 2026-08-24
 
 ### Added
 - **Temperature readings are now part of the report.** On Linux the report
@@ -65,19 +65,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checks that proof and every accepted download byte before making the complete
   34-file release public. Public updater checks happen only after publication,
   so an unpublished candidate is never mistaken for the public latest release.
-- **After the required protected cutover, crates.io publishing will use a
-  short-lived login created for one release run.** The package is fully
-  rehearsed with only read-only GitHub
-  access and no registry login, a fresh
-  runner proves it has the same source and package bytes, and only the final
-  upload receives the temporary credential. The old reusable credential is a
-  one-time setup bridge and must be removed after the new login is proven.
-- **Mac signing credentials will be isolated from project code after the
-  required migration and environment-only native preflight.** A one-time copy
-  moves the exact credentials into a protected environment, both kinds of Mac
-  runner must prove signing and notarization access there, and the old copies
-  plus the temporary migration access are then removed. Credentialed jobs then
-  start fresh and receive only fixed package data.
+- **Crates.io publishing stays automatic after successful `main` checks while
+  using a short-lived login created for that one run.** The package is fully
+  rehearsed with read-only GitHub access and no registry login, a fresh runner
+  proves it has the same source and package bytes, and only the final upload
+  receives the temporary credential. An already-published version is a clean
+  no-op, so normal documentation-only merges do not require attention.
+- **Mac signing credentials are isolated from project code.** Both kinds of Mac
+  runner prove signing and notarization access through the dedicated
+  environment. Credentialed jobs start fresh and receive only fixed package
+  data, with no approval click or wait timer in the normal tag workflow.
 - **Windows installer builds now use one verified official Inno Setup
   download.** Both ordinary CI and release packaging check the compiler's
   download hash, publisher signature, attestation, path, and exact version

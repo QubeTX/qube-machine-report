@@ -1,14 +1,18 @@
 name: Crates.io Publish
 
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       operation:
-        description: "Publish exact main or perform the one-time trusted-publisher bootstrap"
+        description: "Probe the configured crates.io OIDC trusted publisher"
         required: true
-        default: publish
+        default: probe_trusted_publisher
         type: choice
-        options: [publish, configure_trusted_publisher, probe_trusted_publisher]
+        options: [probe_trusted_publisher]
 
 permissions:
   contents: read
@@ -19,108 +23,13 @@ env:
   RUSTFLAGS: "-D warnings"
 
 concurrency:
-  group: crates-publish-${{ inputs.operation }}
+  group: crates-publish-${{ github.event.workflow_run.head_sha || inputs.operation || github.sha }}
   cancel-in-progress: false
 
 jobs:
-  configure-trusted-publisher:
-    name: Configure the one-time crates.io OIDC publisher
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'configure_trusted_publisher' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report' && github.actor_id == '30877743'
-    runs-on: ubuntu-24.04
-    environment: crates-io
-    permissions: {}
-    steps:
-      - name: Create the exact trusted-publisher configuration
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
-          EXPECTED_ACTOR_ID: ${{ github.actor_id }}
-          EXPECTED_REF: ${{ github.ref }}
-          EXPECTED_REPOSITORY: ${{ github.repository }}
-          EXPECTED_SHA: ${{ github.sha }}
-          RESPONSE_PATH: ${{ runner.temp }}/trusted-publisher-response.json
-          LIST_PATH: ${{ runner.temp }}/trusted-publisher-list.json
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ -n ${CARGO_REGISTRY_TOKEN:-} ]] || exit 78
-          [[ "$EVENT_NAME" == workflow_dispatch &&
-             "$EXPECTED_ACTOR_ID" == 30877743 &&
-             "$EXPECTED_REF" == refs/heads/main &&
-             "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
-             "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          remote_main=$(/usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
-            --header 'Accept: application/vnd.github+json' \
-            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
-            https://api.github.com/repos/QubeTX/qube-machine-report/commits/main \
-            | /usr/bin/jq -r .sha)
-          [[ "$remote_main" == "$EXPECTED_SHA" ]]
-          payload='{"github_config":{"crate":"tr300","repository_owner":"QubeTX","repository_name":"qube-machine-report","workflow_filename":"crates-publish.yml","environment":"crates-io"}}'
-          list_configurations() {
-            /usr/bin/curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
-              --header "Authorization: Bearer $CARGO_REGISTRY_TOKEN" \
-              --header 'Accept: application/json' \
-              --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
-              --output "$LIST_PATH" \
-              'https://crates.io/api/v1/trusted_publishing/github_configs?crate=tr300'
-          }
-          require_exact_configuration() {
-            /usr/bin/jq -e '
-              .meta.total == 1 and
-              (.github_configs | length) == 1 and
-              .github_configs[0].crate == "tr300" and
-              .github_configs[0].repository_owner == "QubeTX" and
-              .github_configs[0].repository_name == "qube-machine-report" and
-              .github_configs[0].workflow_filename == "crates-publish.yml" and
-              .github_configs[0].environment == "crates-io" and
-              (.github_configs[0].id | type == "number") and
-              .github_configs[0].repository_owner_id == 230946269
-            ' "$LIST_PATH" >/dev/null
-          }
-
-          list_configurations
-          configuration_count=$(/usr/bin/jq -r '.meta.total' "$LIST_PATH")
-          returned_count=$(/usr/bin/jq -r '.github_configs | length' "$LIST_PATH")
-          [[ "$configuration_count" =~ ^[0-9]+$ && "$returned_count" =~ ^[0-9]+$ &&
-             "$configuration_count" == "$returned_count" ]]
-          if [[ "$configuration_count" == 0 ]]; then
-            /usr/bin/curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
-              --request POST --header "Authorization: Bearer $CARGO_REGISTRY_TOKEN" \
-              --header 'Content-Type: application/json' --header 'Accept: application/json' \
-              --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
-              --data-binary "$payload" --output "$RESPONSE_PATH" \
-              https://crates.io/api/v1/trusted_publishing/github_configs
-            /usr/bin/jq -e '
-              .github_config.crate == "tr300" and
-              .github_config.repository_owner == "QubeTX" and
-              .github_config.repository_name == "qube-machine-report" and
-              .github_config.workflow_filename == "crates-publish.yml" and
-              .github_config.environment == "crates-io" and
-              (.github_config.id | type == "number") and
-              .github_config.repository_owner_id == 230946269
-            ' "$RESPONSE_PATH" >/dev/null
-          elif [[ "$configuration_count" == 1 ]]; then
-            require_exact_configuration
-          else
-            echo "refusing duplicate or ambiguous crates.io trusted-publisher state" >&2
-            exit 65
-          fi
-
-          list_configurations
-          require_exact_configuration
-
   probe-trusted-publisher:
-    name: Prove the new crates.io OIDC exchange
-    needs: configure-trusted-publisher
-    if: |
-      always() &&
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
-      github.repository == 'QubeTX/qube-machine-report' &&
-      github.actor_id == '30877743' &&
-      ((inputs.operation == 'configure_trusted_publisher' &&
-        needs.configure-trusted-publisher.result == 'success') ||
-       inputs.operation == 'probe_trusted_publisher')
+    name: Prove the crates.io OIDC exchange
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'probe_trusted_publisher' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report' && github.actor_id == '30877743'
     runs-on: ubuntu-24.04
     environment: crates-io
     permissions:
@@ -136,56 +45,9 @@ jobs:
         shell: bash
         run: test -n "$OIDC_CRATES_TOKEN"
 
-  enable-trusted-publishing-only:
-    name: Require OIDC for all future tr300 publication
-    needs: [configure-trusted-publisher, probe-trusted-publisher]
-    if: |
-      always() &&
-      github.event_name == 'workflow_dispatch' &&
-      inputs.operation == 'configure_trusted_publisher' &&
-      needs.configure-trusted-publisher.result == 'success' &&
-      needs.probe-trusted-publisher.result == 'success' &&
-      github.ref == 'refs/heads/main' &&
-      github.repository == 'QubeTX/qube-machine-report' &&
-      github.actor_id == '30877743'
-    runs-on: ubuntu-24.04
-    environment: crates-io
-    permissions: {}
-    steps:
-      - name: Disable legacy publication after the successful OIDC probe
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          EXPECTED_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ -n ${CARGO_REGISTRY_TOKEN:-} && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          remote_main=$(/usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
-            --header 'Accept: application/vnd.github+json' \
-            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
-            https://api.github.com/repos/QubeTX/qube-machine-report/commits/main \
-            | /usr/bin/jq -r .sha)
-          [[ "$remote_main" == "$EXPECTED_SHA" ]]
-          /usr/bin/curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
-            --request PATCH --header "Authorization: Bearer $CARGO_REGISTRY_TOKEN" \
-            --header 'Content-Type: application/json' --header 'Accept: application/json' \
-            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
-            --data-binary '{"crate":{"trustpub_only":true}}' \
-            --output "$RUNNER_TEMP/trusted-only-response.json" \
-            https://crates.io/api/v1/crates/tr300
-          /usr/bin/jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
-            "$RUNNER_TEMP/trusted-only-response.json" >/dev/null
-          /usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
-            --header 'Accept: application/json' \
-            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
-            --output "$RUNNER_TEMP/trusted-only-public.json" \
-            https://crates.io/api/v1/crates/tr300
-          /usr/bin/jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
-            "$RUNNER_TEMP/trusted-only-public.json" >/dev/null
-
   validate-package:
     name: Validate and package the exact CI-tested source
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'publish' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report' && github.actor_id == '30877743'
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository && github.repository == 'QubeTX/qube-machine-report'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -202,59 +64,46 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
-          OPERATION: ${{ inputs.operation }}
-          ACTOR_ID: ${{ github.actor_id }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
-          SOURCE_REF: ${{ github.ref }}
-          SOURCE_SHA: ${{ github.sha }}
-          WORKFLOW_RUN_ID: ${{ github.run_id }}
-          CI_STATE_PATH: ${{ runner.temp }}/ci-runs.json
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+          UPSTREAM_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$EVENT_NAME" == workflow_dispatch && "$OPERATION" == publish &&
-             "$ACTOR_ID" == 30877743 &&
+          [[ "$EVENT_NAME" == workflow_run &&
              "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
-             "$SOURCE_REF" == refs/heads/main && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ &&
-             "$WORKFLOW_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          [[ "$remote_main" == "$SOURCE_SHA" ]]
-          workflow_id=$(gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
-          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
-          endpoint="repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$SOURCE_SHA&per_page=100"
-          # The counter intentionally bounds retries.
-          # shellcheck disable=SC2034
-          for attempt in {1..120}; do
-            gh api "$endpoint" > "$CI_STATE_PATH"
-            mapfile -t rows < <(
-              jq -r --argjson workflow_id "$workflow_id" --arg repo "$EXPECTED_REPOSITORY" --arg sha "$SOURCE_SHA" '
-                .workflow_runs[] |
-                select(.workflow_id == $workflow_id and .name == "CI" and
-                       .path == ".github/workflows/ci.yml" and .event == "push" and
-                       .repository.full_name == $repo and .head_repository.full_name == $repo and
-                       .head_branch == "main" and .head_sha == $sha) |
-                [.id, .status, (.conclusion // ""), .run_attempt] | @tsv
-              ' "$CI_STATE_PATH"
+             "$UPSTREAM_RUN_ID" =~ ^[1-9][0-9]*$ &&
+             "$UPSTREAM_WORKFLOW_ID" =~ ^[1-9][0-9]*$ &&
+             "$UPSTREAM_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
+             "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ &&
+             "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
+          trusted_workflow_id=$(gh api \
+            "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
+          [[ "$trusted_workflow_id" =~ ^[1-9][0-9]*$ ]]
+          IFS=$'\t' read -r actual_id workflow_id run_name run_path event status conclusion \
+            repository head_repository head_branch source_sha run_attempt < <(
+              gh api "repos/$EXPECTED_REPOSITORY/actions/runs/$UPSTREAM_RUN_ID" \
+                --jq '[.id, .workflow_id, .name, .path, .event, .status, .conclusion, .repository.full_name, .head_repository.full_name, .head_branch, .head_sha, .run_attempt] | @tsv'
             )
-            [[ ${#rows[@]} -le 1 ]] || exit 65
-            if [[ ${#rows[@]} -eq 1 ]]; then
-              IFS=$'\t' read -r run_id status conclusion run_attempt <<< "${rows[0]}"
-              [[ "$run_id" =~ ^[1-9][0-9]*$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]]
-              if [[ "$status" == completed ]]; then
-                [[ "$conclusion" == success ]] || exit 65
-                remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-                [[ "$remote_main" == "$SOURCE_SHA" ]]
-                {
-                  echo "source_sha=$SOURCE_SHA"
-                  echo "workflow_run_id=$WORKFLOW_RUN_ID"
-                  echo "ci_run_id=$run_id"
-                } >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-            fi
-            sleep 15
-          done
-          exit 1
+          [[ "$actual_id" == "$UPSTREAM_RUN_ID" &&
+             "$workflow_id" == "$trusted_workflow_id" &&
+             "$workflow_id" == "$UPSTREAM_WORKFLOW_ID" &&
+             "$run_name" == CI && "$run_path" == .github/workflows/ci.yml &&
+             "$event" == push && "$status" == completed && "$conclusion" == success &&
+             "$repository" == "$EXPECTED_REPOSITORY" &&
+             "$head_repository" == "$EXPECTED_REPOSITORY" &&
+             "$head_branch" == main && "$source_sha" == "$UPSTREAM_SHA" &&
+             "$run_attempt" == "$UPSTREAM_RUN_ATTEMPT" ]]
+          remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$remote_main" == "$source_sha" && "$WORKFLOW_SHA" == "$source_sha" ]]
+          {
+            echo "source_sha=$source_sha"
+            echo "workflow_run_id=$UPSTREAM_RUN_ID"
+            echo "ci_run_id=$UPSTREAM_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -370,7 +219,7 @@ jobs:
           echo "toolchain_directory=$toolchain_directory" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.validate-package.outputs.source_sha }}
           path: exact-source
           persist-credentials: false
           submodules: false
@@ -383,6 +232,7 @@ jobs:
           EXPECTED_CRATE: ${{ needs.validate-package.outputs.crate_name }}
           EXPECTED_SHA256: ${{ needs.validate-package.outputs.crate_sha256 }}
           SOURCE_SHA: ${{ needs.validate-package.outputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
           SOURCE_DIRECTORY: ${{ github.workspace }}/exact-source
           CLEAN_HOME: ${{ runner.temp }}/publish-home
           CLEAN_CARGO_HOME: ${{ runner.temp }}/cargo-home
@@ -395,7 +245,7 @@ jobs:
           [[ "$EXPECTED_CRATE" =~ ^tr300-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.crate$ ]]
           [[ -x "$CARGO_BIN" && "$CARGO_BIN" == /* ]]
           [[ "$("$CARGO_BIN" --version)" =~ ^cargo\ 1\.95\.[0-9]+\  ]]
-          [[ "$SOURCE_SHA" == "${GITHUB_SHA}" ]]
+          [[ "$WORKFLOW_SHA" == "$SOURCE_SHA" ]]
           test "$(git -C "$SOURCE_DIRECTORY" rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git -C "$SOURCE_DIRECTORY" status --porcelain --untracked-files=all)"
           while IFS= read -r -d '' entry; do

@@ -9,8 +9,6 @@ Cross-platform system information report with Unicode box-drawing tables.
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
 Current release: [latest](https://github.com/QubeTX/qube-machine-report/releases/latest).
-That public link remains v4.2.2 until the unreleased v4.3 candidate described
-below completes its release gates; candidate-only behavior is labeled explicitly.
 The recommended install is the managed CLI command: PowerShell on Windows and
 the shell installer on macOS/Linux. Optional Global/Corporate MSI/EXE packages
 and a direct universal macOS PKG remain first-class, origin-preserving channels.
@@ -158,8 +156,8 @@ Current Windows native installers treat an explicit fresh launch as your newest
 channel choice. They strictly retire an exact older managed/Cargo copy and
 refuse to claim success when ownership is ambiguous or another edition cannot
 be retired safely. There is no cleanup opt-out: use a portable archive if you
-intentionally want an unmanaged side-by-side copy. The unreleased v4.3 direct
-macOS PKG candidate uses the safer, asymmetric rule described below.
+intentionally want an unmanaged side-by-side copy. The v4.3 direct macOS PKG
+uses the safer, asymmetric rule described below.
 
 #### macOS universal PKG
 
@@ -171,7 +169,7 @@ also requires that receipt's version, payload path, per-file ownership, and the
 installed binary's Developer ID product identity to match; a stale receipt is
 not enough.
 
-**Unreleased v4.3 candidate policy:** the direct PKG never removes a per-user
+**v4.3+ policy:** the direct PKG never removes a per-user
 managed/Cargo install. Its `preinstall` checks every direct directory entry in
 `/Users`—including dot-prefixed and unregistered residue—plus all eligible local
 Directory Service homes, independent of console or launch environment. For each
@@ -189,9 +187,9 @@ installer, run `tr300 uninstall`, choose **Complete**, and then launch the PKG. 
 Complete path removes the running managed binary and its exact matching
 cargo-dist receipt as one fail-closed transaction. Malformed, foreign, linked,
 or changing receipt evidence is preserved for review. A clean PKG install,
-same-version repair, and native PKG upgrade remain supported. The public v4.2.2
-PKG predates this policy; do not use this candidate transition sequence until
-v4.3 is published.
+same-version repair, and native PKG upgrade remain supported. The v4.2.2 PKG
+predates this policy; the receipt-aware transition sequence requires v4.3 or
+later.
 
 This safety check is deliberately fail-closed. If a normal local account's
 Directory Service home is missing, offline, or otherwise uninspectable, the PKG
@@ -387,8 +385,8 @@ prefix, and a macOS PKG opens the verified universal PKG in Apple Installer.
 latest-only and preserves its proven channel. A fresh installer expresses a new
 choice, including a same-version or downgrade reinstall, only within a platform
 transaction that can prove the ownership change. Windows native installers and
-the managed wrappers retire recognized prior TR-300 ownership. In the
-unreleased v4.3 candidate, a direct macOS PKG instead refuses standard managed
+the managed wrappers retire recognized prior TR-300 ownership. Beginning with
+v4.3, a direct macOS PKG instead refuses standard managed
 ownership during `preinstall`; switching to it requires the receipt-aware
 Complete-uninstall sequence above. Ambiguous evidence or failed authorization
 always returns a visible failure and recovery guidance.
@@ -396,7 +394,7 @@ always returns a visible failure and recovery guidance.
 The bounded Windows consolidation code deletes only the allowlisted `tr300`
 binary and an exactly matching cargo-dist receipt—never Cargo/rustup, the Cargo
 PATH entry, Downloads, or the running copy. Windows native installers have no
-cleanup checkbox or silent opt-out. The unreleased v4.3 macOS PKG candidate
+cleanup checkbox or silent opt-out. The v4.3+ macOS PKG
 contains no postinstall migration helper and performs no privileged user-home
 mutation.
 
@@ -496,14 +494,14 @@ protected, exact-source workflows:
   cargo-dist planning on pushes to the default branch. Native Apple Silicon and
   Intel macOS jobs plus AMD64/ARM64 Linux and Windows jobs are blocking, and
   workflow/shell validation runs in the same gate.
-- `Crates.io Publish` is an explicit owner-only dispatch after exact-current-
-  `main` CI. A read-only Cargo 1.95 job with no registry credential builds and
-  verifies the normalized
-  package; a fresh protected `crates-io` job reproduces the exact crate bytes,
-  mints a short-lived OIDC token only for `cargo publish --no-verify`, and
-  requires the public checksum and trusted-publisher provenance to match the
-  repository, run, and source SHA. No push or downstream `workflow_run`
-  automatically publishes a crate.
+- After a same-repository push to `main` passes `CI`, `Crates.io Publish`
+  automatically consumes that exact successful run. A read-only Cargo 1.95 job
+  with no registry credential builds and verifies the normalized package; a
+  fresh protected `crates-io` job reproduces the exact crate bytes, mints a
+  short-lived OIDC token only for `cargo publish --no-verify`, and requires the
+  public checksum and trusted-publisher provenance to match the repository,
+  run, and source SHA. If the version already exists with the expected bytes,
+  the workflow exits successfully without minting a publish token.
 - `Release` is the cargo-dist workflow triggered by an explicit stable
   `vX.Y.Z` tag. Builders use only read-only GitHub authorization with checkout
   credential persistence disabled; fresh checkout-free Apple signers produce
@@ -612,7 +610,7 @@ The uninstall does not roll back your execution policy — other PowerShell
 tooling typically relies on `RemoteSigned`, so restoring it would surprise
 users.
 
-In the unreleased v4.3 candidate on macOS/Linux, **Complete** also recognizes a
+Beginning with v4.3 on macOS/Linux, **Complete** also recognizes a
 running cargo-dist-managed copy. It validates the standard receipt's provider,
 app, and exact install prefix before changing profiles, then removes the binary
 and receipt transactionally. A raw Cargo install with no receipt still removes

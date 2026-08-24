@@ -1,5 +1,10 @@
 name: Windows Installer Validation
 
+# Automatic macOS follow-up accepts only the normal tag-chain workflow_run.
+# Tagless credential preflights therefore skip cleanly instead of producing a
+# false red validation run. After a manually dispatched macOS publication
+# recovery, use this workflow's explicit public recovery dispatch with that
+# exact upstream run ID.
 on:
   workflow_run:
     workflows: ["Windows Installers", "macOS Universal Package"]
@@ -40,8 +45,11 @@ jobs:
        github.repository == 'QubeTX/qube-machine-report' &&
        github.actor_id == '30877743') ||
       (github.event.workflow_run.conclusion == 'success' &&
-       (github.event.workflow_run.event == 'workflow_run' ||
-        github.event.workflow_run.event == 'workflow_dispatch') &&
+       ((github.event.workflow_run.name == 'Windows Installers' &&
+         (github.event.workflow_run.event == 'workflow_run' ||
+          github.event.workflow_run.event == 'workflow_dispatch')) ||
+        (github.event.workflow_run.name == 'macOS Universal Package' &&
+         github.event.workflow_run.event == 'workflow_run')) &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     outputs:

@@ -53,13 +53,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
 Complete GitHub distribution and crates.io package: **4.2.2**. The working
-manifest is **4.3.0** on the unreleased
-`feature/v4.3.0-battery-perf-thermals` candidate developed through PR #14.
-Release-chain hardening merged to `main` and passed exact-main CI; the
-local integration passed its full gate and benchmark, while the final pushed
-candidate still requires exact-head hosted/security/review qualification.
-Protected merge is not publication, so v4.2.2 remains the published boundary
-until the complete release chain succeeds. Exact v4.2.2 source
+manifest is **4.3.0** on `main`. PR #14 merged as
+`2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
+security, review, and benchmark qualification; exact-main CI run `32766014047`
+passed all 19 jobs. v4.2.2 remains the published boundary until the final
+release-source merge automatically publishes the crate through OIDC and the
+complete tagged release chain succeeds. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
@@ -249,11 +248,11 @@ an `-InternalBattery-N` record and cannot fall back to a stray percentage.
 Candidate benchmark contract: seven alternating Windows full-mode runs per
 version yielded medians of 5146.9 ms before and 2120.2 ms after (~3026.6 ms,
 58.8%, 2.43×). Eleven alternating fast-mode runs per version yielded 257.3 ms
-and 260.4 ms medians; the candidate's +1.2% is background-level, so never claim
-a fast-mode gain from this change. Integrated source/test head `8471d95` passed
-the complete local gate and benchmark after merging hardened `main`; the final
-pushed exact head still requires hosted/security/review proof. These results do
-not establish AMD64 Linux/Raspberry Pi physical acceptance.
+and 260.4 ms medians; the measured +1.2% is background-level, so never claim a
+fast-mode gain from this change. PR #14 exact head `8f5919b` passed the complete
+local, hosted, security, review, and benchmark gates before merge as `2f997d2`;
+exact-main CI run `32766014047` passed all 19 jobs. These results do not
+establish AMD64 Linux/Raspberry Pi physical acceptance.
 
 ### Build Script (`build.rs`)
 
@@ -463,8 +462,9 @@ repro commands are in the
   credential plus fresh checkout-free Apple signers and
   publisher. It renders the MIC-1 wrappers and creates only a private exact
   24-asset draft.
-- **`crates-publish.yml`** — explicit owner-only dispatch after exact-main CI.
-  A read-only Cargo 1.95 validator with no registry credential proves the
+- **`crates-publish.yml`** — automatically follows a successful same-repository
+  `main` CI run and binds publication to that exact tested SHA. A read-only
+  Cargo 1.95 validator with no registry credential proves the
   package bytes; a fresh protected
   `crates-io` runner executes no package code while a short-lived OIDC token is
   present, publishes with `--no-verify`, and verifies public hash/provenance.
@@ -575,7 +575,7 @@ A physical Mac is optional unless CI exposes a GUI-only defect.
 ## Release Process
 
 Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump →
-protected PR → exact-main CI → explicit trusted-OIDC crate publication → tag →
+reviewed PR → exact-main CI → automatic trusted-OIDC crate publication → tag →
 private 24-asset draft → Windows 30-asset assembly/acceptance → macOS 34-asset
 finalization → public smokes → fix-forward — is the
 [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md)
@@ -587,12 +587,13 @@ Apple-Silicon/Intel, package/security, exact-SHA CI/crates, Apple notarization,
 and release-asset gates.
 
 - Bump `Cargo.toml` `version`; update the doc set in lockstep (incl. `HUMAN_CHANGELOG.md` — see the `tr300-changelog` skill).
-- Commit `release: vX.Y.Z - <summary>` on a branch; merge only through the
-  protected PR after all strict checks and review threads resolve.
-- Wait for exact-current-main `ci.yml`, then manually dispatch
-  `crates-publish.yml operation=publish` and require trusted OIDC/public-byte
-  provenance. No push or `workflow_run` automatically publishes a crate.
-- **Tag only after exact-main CI and explicit crates publication are proven.**
+- Commit `release: vX.Y.Z - <summary>` on a branch; merge the PR only after all
+  required checks pass and review threads resolve.
+- A successful same-repository push to `main` automatically triggers
+  `crates-publish.yml` for that exact CI-tested SHA. Require its trusted
+  OIDC/public-byte provenance; no manual publication dispatch belongs in the
+  normal path.
+- **Tag only after exact-main CI and automatic crates publication are proven.**
   Create `git tag vX.Y.Z` and push the single tag explicitly — never
   `git push --tags`.
 - `release.yml` creates a private 24-asset draft. `windows-installers.yml` takes
@@ -608,10 +609,9 @@ package code while credentialed: read-only validation without a registry
 credential has already built the normalized package, and authenticated Cargo
 uses `--no-verify` only after
 reproducing the exact expected bytes in an empty/config-free boundary. The
-crate must enforce `trustpub_only=true`. The one-time bootstrap uses the legacy
-token only to create the exact publisher tuple, prove OIDC, and enable that
-flag; then UI-revoke the token, delete the GitHub secret, remove bootstrap code
-in a protected follow-up, and run the explicit OIDC-only probe.
+crate enforces `trustpub_only=true`; the completed one-time bootstrap is not
+part of the steady-state release workflow. A manual OIDC probe is recovery
+diagnostics only and never substitutes for the automatic exact-main run.
 
 `allow-dirty = ["ci", "msi"]` is
 intentional for the checked-in release customization and WiX source. After

@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a TR-300 release end-to-end — from a protected main-branch commit through crates.io publication and the private-draft GitHub Release chain. Use whenever the user asks to ship, release, deploy, cut a release, tag a release, publish a version, push a version bump to crates.io, or watch a release CI run. Also use when fixing a CI or release workflow failure during an in-flight release. Encodes the full ordered workflow: pre-release local gates, version bump in lockstep across the documentation set, protected PR merge → exact-main CI → explicit OIDC crates publication → tag push → private 24-asset draft → Windows 30-asset assembly and acceptance → macOS 34-asset final publication → post-public smokes → fix-forward loop on failure. Trigger on phrases like "ship v3.14.4", "let's release", "cut the release", "deploy this", "tag and release", "release time", or just "deploy" / "ship it" in this repo's context, even when the user doesn't name a version number.
+description: Cut a TR-300 release end-to-end — from a reviewed main-branch commit through crates.io publication and the private-draft GitHub Release chain. Use whenever the user asks to ship, release, deploy, cut a release, tag a release, publish a version, push a version bump to crates.io, or watch a release CI run. Also use when fixing a CI or release workflow failure during an in-flight release. Encodes the full ordered workflow: pre-release local gates, version bump in lockstep across the documentation set, reviewed PR merge → exact-main CI → automatic OIDC crates publication → tag push → private 24-asset draft → Windows 30-asset assembly and acceptance → macOS 34-asset final publication → post-public smokes → fix-forward loop on failure. Trigger on phrases like "ship v3.14.4", "let's release", "cut the release", "deploy this", "tag and release", "release time", or just "deploy" / "ship it" in this repo's context, even when the user doesn't name a version number.
 ---
 
 # TR-300 release workflow
@@ -156,9 +156,9 @@ Agent tool with subagent_type: "codex:codex-rescue"
 
 For release commits this starts with a self-review of the diff. Open a focused
 feature/release PR and run the full review path for any non-trivial code,
-workflow, dependency, installer, or platform change. Repository ruleset
-`21268055` protects `main`: release work does not bypass the PR, resolved-thread,
-or strict required-check contracts.
+workflow, dependency, installer, or platform change. Merge only a reviewed
+exact commit whose required checks are green and whose review threads are
+resolved.
 
 ---
 
@@ -236,14 +236,13 @@ See § 13 for the fix-forward loop.
 
 ---
 
-## § 9 Explicitly publish the crate through trusted OIDC
+## § 9 Observe automatic crate publication through trusted OIDC
 
-`crates-publish.yml` is deliberately manual so merging a candidate cannot race
-the irreversible release decision. After `ci.yml` succeeds on the exact current
-`main` SHA, dispatch the owner-only `publish` operation:
+`crates-publish.yml` automatically follows a successful same-repository `CI`
+push run on `main` and publishes that exact tested SHA. There is no normal
+manual publication step:
 
 ```bash
-gh workflow run crates-publish.yml --ref main -f operation=publish
 gh run list --workflow=crates-publish.yml --branch main --limit 3
 gh run watch <run-id>
 ```
@@ -268,32 +267,13 @@ A **failed** run halts the release. Diagnose with `gh run view <run-id> --log-fa
 - Cargo or crates.io returned an indeterminate result — inspect the authoritative
   public metadata/hash before deciding whether a retry is safe.
 
-One-time migration only: dispatch `operation=configure_trusted_publisher` from
-protected `main`. It idempotently creates the exact crates.io configuration,
-proves OIDC, and enables `trustpub_only` using the existing scoped legacy token.
-Once that operation succeeds and the public policy is confirmed, the operator
-must revoke that exact token in the authenticated crates.io UI, delete the
-GitHub `CARGO_REGISTRY_TOKEN` secret, and merge a protected follow-up PR that
-removes the bootstrap job and every legacy-token reference. Then dispatch
-`operation=probe_trusted_publisher` to prove OIDC still works without the
-legacy secret; the real version publication remains a later explicit release
-gate. Never retain the token until that publication or restore automatic push
-publication.
-
-Apple cutover is separate. Create a short-lived fine-grained personal access
-token restricted to `QubeTX/qube-machine-report`, with repository permissions
-`Contents: read`, `Actions: read`, and `Environments: write` only. Install its
-value as the `apple-signing` environment secret named exactly
-`RELEASE_SECRET_MIGRATION_TOKEN` from an authenticated workstation with
-`gh secret set RELEASE_SECRET_MIGRATION_TOKEN --env apple-signing --repo QubeTX/qube-machine-report`;
-paste the value only at the command's stdin prompt so it does not enter shell
-history. Run `apple-secret-migration.yml` to copy and inventory the exact names,
-then require fresh native ARM and Intel credential preflights to prove both
-Developer ID identities plus read-only notary authentication from
-`apple-signing`. Delete the repository Apple secrets and
-`RELEASE_SECRET_MIGRATION_TOKEN`, rerun environment-only preflight, and remove
-the migration workflow in the protected follow-up. The copy workflow neither
-deletes credentials nor supplies native proof itself.
+The trusted-publisher tuple and `trustpub_only=true` are steady-state
+configuration. `operation=probe_trusted_publisher` is diagnostics only; it
+must never become a required release click or substitute for the automatic
+run. Apple signing likewise consumes the existing `apple-signing` environment;
+its branch policy has no reviewer or wait-timer ceremony. A tagless native
+ARM/Intel credential preflight is optional diagnostics before a risky signing
+change, not a normal release step.
 
 Don't push the tag until this resolves.
 
@@ -418,7 +398,7 @@ Then update two files:
 
 **`MASTER_PLAN.md`** — locate the "Tag status (as of YYYY-MM-DD)" bulleted list and append a new entry for `vX.Y.Z`:
 ```
-- `vX.Y.Z` (`<commit-sha>`): tagged + pushed after exact-main CI and explicit trusted-OIDC crates publication; release.yml run <id> created the private 24-asset draft after fresh Apple signing/notary gates; windows-installers.yml run <id> assembled the exact 30-asset draft; private windows-installer-validation.yml run <id> attested those bytes and passed direct prior-to-candidate transitions while public latest remained prior; macos-installer.yml run <id> added the four direct-PKG/compatibility-DMG assets and solely published the exact 34-asset release; public windows-installer-validation.yml run <id> and published Linux/macOS smokes passed.
+- `vX.Y.Z` (`<commit-sha>`): tagged + pushed after exact-main CI and automatic trusted-OIDC crates publication; release.yml run <id> created the private 24-asset draft after fresh Apple signing/notary gates; windows-installers.yml run <id> assembled the exact 30-asset draft; private windows-installer-validation.yml run <id> attested those bytes and passed direct prior-to-candidate transitions while public latest remained prior; macos-installer.yml run <id> added the four direct-PKG/compatibility-DMG assets and solely published the exact 34-asset release; public windows-installer-validation.yml run <id> and published Linux/macOS smokes passed.
 ```
 
 Also bump the "Last updated" and "Current version" lines at the top of `MASTER_PLAN.md`.
@@ -432,8 +412,8 @@ git push -u origin <docs-branch>
 # open/merge a protected docs PR
 ```
 
-The follow-up PR must still pass the protected `ci.yml` contexts. It does not
-automatically dispatch crates publication.
+The follow-up PR must still pass `ci.yml`. Its merge triggers the automatic
+crates workflow, which must cleanly prove and skip the already-published version.
 
 The release is now complete.
 
@@ -445,17 +425,17 @@ Things fail. The recovery path depends on whether the tag has been pushed yet.
 
 ### Pre-tag (between § 7 push and § 10 tag)
 
-If `ci.yml` or the explicit `crates-publish.yml` run fails:
+If `ci.yml` or the automatic `crates-publish.yml` run fails:
 
 1. `gh run view <run-id> --log-failed` to diagnose.
 2. Fix the issue on the release branch with a new commit. **Keep the same
    version** — the tag has not moved yet, so `Cargo.toml` `version` stays as set
    in § 3.
 3. Push the branch and wait for the protected PR's exact-head checks.
-4. Merge, watch exact-main CI again from § 8, and explicitly redispatch crates
-   publication only when that SHA is ready.
+4. Merge, watch exact-main CI again from § 8, and let its successful completion
+   start a fresh automatic crates publication run for that SHA.
 
-Repeat until exact-main `ci.yml` and the explicit crates publication are proven,
+Repeat until exact-main `ci.yml` and the automatic crates publication are proven,
 then proceed to § 10.
 
 ### Post-tag (after § 10 push)
@@ -491,7 +471,7 @@ These have all bitten previous releases. They're the load-bearing why-not-this-i
 
 - **Never `git push --tags`.** Always explicit `git push origin vX.Y.Z`. Broad tag pushes can drag stale local tags into the remote and trigger spurious release.yml runs.
 
-- **Don't tag before** exact-main `ci.yml` is green AND the explicit trusted-
+- **Don't tag before** exact-main `ci.yml` is green AND the automatic trusted-
   OIDC crates publication has been proven. If you tag while either is still in
   flight, you risk a GitHub candidate whose Cargo fallback is unavailable.
 

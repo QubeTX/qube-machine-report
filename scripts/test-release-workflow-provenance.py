@@ -24,7 +24,6 @@ MACOS_WORKFLOW = ROOT / ".github" / "workflows" / "macos-installer.yml"
 MACOS_INSTALLER_BUILDER = ROOT / "scripts" / "build-sign-notarize-macos-installer.sh"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CRATES_WORKFLOW = ROOT / ".github" / "workflows" / "crates-publish.yml"
-APPLE_MIGRATION_WORKFLOW = ROOT / ".github" / "workflows" / "apple-secret-migration.yml"
 PINNED_INNO_INSTALLER = ROOT / "scripts" / "install-pinned-inno-setup.ps1"
 INNO_MSI_BRIDGE = ROOT / "inno" / "remove-conflicting-msi.pas"
 MANAGED_WINDOWS_INSTALLER = (
@@ -3839,6 +3838,7 @@ def check_workflow_contract(path: Path, workflow: str) -> None:
 
 def check_windows_validation_provenance(workflow: str) -> None:
     label = WINDOWS_VALIDATION_WORKFLOW.name
+    resolve = extract_job(workflow, "resolve", label)
     require(workflow, "github.event.workflow_run.conclusion == 'success'", label)
     require(
         workflow,
@@ -3846,6 +3846,19 @@ def check_windows_validation_provenance(workflow: str) -> None:
         label,
     )
     require(workflow, "github.event.workflow_run.event == 'workflow_run'", label)
+    if re.search(
+        r"github\.event\.workflow_run\.name == 'Windows Installers'\s*&&\s*"
+        r"\(github\.event\.workflow_run\.event == 'workflow_run'\s*\|\|\s*"
+        r"github\.event\.workflow_run\.event == 'workflow_dispatch'\)",
+        resolve,
+    ) is None:
+        raise AssertionError(f"{label}: Windows automatic/recovery event gate drifted")
+    if re.search(
+        r"github\.event\.workflow_run\.name == 'macOS Universal Package'\s*&&\s*"
+        r"github\.event\.workflow_run\.event == 'workflow_run'",
+        resolve,
+    ) is None:
+        raise AssertionError(f"{label}: macOS preflight exclusion gate drifted")
     require(
         workflow,
         "github.event.workflow_run.head_repository.full_name == github.repository",
@@ -5388,23 +5401,25 @@ def check_release_token_boundary(workflow: str) -> None:
 def check_crates_token_boundary(workflow: str) -> None:
     label = CRATES_WORKFLOW.name
     trigger = workflow[: workflow.index("permissions:")]
+    for needle in (
+        "workflow_run:",
+        'workflows: ["CI"]',
+        "types: [completed]",
+        "branches: [main]",
+    ):
+        require(trigger, needle, f"{label} automatic post-CI trigger")
     if re.search(r"(?m)^\s{2}push:\s*$", trigger):
         raise AssertionError(
-            f"{label}: routine crates publication must remain an explicit dispatch gate"
+            f"{label}: crates publication must consume the successful CI run, not race it"
         )
     require(
         workflow,
-        "if: github.event_name == 'workflow_dispatch' && inputs.operation == 'publish' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report' && github.actor_id == '30877743'",
-        f"{label} explicit publish dispatch",
+        "if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository && github.repository == 'QubeTX/qube-machine-report'",
+        f"{label} automatic trusted-main publish gate",
     )
-    configure_job = extract_job(workflow, "configure-trusted-publisher", label)
     probe_job = extract_job(workflow, "probe-trusted-publisher", label)
-    enable_job = extract_job(workflow, "enable-trusted-publishing-only", label)
     validation_job = extract_job(workflow, "validate-package", label)
     publish_job = extract_job(workflow, "publish", label)
-    bootstrap = extract_named_step(
-        configure_job, "Create the exact trusted-publisher configuration", label
-    )
     validation_package = extract_named_step(
         validation_job, "Package and registry-credential-free dry-run", label
     )
@@ -5425,71 +5440,50 @@ def check_crates_token_boundary(workflow: str) -> None:
     )
 
     require(workflow, "cancel-in-progress: false", f"{label} irreversible publish lock")
-    for job_name, job in (
-        ("configure", configure_job),
-        ("probe", probe_job),
-        ("enable", enable_job),
-        ("publish", publish_job),
-    ):
+    for job_name, job in (("probe", probe_job), ("publish", publish_job)):
         require(job, "environment: crates-io", f"{label} {job_name} environment")
         require(job, "runs-on: ubuntu-24.04", f"{label} {job_name} runner")
 
-    if "uses:" in configure_job or "actions/checkout" in configure_job:
-        raise AssertionError(f"{label}: bootstrap must be checkout/action free")
-    require(configure_job, "permissions: {}", f"{label} bootstrap permissions")
-    require(
-        bootstrap,
-        "CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}",
-        f"{label} bootstrap token",
-    )
-    for needle in (
-        "Authorization: Bearer $CARGO_REGISTRY_TOKEN",
-        '"environment":"crates-io"',
-        ".github_config.crate",
-        ".github_configs[0].crate",
-        ".meta.total == 1",
-        ".github_configs | length",
-        "repository_owner_id == 230946269",
-        "configuration_count\" == 0",
-        "configuration_count\" == 1",
-        "commits/main",
-        "EXPECTED_ACTOR_ID\" == 30877743",
+    for forbidden in (
+        "configure-trusted-publisher",
+        "enable-trusted-publishing-only",
+        "${{ secrets.CARGO_REGISTRY_TOKEN }}",
+        "configure_trusted_publisher",
     ):
-        require(bootstrap, needle, f"{label} idempotent exact bootstrap")
-    if ".krate" in bootstrap or "/api/v1/tokens/current" in workflow:
-        raise AssertionError(f"{label}: invalid crates.io API contract returned")
-    if workflow.count("${{ secrets.CARGO_REGISTRY_TOKEN }}") != 2:
-        raise AssertionError(f"{label}: legacy token must remain in bootstrap/disable-only jobs")
+        if forbidden in workflow:
+            raise AssertionError(f"{label}: completed one-time bootstrap remained: {forbidden}")
 
     probe_uses = [line.strip() for line in probe_job.splitlines() if "uses:" in line]
     if probe_uses != [f"uses: {CRATES_AUTH_ACTION}"]:
         raise AssertionError(f"{label}: unexpected OIDC probe actions: {probe_uses!r}")
     require(probe_job, "id-token: write", f"{label} OIDC probe permission")
     require(workflow, "probe_trusted_publisher", f"{label} post-deletion OIDC probe mode")
-    if "actions/checkout" in enable_job or "uses:" in enable_job:
-        raise AssertionError(f"{label}: trusted-only transition must be checkout/action free")
-    for needle in (
-        "needs.probe-trusted-publisher.result == 'success'",
-        "CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}",
-        '--request PATCH',
-        "{\"crate\":{\"trustpub_only\":true}}",
-        '.crate.trustpub_only == true',
-        "commits/main",
-    ):
-        require(enable_job, needle, f"{label} trusted-only transition")
 
     if "id-token: write" in validation_job or "CARGO_REGISTRY_TOKEN" in validation_job:
         raise AssertionError(f"{label}: validation regained a credential")
     for needle in (
         "EVENT_NAME: ${{ github.event_name }}",
-        "OPERATION: ${{ inputs.operation }}",
-        "ACTOR_ID: ${{ github.actor_id }}",
-        '"$EVENT_NAME" == workflow_dispatch',
-        '"$OPERATION" == publish',
-        '"$ACTOR_ID" == 30877743',
+        "UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}",
+        "UPSTREAM_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}",
+        "UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}",
+        "UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}",
+        "WORKFLOW_SHA: ${{ github.sha }}",
+        '"$EVENT_NAME" == workflow_run',
         '"$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report',
+        "actions/workflows/ci.yml",
+        "actions/runs/$UPSTREAM_RUN_ID",
+        '"$workflow_id" == "$trusted_workflow_id"',
+        '"$workflow_id" == "$UPSTREAM_WORKFLOW_ID"',
+        '"$event" == push',
+        '"$status" == completed',
+        '"$conclusion" == success',
+        '"$head_branch" == main',
+        '"$source_sha" == "$UPSTREAM_SHA"',
+        '"$run_attempt" == "$UPSTREAM_RUN_ATTEMPT"',
+        '"$WORKFLOW_SHA" == "$source_sha"',
+        'git/ref/heads/main',
     ):
-        require(source_gate, needle, f"{label} owner-authorized publish gate")
+        require(source_gate, needle, f"{label} exact automatic publish gate")
     for needle in (
         "rustup toolchain install 1.95",
         "cargo\\ 1\\.95",
@@ -5512,7 +5506,11 @@ def check_crates_token_boundary(workflow: str) -> None:
     if uses != [f"uses: {CHECKOUT_ACTION}", f"uses: {CRATES_AUTH_ACTION}"]:
         raise AssertionError(f"{label}: unexpected privileged publisher actions: {uses!r}")
     require(publish_job, "persist-credentials: false", f"{label} exact checkout")
-    require(publish_job, "ref: ${{ github.sha }}", f"{label} exact checkout")
+    require(
+        publish_job,
+        "ref: ${{ needs.validate-package.outputs.source_sha }}",
+        f"{label} exact checkout",
+    )
     require(publish_job, "submodules: false", f"{label} exact checkout")
     require(publish_job, "lfs: false", f"{label} exact checkout")
 
@@ -5601,30 +5599,6 @@ def check_crates_token_boundary(workflow: str) -> None:
         '[[ "$tag_after" == "$published_tag_sha"',
     ):
         require(registry, needle, f"{label} post-release drift proof")
-
-
-def check_apple_migration_boundary(workflow: str) -> None:
-    label = APPLE_MIGRATION_WORKFLOW.name
-    migrate = extract_job(workflow, "migrate", label)
-    require(workflow, "permissions: {}", label)
-    require(migrate, "environment: apple-signing", label)
-    if "uses:" in migrate or "actions/checkout" in migrate:
-        raise AssertionError(f"{label}: one-time migration must be action/checkout free")
-    for needle in (
-        "github.repository == 'QubeTX/qube-machine-report'",
-        "github.actor_id == '30877743'",
-        "github.ref == 'refs/heads/main'",
-        "git/ref/heads/main",
-        "deployment-branch-policies",
-        "$'branch\\tmain'",
-        "$'tag\\tv*'",
-        "RELEASE_SECRET_MIGRATION_TOKEN",
-        "APPLE_CERTIFICATE_P12_BASE64",
-        "APPLE_INSTALLER_CERTIFICATE_P12_BASE64",
-        "APPLE_API_KEY_P8_BASE64",
-        'gh secret set "$name" --env apple-signing',
-    ):
-        require(migrate, needle, label)
 
 
 def check_privileged_working_directory_contract() -> None:
@@ -5767,7 +5741,6 @@ def check_structural_contract(
     ci: str,
     crates: str,
     windows_validation: str,
-    apple_migration: str,
 ) -> None:
     for workflow_path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         workflow_text = workflow_path.read_text(encoding="utf-8")
@@ -5861,7 +5834,6 @@ if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Va
     check_macos_publish_boundary(macos)
     check_release_token_boundary(release)
     check_crates_token_boundary(crates)
-    check_apple_migration_boundary(apple_migration)
     check_privileged_working_directory_contract()
     check_ci_lifecycle_guard(ci, macos)
 
@@ -5924,13 +5896,12 @@ def main() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     crates = CRATES_WORKFLOW.read_text(encoding="utf-8")
     windows_validation = WINDOWS_VALIDATION_WORKFLOW.read_text(encoding="utf-8")
-    apple_migration = APPLE_MIGRATION_WORKFLOW.read_text(encoding="utf-8")
     bash = locate_bash()
     if not bash:
         raise AssertionError("bash is required to execute workflow provenance fixtures")
 
     check_structural_contract(
-        release, windows, macos, ci, crates, windows_validation, apple_migration
+        release, windows, macos, ci, crates, windows_validation
     )
     with tempfile.TemporaryDirectory(prefix="tr300-provenance-gh-") as fixture_raw:
         mock_bin = Path(fixture_raw) / "bin"
