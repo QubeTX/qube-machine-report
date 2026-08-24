@@ -2,8 +2,6 @@
 
 ## Backlog
 
-- [ ] **Review, merge, and release TR-300 v4.3.0** - after corrected PR acceptance, merge and run exact-SHA crates/tag/release/physical gates (needs #v430) (ms #v43) #r43
-
 ## To-Do
 
 - [ ] **Validate TR-300 on the AMD64 Linux laptop** - full/fast reports, shell/Cargo update preservation, permissions, networking, and graceful optional probes (ms #hw4) #amd
@@ -11,6 +9,16 @@
 - [ ] **Complete the Alienware Global MSI v4.1.3 → v4.2.2 UAC update** - approve the same-channel transaction, then reprove one Program Files owner, registry/PATH, cleanup, JSON, functionality, and hardware (needs #v42) (ms #hw4) #w422
 
 ## Active
+
+- [ ] **Review, merge, and release TR-300 v4.3.0** - harden the release chain, qualify the corrected candidate, then merge and run exact-SHA crates/tag/release/physical/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+  - [ ] Remediate and independently validate every confirmed release/privilege security finding
+  - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
+  - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
+  - [ ] Reconcile the hardened main branch into PR #14 and pass final review/gates
+  - [ ] Complete reachable physical hardware qualification without overstating unavailable evidence
+  - [ ] Merge only the accepted exact candidate and verify exact-main CI plus crates.io custody
+  - [ ] Push only v4.3.0 and pass every archive/installer/signing/notary/transition gate
+  - [ ] Audit all 34 public assets, deploy the homepage candidate, and close the release ledger
 
 ## Done
 
