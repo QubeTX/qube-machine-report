@@ -781,6 +781,10 @@ def run_case(
         return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+def cargo_dist_apple_archive_bytes(target: str) -> bytes:
+    return f"fixture signed cargo-dist archive for {target}\n".encode()
+
+
 def write_cargo_dist_apple_artifact(
     path: Path,
     target: str,
@@ -791,7 +795,7 @@ def write_cargo_dist_apple_artifact(
     archive_name = f"tr300-{target}.tar.xz"
     sidecar_name = f"{archive_name}.sha256"
     manifest_name = f"{target}-dist-manifest.json"
-    archive_bytes = f"fixture signed cargo-dist archive for {target}\n".encode()
+    archive_bytes = cargo_dist_apple_archive_bytes(target)
     archive_hash = hashlib.sha256(archive_bytes).hexdigest()
     sidecar_hash = "0" * 64 if bad_checksum else archive_hash
     sidecar_bytes = f"{sidecar_hash} *{archive_name}\n".encode()
@@ -820,6 +824,8 @@ def write_prepared_release_artifact(
         name: f"prepared Release fixture for {name}\n".encode()
         for name in INITIAL_RELEASE_ASSETS
     }
+    for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+        payloads[f"tr300-{target}.tar.xz"] = cargo_dist_apple_archive_bytes(target)
     dist_installer = b"#!/bin/sh\nprintf '%s\\n' 'fixture dist installer'\n"
     payloads["tr300-dist-installer.sh"] = dist_installer
     dist_installer_sha256 = hashlib.sha256(dist_installer).hexdigest()
@@ -834,6 +840,10 @@ def write_prepared_release_artifact(
         f"tr300_dist_installer_sha256='{embedded_dist_sha256}'\n"
         "printf '%s\\n' \"$tr300_tag\"\n"
     ).encode()
+    if mutation == "prepared-canonical-divergence":
+        payloads["tr300-aarch64-apple-darwin.tar.xz"] += (
+            b"internally valid but different prepared Release bytes\n"
+        )
     manifest = b"".join(
         f"{hashlib.sha256(payloads[name]).hexdigest()}  {name}\n".encode()
         for name in INITIAL_RELEASE_ASSETS
@@ -1133,6 +1143,15 @@ def run_macos_source_custody_case(
             raise AssertionError(
                 f"{name}: return code {result.returncode}, expected_success="
                 f"{expected_success}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            )
+        if mutation == "prepared-canonical-divergence" and (
+            "prepared Release archive differs from the canonical signed artifact: "
+            "tr300-aarch64-apple-darwin.tar.xz"
+            not in result.stderr
+        ):
+            raise AssertionError(
+                f"{name}: divergent valid archives did not reach the equality guard\n"
+                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
             )
         if expected_success:
             expected = {
@@ -2317,6 +2336,11 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         (
             "prepared wrapper dist-installer pin mismatch",
             "prepared-dist-wrapper-pin-mismatch",
+            False,
+        ),
+        (
+            "prepared and canonical Apple archives diverge while both remain internally valid",
+            "prepared-canonical-divergence",
             False,
         ),
         (

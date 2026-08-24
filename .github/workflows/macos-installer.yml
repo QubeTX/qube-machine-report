@@ -649,6 +649,10 @@ jobs:
             archive_name="tr300-${target}-apple-darwin.tar.xz"
             archive_path="$prepared_extracted/$archive_name"
             [[ -f "$archive_path" && ! -L "$archive_path" && -s "$archive_path" ]]
+            if ! cmp -s -- "$archive_path" "$OUTPUT_DIRECTORY/$archive_name"; then
+              echo "prepared Release archive differs from the canonical signed artifact: $archive_name" >&2
+              exit 65
+            fi
             [[ "$(grep -Ec "^[0-9a-f]{64}  ${archive_name}$" "$asset_manifest")" == 1 ]]
             archive_manifest_sha256=$(awk -v name="$archive_name" \
               '$2 == name { print $1 }' "$asset_manifest")
