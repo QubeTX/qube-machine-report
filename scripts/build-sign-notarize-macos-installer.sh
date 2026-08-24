@@ -232,7 +232,7 @@ directory_listing="${preinstall_state}/directory-listing"
 entry_matches="${preinstall_state}/entry-matches"
 
 # Invoked indirectly by the exit trap below.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 cleanup_preinstall_state() {
     /bin/rm -f "$accounts_file" "$record_plist" "$seen_homes" \
         "$directory_listing" "$entry_matches"

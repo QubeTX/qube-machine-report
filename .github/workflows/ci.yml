@@ -230,37 +230,37 @@ jobs:
               rm -f "$second_receipt"
               rmdir "$second_home/.config/tr300" 2>/dev/null || true
               rmdir "$second_home/.config" 2>/dev/null || true
-              rmdir "$second_home" 2>/dev/null || true
+              sudo /bin/rmdir "$second_home" 2>/dev/null || true
             fi
             for residue_home in "$hidden_home" "$double_dot_home"; do
               if [ -d "$residue_home" ]; then
                 rm -f "$residue_home/.config/tr300/tr300-receipt.json"
                 rmdir "$residue_home/.config/tr300" 2>/dev/null || true
                 rmdir "$residue_home/.config" 2>/dev/null || true
-                rmdir "$residue_home" 2>/dev/null || true
+                sudo /bin/rmdir "$residue_home" 2>/dev/null || true
               fi
             done
             if [ -L "$broken_parent" ]; then
               rm -f "$broken_parent"
             fi
-            rmdir "$broken_parent_home" 2>/dev/null || true
+            sudo /bin/rmdir "$broken_parent_home" 2>/dev/null || true
             if [ -d "$inaccessible_parent" ]; then
               chmod 0700 "$inaccessible_parent" 2>/dev/null || true
               rmdir "$inaccessible_parent" 2>/dev/null || true
             fi
-            rmdir "$inaccessible_home" 2>/dev/null || true
+            sudo /bin/rmdir "$inaccessible_home" 2>/dev/null || true
             if [ -d "$case_home" ]; then
               rm -f "$case_binary" "$case_receipt"
               rmdir "$case_home/.CARGO/BIN" 2>/dev/null || true
               rmdir "$case_home/.CARGO" 2>/dev/null || true
               rmdir "$case_home/.CONFIG/TR300" 2>/dev/null || true
               rmdir "$case_home/.CONFIG" 2>/dev/null || true
-              rmdir "$case_home" 2>/dev/null || true
+              sudo /bin/rmdir "$case_home" 2>/dev/null || true
             fi
             if [ "$casefold_attached" -eq 1 ]; then
               hdiutil detach "$casefold_home" >/dev/null 2>&1 || true
             fi
-            rmdir "$casefold_home" 2>/dev/null || true
+            sudo /bin/rmdir "$casefold_home" 2>/dev/null || true
             rm -f "$casefold_image"
             if [ "$custom_fixture_created" -eq 1 ]; then
               sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user" \
@@ -373,7 +373,8 @@ jobs:
             "$second_log"
           test "$(shasum -a 256 "$second_receipt" | awk '{print $1}')" = "$second_hash"
           rm -f "$second_receipt"
-          rmdir "$second_home/.config/tr300" "$second_home/.config" "$second_home"
+          rmdir "$second_home/.config/tr300" "$second_home/.config"
+          sudo /bin/rmdir "$second_home"
 
           # Both safe dot-entry globs are load-bearing: one covers ordinary
           # hidden homes, and the other covers names beginning with two dots
@@ -397,8 +398,8 @@ jobs:
             test "$(shasum -a 256 "$residue_receipt" | awk '{print $1}')" = \
               "$residue_hash"
             rm -f "$residue_receipt"
-            rmdir "$residue_home/.config/tr300" "$residue_home/.config" \
-              "$residue_home"
+            rmdir "$residue_home/.config/tr300" "$residue_home/.config"
+            sudo /bin/rmdir "$residue_home"
           done
 
           # ASCII case variants resolve to the same owner on default macOS
@@ -433,7 +434,8 @@ jobs:
           test "$(shasum -a 256 "$case_receipt" | awk '{print $1}')" = \
             "$case_receipt_hash"
           rm -f "$case_receipt"
-          rmdir "$case_home/.CONFIG/TR300" "$case_home/.CONFIG" "$case_home"
+          rmdir "$case_home/.CONFIG/TR300" "$case_home/.CONFIG"
+          sudo /bin/rmdir "$case_home"
 
           # A case-sensitive home can contain both the clean lowercase parent
           # and a second folded-name owner. Counted matching must reject that
@@ -465,7 +467,7 @@ jobs:
             "$casefold_home/.cargo/bin" "$casefold_home/.cargo"
           hdiutil detach "$casefold_home" >/dev/null
           casefold_attached=0
-          rmdir "$casefold_home"
+          sudo /bin/rmdir "$casefold_home"
           rm -f "$casefold_image"
 
           # A broken fixed-path parent cannot be mistaken for absent managed
@@ -485,7 +487,7 @@ jobs:
           test "$(readlink "$broken_parent")" = "$broken_parent_target"
           test ! -e "$broken_parent_target"
           rm -f "$broken_parent"
-          rmdir "$broken_parent_home"
+          sudo /bin/rmdir "$broken_parent_home"
 
           # Run the exact script without privilege so a permission-denied fixed
           # parent is deterministic. Production PackageKit runs as root, but
@@ -504,7 +506,8 @@ jobs:
             "$inaccessible_log"
           test "$(stat -f '%Lp' "$inaccessible_parent")" = 0
           chmod 0700 "$inaccessible_parent"
-          rmdir "$inaccessible_parent" "$inaccessible_home"
+          rmdir "$inaccessible_parent"
+          sudo /bin/rmdir "$inaccessible_home"
 
           # Create a non-console local human account at a valid unsigned UID
           # above signed-32-bit range whose Directory Service home is outside
