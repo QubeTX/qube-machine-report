@@ -12,10 +12,15 @@
 #
 # Note that the GitHub Release will be created with a generated
 # title/body based on your changelogs.
+#
+# PROJECT OVERRIDE: the fresh no-checkout host creates a private 24-asset draft,
+# not a public stable release. Windows Installers extends that draft to 30;
+# exact-byte private Windows validation must succeed before the macOS workflow
+# adds four native assets and becomes the sole 34-asset final publisher.
 
 name: Release
 permissions:
-  "contents": "write"
+  "contents": "read"
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -38,6 +43,11 @@ permissions:
 #
 # If there's a prerelease-style suffix to the version, then the release(s)
 # will be marked as a prerelease.
+#
+# PROJECT OVERRIDE: TR-300's complete 34-asset release chain deliberately
+# supports only repository-wide stable tags in the exact form vX.Y.Z. The first
+# plan step rejects every other push tag before checkout, dist planning,
+# artifact building, or hosting. Keep this fail-closed guard when regenerating.
 on:
   pull_request:
   push:
@@ -53,20 +63,109 @@ jobs:
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
       tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
       publishing: ${{ !github.event.pull_request }}
+      source-sha: ${{ steps.provenance.outputs.source_sha }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
+      - name: Require a supported stable release tag
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "unsupported release tag: $RELEASE_TAG (expected vX.Y.Z)" >&2
+            exit 64
+          }
+      - name: Bind the release tag to current main and successful CI
+        if: github.event_name == 'push'
+        id: provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          EVENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$EVENT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          resolve_tag_commit() {
+            local tag=$1
+            local object_type source_sha
+            IFS=$'\t' read -r object_type source_sha < <(
+              gh api "repos/$EXPECTED_REPOSITORY/git/ref/tags/$tag" \
+                --jq '.object | [.type, .sha] | @tsv'
+            )
+            for _ in 1 2 3 4 5; do
+              case "$object_type" in
+                commit) printf '%s\n' "$source_sha"; return 0 ;;
+                tag)
+                  IFS=$'\t' read -r object_type source_sha < <(
+                    gh api "repos/$EXPECTED_REPOSITORY/git/tags/$source_sha" \
+                      --jq '.object | [.type, .sha] | @tsv'
+                  )
+                  ;;
+                *) return 65 ;;
+              esac
+            done
+            return 65
+          }
+          source_sha=$(resolve_tag_commit "$RELEASE_TAG")
+          [[ "$source_sha" == "$EVENT_SHA" ]]
+          main_sha=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$main_sha" == "$source_sha" ]]
+          workflow_id=$(gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
+          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$source_sha&per_page=100" \
+            > "$RUNNER_TEMP/release-ci-runs.json"
+          mapfile -t ci_runs < <(
+            jq -r --argjson workflow_id "$workflow_id" \
+              --arg repository "$EXPECTED_REPOSITORY" --arg sha "$source_sha" '
+                .workflow_runs[] |
+                select(.workflow_id == $workflow_id and .name == "CI" and
+                       .path == ".github/workflows/ci.yml" and .event == "push" and
+                       .status == "completed" and .conclusion == "success" and
+                       .repository.full_name == $repository and
+                       .head_repository.full_name == $repository and
+                       .head_branch == "main" and .head_sha == $sha) |
+                .id
+              ' "$RUNNER_TEMP/release-ci-runs.json"
+          )
+          [[ ${#ci_runs[@]} -eq 1 && "${ci_runs[0]}" =~ ^[1-9][0-9]*$ ]]
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          ref: ${{ steps.provenance.outputs.source_sha || github.sha }}
           persist-credentials: false
           submodules: recursive
       - name: Install dist
-        # we specify bash to get pipefail; it guards against the `curl` command
-        # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh"
+        run: |
+          set -euo pipefail
+          installer="$RUNNER_TEMP/cargo-dist-installer-v0.31.0.sh"
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh \
+            -o "$installer"
+          printf '%s  %s\n' \
+            'e79d87e418b9d2cbe992d014985457c28a5a7c553add3da4ed1047e161c928f4' \
+            "$installer" | sha256sum -c -
+          checksum_bin="$RUNNER_TEMP/cargo-dist-checksum-bin"
+          mkdir "$checksum_bin"
+          cat > "$checksum_bin/sha256sum" <<'SH'
+          #!/bin/sh
+          exec /usr/bin/sha256sum "$@"
+          SH
+          chmod 500 "$checksum_bin/sha256sum"
+          checksum_path=$(PATH="$checksum_bin:$PATH" command -v sha256sum)
+          [[ "$checksum_path" == "$checksum_bin/sha256sum" && -f "$checksum_path" && ! -L "$checksum_path" && -x "$checksum_path" ]]
+          PATH="$checksum_bin:$PATH" sh "$installer"
+          dist_path=$(command -v dist)
+          [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]]
+          [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]]
       - name: Cache dist
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/dist
@@ -76,13 +175,22 @@ jobs:
       # (PRs run on the *source* but secrets are usually on the *target* -- that's *good*
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == push ]]; then
+            dist host --steps=create --tag="$RELEASE_TAG" --output-format=json \
+              > plan-dist-manifest.json
+          else
+            dist plan --output-format=json > plan-dist-manifest.json
+          fi
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
       - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
@@ -116,22 +224,79 @@ jobs:
       - name: enable windows longpaths
         run: |
           git config --global core.longpaths true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install Rust non-interactively if not already installed
+      - name: Reject unreviewed cargo-dist container runners
         if: ${{ matrix.container }}
+        shell: bash
         run: |
-          if ! command -v cargo > /dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo 'cargo-dist container execution is not source-pinned for this repository' >&2
+          exit 64
+      - name: Install pinned cargo-dist on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer="$RUNNER_TEMP/cargo-dist-installer-v0.31.0.sh"
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh \
+            -o "$installer"
+          actual=$(shasum -a 256 "$installer" | awk '{print $1}')
+          [[ "$actual" == e79d87e418b9d2cbe992d014985457c28a5a7c553add3da4ed1047e161c928f4 ]]
+          checksum_bin="$RUNNER_TEMP/cargo-dist-checksum-bin"
+          mkdir "$checksum_bin"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            checksum_program=/usr/bin/shasum
+            [[ -x "$checksum_program" ]]
+            cat > "$checksum_bin/sha256sum" <<'SH'
+          #!/bin/sh
+          exec /usr/bin/shasum -a 256 "$@"
+          SH
+          else
+            checksum_program=/usr/bin/sha256sum
+            [[ -x "$checksum_program" ]]
+            cat > "$checksum_bin/sha256sum" <<'SH'
+          #!/bin/sh
+          exec /usr/bin/sha256sum "$@"
+          SH
           fi
-      - name: Install dist
-        run: ${{ matrix.install_dist.run }}
+          chmod 500 "$checksum_bin/sha256sum"
+          checksum_path=$(PATH="$checksum_bin:$PATH" command -v sha256sum)
+          [[ "$checksum_path" == "$checksum_bin/sha256sum" && -f "$checksum_path" && ! -L "$checksum_path" && -x "$checksum_path" ]]
+          PATH="$checksum_bin:$PATH" sh "$installer"
+          dist_path=$(command -v dist)
+          [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]]
+          [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]]
+      - name: Install pinned cargo-dist on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'cargo-dist-installer-v0.31.0.ps1'
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri 'https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.ps1' `
+            -OutFile $installer
+          $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne 'ffec5b52cfbe29465d831150b01f8a254668fc271e5102fab7aea7da5d51ec69') {
+            throw "cargo-dist installer checksum mismatch: $actual"
+          }
+          & $installer
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $distPath = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cargo\bin\dist.exe'
+          $distPath = [IO.Path]::GetFullPath($distPath)
+          if (-not (Test-Path -LiteralPath $distPath -PathType Leaf) -or
+              (Get-Item -LiteralPath $distPath).LinkType) {
+            throw 'cargo-dist executable is missing or not a regular file'
+          }
+          $distVersion = (& $distPath --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $distVersion -cne 'cargo-dist 0.31.0') {
+            throw "unexpected cargo-dist version: $distVersion"
+          }
       # Get the dist-manifest
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -144,28 +309,6 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
-      # Release publishing is fail-closed for Apple artifacts. The script signs
-      # and notarizes before cargo-dist selects upload files; missing credentials
-      # or a non-Accepted Apple result stops the job, so no unsigned fallback can
-      # reach the GitHub Release.
-      - name: Sign and notarize macOS artifacts
-        if: ${{ needs.plan.outputs.publishing == 'true' && contains(join(matrix.targets, ','), 'apple-darwin') }}
-        timeout-minutes: 30
-        shell: bash
-        env:
-          APPLE_TARGETS: ${{ join(matrix.targets, ' ') }}
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: |
-          read -r -a targets <<< "$APPLE_TARGETS"
-          for target in "${targets[@]}"; do
-            scripts/sign-notarize-macos.sh "$target" dist-manifest.json target/distrib
-          done
       - id: cargo-dist
         name: Post-build
         # We force bash here just because github makes it really hard to get values up
@@ -182,36 +325,305 @@ jobs:
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
       - name: "Upload artifacts"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: artifacts-build-local-${{ join(matrix.targets, '_') }}
+          # Published Apple archives cross a fresh-runner credential boundary.
+          # Keep unsigned inputs out of cargo-dist's canonical artifacts-* set.
+          name: ${{ needs.plan.outputs.publishing == 'true' && contains(join(matrix.targets, ','), 'apple-darwin') && format('unsigned-artifacts-build-local-{0}', join(matrix.targets, '_')) || format('artifacts-build-local-{0}', join(matrix.targets, '_')) }}
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+
+  # Apple credentials never share a runner with checkout, dependencies, build
+  # scripts, or cargo-dist. These jobs accept only each fixed unsigned archive
+  # artifact, safely extract a strict five-entry tar, and never execute its
+  # binary before signing/notarization.
+  sign-apple-artifacts:
+    needs:
+      - plan
+      - build-local-artifacts
+    if: ${{ needs.plan.outputs.publishing == 'true' && needs.build-local-artifacts.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    environment: apple-signing
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Download the fixed unsigned cargo-dist artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: unsigned-artifacts-build-local-${{ matrix.target }}
+          path: unsigned
+
+      - name: Validate and safely stage the unsigned Apple archive
+        env:
+          APPLE_TARGET: ${{ matrix.target }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          STAGING_DIRECTORY: ${{ runner.temp }}/tr300-apple-signing-input
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$APPLE_TARGET" in
+            aarch64-apple-darwin|x86_64-apple-darwin) ;;
+            *) exit 64 ;;
+          esac
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          archive="tr300-$APPLE_TARGET.tar.xz"
+          sidecar="$archive.sha256"
+          manifest="$APPLE_TARGET-dist-manifest.json"
+          expected=("$archive" "$sidecar" "$manifest")
+          declare -A remaining=()
+          for name in "${expected[@]}"; do remaining["$name"]=1; done
+          mapfile -d '' -t entries < <(find unsigned -mindepth 1 -maxdepth 1 -print0)
+          [[ ${#entries[@]} -eq 3 ]]
+          for path in "${entries[@]}"; do
+            name=${path##*/}
+            [[ -n ${remaining[$name]+present} && -f "$path" && ! -L "$path" && -s "$path" ]]
+            unset 'remaining[$name]'
+          done
+          [[ ${#remaining[@]} -eq 0 ]]
+          archive_sha=$(shasum -a 256 "unsigned/$archive" | awk '{print $1}')
+          expected_sidecar="$archive_sha *$archive"
+          sidecar_size=$(wc -c < "unsigned/$sidecar" | tr -d '[:space:]')
+          expected_size=$((${#expected_sidecar} + 1))
+          IFS= read -r actual_sidecar < "unsigned/$sidecar"
+          [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
+             "$sidecar_size" == "$expected_size" &&
+             "$actual_sidecar" == "$expected_sidecar" ]]
+          jq -e --arg tag "$RELEASE_TAG" --arg archive "$archive" --arg sidecar "$sidecar" --arg hash "$archive_sha" '
+            .dist_version == "0.31.0" and
+            .announcement_tag == $tag and
+            (.upload_files | length) == 2 and
+            ([.upload_files[] | select(type == "string") | split("/")[-1]] | sort) ==
+              ([$archive, $sidecar] | sort) and
+            .artifacts[$archive].checksums.sha256 == $hash
+          ' "unsigned/$manifest" >/dev/null
+
+          mkdir -m 700 "$STAGING_DIRECTORY"
+          python3 - "unsigned/$archive" "$STAGING_DIRECTORY" "$APPLE_TARGET" <<'PY'
+          import os
+          import shutil
+          import stat
+          import sys
+          import tarfile
+          from pathlib import Path, PurePosixPath
+
+          archive_path, output_path, target = sys.argv[1:]
+          root = f"tr300-{target}"
+          expected = {
+              root,
+              f"{root}/LICENSE",
+              f"{root}/CHANGELOG.md",
+              f"{root}/README.md",
+              f"{root}/tr300",
+          }
+          output = Path(output_path)
+          with tarfile.open(archive_path, mode="r:xz") as source:
+              members = source.getmembers()
+              names = [member.name for member in members]
+              if len(names) != len(expected) or set(names) != expected:
+                  raise SystemExit(f"unexpected archive members: {names!r}")
+              if sum(member.size for member in members) > 64 * 1024 * 1024:
+                  raise SystemExit("archive expands beyond the signing limit")
+              for member in members:
+                  pure = PurePosixPath(member.name)
+                  if pure.is_absolute() or ".." in pure.parts or member.issym() or member.islnk():
+                      raise SystemExit(f"unsafe archive member: {member.name!r}")
+                  destination = output.joinpath(*pure.parts)
+                  if member.isdir():
+                      if member.name != root or member.mode != 0o755:
+                          raise SystemExit("unexpected archive directory metadata")
+                      destination.mkdir(mode=0o755)
+                      continue
+                  expected_mode = 0o755 if member.name == f"{root}/tr300" else 0o644
+                  if not member.isfile() or member.size <= 0 or member.mode != expected_mode:
+                      raise SystemExit(f"unexpected archive file metadata: {member.name!r}")
+                  flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                  if hasattr(os, "O_NOFOLLOW"):
+                      flags |= os.O_NOFOLLOW
+                  descriptor = os.open(destination, flags, expected_mode)
+                  try:
+                      extracted = source.extractfile(member)
+                      if extracted is None:
+                          raise SystemExit(f"could not read archive member: {member.name!r}")
+                      with extracted, os.fdopen(descriptor, "wb") as target_file:
+                          descriptor = -1
+                          shutil.copyfileobj(extracted, target_file, length=1024 * 1024)
+                  finally:
+                      if descriptor >= 0:
+                          os.close(descriptor)
+          PY
+          test -f "$STAGING_DIRECTORY/tr300-$APPLE_TARGET/tr300"
+          test -x "$STAGING_DIRECTORY/tr300-$APPLE_TARGET/tr300"
+
+      - name: Sign, notarize, and rehash the staged Apple archive
+        timeout-minutes: 30
+        env:
+          APPLE_TARGET: ${{ matrix.target }}
+          STAGING_DIRECTORY: ${{ runner.temp }}/tr300-apple-signing-input
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$APPLE_TARGET" in
+            aarch64-apple-darwin|x86_64-apple-darwin) ;;
+            *) exit 64 ;;
+          esac
+          required_vars=(
+            APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD
+            APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID
+            APPLE_SIGNING_IDENTITY APPLE_TEAM_ID
+          )
+          for name in "${required_vars[@]}"; do
+            [[ -n ${!name:-} ]] || { echo "required Apple credential is unavailable: $name" >&2; exit 78; }
+          done
+          archive_name="tr300-$APPLE_TARGET.tar.xz"
+          archive_root="tr300-$APPLE_TARGET"
+          binary="$STAGING_DIRECTORY/$archive_root/tr300"
+          [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]]
+
+          work_dir=$(mktemp -d "$RUNNER_TEMP/tr300-notary-$APPLE_TARGET.XXXXXX")
+          credential_dir="$work_dir/credentials"
+          keychain="$work_dir/tr300-signing.keychain-db"
+          mkdir -m 700 "$credential_dir"
+          chmod 700 "$work_dir"
+          original_user_keychains=()
+          while IFS= read -r line; do
+            keychain_path=${line#*\"}
+            keychain_path=${keychain_path%\"*}
+            [[ -z $keychain_path ]] || original_user_keychains+=("$keychain_path")
+          done < <(security list-keychains -d user)
+          keychain_search_modified=false
+          restore_keychain_search() {
+            [[ $keychain_search_modified == true ]] || return 0
+            security list-keychains -d user -s "${original_user_keychains[@]}"
+            keychain_search_modified=false
+          }
+          cleanup() {
+            restore_keychain_search >/dev/null 2>&1 || true
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -rf "$work_dir"
+          }
+          trap cleanup EXIT INT TERM
+
+          p12_path="$credential_dir/developer-id.p12"
+          api_key_path="$credential_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
+          keychain_password=$(openssl rand -base64 32)
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | /usr/bin/base64 -D > "$p12_path"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | /usr/bin/base64 -D > "$api_key_path"
+          chmod 600 "$p12_path" "$api_key_path"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12_path" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" >/dev/null
+          identity_lines=$(security find-identity -v -p codesigning "$keychain" \
+            | grep -E '^[[:space:]]*[0-9]+\) [[:xdigit:]]{40} "[^"]+"$' || true)
+          identity_count=$(printf '%s\n' "$identity_lines" | grep -c . || true)
+          [[ $identity_count -eq 1 ]]
+          signing_fingerprint=$(printf '%s\n' "$identity_lines" | awk '{print $2}')
+          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]]
+          imported_identity=$(printf '%s\n' "$identity_lines" | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
+          [[ "$APPLE_SIGNING_IDENTITY" == "$signing_fingerprint" ||
+             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]]
+
+          security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
+          keychain_search_modified=true
+          codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
+            --keychain "$keychain" --sign "$signing_fingerprint" "$binary"
+          restore_keychain_search
+          codesign --verify --strict --verbose=4 "$binary"
+          signature_details=$(codesign -d --verbose=4 "$binary" 2>&1)
+          grep -Fqx 'Identifier=com.qubetx.tr300' <<< "$signature_details"
+          grep -Fqx "TeamIdentifier=$APPLE_TEAM_ID" <<< "$signature_details"
+          grep -Fqx "Authority=$imported_identity" <<< "$signature_details"
+          certificate_prefix="$work_dir/embedded-signing-certificate"
+          codesign -d --extract-certificates="$certificate_prefix" "$binary" >/dev/null 2>&1
+          embedded_fingerprint=$(openssl x509 -inform DER -in "${certificate_prefix}0" \
+            -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+          [[ "$embedded_fingerprint" == "$signing_fingerprint" ]]
+          grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$signature_details"
+          grep -Eq '^Timestamp=.+' <<< "$signature_details"
+
+          notary_zip="$work_dir/$archive_root-notary.zip"
+          /usr/bin/ditto -c -k --keepParent "$binary" "$notary_zip"
+          notary_result="$work_dir/notary-result.json"
+          xcrun notarytool submit "$notary_zip" --key "$api_key_path" \
+            --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
+            --wait --output-format json > "$notary_result"
+          submission_id=$(jq -r '.id // empty' "$notary_result")
+          notary_status=$(jq -r '.status // empty' "$notary_result")
+          if [[ "$notary_status" != Accepted ]]; then
+            [[ -z $submission_id ]] || xcrun notarytool log "$submission_id" \
+              --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER_ID" || true
+            exit 1
+          fi
+
+          replacement="$work_dir/$archive_name"
+          COPYFILE_DISABLE=1 tar -cJf "$replacement" -C "$STAGING_DIRECTORY" "$archive_root"
+          mv "$replacement" "unsigned/$archive_name"
+          archive_sha=$(shasum -a 256 "unsigned/$archive_name" | awk '{print $1}')
+          printf '%s *%s\n' "$archive_sha" "$archive_name" > "unsigned/$archive_name.sha256"
+          manifest="unsigned/$APPLE_TARGET-dist-manifest.json"
+          jq --arg archive "$archive_name" --arg sha "$archive_sha" '
+            if .artifacts[$archive] == null then error("archive missing from manifest")
+            else .artifacts[$archive].checksums.sha256 = $sha end
+          ' "$manifest" > "$work_dir/dist-manifest.json"
+          mv "$work_dir/dist-manifest.json" "$manifest"
+          (cd unsigned && shasum -a 256 -c "$archive_name.sha256")
+
+      - name: Upload the canonical signed cargo-dist artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: artifacts-build-local-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            unsigned/tr300-${{ matrix.target }}.tar.xz
+            unsigned/tr300-${{ matrix.target }}.tar.xz.sha256
+            unsigned/${{ matrix.target }}-dist-manifest.json
 
   # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
     needs:
       - plan
       - build-local-artifacts
+      - sign-apple-artifacts
+    if: ${{ always() && needs.plan.result == 'success' && needs.build-local-artifacts.result == 'success' && (needs.plan.outputs.publishing != 'true' || needs.sign-apple-artifacts.result == 'success') }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           submodules: recursive
       - name: Install cached dist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
       # Get all the local artifacts for the global tasks to use (for e.g. checksums)
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -231,196 +643,482 @@ jobs:
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
       - name: "Upload artifacts"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: artifacts-build-global
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
   # Determines if we should publish/announce
-  host:
+  prepare-host-assets:
+    name: Prepare fixed GitHub Release assets without write credentials
     needs:
       - plan
       - build-local-artifacts
+      - sign-apple-artifacts
       - build-global-artifacts
-    # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: "ubuntu-22.04"
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && needs.sign-apple-artifacts.result == 'success' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     outputs:
-      val: ${{ steps.host.outputs.manifest }}
+      artifact_id: ${{ steps.prepared-upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.prepared-upload.outputs.artifact-digest }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          ref: ${{ needs.plan.outputs.source-sha }}
           persist-credentials: false
-          submodules: recursive
-      - name: Install cached dist
-        uses: actions/download-artifact@v7
-        with:
-          name: cargo-dist-cache
-          path: ~/.cargo/bin/
-      - run: chmod +x ~/.cargo/bin/dist
-      # Fetch artifacts from scratch-storage
-      - name: Fetch artifacts
-        uses: actions/download-artifact@v7
+          submodules: false
+          lfs: false
+      - name: Download only this run's cargo-dist build artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: artifacts-*
-          path: target/distrib/
+          path: ${{ runner.temp }}/cargo-dist-release-inputs
           merge-multiple: true
-      - id: host
-        shell: bash
-        run: |
-          dist host ${{ needs.plan.outputs.tag-flag }} --steps=upload --steps=release --output-format=json > dist-manifest.json
-          echo "artifacts uploaded and released successfully"
-          cat dist-manifest.json
-          echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
-      - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v6
-        with:
-          # Overwrite the previous copy
-          name: artifacts-dist-manifest
-          path: dist-manifest.json
-      # Create a GitHub Release while uploading all files to it
-      - name: "Download GitHub Artifacts"
-        uses: actions/download-artifact@v7
-        with:
-          pattern: artifacts-*
-          path: artifacts
-          merge-multiple: true
-      - name: Cleanup
-        run: |
-          # Remove the granular manifests
-          rm -f artifacts/*-dist-manifest.json
-      - name: Wrap managed CLI installers
-        shell: bash
+      - name: Render and validate the fixed 24-asset initial release
+        id: prepared
         env:
+          PLAN_MANIFEST: ${{ needs.plan.outputs.val }}
           RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source-sha }}
+          INPUT_DIRECTORY: ${{ runner.temp }}/cargo-dist-release-inputs
+          OUTPUT_DIRECTORY: ${{ runner.temp }}/tr300-prepared-release
+        shell: bash
         run: |
           set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ -z "$(git status --porcelain=v1 --untracked-files=no)" ]]
+          mkdir -m 700 "$OUTPUT_DIRECTORY"
+          find "$INPUT_DIRECTORY" -mindepth 1 -maxdepth 1 \
+            -name '*-dist-manifest.json' -type f -delete
+          cargo_assets=(
+            sha256.sum
+            source.tar.gz
+            source.tar.gz.sha256
+            tr300-installer.ps1
+            tr300-installer.sh
+            tr300-aarch64-apple-darwin.tar.xz
+            tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-aarch64-unknown-linux-gnu.tar.xz
+            tr300-aarch64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-apple-darwin.tar.xz
+            tr300-x86_64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-pc-windows-msvc.msi
+            tr300-x86_64-pc-windows-msvc.msi.sha256
+            tr300-x86_64-pc-windows-msvc.zip
+            tr300-x86_64-pc-windows-msvc.zip.sha256
+            tr300-x86_64-unknown-linux-gnu.tar.xz
+            tr300-x86_64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-unknown-linux-musl.tar.xz
+            tr300-x86_64-unknown-linux-musl.tar.xz.sha256
+          )
+          declare -A remaining=()
+          for name in "${cargo_assets[@]}"; do remaining["$name"]=1; done
+          mapfile -d '' -t inputs < <(find "$INPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
+          [[ ${#inputs[@]} -eq ${#cargo_assets[@]} ]]
+          for path in "${inputs[@]}"; do
+            name=${path##*/}
+            [[ -n ${remaining[$name]+present} && -f "$path" && ! -L "$path" && -s "$path" ]]
+            unset 'remaining[$name]'
+          done
+          [[ ${#remaining[@]} -eq 0 ]]
+          for name in "${cargo_assets[@]}"; do
+            install -m 0644 "$INPUT_DIRECTORY/$name" "$OUTPUT_DIRECTORY/$name"
+          done
+
+          mv "$OUTPUT_DIRECTORY/tr300-installer.sh" \
+            "$OUTPUT_DIRECTORY/tr300-dist-installer.sh"
+          mv "$OUTPUT_DIRECTORY/tr300-installer.ps1" \
+            "$OUTPUT_DIRECTORY/tr300-dist-installer.ps1"
           version=${RELEASE_TAG#v}
-          test -f artifacts/tr300-installer.sh
-          test -f artifacts/tr300-installer.ps1
-          mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh
-          mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1
-          sed \
-            -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
+          sed -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
             -e "s/@TR300_VERSION@/${version}/g" \
             scripts/managed-installers/tr300-installer.sh \
-            > artifacts/tr300-installer.sh
-          sed \
-            -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
+            > "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          sed -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
             -e "s/@TR300_VERSION@/${version}/g" \
             scripts/managed-installers/tr300-installer.ps1 \
-            > artifacts/tr300-installer.ps1
-          chmod 755 artifacts/tr300-installer.sh
-          if grep -R -F '@TR300_' artifacts/tr300-installer.sh artifacts/tr300-installer.ps1; then
-            echo 'managed installer placeholder was not rendered' >&2
-            exit 1
+            > "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          chmod 0755 "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          grep -Fq "tr300_tag='${RELEASE_TAG}'" "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          grep -Fq "\$Tr300Tag = '${RELEASE_TAG}'" "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          if grep -F '@TR300_' "$OUTPUT_DIRECTORY/tr300-installer.sh" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"; then
+            exit 65
           fi
-          grep -Fq "tr300_tag='${RELEASE_TAG}'" artifacts/tr300-installer.sh
-          grep -Fq "releases/download/\${tr300_tag}" artifacts/tr300-installer.sh
-          grep -Fq "\${tr300_release_base}/tr300-dist-installer.sh" artifacts/tr300-installer.sh
-          grep -Fq "\$Tr300Tag = '${RELEASE_TAG}'" artifacts/tr300-installer.ps1
-          grep -Fq "releases/download/\$Tr300Tag\"" artifacts/tr300-installer.ps1
-          grep -Fq "\$Tr300ReleaseBase/tr300-dist-installer.ps1" artifacts/tr300-installer.ps1
-      - name: Add legacy installer aliases
-        shell: bash
-        run: |
-          # v3.14.2 briefly used the deleted crates.io package name `tr-300`.
-          # Keep these aliases so those binaries can still self-update through
-          # their installer fallback after canonicalizing the package as `tr300`.
-          if [ -f artifacts/tr300-installer.sh ]; then
-            cp artifacts/tr300-installer.sh artifacts/tr-300-installer.sh
-          fi
-          if [ -f artifacts/tr300-installer.ps1 ]; then
-            cp artifacts/tr300-installer.ps1 artifacts/tr-300-installer.ps1
-          fi
-      - name: Create GitHub Release
-        env:
-          PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
-          ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
-          ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
-          RELEASE_COMMIT: "${{ github.sha }}"
-        run: |
-          # Write and read notes from a file to avoid quoting breaking things
-          # cargo-dist correctly plans immutable exact-tag URLs. Public install
-          # commands and download links intentionally stay on the versionless
-          # latest endpoint; updater internals still use the resolved tag.
-          printf '%s\n' "$ANNOUNCEMENT_BODY" \
+          cp "$OUTPUT_DIRECTORY/tr300-installer.sh" \
+            "$OUTPUT_DIRECTORY/tr-300-installer.sh"
+          cp "$OUTPUT_DIRECTORY/tr300-installer.ps1" \
+            "$OUTPUT_DIRECTORY/tr-300-installer.ps1"
+          printf '%s\n' "$PLAN_MANIFEST" | jq -e '
+            .announcement_is_prerelease == false and
+            (.announcement_title | type == "string" and length > 0) and
+            (.announcement_github_body | type == "string" and length > 0)
+          ' > "$OUTPUT_DIRECTORY/dist-manifest.json"
+          jq --arg tag "$RELEASE_TAG" --arg source_sha "$SOURCE_SHA" '
+            {
+              tag: $tag,
+              source_sha: $source_sha,
+              title: .announcement_title,
+              body: .announcement_github_body,
+              prerelease: .announcement_is_prerelease
+            }
+          ' "$OUTPUT_DIRECTORY/dist-manifest.json" \
+            > "$OUTPUT_DIRECTORY/__tr300-release-metadata.json"
+          jq -r .body "$OUTPUT_DIRECTORY/__tr300-release-metadata.json" \
             | sed \
-                -e "s|/releases/download/${{ needs.plan.outputs.tag }}/|/releases/latest/download/|g" \
+                -e "s|/releases/download/${RELEASE_TAG}/|/releases/latest/download/|g" \
                 -e 's/^## Install tr300 [^[:space:]]*$/## Install tr300 (latest)/' \
                 -e 's/^## Download tr300 [^[:space:]]*$/## Download tr300 (latest)/' \
-            > "$RUNNER_TEMP/notes.txt"
+            > "$OUTPUT_DIRECTORY/__tr300-notes.txt"
 
-          prerelease_args=()
-          if [[ -n $PRERELEASE_FLAG ]]; then
-            prerelease_args+=("$PRERELEASE_FLAG")
-          fi
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" "${prerelease_args[@]}" --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
-      - name: Smoke the published managed Linux installer
+          public_assets=(
+            dist-manifest.json
+            sha256.sum
+            source.tar.gz
+            source.tar.gz.sha256
+            tr-300-installer.ps1
+            tr-300-installer.sh
+            tr300-aarch64-apple-darwin.tar.xz
+            tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-aarch64-unknown-linux-gnu.tar.xz
+            tr300-aarch64-unknown-linux-gnu.tar.xz.sha256
+            tr300-dist-installer.ps1
+            tr300-dist-installer.sh
+            tr300-installer.ps1
+            tr300-installer.sh
+            tr300-x86_64-apple-darwin.tar.xz
+            tr300-x86_64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-pc-windows-msvc.msi
+            tr300-x86_64-pc-windows-msvc.msi.sha256
+            tr300-x86_64-pc-windows-msvc.zip
+            tr300-x86_64-pc-windows-msvc.zip.sha256
+            tr300-x86_64-unknown-linux-gnu.tar.xz
+            tr300-x86_64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-unknown-linux-musl.tar.xz
+            tr300-x86_64-unknown-linux-musl.tar.xz.sha256
+          )
+          payloads=(
+            source.tar.gz
+            tr300-aarch64-apple-darwin.tar.xz
+            tr300-aarch64-unknown-linux-gnu.tar.xz
+            tr300-x86_64-apple-darwin.tar.xz
+            tr300-x86_64-pc-windows-msvc.msi
+            tr300-x86_64-pc-windows-msvc.zip
+            tr300-x86_64-unknown-linux-gnu.tar.xz
+            tr300-x86_64-unknown-linux-musl.tar.xz
+          )
+          for payload in "${payloads[@]}"; do
+            digest=$(sha256sum "$OUTPUT_DIRECTORY/$payload"); digest=${digest%% *}
+            expected_sidecar="$digest *$payload"
+            sidecar="$OUTPUT_DIRECTORY/$payload.sha256"
+            [[ $(wc -c < "$sidecar" | tr -d '[:space:]') == $((${#expected_sidecar} + 1)) ]]
+            IFS= read -r actual_sidecar < "$sidecar"
+            [[ "$actual_sidecar" == "$expected_sidecar" ]]
+          done
+          (
+            cd "$OUTPUT_DIRECTORY"
+            [[ $(wc -l < sha256.sum | tr -d '[:space:]') == ${#payloads[@]} ]]
+            sha256sum -c sha256.sum
+            : > __tr300-asset-sha256s
+            for asset in "${public_assets[@]}"; do
+              sha256sum "$asset" >> __tr300-asset-sha256s
+            done
+          )
+          mapfile -d '' -t prepared < <(find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
+          [[ ${#prepared[@]} -eq $((${#public_assets[@]} + 3)) ]]
+          for path in "${prepared[@]}"; do
+            [[ -f "$path" && ! -L "$path" && -s "$path" ]]
+          done
+
+      - name: Upload the exact prepared initial release
+        id: prepared-upload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: tr300-prepared-release-assets
+          if-no-files-found: error
+          retention-days: 1
+          path: ${{ runner.temp }}/tr300-prepared-release/
+
+  host:
+    needs:
+      - plan
+      - prepare-host-assets
+    if: ${{ always() && needs.plan.result == 'success' && needs.prepare-host-assets.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release-publishing
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      managed_installer_sha256: ${{ steps.publish.outputs.managed_installer_sha256 }}
+    steps:
+      - name: Download and verify the exact prepared release artifact
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
           RELEASE_TAG: ${{ needs.plan.outputs.tag }}
-          TR300_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_SHA: ${{ needs.plan.outputs.source-sha }}
+          ARTIFACT_ID: ${{ needs.prepare-host-assets.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.prepare-host-assets.outputs.artifact_digest }}
+          ASSET_DIRECTORY: ${{ runner.temp }}/tr300-release-assets
         shell: bash
         run: |
           set -euo pipefail
-          smoke_home=$(mktemp -d "$RUNNER_TEMP/tr300-managed-linux.XXXXXXXX")
-          trap 'rm -rf "$smoke_home"' EXIT
-          export HOME="$smoke_home"
-          export CARGO_HOME="$smoke_home/.cargo"
-          export XDG_CONFIG_HOME="$smoke_home/.config"
-          # Exercise the advertised clean-machine default, including cargo-dist's
-          # durable shell-PATH setup. The public wrapper intentionally delegates
-          # profile ownership to that generated installer instead of maintaining
-          # a second implementation that could drift.
-          sh artifacts/tr300-installer.sh
-          test "$("$CARGO_HOME/bin/tr300" --version)" = "tr300 ${RELEASE_TAG#v}"
-          jq -e --arg version "${RELEASE_TAG#v}" '
-            .provider.source == "cargo-dist" and
-            .source.app_name == "tr300" and
-            .version == $version and
-            .modify_path == true
-          ' "$XDG_CONFIG_HOME/tr300/tr300-receipt.json"
-          test -f "$CARGO_HOME/env"
-          # The profile intentionally retains a late-bound HOME.
-          # shellcheck disable=SC2016
-          grep -Fq '. "$HOME/.cargo/env"' "$HOME/.profile"
-          fresh_path=$(PATH=/usr/bin:/bin sh -c '. "$HOME/.profile"; command -v tr300')
-          test "$fresh_path" = "$CARGO_HOME/bin/tr300"
-          for attempt in {1..12}; do
-            latest=$(gh api 'repos/${{ github.repository }}/releases/latest' --jq .tag_name)
-            [[ $latest == "$RELEASE_TAG" ]] && break
-            if [[ $attempt -eq 12 ]]; then
-              echo "latest release is $latest, expected $RELEASE_TAG" >&2
-              exit 1
-            fi
-            sleep 5
-          done
-          update=$("$CARGO_HOME/bin/tr300" update --json)
-          test "$(printf '%s\n' "$update" | wc -l | tr -d ' ')" -eq 1
-          jq -e '
-            .success == true and
-            .update_available == false and
-            .install_channel == "shell-installer" and
-            .requires_user_action == false
-          ' <<< "$update"
+          [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ && "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          repository_id=$(gh api "repos/$EXPECTED_REPOSITORY" --jq .id)
+          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
+          work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-host-custody.XXXXXXXX")
+          trap 'rm -rf "$work_directory"' EXIT
+          gh api "repos/$EXPECTED_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            > "$work_directory/artifact-before.json"
+          validate_artifact() {
+            local path=$1
+            jq -e --argjson id "$ARTIFACT_ID" --argjson run "$CURRENT_RUN_ID" \
+              --argjson repository "$repository_id" --arg digest "sha256:$ARTIFACT_DIGEST" \
+              --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" '
+                .id == $id and .name == "tr300-prepared-release-assets" and
+                .expired == false and (.size_in_bytes > 0 and .size_in_bytes <= 268435456) and
+                .digest == $digest and .workflow_run.id == $run and
+                .workflow_run.repository_id == $repository and
+                .workflow_run.head_repository_id == $repository and
+                .workflow_run.head_branch == $tag and .workflow_run.head_sha == $sha
+              ' "$path" >/dev/null
+          }
+          validate_artifact "$work_directory/artifact-before.json"
+          zip_path="$work_directory/release-assets.zip"
+          gh api "repos/$EXPECTED_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$zip_path"
+          zip_sha=$(sha256sum "$zip_path"); zip_sha=${zip_sha%% *}
+          [[ "$zip_sha" == "$ARTIFACT_DIGEST" ]]
+          public_assets=(
+            dist-manifest.json sha256.sum source.tar.gz source.tar.gz.sha256
+            tr-300-installer.ps1 tr-300-installer.sh
+            tr300-aarch64-apple-darwin.tar.xz tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-aarch64-unknown-linux-gnu.tar.xz tr300-aarch64-unknown-linux-gnu.tar.xz.sha256
+            tr300-dist-installer.ps1 tr300-dist-installer.sh
+            tr300-installer.ps1 tr300-installer.sh
+            tr300-x86_64-apple-darwin.tar.xz tr300-x86_64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-pc-windows-msvc.msi tr300-x86_64-pc-windows-msvc.msi.sha256
+            tr300-x86_64-pc-windows-msvc.zip tr300-x86_64-pc-windows-msvc.zip.sha256
+            tr300-x86_64-unknown-linux-gnu.tar.xz tr300-x86_64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-unknown-linux-musl.tar.xz tr300-x86_64-unknown-linux-musl.tar.xz.sha256
+          )
+          expected=("${public_assets[@]}" __tr300-release-metadata.json __tr300-notes.txt __tr300-asset-sha256s)
+          mkdir -m 700 "$ASSET_DIRECTORY"
+          python3 - "$zip_path" "$ASSET_DIRECTORY" "${expected[@]}" <<'PY'
+          import os
+          import shutil
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
 
+          archive_path, output_path, *expected = sys.argv[1:]
+          expected_names = set(expected)
+          output = Path(output_path)
+          with zipfile.ZipFile(archive_path) as source:
+              members = source.infolist()
+              names = [member.filename for member in members]
+              if len(names) != len(expected_names) or set(names) != expected_names:
+                  raise SystemExit(f"unexpected prepared release members: {names!r}")
+              if sum(member.file_size for member in members) > 256 * 1024 * 1024:
+                  raise SystemExit("prepared release expands beyond the custody limit")
+              for member in members:
+                  pure = PurePosixPath(member.filename)
+                  mode = member.external_attr >> 16
+                  if (pure.name != member.filename or pure.is_absolute() or
+                      ".." in pure.parts or member.is_dir() or member.file_size <= 0 or
+                      member.file_size > 256 * 1024 * 1024 or stat.S_ISLNK(mode)):
+                      raise SystemExit(f"unsafe prepared release member: {member.filename!r}")
+                  destination = output / member.filename
+                  flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                  if hasattr(os, "O_NOFOLLOW"):
+                      flags |= os.O_NOFOLLOW
+                  descriptor = os.open(destination, flags, 0o600)
+                  try:
+                      with source.open(member) as src, os.fdopen(descriptor, "wb") as dst:
+                          descriptor = -1
+                          shutil.copyfileobj(src, dst, length=1024 * 1024)
+                  finally:
+                      if descriptor >= 0:
+                          os.close(descriptor)
+          PY
+          gh api "repos/$EXPECTED_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            > "$work_directory/artifact-after.json"
+          validate_artifact "$work_directory/artifact-after.json"
+          cmp "$work_directory/artifact-before.json" "$work_directory/artifact-after.json"
+          mapfile -d '' -t extracted < <(find "$ASSET_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
+          [[ ${#extracted[@]} -eq ${#expected[@]} ]]
+          for path in "${extracted[@]}"; do
+            [[ -f "$path" && ! -L "$path" && -s "$path" ]]
+          done
+          jq -e --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" '
+            .tag == $tag and .source_sha == $sha and .prerelease == false and
+            (.title | type == "string" and length > 0) and
+            (.body | type == "string" and length > 0)
+          ' "$ASSET_DIRECTORY/__tr300-release-metadata.json" >/dev/null
+          (
+            cd "$ASSET_DIRECTORY"
+            [[ $(wc -l < __tr300-asset-sha256s | tr -d '[:space:]') == ${#public_assets[@]} ]]
+            sha256sum -c __tr300-asset-sha256s
+          )
+      - name: Rebind protected source and publish the fixed 24 assets
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.plan.outputs.source-sha }}
+          ASSET_DIRECTORY: ${{ runner.temp }}/tr300-release-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          resolve_tag_commit() {
+            local tag=$1
+            local object_type source_sha
+            IFS=$'\t' read -r object_type source_sha < <(
+              gh api "repos/$EXPECTED_REPOSITORY/git/ref/tags/$tag" \
+                --jq '.object | [.type, .sha] | @tsv'
+            )
+            for _ in 1 2 3 4 5; do
+              case "$object_type" in
+                commit) printf '%s\n' "$source_sha"; return 0 ;;
+                tag)
+                  IFS=$'\t' read -r object_type source_sha < <(
+                    gh api "repos/$EXPECTED_REPOSITORY/git/tags/$source_sha" \
+                      --jq '.object | [.type, .sha] | @tsv'
+                  )
+                  ;;
+                *) return 65 ;;
+              esac
+            done
+            return 65
+          }
+
+          source_sha=$(resolve_tag_commit "$RELEASE_TAG")
+          [[ "$source_sha" == "$EXPECTED_SHA" ]]
+          main_sha=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$main_sha" == "$EXPECTED_SHA" ]]
+          workflow_id=$(gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
+          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$EXPECTED_SHA&per_page=100" \
+            > "$RUNNER_TEMP/publish-ci-runs.json"
+          mapfile -t ci_runs < <(
+            jq -r --argjson workflow_id "$workflow_id" \
+              --arg repository "$EXPECTED_REPOSITORY" --arg sha "$EXPECTED_SHA" '
+                .workflow_runs[] |
+                select(.workflow_id == $workflow_id and .name == "CI" and
+                       .path == ".github/workflows/ci.yml" and .event == "push" and
+                       .status == "completed" and .conclusion == "success" and
+                       .repository.full_name == $repository and
+                       .head_repository.full_name == $repository and
+                       .head_branch == "main" and .head_sha == $sha) |
+                .id
+              ' "$RUNNER_TEMP/publish-ci-runs.json"
+          )
+          [[ ${#ci_runs[@]} -eq 1 && "${ci_runs[0]}" =~ ^[1-9][0-9]*$ ]]
+
+          public_assets=(
+            dist-manifest.json sha256.sum source.tar.gz source.tar.gz.sha256
+            tr-300-installer.ps1 tr-300-installer.sh
+            tr300-aarch64-apple-darwin.tar.xz tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-aarch64-unknown-linux-gnu.tar.xz tr300-aarch64-unknown-linux-gnu.tar.xz.sha256
+            tr300-dist-installer.ps1 tr300-dist-installer.sh
+            tr300-installer.ps1 tr300-installer.sh
+            tr300-x86_64-apple-darwin.tar.xz tr300-x86_64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-pc-windows-msvc.msi tr300-x86_64-pc-windows-msvc.msi.sha256
+            tr300-x86_64-pc-windows-msvc.zip tr300-x86_64-pc-windows-msvc.zip.sha256
+            tr300-x86_64-unknown-linux-gnu.tar.xz tr300-x86_64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-unknown-linux-musl.tar.xz tr300-x86_64-unknown-linux-musl.tar.xz.sha256
+          )
+          mapfile -d '' -t present < <(find "$ASSET_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
+          [[ ${#present[@]} -eq $((${#public_assets[@]} + 3)) ]]
+          for name in "${public_assets[@]}"; do
+            [[ -f "$ASSET_DIRECTORY/$name" && ! -L "$ASSET_DIRECTORY/$name" && -s "$ASSET_DIRECTORY/$name" ]]
+          done
+          jq -e --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" '
+            .tag == $tag and .source_sha == $sha and .prerelease == false and
+            (.title | type == "string" and length > 0)
+          ' "$ASSET_DIRECTORY/__tr300-release-metadata.json" >/dev/null
+          title=$(jq -r .title "$ASSET_DIRECTORY/__tr300-release-metadata.json")
+
+          release_url="https://api.github.com/repos/$EXPECTED_REPOSITORY/releases/tags/$RELEASE_TAG"
+          http_status=$(curl --proto '=https' --tlsv1.2 -sS -o "$RUNNER_TEMP/release-before.json" \
+            -w '%{http_code}' -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$release_url")
+          [[ "$http_status" == 404 ]]
+
+          # The stable release remains private until the Windows and macOS
+          # supplemental workflows have assembled and verified all 34 assets.
+          gh release create "$RELEASE_TAG" --repo "$EXPECTED_REPOSITORY" \
+            --draft --verify-tag --target "$EXPECTED_SHA" --title "$title" \
+            --notes-file "$ASSET_DIRECTORY/__tr300-notes.txt" \
+            "$ASSET_DIRECTORY/dist-manifest.json" \
+            "$ASSET_DIRECTORY/sha256.sum" \
+            "$ASSET_DIRECTORY/source.tar.gz" \
+            "$ASSET_DIRECTORY/source.tar.gz.sha256" \
+            "$ASSET_DIRECTORY/tr-300-installer.ps1" \
+            "$ASSET_DIRECTORY/tr-300-installer.sh" \
+            "$ASSET_DIRECTORY/tr300-aarch64-apple-darwin.tar.xz" \
+            "$ASSET_DIRECTORY/tr300-aarch64-apple-darwin.tar.xz.sha256" \
+            "$ASSET_DIRECTORY/tr300-aarch64-unknown-linux-gnu.tar.xz" \
+            "$ASSET_DIRECTORY/tr300-aarch64-unknown-linux-gnu.tar.xz.sha256" \
+            "$ASSET_DIRECTORY/tr300-dist-installer.ps1" \
+            "$ASSET_DIRECTORY/tr300-dist-installer.sh" \
+            "$ASSET_DIRECTORY/tr300-installer.ps1" \
+            "$ASSET_DIRECTORY/tr300-installer.sh" \
+            "$ASSET_DIRECTORY/tr300-x86_64-apple-darwin.tar.xz" \
+            "$ASSET_DIRECTORY/tr300-x86_64-apple-darwin.tar.xz.sha256" \
+            "$ASSET_DIRECTORY/tr300-x86_64-pc-windows-msvc.msi" \
+            "$ASSET_DIRECTORY/tr300-x86_64-pc-windows-msvc.msi.sha256" \
+            "$ASSET_DIRECTORY/tr300-x86_64-pc-windows-msvc.zip" \
+            "$ASSET_DIRECTORY/tr300-x86_64-pc-windows-msvc.zip.sha256" \
+            "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-gnu.tar.xz" \
+            "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-gnu.tar.xz.sha256" \
+            "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-musl.tar.xz" \
+            "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-musl.tar.xz.sha256"
+
+          gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > "$RUNNER_TEMP/release-after.json"
+          jq -e --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
+            --argjson expected_assets "$(printf '%s\n' "${public_assets[@]}" | jq -R . | jq -s 'sort')" '
+              .tag_name == $tag and .target_commitish == $sha and
+              .draft == true and .prerelease == false and
+              ([.assets[].name] | sort) == $expected_assets and
+              ([.assets[].size > 0] | all)
+            ' "$RUNNER_TEMP/release-after.json" >/dev/null
+          managed_installer_sha256=$(awk '$2 == "*tr300-installer.sh" { print $1 }' \
+            "$ASSET_DIRECTORY/__tr300-asset-sha256s")
+          [[ "$managed_installer_sha256" =~ ^[0-9a-f]{64}$ ]]
+          echo "managed_installer_sha256=$managed_installer_sha256" >> "$GITHUB_OUTPUT"
   announce:
     needs:
       - plan
       - host
-    # use "always() && ..." to allow us to wait for all publish jobs while
-    # still allowing individual publish jobs to skip themselves (for prereleases).
-    # "host" however must run to completion, no skipping allowed!
+    # A successful Release run is the private-draft handoff to the two
+    # supplemental workflows. The macOS publisher performs the final exact
+    # 34-asset promotion and the public managed-installer smoke.
     if: ${{ always() && needs.host.result == 'success' }}
-    runs-on: "ubuntu-22.04"
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    runs-on: ubuntu-24.04
+    permissions: {}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          submodules: recursive
+      - name: Confirm private draft handoff
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          echo "Private draft $RELEASE_TAG is ready for supplemental assets."

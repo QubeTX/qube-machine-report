@@ -32,8 +32,8 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
@@ -42,11 +42,11 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo clippy --locked --all-targets --workspace -- -D warnings
 
   test:
@@ -67,10 +67,18 @@ jobs:
           - os: windows-latest
             name: "Windows x86_64"
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --locked --workspace --all-targets
+      - name: Validate descriptor-bound macOS PKG rollback
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            export TR300_REQUIRE_DARWIN_METADATA=1
+          fi
+          bash scripts/test-macos-pkg-rollback.sh
 
   build:
     name: Release Build (${{ matrix.name }})
@@ -90,9 +98,9 @@ jobs:
           - os: windows-latest
             name: "Windows x86_64"
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo build --locked --release --workspace
       - name: Smoke test (--version)
         shell: bash
@@ -120,9 +128,9 @@ jobs:
             name: "Windows"
             budget_ms: 1500
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo build --locked --release --bin tr300
 
       - name: Time tr300 --fast (Unix)
@@ -191,21 +199,42 @@ jobs:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       - name: Install cargo-audit
-        run: cargo install --locked cargo-audit
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          test "$(cargo audit --version)" = 'cargo-audit-audit 0.22.2'
       - run: cargo audit
 
   dist-plan:
     name: cargo-dist plan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Install cargo-dist v0.31.0
         run: |
+          set -euo pipefail
+          installer="$RUNNER_TEMP/cargo-dist-installer-v0.31.0.sh"
           curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh \
+            -o "$installer"
+          printf '%s  %s\n' \
+            'e79d87e418b9d2cbe992d014985457c28a5a7c553add3da4ed1047e161c928f4' \
+            "$installer" | sha256sum -c -
+          checksum_bin="$RUNNER_TEMP/cargo-dist-checksum-bin"
+          mkdir "$checksum_bin"
+          cat > "$checksum_bin/sha256sum" <<'SH'
+          #!/bin/sh
+          exec /usr/bin/sha256sum "$@"
+          SH
+          chmod 500 "$checksum_bin/sha256sum"
+          checksum_path=$(PATH="$checksum_bin:$PATH" command -v sha256sum)
+          [[ "$checksum_path" == "$checksum_bin/sha256sum" && -f "$checksum_path" && ! -L "$checksum_path" && -x "$checksum_path" ]]
+          PATH="$checksum_bin:$PATH" sh "$installer"
+          dist_path=$(command -v dist)
+          [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]]
+          [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]]
       - name: Verify dist plan parses
         run: ~/.cargo/bin/dist plan
 
@@ -213,7 +242,7 @@ jobs:
     name: Workflow and shell validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Validate GitHub Actions workflows
@@ -224,23 +253,36 @@ jobs:
         run: shellcheck -x scripts/*.sh scripts/managed-installers/*.sh
       - name: Validate managed shell transaction rollback
         run: scripts/test-managed-installer-transaction.sh
+      - name: Validate privileged release workflow provenance
+        run: python3 scripts/test-release-workflow-provenance.py
       - name: Guard supplemental packaging lifecycle invariants
         shell: bash
         run: |
           set -euo pipefail
           workflow=.github/workflows/macos-installer.yml
           builder=scripts/build-sign-notarize-macos-installer.sh
+          rollback_helper=scripts/macos-pkg-rollback.c
           release=.github/workflows/release.yml
           shell_wrapper=scripts/managed-installers/tr300-installer.sh
           powershell_wrapper=scripts/managed-installers/tr300-installer.ps1
           windows_validation=.github/workflows/windows-installer-validation.yml
           updater=src/update.rs
           inno_msi_bridge=inno/remove-conflicting-msi.pas
-          checkout_line=$(grep -nF 'name: Checkout exact release tag' "$workflow" | cut -d: -f1)
-          download_line=$(grep -nF 'name: Verify upstream release and download signed architecture archives' "$workflow" | cut -d: -f1)
-          test -n "$checkout_line"
-          test -n "$download_line"
-          test "$checkout_line" -lt "$download_line"
+          # The executable provenance fixture above owns step-level credential
+          # isolation. Job IDs and needs are the stable lifecycle interface;
+          # display names may change without invalidating this guard.
+          source_custody_line=$(grep -nE '^  source-custody:$' "$workflow" | cut -d: -f1)
+          prepare_line=$(grep -nE '^  prepare-installer-inputs:$' "$workflow" | cut -d: -f1)
+          preflight_line=$(grep -nE '^  credential-preflight:$' "$workflow" | cut -d: -f1)
+          build_line=$(grep -nE '^  build:$' "$workflow" | cut -d: -f1)
+          test -n "$source_custody_line"
+          test -n "$prepare_line"
+          test -n "$preflight_line"
+          test -n "$build_line"
+          test "$source_custody_line" -lt "$prepare_line"
+          test "$prepare_line" -lt "$preflight_line"
+          test "$preflight_line" -lt "$build_line"
+          grep -Fq 'needs: [resolve-release, source-custody, prepare-installer-inputs, credential-preflight]' "$workflow"
           grep -Fqx "lipo \"\$universal\" -verify_arch arm64 x86_64" "$builder"
           grep -Fqx '          lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64' "$workflow"
           if grep -Eq '^[[:space:]]*lipo[[:space:]]+-verify_arch' "$builder" "$workflow"; then
@@ -260,11 +302,32 @@ jobs:
           grep -Fq 'name: Validate v4.1.x DMG bridge' "$workflow"
           grep -Fq 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer' "$shell_wrapper"
           grep -Fq 'tr300_restore_managed_state' "$shell_wrapper"
-          grep -Fq 'migrate-cleanup --quiet --strict --cargo-copy --user-profile' "$builder"
+          grep -Fq '"migrate-cleanup", "--quiet"' "$rollback_helper"
           grep -Fq 'tr300-migration-probe' "$builder"
-          grep -Fq 'migrate-cleanup --quiet --strict --dry-run' "$builder"
+          grep -Fq 'tr300-pkg-rollback' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq '"${script_dir}/tr300-pkg-rollback" check "$user_home"' "$builder"
+          # shellcheck disable=SC2016
+          if grep -Fq '"${script_dir}/tr300-migration-probe" migrate-cleanup' "$builder"; then
+            echo 'preinstall must route the Rust dry-run through the credential-dropping helper' >&2
+            exit 1
+          fi
           grep -Fq '.config/tr300/tr300-receipt.json' "$builder"
-          grep -Fq 'rollback_managed' "$builder"
+          grep -Fq 'renameat(snapshot->directory->fd' "$rollback_helper"
+          grep -Fq 'AT_SYMLINK_NOFOLLOW' "$rollback_helper"
+          grep -Fq 'testing_after_first_discard' "$rollback_helper"
+          grep -Fq 'write_preflight_state' "$rollback_helper"
+          grep -Fq 'consume_preflight_state' "$rollback_helper"
+          grep -Fq 'home identity changed after' "$rollback_helper"
+          grep -Fq 'native postinstall failure fixture unexpectedly committed' scripts/test-macos-pkg-rollback.sh
+          grep -Fq 'simulated fast-user switch' scripts/test-macos-pkg-rollback.sh
+          # shellcheck disable=SC2016
+          test "$(grep -Fc 'preflight_state="${script_dir}/tr300-preflight-state"' "$builder")" -eq 2
+          # shellcheck disable=SC2016
+          test "$(grep -Fc '[ ! -L "${home}/.cargo/bin/tr300" ]' "$builder")" -eq 2
+          # shellcheck disable=SC2016
+          test "$(grep -Fc '[ ! -L "${home}/.config/tr300/tr300-receipt.json" ]' "$builder")" -eq 2
+          grep -Fq 'home changed after preflight' "$builder"
           render_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/tr300-wrapper-render.XXXXXXXX")
           trap 'rm -rf "$render_dir"' EXIT
           sed -n "/<<'PREINSTALL'/,/^PREINSTALL$/p" "$builder" | sed '1d;$d' > "$render_dir/pkg-preinstall.sh"
@@ -345,9 +408,9 @@ jobs:
     name: Windows installer source gate
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Parse the managed PowerShell installer
         shell: pwsh
         run: |
@@ -398,6 +461,8 @@ jobs:
         shell: pwsh
         run: |
           $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $cases = @(
             @{ Name = 'global'; Display = 'tr300'; Exe = "$env:ProgramFiles\tr300\bin\tr300.exe" },
             @{ Name = 'corporate'; Display = 'tr300 (Corporate Edition)'; Exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe" }
@@ -411,7 +476,7 @@ jobs:
           foreach ($case in $cases) {
             foreach ($variant in @('newer-fixture', 'current', 'same-version-fixture')) {
               $msi = (Resolve-Path "target\wix-ci\$($case.Name)-$variant.msi").Path
-              $process = Start-Process msiexec.exe -Wait -PassThru `
+              $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
                 -ArgumentList @('/i', $msi, '/qn', '/norestart')
               if ($process.ExitCode -ne 0) {
                 throw "install failed for $msi with $($process.ExitCode)"
@@ -429,16 +494,18 @@ jobs:
             if ($actualVersion -ne "tr300 $version") {
               throw "installed binary version does not match $version"
             }
-            $process = Start-Process msiexec.exe -Wait -PassThru `
+            $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
               -ArgumentList @('/x', $entries[0].PSChildName, '/qn', '/norestart')
             if ($process.ExitCode -ne 0) {
               throw "uninstall failed for $($case.Display) with $($process.ExitCode)"
             }
           }
       - name: Compile Global and Corporate Inno Setup sources
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress --no-color
+          & scripts/install-pinned-inno-setup.ps1
           $iscc = "C:\Program Files (x86)\Inno Setup 6\iscc.exe"
           if (-not (Test-Path $iscc)) { throw "iscc.exe not found" }
           $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
@@ -449,6 +516,8 @@ jobs:
       - name: Prove current MSI and Inno formats take over bidirectionally
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $cases = @(
             @{
               Name = 'global'
@@ -472,7 +541,8 @@ jobs:
             ) | Where-Object DisplayName -EQ $display
           }
           function Install-Msi([string] $path) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', (Resolve-Path $path).Path, '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', (Resolve-Path $path).Path, '/qn', '/norestart')
             if ($p.ExitCode -ne 0) { throw "MSI install failed for ${path}: $($p.ExitCode)" }
           }
           function Install-Exe([string] $path, [string] $name) {
@@ -486,7 +556,8 @@ jobs:
           }
           function Remove-Entry($entry) {
             if ($entry.WindowsInstaller -eq 1) {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
             } else {
               if ($entry.UninstallString -notmatch '^"([^"]+)"$') { throw "unexpected Inno uninstall command" }
               $p = Start-Process $Matches[1] -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
@@ -524,6 +595,8 @@ jobs:
       - name: Prove cross-edition native choices fail before mutation
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $globalMsi = (Resolve-Path 'target\wix-ci\global-current.msi').Path
           $corporateMsi = (Resolve-Path 'target\wix-ci\corporate-current.msi').Path
           $globalExe = (Resolve-Path 'inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe').Path
@@ -532,7 +605,8 @@ jobs:
           $corporateBinary = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
 
           function Install-Msi([string]$path) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $path, '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', $path, '/qn', '/norestart')
             if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
           }
           function Install-Exe([string]$path) {
@@ -540,7 +614,8 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "EXE install failed: $($p.ExitCode)" }
           }
           function Expect-MsiBlocked([string]$path) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $path, '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', $path, '/qn', '/norestart')
             if ($p.ExitCode -eq 0) { throw 'cross-edition MSI unexpectedly mutated the machine' }
           }
           function Expect-ExeBlocked([string]$path) {
@@ -556,7 +631,8 @@ jobs:
           function Remove-Edition([string]$display) {
             $entry = @(Entries $display)[0]
             if ($entry.WindowsInstaller -eq 1) {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
             } else {
               if ($entry.UninstallString -notmatch '^"([^"]+)"$') { throw 'unexpected Inno uninstall command' }
               $p = Start-Process $Matches[1] -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
@@ -592,6 +668,8 @@ jobs:
       - name: Prove ambiguous managed ownership blocks native packages before mutation
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $cargoBinary = "$HOME\.cargo\bin\tr300.exe"
           $receipt = "$env:LOCALAPPDATA\tr300\tr300-receipt.json"
           New-Item -ItemType Directory -Force (Split-Path -Parent $cargoBinary), (Split-Path -Parent $receipt) | Out-Null
@@ -609,7 +687,7 @@ jobs:
           foreach ($case in $cases) {
             $path = (Resolve-Path $case.Path).Path
             if ($case.Kind -eq 'msi') {
-              $process = Start-Process msiexec.exe -Wait -PassThru `
+              $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
                 -ArgumentList @('/i', $path, '/qn', '/norestart')
             } else {
               $log = Join-Path $env:RUNNER_TEMP "tr300-$($case.Name)-ambiguous.log"
