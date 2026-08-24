@@ -1,20 +1,23 @@
 #!/bin/sh
 # TR-300 managed shell installer.
 #
-# The release workflow renders the immutable tag/version placeholders, keeps the
-# cargo-dist generated installer as tr300-dist-installer.sh, and publishes this
-# stable-name wrapper as tr300-installer.sh. On macOS a deliberately launched
-# fresh wrapper safely supersedes an exact, receipt-owned TR-300 PKG install.
+# The release workflow renders the immutable tag, version, and exact raw
+# cargo-dist installer SHA-256 placeholders, keeps the generated installer as
+# tr300-dist-installer.sh, and publishes this stable-name wrapper as
+# tr300-installer.sh. On macOS a deliberately launched fresh wrapper safely
+# supersedes an exact, receipt-owned TR-300 PKG install.
 
 set -u
 
 tr300_tag='@TR300_TAG@'
 tr300_version='@TR300_VERSION@'
+tr300_dist_installer_sha256='@TR300_DIST_INSTALLER_SHA256@'
 tr300_release_base="https://github.com/QubeTX/qube-machine-report/releases/download/${tr300_tag}"
 tr300_recovery_url='https://github.com/QubeTX/qube-machine-report/releases/latest'
 tr300_temp=''
 tr300_transaction_started=0
 tr300_committed=0
+tr300_cleanup_ran=0
 tr300_receipt_existed=0
 tr300_intended_binary_existed=0
 tr300_prior_binary_existed=0
@@ -22,8 +25,11 @@ tr300_prior_binary=''
 tr300_pkg_present=0
 tr300_pkg_payload_removed=0
 tr300_pkg_receipt_forgotten=0
+tr300_sha256sum_directory=''
 
 tr300_cleanup() {
+    [ "$tr300_cleanup_ran" -eq 0 ] || return 0
+    tr300_cleanup_ran=1
     if [ "$tr300_transaction_started" -eq 1 ] && [ "$tr300_committed" -eq 0 ]; then
         if [ "$tr300_pkg_receipt_forgotten" -eq 1 ]; then
             # pkgutil has no supported inverse that recreates an exact signed
@@ -39,13 +45,91 @@ tr300_cleanup() {
                     printf '%s\n' 'TR-300 warning: restoring the prior PKG payload also failed' >&2
             fi
         fi
-        tr300_committed=1
     fi
     if [ -n "$tr300_temp" ]; then
         rm -rf "$tr300_temp" >/dev/null 2>&1 || true
     fi
 }
-trap tr300_cleanup EXIT HUP INT TERM
+
+tr300_sha256() {
+    sha256_path=$1
+    if [ -x /usr/bin/shasum ]; then
+        sha256_output=$(/usr/bin/shasum -a 256 "$sha256_path") || return 1
+    elif [ -x /usr/bin/sha256sum ]; then
+        sha256_output=$(/usr/bin/sha256sum "$sha256_path") || return 1
+    elif [ -x /bin/sha256sum ]; then
+        sha256_output=$(/bin/sha256sum "$sha256_path") || return 1
+    else
+        return 1
+    fi
+    sha256_value=${sha256_output%% *}
+    case "$sha256_value" in
+        ''|*[!0-9a-f]*) return 1 ;;
+    esac
+    [ "${#sha256_value}" -eq 64 ] || return 1
+    printf '%s\n' "$sha256_value"
+}
+
+tr300_verify_dist_installer() {
+    dist_installer_path=$1
+    case "$tr300_dist_installer_sha256" in
+        ''|*[!0-9a-f]*)
+            tr300_fail 'the managed installer has an invalid embedded cargo-dist checksum'
+            ;;
+    esac
+    [ "${#tr300_dist_installer_sha256}" -eq 64 ] ||
+        tr300_fail 'the managed installer has an invalid embedded cargo-dist checksum'
+    dist_installer_actual_sha256=$(tr300_sha256 "$dist_installer_path") ||
+        tr300_fail 'could not hash the downloaded cargo-dist installer'
+    [ "$dist_installer_actual_sha256" = "$tr300_dist_installer_sha256" ] ||
+        tr300_fail 'the downloaded cargo-dist installer checksum did not match this release'
+}
+
+tr300_prepare_sha256sum() {
+    verified_path=$1
+    tr300_sha256sum_directory="${tr300_temp}/hash-tools"
+    /bin/mkdir "$tr300_sha256sum_directory" ||
+        tr300_fail 'could not create the private checksum-tool directory'
+    /bin/chmod 700 "$tr300_sha256sum_directory" ||
+        tr300_fail 'could not protect the private checksum-tool directory'
+    sha256sum_shim="${tr300_sha256sum_directory}/sha256sum"
+    if [ -x /usr/bin/shasum ]; then
+        /bin/cat > "$sha256sum_shim" <<'TR300_SHA256SUM_SHIM'
+#!/bin/sh
+set -u
+case "${1-}" in
+    -b|--binary) shift ;;
+esac
+[ "$#" -eq 1 ] || exit 64
+exec /usr/bin/shasum -a 256 "$1"
+TR300_SHA256SUM_SHIM
+    elif [ -x /usr/bin/sha256sum ]; then
+        /bin/cat > "$sha256sum_shim" <<'TR300_SHA256SUM_SHIM'
+#!/bin/sh
+exec /usr/bin/sha256sum "$@"
+TR300_SHA256SUM_SHIM
+    elif [ -x /bin/sha256sum ]; then
+        /bin/cat > "$sha256sum_shim" <<'TR300_SHA256SUM_SHIM'
+#!/bin/sh
+exec /bin/sha256sum "$@"
+TR300_SHA256SUM_SHIM
+    else
+        tr300_fail 'no trusted SHA-256 implementation is available for cargo-dist'
+    fi
+    /bin/chmod 700 "$sha256sum_shim" ||
+        tr300_fail 'could not protect the private checksum shim'
+    if [ ! -f "$sha256sum_shim" ] || [ -L "$sha256sum_shim" ] ||
+        [ ! -x "$sha256sum_shim" ]; then
+        tr300_fail 'the private checksum shim is not a regular executable file'
+    fi
+    shim_output=$("$sha256sum_shim" -b "$verified_path") ||
+        tr300_fail 'the private checksum shim could not hash the cargo-dist installer'
+    shim_sha256=${shim_output%% *}
+    [ "$shim_sha256" = "$tr300_dist_installer_sha256" ] ||
+        tr300_fail 'the private checksum shim returned an unexpected digest'
+}
+trap tr300_cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 tr300_fail() {
     printf '%s\n' "TR-300 managed install failed safely: $*" >&2
@@ -320,10 +404,14 @@ tr300_main() {
     dist_installer="$tr300_temp/tr300-dist-installer.sh"
     tr300_download "${tr300_release_base}/tr300-dist-installer.sh" "$dist_installer" \
         || tr300_fail 'could not download the immutable managed installer'
+    tr300_verify_dist_installer "$dist_installer"
+    tr300_prepare_sha256sum "$dist_installer"
     chmod 700 "$dist_installer" || tr300_fail 'could not protect the managed installer'
 
     tr300_transaction_started=1
-    sh "$dist_installer" "$@" || tr300_fail 'cargo-dist installation did not complete'
+    PATH="${tr300_sha256sum_directory}:${PATH:-/usr/bin:/bin}" \
+        /bin/sh "$dist_installer" "$@" ||
+        tr300_fail 'cargo-dist installation did not complete'
     tr300_verify_receipt
     managed_binary=$(tr300_verify_binary) || tr300_fail 'managed TR-300 verification did not complete'
     tr300_take_over_macos_pkg

@@ -13,6 +13,56 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Release packaging now proves it is using the exact trusted release before
+  it can access signing credentials or upload files.** Forks, unrelated runs,
+  altered tags, and mismatched release records stop safely, which prevents an
+  untrusted change from borrowing the official release pipeline.
+- **A release stays private until the actual Windows installers pass.** The
+  Windows tests all use one frozen copy of the draft, and the final Mac step
+  checks that proof and every accepted download byte before making the complete
+  34-file release public. Public updater checks happen only after publication,
+  so an unpublished candidate is never mistaken for the public latest release.
+- **Crates.io publishing now uses a short-lived login created for one protected
+  release run.** The package is fully rehearsed with only read-only GitHub
+  access and no registry login, a fresh
+  runner proves it has the same source and package bytes, and only the final
+  upload receives the temporary credential. The old reusable credential is a
+  one-time setup bridge and must be removed after the new login is proven.
+- **Mac signing credentials are isolated from project code.** A one-time copy
+  moves the exact credentials into a protected environment, both kinds of Mac
+  runner must prove signing and notarization access there, and the old copies
+  plus the temporary migration access are then removed. Credentialed jobs start
+  fresh and receive only fixed package data.
+- **Windows installer builds now use one verified official Inno Setup
+  download.** Both ordinary CI and release packaging check the compiler's
+  download hash, publisher signature, attestation, path, and exact version
+  instead of trusting a mutable package-manager install.
+- **Private shell profiles stay private during install and uninstall edits.**
+  If a Unix profile was owner-only, its atomic replacement keeps that access
+  mode instead of silently adopting a broader default.
+- **Windows package updates now keep administrator approval away from the
+  caller's folder and command search path.** They launch the operating system's
+  own installer or a verified TR-300 package from its trusted directory, so a
+  nearby lookalike program or library cannot inherit the elevated launch.
+  Company and personal installation choices keep their existing permission
+  behavior.
+- **The Mac package now stops before installing anything when a per-user copy
+   already exists.** Mac testing proved that a failed late installer step can
+   still leave the new system command behind, so the package no longer tries to
+   remove or roll back files in a user's home. It checks the standard managed
+   command and receipt locations in every home under the Mac's standard Users
+   folder plus every eligible local account's declared home, including custom
+   locations. It preserves any matching command or receipt it finds and asks the
+   user to complete the supported switch before trying again.
+
+### Changed
+- **Switching from the managed Mac install to the system package is now a clear
+  three-step process.** Update or reinstall the managed v4.3 copy, choose
+  Complete uninstall so TR-300 safely removes both its command and matching
+  receipt, then open the PKG. A normal PKG upgrade still works, and switching
+  from an exact PKG back to the managed installer remains supported.
+
 ## [4.2.2] - 2026-07-18
 
 ### Fixed

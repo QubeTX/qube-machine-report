@@ -1,13 +1,14 @@
 ---
 name: tr300-dev-workflow
-description: TR-300's canonical 7-phase development workflow for any non-trivial change, plus the CI gates. Use when starting feature work, planning a multi-PR change, asking "how are changes developed/documented here", setting up TaskCreate tracking, running the local gate (fmt/clippy/test/build/speed), or reproducing CI locally. Encodes plan (read-only, parallel Explore + authoritative research) → upfront task tracking → implement one PR at a time → per-PR F.1–F.6 documentation block → verification + Codex review → ci-tester then git-master commit/push → close out, plus what each GitHub Actions workflow (ci.yml, release.yml, crates-publish.yml) enforces and the Intel macOS coverage policy. Triggers on "development workflow", "how do I add a feature", "plan this change", "the F-block", "CI gates", "reproduce CI", "phases". For cutting an actual release (version bump → tag → publish), use the `release` skill instead.
+description: TR-300's canonical 7-phase development workflow for any non-trivial change, plus the CI gates. Use when starting feature work, planning a multi-PR change, asking "how are changes developed/documented here", setting up task tracking, running the local gate, or reproducing CI. Encodes plan → implementation → documentation → verification → protected PR merge, plus the private-draft release and explicit trusted-OIDC publication gates. Triggers on "development workflow", "how do I add a feature", "plan this change", "the F-block", "CI gates", "reproduce CI", "phases". For cutting an actual release, use the `release` skill instead.
 ---
 
 # TR-300 development workflow + CI
 
 The canonical cadence for any non-trivial change, and the CI gates that guard it. The actual
-release procedure (version bump → tag → GitHub Release → crates.io) is the separate
-[`release`](../release/SKILL.md) skill; this skill stops at "commit + push to main." Summary +
+release procedure (version bump → protected PR → explicit crates publication → tag → private
+draft → exact acceptance → public release) is the separate
+[`release`](../release/SKILL.md) skill; this skill stops at a protected PR merge. Summary +
 pointers are in [`CLAUDE.md`](../../../CLAUDE.md); the historical ledger is in
 [`MASTER_PLAN.md`](../../../MASTER_PLAN.md).
 
@@ -71,8 +72,8 @@ Every PR completes this block before commit:
 ### Phase 6 — Commit + push
 
 - **Local commit**: `git-master` agent. No `ci-tester` needed for local-only operations.
-- **Push to remote**: `ci-tester` agent FIRST. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`), never bypass signing. Once `ci-tester` is `[PASS]`, hand off to `git-master` for the push.
-- **Tag a release**: bump version (already done in `F.4`), commit + push commits, wait for `ci.yml` to go green on the exact commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag push triggers cargo-dist's `release.yml`. Push a single explicit version tag; do not use broad `git push --tags`. (For the full release procedure, use the [`release`](../release/SKILL.md) skill.)
+- **Push to remote**: `ci-tester` agent first. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`) or bypass signing. Push a focused branch, open a PR, resolve review threads, and merge only after repository ruleset `21268055` reports every strict required check green. Never push feature or release work directly to `main`.
+- **Do not tag from this development workflow.** A release tag is irreversible and follows exact-current-main CI plus an explicit owner-authorized trusted-OIDC crates publication. Use the [`release`](../release/SKILL.md) skill for that sequence; it pushes only one exact stable `vX.Y.Z` tag.
 
 ### Phase 7 — Close out
 
@@ -80,7 +81,9 @@ Mark the parent PR task `completed` in `TaskList`. Move on to the next PR's pare
 
 ## CI
 
-Three GitHub Actions workflows guard release quality and publication:
+Six persistent GitHub Actions workflows guard release quality and publication;
+the temporary Apple secret migration workflow exists only during credential
+cutover:
 
 - **`.github/workflows/ci.yml`** — runs on every push to `main` and every pull request. Jobs:
   - `fmt` — `cargo fmt --check` (Linux only)
@@ -90,8 +93,11 @@ Three GitHub Actions workflows guard release quality and publication:
   - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
   - `audit` — blocking `cargo audit` against RustSec advisories; a finding fails CI
   - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
-- **`.github/workflows/release.yml`** — cargo-dist v0.31.0 release workflow. Triggered by tag push (`vX.Y.Z`). Builds 6 targets and produces shell + PowerShell + MSI installers. It copies `tr300-installer.*` to legacy `tr-300-installer.*` aliases for v3.14.2 updater compatibility and, on both Apple jobs, fail-closed Developer ID-signs/notarizes before upload. `Cargo.toml` sets `allow-dirty = ["ci", "msi"]` for checked-in CI/WiX customizations. After `dist init`, preserve both the alias and Apple trust zones and rerun the Mac gate.
-- **`.github/workflows/crates-publish.yml`** — runs after successful `CI` workflow runs from pushes to `main`, checks out the exact CI-tested SHA, skips already-published crate versions using a descriptive crates.io data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run with `--locked`, and publishes with the repository Actions secret `CARGO_REGISTRY_TOKEN`.
+- **`.github/workflows/crates-publish.yml`** — manual owner-only publication from exact protected `main` after CI. A read-only Cargo 1.95 validator with no registry credential proves the package; a fresh `crates-io` runner executes no package code while a short-lived OIDC token exists and verifies public bytes/provenance. Automatic push/`workflow_run` publication is forbidden.
+- **`.github/workflows/release.yml`** — exact stable-tag cargo-dist v0.31.0 builds, fresh checkout-free Apple signers, and a fresh publisher that creates a private 24-asset draft. Preserve the stable-tag, fixed-artifact, MIC-1 alias, private-host, and Apple trust zones after `dist init`.
+- **`.github/workflows/windows-installers.yml`** — adds six exact Windows installer/sidecar assets to the private draft through a separate checkout-free publisher, producing 30 assets.
+- **`.github/workflows/windows-installer-validation.yml`** — freezes those 30 exact bytes and runs pre-public fresh-install plus authenticated direct prior-to-candidate transition/uninstall/takeover checks while public `latest` remains unchanged; after final publication it separately runs the real updater-to-candidate matrix.
+- **`.github/workflows/macos-installer.yml`** — uses data-only prep and fresh `apple-signing` jobs, consumes the exact successful Windows proof, adds the four PKG/DMG assets, verifies the exact 34-asset inventory and every asset byte, and is the sole final publisher.
 
 To reproduce the CI gates locally:
 

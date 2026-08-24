@@ -15,6 +15,7 @@ use clap::{Parser, ValueEnum};
 pub enum Action {
     Update,
     Install,
+    /// Open the uninstall menu for profile-only or Complete removal.
     Uninstall,
     /// Cross-method install cleanup. HIDDEN — invoked by the Windows installers
     /// (and the silent self-update path) to consolidate to a single install:
@@ -68,7 +69,7 @@ pub struct Cli {
     #[arg(long, conflicts_with_all = ["update", "uninstall", "action"])]
     pub install: bool,
 
-    /// Remove tr300 from shell profile
+    /// Open uninstall menu (profile-only or Complete removal)
     #[arg(long, conflicts_with_all = ["update", "install", "action"])]
     pub uninstall: bool,
 

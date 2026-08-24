@@ -1,10 +1,11 @@
 # TR-300 managed PowerShell installer.
 #
-# The release workflow renders the immutable tag/version placeholders, keeps the
-# cargo-dist generated installer as tr300-dist-installer.ps1, and publishes this
-# stable-name wrapper as tr300-installer.ps1. A deliberately launched fresh
-# wrapper is authoritative: after cargo-dist installs and verifies the managed
-# PowerShell channel, recognized native MSI/Inno products are uninstalled.
+# The release workflow renders the immutable tag, version, and exact raw
+# cargo-dist installer SHA-256 placeholders, keeps the generated installer as
+# tr300-dist-installer.ps1, and publishes this stable-name wrapper as
+# tr300-installer.ps1. A deliberately launched fresh wrapper is authoritative:
+# after cargo-dist installs and verifies the managed PowerShell channel,
+# recognized native MSI/Inno products are uninstalled.
 
 param (
     [switch]$NoModifyPath,
@@ -15,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 $Tr300Tag = '@TR300_TAG@'
 $Tr300Version = '@TR300_VERSION@'
+$Tr300DistInstallerSha256 = '@TR300_DIST_INSTALLER_SHA256@'
 $Tr300ReleaseBase = "https://github.com/QubeTX/qube-machine-report/releases/download/$Tr300Tag"
 $Tr300RecoveryUrl = 'https://github.com/QubeTX/qube-machine-report/releases/latest'
 
@@ -22,6 +24,60 @@ if ($Help) {
     Write-Information 'TR-300 managed PowerShell installer'
     Write-Information 'Installs the latest managed CLI channel and safely supersedes recognized TR-300 MSI/EXE installs.'
     return
+}
+
+function Get-Tr300TrustedMsiExecPath {
+    # Environment.SystemDirectory is backed by the Windows system-directory
+    # API. Do not replace this with Get-Command, a bare executable name, PATH,
+    # or the current directory: Global MSI removal may run with a UAC token.
+    $systemDirectory = [Environment]::SystemDirectory
+    if ([string]::IsNullOrWhiteSpace($systemDirectory)) {
+        throw 'Windows did not provide its trusted system directory'
+    }
+    $systemDirectory = [IO.Path]::GetFullPath($systemDirectory).TrimEnd('\')
+    if (-not [IO.Path]::IsPathRooted($systemDirectory)) {
+        throw 'Windows returned a non-absolute system directory'
+    }
+    $msiexec = [IO.Path]::GetFullPath((Join-Path $systemDirectory 'msiexec.exe'))
+    $parent = [IO.Path]::GetDirectoryName($msiexec).TrimEnd('\')
+    if (-not $parent.Equals($systemDirectory, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $msiexec -PathType Leaf)) {
+        throw "the trusted Windows Installer executable is unavailable: $msiexec"
+    }
+    return $msiexec
+}
+
+function Get-Tr300Sha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $algorithm.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Assert-Tr300DistInstallerHash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ($Tr300DistInstallerSha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+        throw 'the managed installer has an invalid embedded cargo-dist checksum'
+    }
+    $actual = Get-Tr300Sha256 -Path $Path
+    if ($actual -cne $Tr300DistInstallerSha256) {
+        throw 'the downloaded cargo-dist installer checksum did not match this release'
+    }
 }
 
 function Get-Tr300MsiProducts {
@@ -72,7 +128,7 @@ namespace Tr300.ManagedInstaller {
                 Channel = $family.Channel
                 Elevated = $family.Elevated
                 ProductCode = $productCode.ToString()
-                Uninstaller = 'msiexec.exe'
+                Uninstaller = Get-Tr300TrustedMsiExecPath
                 Binary = $family.Binary
             }
         }
@@ -152,13 +208,24 @@ function Get-Tr300NativeProducts {
     return $products
 }
 
-function Invoke-Tr300Process([string]$FilePath, [string[]]$Arguments, [bool]$Elevated) {
+function Invoke-Tr300Process(
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [bool]$Elevated,
+    [string]$WorkingDirectory = ''
+) {
     $params = @{
         FilePath = $FilePath
         ArgumentList = $Arguments
         Wait = $true
         PassThru = $true
         WindowStyle = 'Hidden'
+    }
+    if ($WorkingDirectory) {
+        if (-not [IO.Path]::IsPathRooted($WorkingDirectory)) {
+            throw 'a process working directory must be absolute'
+        }
+        $params.WorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)
     }
     if ($Elevated) { $params.Verb = 'RunAs' }
     return Start-Process @params
@@ -167,12 +234,27 @@ function Invoke-Tr300Process([string]$FilePath, [string[]]$Arguments, [bool]$Ele
 function Remove-Tr300NativeProduct($Product) {
     Write-Information "Switching TR-300 ownership from $($Product.Channel) to powershell-installer..."
     if ($Product.Kind -eq 'msi') {
-        $process = Invoke-Tr300Process 'msiexec.exe' @('/x', $Product.ProductCode, '/passive', '/norestart') $Product.Elevated
+        # Resolve again at the launch boundary rather than trusting PATH or a
+        # mutable product object carried forward from discovery. Pin the child
+        # working directory to the same OS-owned directory; do not clear the
+        # inherited environment because Windows Installer depends on it.
+        $msiexec = Get-Tr300TrustedMsiExecPath
+        $systemDirectory = [IO.Path]::GetDirectoryName($msiexec)
+        $process = Invoke-Tr300Process $msiexec @('/x', $Product.ProductCode, '/passive', '/norestart') $Product.Elevated $systemDirectory
         if ($process.ExitCode -notin @(0, 1605, 1614, 1641, 3010)) {
             throw "$($Product.Channel) uninstall exited with Windows Installer code $($process.ExitCode)"
         }
     } else {
-        $process = Invoke-Tr300Process $Product.Uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') $Product.Elevated
+        # The Global Inno uninstaller crosses UAC. Keep its current directory
+        # beside the already validated absolute uninstaller rather than
+        # inheriting the directory from which this wrapper happened to run.
+        $uninstaller = [IO.Path]::GetFullPath([string]$Product.Uninstaller)
+        $uninstallerDirectory = [IO.Path]::GetDirectoryName($uninstaller)
+        if ([string]::IsNullOrWhiteSpace($uninstallerDirectory) -or
+            -not [IO.Path]::IsPathRooted($uninstallerDirectory)) {
+            throw "recognized $($Product.Channel) uninstaller has no absolute working directory"
+        }
+        $process = Invoke-Tr300Process $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') $Product.Elevated $uninstallerDirectory
         if ($process.ExitCode -ne 0) {
             throw "$($Product.Channel) uninstall exited with code $($process.ExitCode)"
         }
@@ -350,6 +432,7 @@ try {
     }
     if ($token) { $headers.Authorization = "Bearer $token" }
     Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$Tr300ReleaseBase/tr300-dist-installer.ps1" -OutFile $distInstaller
+    Assert-Tr300DistInstallerHash -Path $distInstaller
 
     $transactionStarted = $true
     $launcher = if ($PSVersionTable.PSEdition -eq 'Core') {

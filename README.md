@@ -9,6 +9,8 @@ Cross-platform system information report with Unicode box-drawing tables.
 TR-300 is a standalone Rust CLI for fast, reliable, and readable terminal machine reports.
 
 Current release: [latest](https://github.com/QubeTX/qube-machine-report/releases/latest).
+That public link remains v4.2.2 until the unreleased v4.3 candidate described
+below completes its release gates; candidate-only behavior is labeled explicitly.
 The recommended install is the managed CLI command: PowerShell on Windows and
 the shell installer on macOS/Linux. Optional Global/Corporate MSI/EXE packages
 and a direct universal macOS PKG remain first-class, origin-preserving channels.
@@ -151,11 +153,12 @@ If you are deliberately choosing a native Windows package:
 | A locked-down machine that blocks `C:\Program Files` writes | **Corporate** |
 | A server, ARM Windows, or anything else | Use the bare EXE / shell installer below |
 
-Current native installers treat an explicit fresh launch as your newest channel
-choice. They strictly retire an exact older managed/Cargo copy and refuse to
-claim success when ownership is ambiguous or another edition cannot be retired
-safely. There is no cleanup opt-out: use a portable archive if you intentionally
-want an unmanaged side-by-side copy.
+Current Windows native installers treat an explicit fresh launch as your newest
+channel choice. They strictly retire an exact older managed/Cargo copy and
+refuse to claim success when ownership is ambiguous or another edition cannot
+be retired safely. There is no cleanup opt-out: use a portable archive if you
+intentionally want an unmanaged side-by-side copy. The unreleased v4.3 direct
+macOS PKG candidate uses the safer, asymmetric rule described below.
 
 #### macOS universal PKG
 
@@ -167,11 +170,40 @@ also requires that receipt's version, payload path, per-file ownership, and the
 installed binary's Developer ID product identity to match; a stale receipt is
 not enough.
 
-The binary and PKG are Developer ID signed. GitHub's native Apple Silicon and
-Intel runners require Apple Notary Service acceptance, staple and Gatekeeper-
-check the PKG, install it directly, run report/update smokes, and verify
-uninstall contents before publication. A physical Mac is optional visual
-testing, not a release gate.
+**Unreleased v4.3 candidate policy:** the direct PKG never removes a per-user
+managed/Cargo install. Its `preinstall` checks every direct directory entry in
+`/Users`—including dot-prefixed and unregistered residue—plus all eligible local
+Directory Service homes, independent of console or launch environment. For each
+home it performs a bounded, non-recursive inspection of only the exact parent
+levels leading to the standard managed binary at `~/.cargo/bin/tr300` and receipt
+at `~/.config/tr300/tr300-receipt.json`; it enumerates each existing parent before
+treating the fixed path as absent. Abnormal entry types, broken links, or an
+unlistable intermediate directory fail closed before `/usr/local/bin/tr300` is
+installed. Arbitrary custom cargo-dist prefixes, `CARGO_HOME`, or XDG
+configuration roots are not discoverable from PackageKit; keep using the managed
+installer or explicitly retire that custom owner before launching the PKG. The
+PKG also accepts only the current system volume (`/`). To switch from the managed
+channel, first refresh or reinstall that copy through the v4.3-or-later managed
+installer, run `tr300 uninstall`, choose **Complete**, and then launch the PKG. The
+Complete path removes the running managed binary and its exact matching
+cargo-dist receipt as one fail-closed transaction. Malformed, foreign, linked,
+or changing receipt evidence is preserved for review. A clean PKG install,
+same-version repair, and native PKG upgrade remain supported. The public v4.2.2
+PKG predates this policy; do not use this candidate transition sequence until
+v4.3 is published.
+
+This safety check is deliberately fail-closed. If a normal local account's
+Directory Service home is missing, offline, or otherwise uninspectable, the PKG
+will stop without an override. Make that declared home available, repair the
+account's Directory Service home record, or keep using the managed installer.
+
+The binary and PKG are Developer ID signed. Before publication, GitHub's native
+Apple Silicon and Intel runners require Apple Notary Service acceptance, staple
+and Gatekeeper-check the candidate PKG and DMG, install the PKG directly, run its
+report/lifecycle checks, and verify uninstall contents. The real public updater
+matrix, immutable-v4.1.x compatibility bridge, and published Linux/macOS smokes
+run only after the exact 34-asset release is public. A physical Mac is optional
+visual testing, not a release gate.
 
 Releases also retain a signed compatibility DMG containing the byte-identical
 PKG because immutable v4.1.x updaters require that exact legacy filename. New
@@ -261,7 +293,8 @@ tr300 install
 # Legacy form still works:
 tr300 --install
 
-# Remove from shell profile
+# Remove from the shell profile, or choose Complete for the binary and
+# an exact matching managed receipt
 tr300 uninstall
 # Legacy form still works:
 tr300 --uninstall
@@ -316,7 +349,7 @@ exclusive with each other and with the legacy action flags.
 |--------|-------------|
 | `update` | Check for updates and install the latest version |
 | `install` | Add to shell profile with alias and auto-run |
-| `uninstall` | Remove from shell profile |
+| `uninstall` | Remove from the shell profile, or choose Complete for the binary and an exact matching managed receipt |
 
 | Option | Description |
 |--------|-------------|
@@ -329,7 +362,7 @@ exclusive with each other and with the legacy action flags.
 | `--no-elevation-hint` | Suppress the optional Linux `sudo` detail hint |
 | `--update` | Legacy flag form of `tr300 update` |
 | `--install` | Add to shell profile with alias and auto-run |
-| `--uninstall` | Remove from shell profile |
+| `--uninstall` | Legacy flag form of `tr300 uninstall` |
 | `-h, --help` | Print help information |
 | `-V, --version` | Print version information |
 
@@ -349,19 +382,21 @@ stays Global EXE, Cargo stays Cargo, shell/PowerShell stays at its receipt
 prefix, and a macOS PKG opens the verified universal PKG in Apple Installer.
 
 **Fresh install and update are different operations.** A CLI update is
-latest-only and preserves its proven channel. A fresh managed CLI/native
-installer is the user's newest channel choice, including a same-version or
-downgrade reinstall. It first establishes the chosen copy, then retires only
-recognized prior TR-300 ownership. Ambiguous evidence or failed authorization
-returns a visible failure and recovery link; it never silently declares that a
-duplicate/conflicting state converged.
+latest-only and preserves its proven channel. A fresh installer expresses a new
+choice, including a same-version or downgrade reinstall, only within a platform
+transaction that can prove the ownership change. Windows native installers and
+the managed wrappers retire recognized prior TR-300 ownership. In the
+unreleased v4.3 candidate, a direct macOS PKG instead refuses standard managed
+ownership during `preinstall`; switching to it requires the receipt-aware
+Complete-uninstall sequence above. Ambiguous evidence or failed authorization
+always returns a visible failure and recovery guidance.
 
-The bounded consolidation code deletes only the allowlisted `tr300` binary and
-an exactly matching cargo-dist receipt—never Cargo/rustup, the Cargo PATH entry,
-Downloads, or the running copy. Current native installers have no cleanup
-checkbox or silent opt-out: an exact managed/Cargo owner converges, while an
-ambiguous receipt or registered/exact-path opposite edition stops before native
-mutation and points to the managed recovery command.
+The bounded Windows consolidation code deletes only the allowlisted `tr300`
+binary and an exactly matching cargo-dist receipt—never Cargo/rustup, the Cargo
+PATH entry, Downloads, or the running copy. Windows native installers have no
+cleanup checkbox or silent opt-out. The unreleased v4.3 macOS PKG candidate
+contains no postinstall migration helper and performs no privileged user-home
+mutation.
 
 **On Windows (v3.15.0+):**
 
@@ -452,37 +487,42 @@ known) and the versionless latest release page.
 
 ## Release Automation
 
-GitHub Actions handles both release assets and crates.io publishing:
+GitHub Actions handles both release assets and crates.io publishing through
+protected, exact-source workflows:
 
 - `CI` runs formatting, clippy, tests, release builds, speed checks, audit, and
   cargo-dist planning on pushes to the default branch. Native Apple Silicon and
   Intel macOS jobs plus AMD64/ARM64 Linux and Windows jobs are blocking, and
   workflow/shell validation runs in the same gate.
-- `Crates.io Publish` runs only after `CI` succeeds for that default-branch
-  commit, checks whether the manifest version is already on crates.io with a
-  descriptive data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run
-  with `--locked`, and publishes `tr300` only when the repository
-  `CARGO_REGISTRY_TOKEN` Actions secret is configured.
-- `Release` is the cargo-dist workflow triggered by an explicit `vX.Y.Z` tag;
-  it builds the cross-platform archives and installers. Before
-  upload, both Apple targets must pass Developer ID signing and Apple
-  notarization; the job fails closed if any credential or Apple gate fails. New
-  public managed installer assets use `tr300-installer.*`; their exact-tag
-  internal cargo-dist transactions use `tr300-dist-installer.*`. The workflow
-  also publishes `tr-300-installer.*` compatibility aliases so v3.14.2 binaries
-  can self-update after the old package name was removed. The cargo-dist config
-  permits checked-in workflow/MSI customizations with
-  `allow-dirty = ["ci", "msi"]`.
-- `macOS Universal Package` consumes those exact tagged Apple archives on a
-  native Intel runner, creates the universal Developer ID signed binary and
-  signed `com.qubetx.tr300.pkg`, notarizes/staples it, then installs and
-  exercises the direct package independently on native Apple Silicon and Intel
-  runners. It also proves the compatibility DMG contains the byte-identical
-  package and replays an immutable v4.1.3 update through that bridge. After all
-  gates pass, the workflow attaches the versionless PKG/sidecar plus the legacy
-  DMG/sidecar. Together with the two internal managed-installer transactions,
-  this brings a complete release to 34 assets. A physical Mac is an
-  optional visual smoke test, not a release dependency.
+- `Crates.io Publish` is an explicit owner-only dispatch after exact-current-
+  `main` CI. A read-only Cargo 1.95 job with no registry credential builds and
+  verifies the normalized
+  package; a fresh protected `crates-io` job reproduces the exact crate bytes,
+  mints a short-lived OIDC token only for `cargo publish --no-verify`, and
+  requires the public checksum and trusted-publisher provenance to match the
+  repository, run, and source SHA. No push or downstream `workflow_run`
+  automatically publishes a crate.
+- `Release` is the cargo-dist workflow triggered by an explicit stable
+  `vX.Y.Z` tag. Builders use only read-only GitHub authorization with checkout
+  credential persistence disabled; fresh checkout-free Apple signers produce
+  the cross-platform archives, managed `tr300-installer.*` wrappers, internal
+  `tr300-dist-installer.*` transactions, and `tr-300-installer.*` compatibility
+  aliases. A fresh publisher creates a **private 24-asset draft**; it never
+  exposes a partial stable release. The cargo-dist config permits the reviewed
+  workflow/MSI customizations with `allow-dirty = ["ci", "msi"]`.
+- `Windows Installers` adds the Corporate MSI and both Global/Corporate Inno
+  EXEs plus their sidecars through a fresh publisher, producing a private
+  30-asset candidate. `Windows Installer Validation` freezes those exact bytes,
+  runs authenticated direct prior-to-candidate install/transition/uninstall
+  checks while public `latest` remains unchanged, and emits immutable acceptance
+  evidence.
+- `macOS Universal Package` consumes the exact Release-run Apple archives and
+  the Windows acceptance proof, builds/signs/notarizes the universal direct PKG
+  and compatibility DMG, and exercises both on native Apple Silicon and Intel.
+  Its sole fresh finalizer rechecks every accepted byte, adds four assets, and
+  is the only workflow allowed to publish the exact 34-asset release. Only then
+  do the real public updater matrix and published Linux/macOS smokes run. A
+  physical Mac remains an optional visual smoke test, not a release dependency.
 
 `Cargo.lock` is tracked so the crates.io publish workflow uses the same resolved
 dependency set that local release verification used.
@@ -569,6 +609,15 @@ To remove these additions, run `tr300 uninstall` or `tr300 --uninstall`.
 The uninstall does not roll back your execution policy — other PowerShell
 tooling typically relies on `RemoteSigned`, so restoring it would surprise
 users.
+
+In the unreleased v4.3 candidate on macOS/Linux, **Complete** also recognizes a
+running cargo-dist-managed copy. It validates the standard receipt's provider,
+app, and exact install prefix before changing profiles, then removes the binary
+and receipt transactionally. A raw Cargo install with no receipt still removes
+only its binary. Unsafe evidence found during preflight leaves the installation
+and profiles unchanged. If ownership changes after confirmation, the final
+revalidation preserves the binary and receipt, but the profile block may
+already have been removed; the diagnostic explains how to restore it.
 
 **`uninstall` → Complete** on Windows handles the self-EXE delete case
 (v3.15.2+). When you run `tr300 uninstall` from a Windows install

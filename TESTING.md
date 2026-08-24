@@ -7,7 +7,75 @@ as passed.
 
 ## Per-version verification log
 
+### v4.3.0 — Unreleased
+
+- **Mac transaction finding:** exact hardening head `dae0857` CI run
+  `32710504501` passed workflow validation, formatting, Clippy, Linux/Windows
+  tests and release builds, audit, cargo-dist, Windows installer custody, and
+  speed gates. Both native Mac architectures then proved that Apple Installer
+  retained `/usr/local/bin/tr300` after the deliberate failing `postinstall`,
+  even though the old managed binary and receipt restored exactly. That is a
+  release blocker, not acceptable rollback behavior.
+- **Superseding package policy:** the candidate direct PKG contains exactly one
+  non-mutating `preinstall`; it rejects the standard managed binary or receipt
+  paths (`~/.cargo/bin/tr300` and
+  `~/.config/tr300/tr300-receipt.json`) in every `/Users` home, including both
+  classes of safe dot-prefixed entry, plus all eligible local Directory Service
+  homes, independent of console or launch environment, before payload or native
+  receipt creation. `/Users` itself must first be a real listable directory, and
+  the exact fixed parent levels are then enumerated non-recursively;
+  symlinked, non-directory, permission-denied, or I/O-failed intermediates block
+  the package instead of being interpreted as absent. Fixed ASCII components
+  are matched case-insensitively so default APFS/HFS+ aliases and conservative
+  case-sensitive-volume variants cannot hide ownership; more than one folded
+  match is blocking ambiguity. It ships no migration probe,
+  rollback helper, or `postinstall` and
+  never mutates user-owned managed state as root. Directory Service plist
+  handling is constrained to pre-macOS-12-compatible `plutil -lint` plus
+  escaped-key `PlistBuddy` array reads. Sentinel-framed capture preserves data
+  newlines through the one-line validation instead of command-substitution
+  normalization; CI forbids newer typed extraction flags and exercises a real
+  trailing-newline Directory Service record through PackageKit. The
+  component PKG also rejects every target volume except `/`; the exact package
+  fixture must prove alternate-volume refusal leaves no target payload or
+  receipt. The signed candidate is byte-bound to that reviewed preinstall. A
+  real pre-macOS-12 PackageKit run remains a separate compatibility
+  qualification. UID 501–4294967295 accounts with missing, offline, or otherwise
+  uninspectable homes deliberately block the PKG until the home/Directory
+  Service record is repaired; keeping the managed installer is the supported
+  alternative, not bypassing the gate. Native PackageKit fixtures include a
+  custom home owned by UID 3000000000 and require values above UInt32—including
+  both 4294967296 and an 11-digit value—to fail closed before payload or receipt
+  creation. Arbitrary custom Cargo/cargo-dist/XDG
+  locations remain outside this PackageKit-visible inventory and must not be
+  claimed as detected.
+- **Supported channel transition:** managed-to-PKG requires a refresh or exact
+  reinstall through the v4.3-or-later managed installer, receipt-aware Complete
+  uninstall, and then a clean PKG install. Complete must preflight exact
+  cargo-dist provider/app/prefix evidence
+  before profile mutation and transactionally remove the running binary and
+  receipt. Raw Cargo stays binary-only; malformed, foreign, linked, or changed
+  receipts fail closed. Exact PKG-to-managed takeover remains supported.
+- **Open native acceptance:** both `macos-15` and `macos-15-intel` must prove
+  binary-only, receipt-only, pair, malformed, broken-link, second-home, and
+  custom-home managed conflicts plus alternate target volumes leave all old
+  bytes and native payload/receipt state unchanged; then prove clean install,
+  same-version repair, v4.2.2 native upgrade, and the checksum-bound public
+  v4.2.2 managed wrapper -> rejected candidate PKG -> candidate managed refresh
+  -> receipt-aware Complete -> candidate PKG sequence, plus PKG-to-managed
+  takeover, trust, report/update modes, and uninstall inventory. Both managed
+  executions must bind wrapper, raw cargo-dist script, and selected archive
+  asset IDs/sizes/digests before and after; the candidate wrapper embeds the raw
+  script digest, and both the historical and candidate macOS children receive a
+  private `/usr/bin/shasum`-backed `sha256sum` shim so archive verification
+  cannot be skipped.
+  v4.2.2 evidence below is historical and does not qualify the new package
+  contents.
+
 ### v4.2.2 — 2026-07-18 (published package-transaction fix-forward)
+
+The behavior and evidence in this section describe immutable v4.2.2. The v4.3
+Mac policy above explicitly supersedes its automatic managed-to-PKG direction.
 
 - **Immutable release qualification:** final source
   `db0f538c82961569a7118b105a20e967b15476f0` passed clean-tree

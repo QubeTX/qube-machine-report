@@ -1032,6 +1032,28 @@ fn is_worker_release_version(version: &str) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
+/// Select the trusted executable's own absolute directory for the UAC worker.
+/// `ShellExecuteExW` otherwise inherits the caller's current directory into
+/// the elevated process.
+#[cfg(any(windows, test))]
+fn windows_elevated_worker_directory(
+    current_exe: &std::path::Path,
+) -> Result<&std::path::Path, StrategyError> {
+    let is_product = current_exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"));
+    current_exe
+        .parent()
+        .filter(|directory| current_exe.is_absolute() && directory.is_absolute() && is_product)
+        .ok_or_else(|| {
+            StrategyError::Preflight(
+                "refused an elevated worker executable without its trusted absolute product directory"
+                    .to_string(),
+            )
+        })
+}
+
 #[cfg(windows)]
 fn launch_elevated_windows_update_worker(
     strategy: UpdateStrategy,
@@ -1039,7 +1061,7 @@ fn launch_elevated_windows_update_worker(
     backup: &std::path::Path,
 ) -> Result<u32, StrategyError> {
     use std::os::windows::ffi::OsStrExt;
-    use std::ptr::{null, null_mut};
+    use std::ptr::null_mut;
     use winapi::um::errhandlingapi::GetLastError;
     use winapi::um::handleapi::CloseHandle;
     use winapi::um::processthreadsapi::GetExitCodeProcess;
@@ -1065,6 +1087,7 @@ fn launch_elevated_windows_update_worker(
         ))
     })?;
     validate_windows_update_backup(&current, backup)?;
+    let worker_directory = windows_elevated_worker_directory(&current)?;
 
     let backup_text = backup.to_str().ok_or_else(|| {
         StrategyError::Preflight(
@@ -1087,6 +1110,11 @@ fn launch_elevated_windows_update_worker(
         .encode_wide()
         .chain(Some(0))
         .collect();
+    let worker_directory: Vec<u16> = worker_directory
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
     info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
@@ -1094,7 +1122,7 @@ fn launch_elevated_windows_update_worker(
     info.lpVerb = verb.as_ptr();
     info.lpFile = file.as_ptr();
     info.lpParameters = parameters.as_ptr();
-    info.lpDirectory = null();
+    info.lpDirectory = worker_directory.as_ptr();
     info.nShow = SW_HIDE;
 
     let launched = unsafe { ShellExecuteExW(&mut info) };
@@ -1946,6 +1974,108 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
 /// moved the live image to a private sibling, so Restart Manager does not need
 /// to terminate the updater to release the installed path. A deferred
 /// delete/reboot still surfaces as 3010/1641 without claiming success.
+#[cfg(any(windows, test))]
+fn windows_system_executable_path(
+    system_directory: &std::path::Path,
+    executable: &str,
+) -> std::path::PathBuf {
+    system_directory.join(executable)
+}
+
+/// Resolve Windows Installer through the OS-owned system directory instead of
+/// the current directory or PATH. The Global updater calls this after its
+/// strict `runas` handoff, so a bare executable name here would otherwise let
+/// a planted `msiexec.exe` inherit the elevated worker token.
+#[cfg(windows)]
+fn trusted_windows_msiexec_path() -> std::io::Result<std::path::PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use winapi::um::sysinfoapi::GetSystemDirectoryW;
+
+    const INITIAL_CAPACITY: usize = 260;
+    const MAX_DIRECTORY_CAPACITY: usize = 32_768;
+
+    let mut buffer = vec![0_u16; INITIAL_CAPACITY];
+    loop {
+        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
+        if length == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let length = length as usize;
+        if length < buffer.len() {
+            buffer.truncate(length);
+            let directory = std::path::PathBuf::from(OsString::from_wide(&buffer));
+            if !directory.is_absolute() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Windows returned a non-absolute system directory",
+                ));
+            }
+            return Ok(windows_system_executable_path(&directory, "msiexec.exe"));
+        }
+
+        let required = length
+            .checked_add(1)
+            .filter(|size| *size > buffer.len() && *size <= MAX_DIRECTORY_CAPACITY);
+        let Some(required) = required else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Windows returned an invalid system-directory length",
+            ));
+        };
+        buffer.resize(required, 0);
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_msi_install_command(
+    msiexec_path: &std::path::Path,
+    installer_path: &std::path::Path,
+) -> std::io::Result<Command> {
+    let working_directory = msiexec_path
+        .parent()
+        .filter(|directory| directory.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "trusted Windows Installer path has no absolute system directory",
+            )
+        })?;
+    let mut command = Command::new(msiexec_path);
+    command
+        .current_dir(working_directory)
+        .arg("/i")
+        .arg(installer_path)
+        .args(["/passive", "/norestart"]);
+    Ok(command)
+}
+
+/// Launch a downloaded Inno installer from its private staging directory.
+/// The Global installer self-elevates, so inheriting a caller-controlled
+/// current directory would carry that directory into the elevated process's
+/// DLL search path.
+#[cfg(any(windows, test))]
+fn windows_exe_install_command(installer_path: &std::path::Path) -> std::io::Result<Command> {
+    let working_directory = installer_path
+        .parent()
+        .filter(|directory| directory.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "staged Windows installer has no absolute private directory",
+            )
+        })?;
+    let mut command = Command::new(installer_path);
+    command.current_dir(working_directory).args([
+        "/SILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/RESTARTEXITCODE=3010",
+    ]);
+    Ok(command)
+}
+
 #[cfg(windows)]
 fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("msi").map_err(|error| {
@@ -1970,8 +2100,23 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         // replace). For the Global perMachine MSI, msiexec triggers UAC before
         // doing anything; for the Corporate perUser MSI, it installs silently
         // into LocalAppData with no elevation prompt.
-        let mut command = Command::new("msiexec");
-        command.args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"]);
+        let msiexec_path = trusted_windows_msiexec_path().map_err(|error| {
+            let detail = format!(
+                "resolving the trusted Windows Installer executable failed: {error}. The installer was not launched and the existing TR-300 installation was left in place"
+            );
+            if likely_endpoint_policy_error(&error) {
+                StrategyError::PolicyBlocked(format!(
+                    "{detail}. Endpoint security or filesystem policy may be responsible. Ask IT to allow the official asset or install it manually: {url}"
+                ))
+            } else {
+                StrategyError::Runtime(detail)
+            }
+        })?;
+        let mut command = windows_msi_install_command(&msiexec_path, temp_path).map_err(|error| {
+            StrategyError::Runtime(format!(
+                "preparing the trusted Windows Installer launch failed: {error}. The installer was not launched and the existing TR-300 installation was left in place"
+            ))
+        })?;
         suppress_stdout_for_json(&mut command);
         let status = command.status().map_err(|error| {
             prelaunch_installer_io_error("launching Windows Installer", temp_path, url, error)
@@ -2038,13 +2183,11 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         eprintln!("  Launching Inno Setup installer...");
         // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
         // suppresses non-critical message boxes; /NORESTART skips reboot prompts.
-        let mut command = Command::new(temp_path);
-        command.args([
-            "/SILENT",
-            "/SUPPRESSMSGBOXES",
-            "/NORESTART",
-            "/RESTARTEXITCODE=3010",
-        ]);
+        let mut command = windows_exe_install_command(temp_path).map_err(|error| {
+            StrategyError::Runtime(format!(
+                "preparing the private Inno Setup launch failed: {error}. The installer was not launched and the existing TR-300 installation was left in place"
+            ))
+        })?;
         suppress_stdout_for_json(&mut command);
         let status = command.status().map_err(|error| {
             prelaunch_installer_io_error("launching the EXE installer", temp_path, url, error)
@@ -3151,6 +3294,86 @@ TeamIdentifier=M9D5379H93\n";
     }
 
     #[test]
+    fn windows_msi_command_uses_an_explicit_system_path_not_a_planted_name() {
+        let fixture = tempfile::tempdir().unwrap();
+        let system_directory = fixture.path().join("Windows").join("System32");
+        let planted_directory = fixture.path().join("search-path-plant");
+        std::fs::create_dir_all(&system_directory).unwrap();
+        std::fs::create_dir_all(&planted_directory).unwrap();
+
+        let trusted = windows_system_executable_path(&system_directory, "msiexec.exe");
+        let planted = planted_directory.join("msiexec.exe");
+        std::fs::write(&trusted, b"trusted fixture").unwrap();
+        std::fs::write(&planted, b"planted fixture").unwrap();
+
+        let installer = fixture.path().join("candidate.msi");
+        let command = windows_msi_install_command(&trusted, &installer).unwrap();
+        assert!(trusted.is_absolute());
+        assert_eq!(command.get_program(), trusted.as_os_str());
+        assert_eq!(command.get_current_dir(), Some(system_directory.as_path()));
+        assert_ne!(command.get_program(), planted.as_os_str());
+        assert_ne!(command.get_program(), std::ffi::OsStr::new("msiexec.exe"));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                std::ffi::OsStr::new("/i"),
+                installer.as_os_str(),
+                std::ffi::OsStr::new("/passive"),
+                std::ffi::OsStr::new("/norestart"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_exe_command_uses_private_staging_directory_not_planted_cwd() {
+        let fixture = tempfile::tempdir().unwrap();
+        let staging_directory = fixture.path().join("private-staging");
+        let planted_directory = fixture.path().join("caller-controlled");
+        std::fs::create_dir_all(&staging_directory).unwrap();
+        std::fs::create_dir_all(&planted_directory).unwrap();
+        let installer = staging_directory.join("installer.exe");
+        let planted = planted_directory.join("installer.exe");
+        std::fs::write(&installer, b"trusted fixture").unwrap();
+        std::fs::write(&planted, b"planted fixture").unwrap();
+
+        let command = windows_exe_install_command(&installer).unwrap();
+        assert_eq!(command.get_program(), installer.as_os_str());
+        assert_eq!(command.get_current_dir(), Some(staging_directory.as_path()));
+        assert_ne!(command.get_current_dir(), Some(planted_directory.as_path()));
+        assert_ne!(command.get_program(), planted.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                std::ffi::OsStr::new("/SILENT"),
+                std::ffi::OsStr::new("/SUPPRESSMSGBOXES"),
+                std::ffi::OsStr::new("/NORESTART"),
+                std::ffi::OsStr::new("/RESTARTEXITCODE=3010"),
+            ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn trusted_windows_msiexec_is_the_absolute_native_system_copy() {
+        let path = trusted_windows_msiexec_path().unwrap();
+        assert!(path.is_absolute());
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("msiexec.exe")
+        );
+        assert!(
+            path.is_file(),
+            "missing Windows Installer at {}",
+            path.display()
+        );
+
+        let command =
+            windows_msi_install_command(&path, std::path::Path::new("candidate.msi")).unwrap();
+        assert_eq!(command.get_program(), path.as_os_str());
+        assert_eq!(command.get_current_dir(), path.parent());
+    }
+
+    #[test]
     fn explicit_staging_cleanup_preserves_a_verified_success() {
         let staged = StagedInstaller::new("exe").unwrap();
         let staging_dir = staged.path().parent().unwrap().to_path_buf();
@@ -3395,6 +3618,26 @@ TeamIdentifier=M9D5379H93\n";
         assert_eq!(windows_quote_command_arg("msi_global"), "msi_global");
         assert_eq!(windows_quote_command_arg(""), r#""""#);
         assert_eq!(windows_quote_command_arg(r#"a\"b"#), r#""a\\\"b""#);
+    }
+
+    #[test]
+    fn elevated_worker_uses_trusted_product_directory_not_caller_cwd() {
+        let fixture = tempfile::tempdir().unwrap();
+        let product_directory = fixture
+            .path()
+            .join("Program Files")
+            .join("tr300")
+            .join("bin");
+        let planted_directory = fixture.path().join("caller-controlled");
+        std::fs::create_dir_all(&product_directory).unwrap();
+        std::fs::create_dir_all(&planted_directory).unwrap();
+        let current_exe = product_directory.join("tr300.exe");
+
+        let directory = windows_elevated_worker_directory(&current_exe).unwrap();
+        assert_eq!(directory, product_directory);
+        assert_ne!(directory, planted_directory);
+        assert!(windows_elevated_worker_directory(std::path::Path::new("tr300.exe")).is_err());
+        assert!(windows_elevated_worker_directory(&product_directory.join("other.exe")).is_err());
     }
 
     #[cfg(windows)]
