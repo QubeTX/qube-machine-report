@@ -95,13 +95,13 @@ require exact-SHA proof.
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; original feature head passed local/hosted gates and review; integrated exact-head requalification required | candidate source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; integrated source/test head passed local gates and review; final pushed exact-head hosted/security requalification required | candidate source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
 | Developer ID plus Apple `Accepted` before Mac artifact upload | Accepted and release-blocking | signing script and protected cargo-dist workflow step |
 | Frozen Mac surface during personal Windows/Linux/Pi continuation | Superseded for the v4.3 campaign; every Mac/shared change reopens native Intel/ARM qualification | agent guides, current handoff, release workflow, hardware task boundary |
-| Personal hardware evidence | Alienware complete; AMD64 laptop and Pi 4 still open | `#win`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
+| Personal hardware evidence | Alienware report/hardware and v4.1.3 same-channel evidence complete; natural v4.2.2 UAC update, AMD64 laptop, and Pi 4 still open | `#win`, `#w422`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
 | GitHub default branch `main` and checkout v6/Node 24 | Accepted and hosted-verified | GitHub default metadata, workflow filters/actions, exact-SHA CI/crates runs |
 | Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
 | Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; PR #15 head and exact-`main` workflow/provenance gates pass; integrated/tagged 24-to-30-to-34 proof remains | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
@@ -1499,8 +1499,7 @@ planning did not receive the values. The v4.3 protected-environment decision at
 lines 1698ff supersedes that storage topology after cutover: release jobs must
 consume Apple credentials only from `apple-signing`, and release is blocked
 until the one-time migration, native ARM/Intel environment-only preflight,
-repository-
-secret deletion, and migration-workflow removal are proven.
+repository-secret deletion, and migration-workflow removal are proven.
 
 This bare-archive conclusion applied to the v4.0 cargo-dist artifacts and is
 superseded for the installer-first path by the v4.1.0 PKG-in-DMG decision. The
@@ -3376,11 +3375,11 @@ work. The separate NVIDIA subprocess follows Fast/Normal command budgets rather
 than an unbounded or one-size-fits-all wait.
 
 On the controlled Alienware m16 R2 benchmark, seven alternating full-mode runs
-produced medians of 5138.6 ms for the v4.2.2 baseline and 2092.3 ms for the
-candidate: about 3046.3 ms (59.3%) less, a 2.46× runtime ratio. Eleven
-alternating fast-mode runs produced medians of 247.0 ms and 238.9 ms; the
-apparent -3.3% is background-level, so this decision makes no fast-mode
-performance-gain claim. The full repaired-code local and hosted PR gates are
-recorded in `TESTING.md`. Their success validates the candidate but does not
-authorize merge, publication, or independent AMD64 Linux/Raspberry Pi physical
-acceptance.
+per version produced medians of 5146.9 ms for the v4.2.2 baseline and 2120.2 ms
+for the candidate: about 3026.6 ms (58.8%) less, a 2.43× runtime ratio. Eleven
+alternating fast-mode runs per version produced medians of 257.3 ms and
+260.4 ms; the candidate's +1.2% is background-level, so this decision makes no
+fast-mode performance-gain claim. The integrated source/test head's full local
+gate is recorded in `TESTING.md`; the final pushed exact head still requires
+hosted, security, and review proof. Neither result establishes release
+acceptance or independent AMD64 Linux/Raspberry Pi physical acceptance.

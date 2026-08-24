@@ -14,10 +14,24 @@ working `4.3.0` manifest remains unreleased on
 `feature/v4.3.0-battery-perf-thermals`. Release-chain hardening exact head
 `8ea060f` passed complete local, hosted, security, and native fixture gates and
 merged through PR #15 as `1ffb0cc`; exact-main CI `32759430269` then passed all
-19 jobs. PR #14 is now being reconciled with that hardened `main`. Its earlier
-`56b92d7` qualification and newer remote-head `b068f65` CI `32681025189` plus
-release plan `32681025173` are historical evidence, not qualification of local
-fix `a10d429` or the integrated head now under construction.
+19 jobs. The local PR #14 branch integrated hardened `main` through merge
+`4e962b6` and source/test head `8471d95`. That head passed the complete local
+gate, controlled benchmark, and independent code/security reviews; it was not
+yet pushed at this checkpoint, so exact pushed-head hosted and review-thread
+qualification remain open. Earlier `56b92d7`/remote `b068f65` runs are
+historical evidence only.
+
+- **Integrated local qualification — pass through source/test head `8471d95`:**
+  locked fmt; warnings-denied workspace/all-target Clippy; 185 library and 22
+  integration tests; release build; 39-file package list; locked publish
+  dry-run with no upload; RustSec audit of 221 dependencies; cargo-dist 0.31.0
+  plan; actionlint; source and extracted-preinstall ShellCheck; release
+  provenance fixtures; Bash, PowerShell 7, and Windows PowerShell managed-
+  transaction fixtures; pinned-Inno parser; Linux/macOS cross-target
+  check/Clippy; and full/fast table, JSON, and ASCII smokes. Three independent
+  final reviews reported no source or release-security P0–P3 finding; the
+  documentation review's state corrections are incorporated here. Hosted
+  exact-head and signed/tagged gates remain separate.
 
 - **Earlier repaired-code local gates — pass on exact head `56b92d7`:** locked fmt; warnings-denied
   all-target/workspace Clippy; 173 library and 22 integration tests; release
@@ -36,12 +50,15 @@ fix `a10d429` or the integrated head now under construction.
   `null`; one ASCII invocation had 49 nonempty lines and every line was exactly
   51 display columns.
 - **Recorded Windows latency benchmark:** seven alternating Alienware m16 R2
-  full-mode runs produced medians of 5138.6 ms for the v4.2.2 baseline and
-  2092.3 ms for the candidate, a reduction of about 3046.3 ms (59.3%) and a
-  2.46× runtime ratio. Eleven alternating fast-mode runs produced medians of
-  247.0 ms and 238.9 ms; the apparent -3.3% difference is background-level, so
-  make no fast-mode gain claim. These controlled post-repair measurements and
-  the full local and exact repaired-head hosted gates are complete.
+  full-mode runs per version against integrated source/test head `8471d95`
+  produced medians of 5146.9 ms for the installed v4.2.2 baseline and 2120.2 ms
+  for the candidate, a reduction of about 3026.6 ms (58.8%) and a 2.43× runtime
+  ratio. Eleven alternating fast-mode runs per version produced medians of
+  257.3 ms and 260.4 ms; the candidate's +1.2% difference is background-level,
+  so make no fast-mode gain claim. Candidate JSON kept Windows CPU
+  present-and-`null`; its 54 °C GPU value exactly matched direct `nvidia-smi`.
+  Independent reviewer runs reproduced the material full-mode improvement and
+  statistically unchanged fast behavior.
 - **Linux thermal contract:** both modes use pure sysfs. CPU/GPU selection is
   deterministic, chooses the hottest plausible healthy sensor within the
   preferred class, rejects faulted/unreadable/malformed channels, recognizes
@@ -69,7 +86,7 @@ fix `a10d429` or the integrated head now under construction.
   run `32758484335`. Both native Intel and Apple Silicon PackageKit fixtures
   passed the preinstall-only refusal, no-mutation invariants, and clean-package
   control before PR #15 merged as `1ffb0cc`. These results qualify the hardened
-  release chain, not the still-unqualified integrated v4.3 product head.
+  release chain, not the final pushed integrated v4.3 product head.
 - **Mac transaction finding:** exact hardening head `dae0857` CI run
   `32710504501` passed workflow validation, formatting, Clippy, Linux/Windows
   tests and release builds, audit, cargo-dist, Windows installer custody, and
@@ -1152,7 +1169,7 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | Post-v4.0.1 personal-hardware task open |
 | **AWS EC2 (Graviton or Intel)** | Hypervisor shows "amazon" / "kvm"; cloud detection works | — |
 | **WSL2 on Win11** | Hypervisor shows "WSL2"; terminal shows "Windows Terminal" via WT_SESSION | — |
-| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Personal Alienware post-v4.0.1 retest open; prior 3.10.0 evidence remains historical |
+| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Alienware report/hardware and v4.1.3 same-channel evidence complete; natural v4.2.2 UAC update remains open |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
 | **Windows 11 (BitLocker OFF)** | "Encryption" row shows an evidence-backed Off state or remains absent; no promise that elevation alone unlocks it | — |
 | **Windows 11 as Administrator** | Encryption shows evidence-backed method + protection level when available; no blanket elevation footer | — |

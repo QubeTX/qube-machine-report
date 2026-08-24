@@ -30,16 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Windows full-mode report is materially faster on the benchmark machine.**
-  Seven alternating Alienware m16 R2 runs produced baseline/candidate medians
-  of 5138.6 ms and 2092.3 ms: about 3046.3 ms (59.3%) less elapsed time, a
-  2.46× runtime ratio.
+  Seven alternating Alienware m16 R2 runs per version produced
+  baseline/candidate medians of 5146.9 ms and 2120.2 ms: about 3026.6 ms
+  (58.8%) less elapsed time, a 2.43× runtime ratio.
   The BitLocker security-namespace probe now starts concurrently with the main
   WMI batch under a dedicated 2-second, launch-relative deadline instead of
   serially consuming the shared timeout. Duplicate WMI/process lookups and
   unnecessary registry subprocesses are also consolidated. Eleven alternating
-  fast-mode runs produced medians of 247.0 ms and 238.9 ms; the apparent -3.3%
-  difference is background-level, so this release makes no fast-mode
-  performance-gain claim.
+  fast-mode runs per version produced medians of 257.3 ms and 260.4 ms; the
+  candidate's 1.2% difference is background-level, so this release makes no
+  fast-mode performance-gain claim.
 - **Managed-to-PKG switching is now an explicit, receipt-aware sequence.** A
   managed user updates or reinstalls v4.3, chooses Complete uninstall, and then
   runs the PKG. On Unix, Complete validates an exact cargo-dist provider, app,

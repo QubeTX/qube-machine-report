@@ -33,15 +33,16 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
   recognizable-`InternalBattery`-only macOS fallback, mode-bounded NVIDIA GPU
   thermals on Windows while CPU stays absent/JSON `null`, and `-f/--full`.
-  Seven alternating full runs measured 5138.6 ms versus 2092.3 ms (~59.3%,
-  2.46×); 11 fast runs measured 247.0 ms versus 238.9 ms (-3.3%), so no
-  fast-mode gain is claimed. It remains unreleased; AMD64 Linux laptop and
+  Seven alternating full runs per version measured 5146.9 ms versus 2120.2 ms
+  (~58.8%, 2.43×); 11 fast runs per version measured 257.3 ms versus 260.4 ms
+  (+1.2%), so no fast-mode gain is claimed. It remains unreleased; AMD64 Linux laptop and
   Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
-- Personal-fleet evidence: the Alienware Global MSI update and report/hardware
-  facts now have real evidence; never claim the AMD laptop or Pi 4 is verified
-  until its board task contains real evidence
+- Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel
+  evidence are real; the natural v4.1.3 → v4.2.2 UAC update remains open. Never
+  claim the AMD laptop or Pi 4 is verified until its board task contains real
+  evidence.
 - Major-version reason: public Rust structs gained fields and selected public
   collector helpers changed signature. CLI and schema-v1 JSON compatibility are
   retained; changed record types are now `#[non_exhaustive]` for safer future
@@ -79,10 +80,11 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   launch-relative probe deadlines. NVIDIA temperature uses bounded
   `nvidia-smi`; Windows CPU temperature remains absent/null because ACPI zones
   cannot be mapped reliably. macOS accepts only a real `InternalBattery` record.
-- Seven alternating Windows full-mode runs produced medians of 5138.6 ms before
-  and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×). Eleven alternating fast runs
-  produced 247.0 ms and 238.9 ms medians; the apparent -3.3% is background-level
-  and supports no fast-mode performance claim.
+- Seven alternating Windows full-mode runs per version produced medians of
+  5146.9 ms before and 2120.2 ms after (~3026.6 ms, 58.8%, 2.43×). Eleven
+  alternating fast runs per version produced 257.3 ms and 260.4 ms medians; the
+  apparent +1.2% is background-level and supports no fast-mode performance
+  claim.
 - The release-security candidate keeps every stable release private at 24 base
   assets, extends it to 30 Windows assets, proves those exact bytes through
   private fresh-install plus authenticated direct prior-to-candidate transition
@@ -104,8 +106,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Release-chain hardening head `8ea060f` passed its complete local gate, five
   zero-finding security scans, exact-head CI/release-plan runs, and native Intel
   and Apple Silicon PackageKit fixtures before PR #15 merged as `1ffb0cc`.
-  Exact-main CI then passed. The earlier collector-only head passed its recorded
-  gates; the integrated PR #14 result requires fresh exact-head proof.
+  Exact-main CI then passed. Integrated source/test head `8471d95` passed the
+  complete local gate, benchmark, and independent review; final pushed-head
+  hosted/security/review proof remains open.
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not

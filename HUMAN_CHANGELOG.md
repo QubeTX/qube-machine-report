@@ -30,11 +30,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **The full report on the Windows benchmark machine is substantially faster.**
-  Controlled alternating runs put the median at 5138.6 ms before and 2092.3 ms
-  after — about 3046.3 ms or 59.3% less time, a 2.46× speedup. A slow security
+  Seven controlled alternating runs per version put the median at 5146.9 ms
+  before and 2120.2 ms after — about 3026.6 ms or 58.8% less time, a 2.43×
+  speedup. A slow security
   check now overlaps other work under its own deadline, and repeated lookups
-  were consolidated. Quick-report medians were 247.0 ms before and 238.9 ms
-  after; that small -3.3% difference is background-level, so there is no
+  were consolidated. Eleven quick-report runs per version produced medians of
+  257.3 ms before and 260.4 ms after; that small 1.2% difference is
+  background-level, so there is no
   quick-mode speedup claim.
 - **Switching from the managed Mac install to the system package is now a clear
   three-step process.** Update or reinstall the managed v4.3 copy, choose
@@ -63,17 +65,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checks that proof and every accepted download byte before making the complete
   34-file release public. Public updater checks happen only after publication,
   so an unpublished candidate is never mistaken for the public latest release.
-- **Crates.io publishing now uses a short-lived login created for one protected
-  release run.** The package is fully rehearsed with only read-only GitHub
+- **After the required protected cutover, crates.io publishing will use a
+  short-lived login created for one release run.** The package is fully
+  rehearsed with only read-only GitHub
   access and no registry login, a fresh
   runner proves it has the same source and package bytes, and only the final
   upload receives the temporary credential. The old reusable credential is a
   one-time setup bridge and must be removed after the new login is proven.
-- **Mac signing credentials are isolated from project code.** A one-time copy
+- **Mac signing credentials will be isolated from project code after the
+  required migration and environment-only native preflight.** A one-time copy
   moves the exact credentials into a protected environment, both kinds of Mac
   runner must prove signing and notarization access there, and the old copies
-  plus the temporary migration access are then removed. Credentialed jobs start
-  fresh and receive only fixed package data.
+  plus the temporary migration access are then removed. Credentialed jobs then
+  start fresh and receive only fixed package data.
 - **Windows installer builds now use one verified official Inno Setup
   download.** Both ordinary CI and release packaging check the compiler's
   download hash, publisher signature, attestation, path, and exact version

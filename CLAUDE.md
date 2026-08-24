@@ -56,9 +56,10 @@ Complete GitHub distribution and crates.io package: **4.2.2**. The working
 manifest is **4.3.0** on the unreleased
 `feature/v4.3.0-battery-perf-thermals` candidate developed through PR #14.
 Release-chain hardening merged to `main` and passed exact-main CI; the
-integrated candidate still requires fresh exact-head qualification. Protected
-merge is not publication, so v4.2.2 remains the published boundary until the
-complete release chain succeeds. Exact v4.2.2 source
+local integration passed its full gate and benchmark, while the final pushed
+candidate still requires exact-head hosted/security/review qualification.
+Protected merge is not publication, so v4.2.2 remains the published boundary
+until the complete release chain succeeds. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
@@ -245,14 +246,14 @@ deterministic. The historical Raspberry Pi "30%" source is not proven until
 physical sysfs diagnostics are captured. The macOS `pmset` fallback requires
 an `-InternalBattery-N` record and cannot fall back to a stray percentage.
 
-Candidate benchmark contract: seven alternating Windows full-mode runs yielded
-medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
-Eleven alternating fast-mode runs yielded 247.0 ms and 238.9 ms medians; the
-apparent -3.3% is background-level, so never claim a fast-mode gain from this
-change. The earlier collector head `56b92d7` passed CI 32680492930 plus PR-mode
-Release plan 32680492910 with all four review threads resolved. The integrated
-result requires fresh exact-head local/hosted proof; these results do not
-establish AMD64 Linux/Raspberry Pi physical acceptance.
+Candidate benchmark contract: seven alternating Windows full-mode runs per
+version yielded medians of 5146.9 ms before and 2120.2 ms after (~3026.6 ms,
+58.8%, 2.43×). Eleven alternating fast-mode runs per version yielded 257.3 ms
+and 260.4 ms medians; the candidate's +1.2% is background-level, so never claim
+a fast-mode gain from this change. Integrated source/test head `8471d95` passed
+the complete local gate and benchmark after merging hardened `main`; the final
+pushed exact head still requires hosted/security/review proof. These results do
+not establish AMD64 Linux/Raspberry Pi physical acceptance.
 
 ### Build Script (`build.rs`)
 

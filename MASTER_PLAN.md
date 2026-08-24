@@ -7,8 +7,9 @@
 **Last updated:** 2026-08-24
 **Complete GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.2.2 / 4.3.0
 (v4.2.2 remains the last fully published state. Release-chain hardening merged
-to `main` as `1ffb0cc`; the unreleased PR #14 candidate is being reconciled and
-must pass fresh exact-head qualification before merge or publication.)
+to `main` as `1ffb0cc`; the local PR #14 branch integrated it through merge
+`4e962b6` and source/test head `8471d95`, which passed the complete local gate
+and benchmark. Pushed-head hosted/security/review qualification remains open.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
@@ -21,12 +22,13 @@ honor hwmon fault state, and include `soc_thermal`. Windows reports NVIDIA GPU
 temperature only through mode-bounded `nvidia-smi`; Windows CPU temperature
 stays absent/JSON `null`. macOS requires an InternalBattery record for the
 `pmset` fallback and reports no thermals. Seven alternating Windows full runs
-produced medians of 5138.6 ms and 2092.3 ms (~3046.3 ms, 59.3%, 2.46×), while
-11 alternating fast runs at 247.0 ms and 238.9 ms (-3.3%) are background-level
-and support no gain claim. The explicit `-f/--full` flag is also included.
-The earlier repaired collector head `56b92d7` passed CI 32680492930 and PR-mode
-Release plan 32680492910 with all four review threads resolved. The integrated
-result requires fresh local/exact-head hosted gates and review resolution.
+per version produced medians of 5146.9 ms and 2120.2 ms (~3026.6 ms, 58.8%,
+2.43×), while 11 alternating fast runs per version at 257.3 ms and 260.4 ms
+(+1.2%) are background-level and support no gain claim. The explicit
+`-f/--full` flag is also included.
+The integrated source/test head `8471d95` passed fresh local gates and review;
+the final pushed exact head still requires hosted CI/release-plan, security,
+and review-thread qualification.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`

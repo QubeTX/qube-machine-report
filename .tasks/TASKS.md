@@ -17,7 +17,8 @@
   - [x] Pass PR #15 exact-head local/hosted/security/native qualification, merge it, and pass exact-main CI
   - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
   - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
-  - [ ] Merge hardened main into PR #14 and pass final exact-head review and hosted gates
+  - [x] Merge hardened main into the local PR #14 branch and pass the complete local gate plus controlled benchmark
+  - [ ] Push the integrated candidate and pass final exact-head hosted, security, and review gates
   - [ ] Merge only the accepted candidate and verify exact-main CI plus crates.io custody
   - [ ] Push only v4.3.0 and pass the private 24-to-30-to-validated-to-34 publication chain
   - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment

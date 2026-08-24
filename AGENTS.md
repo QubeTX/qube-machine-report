@@ -56,8 +56,10 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Current published version: `4.2.2`. The working manifest on
   `feature/v4.3.0-battery-perf-thermals` is `4.3.0` (battery hardening, Windows
   full-mode latency, thermal reporting), developed through PR #14. Release-chain
-  hardening merged to `main` as `1ffb0cc` and passed exact-main CI, but the
-  integrated candidate still requires fresh exact-head qualification. Merging
+  hardening merged to `main` as `1ffb0cc` and passed exact-main CI. The local
+  integration through source/test head `8471d95` passed the complete local gate
+  and controlled benchmark, but still requires fresh pushed-head hosted,
+  security, and review qualification. Merging
   the protected PR does not publish the crate; v4.2.2 remains the last fully
   published state until explicit trusted-OIDC crates publication, the single
   tag/private 24-to-30-to-validated-to-34 asset chain, and post-public smokes
@@ -68,10 +70,10 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   `nvidia-smi`, with CPU temperature absent/JSON `null`; macOS exposes no
   thermals. Linux battery hardening recognizes `*_avg` and valid signed
   current/power readings, but does not prove the source of the historical Pi
-  "30%" report. Seven alternating Windows full runs produced medians of
-  5138.6 ms versus 2092.3 ms (~3046.3 ms, 59.3%, 2.46×); 11 alternating fast
-  runs at 247.0 ms versus 238.9 ms (-3.3%) are background-level and carry no
-  gain claim.
+  "30%" report. Seven alternating Windows full runs per version produced
+  medians of 5146.9 ms versus 2120.2 ms (~3026.6 ms, 58.8%, 2.43×); 11
+  alternating fast runs per version at 257.3 ms versus 260.4 ms (+1.2%) are
+  background-level and carry no gain claim.
   v4.2.2 passed exact-SHA CI/crates, signed archives, every Windows package and
   transition job, and universal PKG/compatibility-DMG sign/notary/install/
   update/uninstall gates on native Intel and Apple Silicon. It fixes the
@@ -576,15 +578,15 @@ Platform implementations:
   `None`/JSON `null`; do not revive ACPI thermal-zone output without a reliable
   CPU-identity contract and a new architecture decision.
 
-The v4.3 Windows benchmark records seven alternating full-mode runs with
-medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
-Eleven alternating fast runs produced 247.0 ms and 238.9 ms medians; the
-apparent -3.3% is background-level, so documentation and tests must not claim a
-fast-mode performance gain. The earlier collector head `56b92d7` passed CI
-32680492930 plus PR-mode Release plan 32680492910 with all four review threads
-resolved. Integrating current `main` creates a new exact head, so repeat the
-full local/hosted gates and resolve review against that SHA. These results do
-not establish AMD64 Linux/Raspberry Pi physical acceptance.
+The v4.3 Windows benchmark records seven alternating full-mode runs per version
+with medians of 5146.9 ms before and 2120.2 ms after (~3026.6 ms, 58.8%,
+2.43×). Eleven alternating fast runs per version produced 257.3 ms and 260.4 ms
+medians; the candidate's +1.2% is background-level, so documentation and tests
+must not claim a fast-mode performance gain. Integrated source/test head
+`8471d95` passed the complete local gate and benchmark after merging hardened
+`main`; repeat hosted/security/review qualification against the final pushed
+exact head. These results do not establish AMD64 Linux/Raspberry Pi physical
+acceptance.
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should
@@ -1098,8 +1100,8 @@ Mac/local/hosted gate below remains blocking for future releases.
    workflow changes.
 3. Run checks:
    - `cargo fmt --all -- --check`
-   - `cargo clippy --all-targets --workspace -- -D warnings`
-   - `cargo test --workspace --all-targets`
+   - `cargo clippy --locked --all-targets --workspace -- -D warnings`
+   - `cargo test --locked --workspace --all-targets`
    - `cargo package --locked --list`
    - `cargo publish --dry-run --locked`
    - `actionlint .github/workflows/*.yml` and `shellcheck` on changed shell scripts
