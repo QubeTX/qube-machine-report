@@ -4257,7 +4257,9 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'cmp "$preinstall" "$fixture_expanded/Scripts/preinstall"',
         '/usr/bin/env -u SUDO_USER -u SUDO_UID',
         '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+        '/usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog',
         "custom-home managed evidence was incorrectly accepted by PackageKit",
+        'managed receipt or link evidence at \\"${custom_fixture_home}\\"',
         "Rerun the managed installer to refresh this copy to a receipt-aware version",
         'test ! -e "$fixture_install_root/payload-marker"',
         'pkgutil --pkg-info "$fixture_identifier"',
@@ -4265,6 +4267,7 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'sudo pkgutil --forget "$fixture_identifier"',
         'hdiutil create -size 64m -fs HFS+ -volname TR300PkgAltTarget',
         '/usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount"',
+        'fixture_phase=\'alternate-volume rejection\'',
         "alternate-volume package target was incorrectly accepted",
         "supports only the current system volume (/)",
         'pkgutil --volume "$fixture_alt_mount" --pkg-info "$fixture_identifier"',
@@ -4309,8 +4312,69 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit",
         "UID outside the supported unsigned 32-bit range",
         "malformed UID $malformed_uid left its fixture receipt behind",
+        "diagnose_direct_pkg_failure() {",
+        'trap \'diagnose_direct_pkg_failure "$?" "$LINENO" "$BASH_COMMAND"\' ERR',
+        "trap - ERR",
+        "refusing unexpected diagnostic log path",
+        '/usr/bin/tail -n 200 "$fixture_phase_log"',
+        "/usr/bin/sed 's/^/[installer] /'",
+        'exit "$failure_status"',
+        "fixture_phase='custom-home ownership rejection'",
+        'fixture_phase_log="$custom_fixture_log"',
+        "fixture_phase='custom fixture account cleanup'",
     ):
         require(preinstall_behavior, needle, f"{CI_WORKFLOW.name} custom-home PackageKit fixture")
+    if preinstall_behavior.count("-dumplog") != 5:
+        raise AssertionError(
+            f"{CI_WORKFLOW.name}: every rejecting PackageKit fixture must retain detailed logs"
+        )
+    for phase, phase_log, installer_target, redirect in (
+        (
+            "fixture_phase='custom-home ownership rejection'",
+            'fixture_phase_log="$custom_fixture_log"',
+            '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+            '"$custom_fixture_log" 2>&1',
+        ),
+        (
+            "fixture_phase='trailing-newline home rejection'",
+            'fixture_phase_log="$custom_fixture_newline_log"',
+            '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+            '"$custom_fixture_newline_log" 2>&1',
+        ),
+        (
+            "fixture_phase='missing declared home rejection'",
+            'fixture_phase_log="$custom_fixture_missing_home_log"',
+            '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+            '"$custom_fixture_missing_home_log" 2>&1',
+        ),
+        (
+            'fixture_phase="malformed UID $malformed_uid rejection"',
+            'fixture_phase_log="$malformed_uid_log"',
+            '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+            '"$malformed_uid_log" 2>&1',
+        ),
+        (
+            "fixture_phase='alternate-volume rejection'",
+            'fixture_phase_log="$fixture_alt_log"',
+            '/usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount"',
+            '"$fixture_alt_log" 2>&1',
+        ),
+    ):
+        phase_index = preinstall_behavior.index(phase)
+        phase_log_index = preinstall_behavior.index(phase_log, phase_index)
+        installer_index = preinstall_behavior.index(installer_target, phase_log_index)
+        dumplog_index = preinstall_behavior.index("-dumplog", installer_index)
+        redirect_index = preinstall_behavior.index(redirect, dumplog_index)
+        if not (
+            phase_index
+            < phase_log_index
+            < installer_index
+            < dumplog_index
+            < redirect_index
+        ):
+            raise AssertionError(
+                f"{CI_WORKFLOW.name}: rejecting PackageKit phase is out of order: {phase}"
+            )
     newline_value_index = preinstall_behavior.index(
         "fixture_newline_framed=$(printf '\\nx')"
     )

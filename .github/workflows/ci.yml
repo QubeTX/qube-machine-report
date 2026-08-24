@@ -163,6 +163,8 @@ jobs:
           fixture_alt_mount="$RUNNER_TEMP/tr300-preinstall-alt-target"
           fixture_alt_log="$RUNNER_TEMP/tr300-preinstall-alt-target.log"
           fixture_alt_attached=0
+          fixture_phase='initial fixture setup'
+          fixture_phase_log=''
 
           test ! -e "$active_binary"
           test ! -L "$active_binary"
@@ -313,6 +315,46 @@ jobs:
             fi
           }
           trap cleanup EXIT
+
+          # Preserve the exact failing command and current fixture log before
+          # EXIT cleanup removes diagnostic files. Avoid xtrace so environment
+          # values and unrelated command expansions are never emitted.
+          # shellcheck disable=SC2317,SC2329
+          diagnose_direct_pkg_failure() {
+            local failure_status=$1
+            local failure_line=$2
+            local failure_command=$3
+            set +e
+            trap - ERR
+            printf 'direct-PKG fixture failure: phase=%s status=%s generated_line=%s\n' \
+              "$fixture_phase" "$failure_status" "$failure_line" >&2
+            printf 'failing command: %s\n' "$failure_command" >&2
+            if [ -n "$fixture_phase_log" ]; then
+              case "$fixture_phase_log" in
+                "$custom_fixture_log"|"$custom_fixture_newline_log"|\
+                  "$custom_fixture_missing_home_log"|\
+                  "$custom_fixture_out_of_range_log"|\
+                  "$custom_fixture_too_wide_uid_log"|"$fixture_alt_log"|\
+                  "$broken_log")
+                  ;;
+                *)
+                  printf 'refusing unexpected diagnostic log path: %s\n' \
+                    "$fixture_phase_log" >&2
+                  exit "$failure_status"
+                  ;;
+              esac
+              if [ -s "$fixture_phase_log" ]; then
+                printf '%s\n' "last 200 lines of $fixture_phase_log:" >&2
+                /usr/bin/tail -n 200 "$fixture_phase_log" |
+                  /usr/bin/sed 's/^/[installer] /' >&2
+              else
+                printf 'diagnostic log is absent or empty: %s\n' \
+                  "$fixture_phase_log" >&2
+              fi
+            fi
+            exit "$failure_status"
+          }
+          trap 'diagnose_direct_pkg_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
           # Exercise the runner's real signed UID records, including macOS's
           # negative nobody sentinel, before the exact preinstall clean-pass.
@@ -514,6 +556,8 @@ jobs:
           # /Users and contains spaces. PackageKit does not promise sudo
           # environment variables, so invoke a real component PKG with them
           # removed and require account enumeration to reject it.
+          fixture_phase='custom account and package construction'
+          fixture_phase_log=''
           custom_fixture_home=$(mktemp -d "/private/tmp/tr300 pkg custom home.XXXXXXXX")
           case "$custom_fixture_home" in
             "/private/tmp/tr300 pkg custom home."*) ;;
@@ -576,13 +620,17 @@ jobs:
           rm -rf "$fixture_expanded"
           test ! -e "$fixture_expanded"
 
+          fixture_phase='custom-home ownership rejection'
+          fixture_phase_log="$custom_fixture_log"
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target / \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
             > "$custom_fixture_log" 2>&1; then
             echo 'custom-home managed evidence was incorrectly accepted by PackageKit' >&2
             exit 1
           fi
+          grep -Fq "managed receipt or link evidence at \"${custom_fixture_home}\"" \
+            "$custom_fixture_log"
           test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
             "$custom_fixture_hash"
           test ! -e "$fixture_install_root/payload-marker"
@@ -596,6 +644,8 @@ jobs:
           # trailing data newline is not normalized into the existing clean
           # home by nested command substitution before validation. PackageKit
           # must reject the malformed home and preserve the evidence there.
+          fixture_phase='trailing-newline home construction'
+          fixture_phase_log=''
           fixture_newline_framed=$(printf '\nx')
           fixture_newline=${fixture_newline_framed%x}
           trailing_fixture_home="${custom_fixture_home}${fixture_newline}"
@@ -621,9 +671,11 @@ jobs:
           fixture_plist_with_terminator=${fixture_plist_framed%"$fixture_plist_sentinel"}
           test "$fixture_plist_with_terminator" = \
             "${trailing_fixture_home}${fixture_newline}"
+          fixture_phase='trailing-newline home rejection'
+          fixture_phase_log="$custom_fixture_newline_log"
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target / \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
             > "$custom_fixture_newline_log" 2>&1; then
             echo 'trailing-newline eligible home was incorrectly accepted by PackageKit' >&2
             exit 1
@@ -642,6 +694,8 @@ jobs:
             NFSHomeDirectory "$custom_fixture_home"
 
           # Exact, non-recursive cleanup is also covered by the EXIT trap.
+          fixture_phase='missing declared home rejection'
+          fixture_phase_log="$custom_fixture_missing_home_log"
           rm -f "$custom_fixture_receipt"
           rmdir "$custom_fixture_home/.config/tr300" "$custom_fixture_home/.config" \
             "$custom_fixture_home"
@@ -649,7 +703,7 @@ jobs:
           # must fail closed rather than becoming an ownership blind spot.
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-            /usr/sbin/installer -pkg "$fixture_pkg" -target / \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
             > "$custom_fixture_missing_home_log" 2>&1; then
             echo 'uninspectable eligible home was incorrectly accepted by PackageKit' >&2
             exit 1
@@ -673,6 +727,8 @@ jobs:
             "10000000000:$custom_fixture_too_wide_uid_log"; do
             malformed_uid=${malformed_uid_case%%:*}
             malformed_uid_log=${malformed_uid_case#*:}
+            fixture_phase="malformed UID $malformed_uid rejection"
+            fixture_phase_log="$malformed_uid_log"
             sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
               UniqueID "$malformed_uid"
             /usr/bin/dscl -plist . -read "/Users/$custom_fixture_user" \
@@ -683,7 +739,7 @@ jobs:
               "$custom_fixture_plist")" = "$malformed_uid"
             # shellcheck disable=SC2024
             if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
-              /usr/sbin/installer -pkg "$fixture_pkg" -target / \
+              /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
               > "$malformed_uid_log" 2>&1; then
               echo "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit" >&2
               exit 1
@@ -697,6 +753,8 @@ jobs:
               exit 1
             fi
           done
+          fixture_phase='custom fixture account cleanup'
+          fixture_phase_log=''
           sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"
           test ! -e "$custom_fixture_home"
           if /usr/bin/dscl . -read "/Users/$custom_fixture_user" >/dev/null 2>&1; then
@@ -710,6 +768,8 @@ jobs:
           # receipt placement, because its ownership inventory is for the
           # running system. Requiring our diagnostic proves PackageKit ran the
           # script instead of rejecting the test volume for an unrelated reason.
+          fixture_phase='alternate-volume rejection'
+          fixture_phase_log="$fixture_alt_log"
           hdiutil create -size 64m -fs HFS+ -volname TR300PkgAltTarget \
             -type SPARSE -ov "$fixture_alt_image" >/dev/null
           mkdir "$fixture_alt_mount"
@@ -720,6 +780,7 @@ jobs:
           # shellcheck disable=SC2024
           if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
             /usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount" \
+            -dumplog \
             > "$fixture_alt_log" 2>&1; then
             echo 'alternate-volume package target was incorrectly accepted' >&2
             exit 1
@@ -743,6 +804,8 @@ jobs:
 
           # The same exact package must be otherwise viable once the sole
           # conflicting Directory Service owner is gone.
+          fixture_phase='clean component-package installation'
+          fixture_phase_log=''
           sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
             /usr/sbin/installer -pkg "$fixture_pkg" -target /
           grep -Fqx 'must-not-survive-preinstall' \
@@ -758,6 +821,8 @@ jobs:
 
           # Broken final-component links are evidence even when their targets
           # do not exist. Both links and target absence must survive rejection.
+          fixture_phase='broken managed symlink rejection'
+          fixture_phase_log="$broken_log"
           mkdir -p "$(dirname "$active_binary")" "$(dirname "$active_receipt")"
           ln -s "$missing_binary" "$active_binary"
           ln -s "$missing_receipt" "$active_receipt"
@@ -777,6 +842,8 @@ jobs:
           rm -f "$active_binary" "$active_receipt"
 
           # Exact fixture cleanup returns the same extracted script to clean pass.
+          fixture_phase='final extracted-preinstall clean pass'
+          fixture_phase_log=''
           sudo /bin/sh "$preinstall" package-path / /
 
   build:
