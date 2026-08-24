@@ -2881,8 +2881,18 @@ def check_structural_contract(
         "ProductVersion",
         "-WorkingDirectory $downloadDirectory",
         "Join-Path $isccDirectory 'ISCC.exe'",
+        "#if Ver != EncodeVer($majorVersion, $minorVersion, $revisionVersion)",
+        "& $iscc '/Qp'",
     ):
         require(inno_installer, needle, "pinned Inno Setup helper")
+    iscc_signature = inno_installer.index(
+        "Get-AuthenticodeSignature -LiteralPath $iscc"
+    )
+    iscc_execution = inno_installer.index("& $iscc '/Qp'")
+    if iscc_signature > iscc_execution:
+        raise AssertionError(
+            "pinned Inno Setup helper executes ISCC before authenticating it"
+        )
     require(ci, "cargo install --locked cargo-audit --version 0.22.2", "ci cargo-audit pin")
     require(ci, "cargo-audit-audit 0.22.2", "ci cargo-audit version proof")
 

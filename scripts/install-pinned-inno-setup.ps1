@@ -104,18 +104,48 @@ $isccItem = Get-Item -LiteralPath $iscc
 if ($isccItem.LinkType) {
     throw 'the Inno Setup compiler must be a regular non-link file'
 }
-$isccVersion = @($isccItem.VersionInfo.ProductVersion, $isccItem.VersionInfo.FileVersion) |
-    ForEach-Object { ([string]$_).Trim() } |
-    Where-Object { $_ } |
-    Select-Object -First 1
-if ($isccVersion -notmatch '^6\.7\.3(?:\.0)?$') {
-    throw "unexpected Inno Setup compiler version: $isccVersion"
-}
 $isccSignature = Get-AuthenticodeSignature -LiteralPath $iscc
 if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
     $null -eq $isccSignature.SignerCertificate -or
     $isccSignature.SignerCertificate.Subject -cne $expectedSigner) {
     throw "the Inno Setup compiler has an invalid publisher signature: $($isccSignature.Status)"
+}
+
+# ISCC.exe intentionally carries 0.0.0.0 in both Windows version-resource
+# fields, so VersionInfo cannot establish the compiler release. Ask the now-
+# authenticated compiler's own preprocessor to prove its exact encoded version
+# before any repository installer source is compiled.
+if ($expectedVersion -notmatch '^(?<major>\d+)\.(?<minor>\d+)\.(?<revision>\d+)$') {
+    throw "invalid pinned Inno Setup version: $expectedVersion"
+}
+$majorVersion = [int]$Matches.major
+$minorVersion = [int]$Matches.minor
+$revisionVersion = [int]$Matches.revision
+$versionProbe = [IO.Path]::GetFullPath((Join-Path $downloadDirectory 'verify-iscc-version.iss'))
+$versionProbeOutput = [IO.Path]::GetFullPath((Join-Path $downloadDirectory 'version-probe-output'))
+New-Item -ItemType Directory -Force -Path $versionProbeOutput | Out-Null
+$versionProbeSource = @"
+#preproc ispp
+#if Ver != EncodeVer($majorVersion, $minorVersion, $revisionVersion)
+  #error "Unexpected Inno Setup compiler version"
+#endif
+
+[Setup]
+AppName=TR-300 Compiler Version Probe
+AppVersion=0.0.0
+DefaultDirName={tmp}\TR300CompilerProbe
+PrivilegesRequired=lowest
+Uninstallable=no
+OutputBaseFilename=tr300-compiler-version-probe
+"@
+[IO.File]::WriteAllText(
+    $versionProbe,
+    $versionProbeSource,
+    [Text.UTF8Encoding]::new($false)
+)
+& $iscc '/Qp' "/O$versionProbeOutput" $versionProbe
+if ($LASTEXITCODE -ne 0) {
+    throw "unexpected Inno Setup compiler version; expected $expectedVersion"
 }
 
 Write-Host "Verified Inno Setup $expectedVersion at $iscc"
