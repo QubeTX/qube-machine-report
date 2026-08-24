@@ -1,10 +1,11 @@
 # TR-300 managed PowerShell installer.
 #
-# The release workflow renders the immutable tag/version placeholders, keeps the
-# cargo-dist generated installer as tr300-dist-installer.ps1, and publishes this
-# stable-name wrapper as tr300-installer.ps1. A deliberately launched fresh
-# wrapper is authoritative: after cargo-dist installs and verifies the managed
-# PowerShell channel, recognized native MSI/Inno products are uninstalled.
+# The release workflow renders the immutable tag, version, and exact raw
+# cargo-dist installer SHA-256 placeholders, keeps the generated installer as
+# tr300-dist-installer.ps1, and publishes this stable-name wrapper as
+# tr300-installer.ps1. A deliberately launched fresh wrapper is authoritative:
+# after cargo-dist installs and verifies the managed PowerShell channel,
+# recognized native MSI/Inno products are uninstalled.
 
 param (
     [switch]$NoModifyPath,
@@ -15,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 $Tr300Tag = '@TR300_TAG@'
 $Tr300Version = '@TR300_VERSION@'
+$Tr300DistInstallerSha256 = '@TR300_DIST_INSTALLER_SHA256@'
 $Tr300ReleaseBase = "https://github.com/QubeTX/qube-machine-report/releases/download/$Tr300Tag"
 $Tr300RecoveryUrl = 'https://github.com/QubeTX/qube-machine-report/releases/latest'
 
@@ -43,6 +45,39 @@ function Get-Tr300TrustedMsiExecPath {
         throw "the trusted Windows Installer executable is unavailable: $msiexec"
     }
     return $msiexec
+}
+
+function Get-Tr300Sha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $algorithm.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Assert-Tr300DistInstallerHash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ($Tr300DistInstallerSha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+        throw 'the managed installer has an invalid embedded cargo-dist checksum'
+    }
+    $actual = Get-Tr300Sha256 -Path $Path
+    if ($actual -cne $Tr300DistInstallerSha256) {
+        throw 'the downloaded cargo-dist installer checksum did not match this release'
+    }
 }
 
 function Get-Tr300MsiProducts {
@@ -397,6 +432,7 @@ try {
     }
     if ($token) { $headers.Authorization = "Bearer $token" }
     Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$Tr300ReleaseBase/tr300-dist-installer.ps1" -OutFile $distInstaller
+    Assert-Tr300DistInstallerHash -Path $distInstaller
 
     $transactionStarted = $true
     $launcher = if ($PSVersionTable.PSEdition -eq 'Core') {

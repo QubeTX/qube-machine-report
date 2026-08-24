@@ -17,7 +17,6 @@ version=${1#v}
 arm_archive=$2
 x86_archive=$3
 output_dir=$4
-script_source_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 
 required_vars=(
     APPLE_CERTIFICATE_P12_BASE64
@@ -173,129 +172,315 @@ install -d -m 755 "${payload}/usr/local/bin"
 install -m 755 "$universal" "${payload}/usr/local/bin/tr300"
 pkg_scripts="${work_dir}/pkg-scripts"
 mkdir -m 755 "$pkg_scripts"
-install -m 755 "$universal" "${pkg_scripts}/tr300-migration-probe"
-rollback_helper="${pkg_scripts}/tr300-pkg-rollback"
-xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
-    -mmacosx-version-min=11.0 -arch arm64 -arch x86_64 \
-    "${script_source_dir}/macos-pkg-rollback.c" -o "$rollback_helper"
-chmod 755 "$rollback_helper"
-lipo "$rollback_helper" -verify_arch arm64 x86_64
-codesign --force --identifier com.qubetx.tr300.pkg-rollback \
-    --options runtime --timestamp --keychain "$keychain" \
-    --sign "$APPLE_SIGNING_IDENTITY" "$rollback_helper"
-codesign --verify --strict --verbose=4 "$rollback_helper"
-rollback_details=$(codesign -d --verbose=4 "$rollback_helper" 2>&1)
-grep -Fqx 'Identifier=com.qubetx.tr300.pkg-rollback' <<< "$rollback_details"
-grep -Fqx "TeamIdentifier=${APPLE_TEAM_ID}" <<< "$rollback_details"
-grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$rollback_details"
-grep -Eq '^Timestamp=.+' <<< "$rollback_details"
 cat > "${pkg_scripts}/preinstall" <<'PREINSTALL'
 #!/bin/sh
-# Fail closed before Installer lays down the PKG payload when an existing
-# managed-shell/Cargo owner cannot be proven safe to converge. The embedded
-# probe is the exact signed universal binary that the package will install;
-# the helper binds and privately copies it before dropping to the home owner.
+# Apple Installer does not guarantee payload rollback after a postinstall
+# failure. Reject managed-shell/Cargo ownership here, before Installer lays
+# down /usr/local/bin/tr300, rather than mutating another channel afterward.
 set -u
+umask 077
 
-console_user=$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)
-case "$console_user" in
-    ''|root|loginwindow|_mbsetupuser)
-        if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != root ]; then
-            console_user=$SUDO_USER
-        else
-            candidates=''
-            for home in /Users/*; do
-                if { [ ! -e "${home}/.cargo/bin/tr300" ] && \
-                    [ ! -L "${home}/.cargo/bin/tr300" ]; } && \
-                    { [ ! -e "${home}/.config/tr300/tr300-receipt.json" ] && \
-                    [ ! -L "${home}/.config/tr300/tr300-receipt.json" ]; }; then
-                    continue
-                fi
-                candidates="${candidates}${home}\n"
-            done
-            candidate_count=$(printf '%b' "$candidates" | /usr/bin/grep -c '^/Users/' || true)
-            [ "$candidate_count" -ne 0 ] || exit 0
-            if [ "$candidate_count" -ne 1 ]; then
-                echo "TR-300: multiple per-user CLI owners exist and no console user identifies the intended one; preserving them and rejecting PKG takeover before payload installation." >&2
-                exit 1
-            fi
-            user_home=$(printf '%b' "$candidates" | /usr/bin/sed -n '1p')
-            console_user=${user_home##*/}
-        fi
-        ;;
+reject_managed_state() {
+    home=$1
+    binary="${home}/.cargo/bin/tr300"
+    if [ -f "$binary" ] && [ ! -L "$binary" ] && [ -x "$binary" ]; then
+        echo "TR-300: an existing managed/Cargo installation at \"${home}\" was found and preserved; the direct PKG stopped before installing its payload. Rerun the managed installer to refresh this copy to a receipt-aware version, then run \"${binary}\" uninstall and choose Complete before retrying the PKG, or keep using the managed installer." >&2
+    else
+        echo "TR-300: managed receipt or link evidence at \"${home}\" was found and preserved, but no regular runnable managed binary is available; the direct PKG stopped before installing its payload. Rerun the managed installer to restore a verifiable managed owner, then run \"${binary}\" uninstall and choose Complete before retrying the PKG." >&2
+    fi
+    exit 1
+}
+
+fail_closed() {
+    echo "TR-300: $1 The direct PKG stopped before installing its payload." >&2
+    exit 1
+}
+
+fail_uninspectable_home() {
+    echo "TR-300: $1 Make the declared home available and inspectable, or repair the local account's Directory Service home record; otherwise keep using the managed installer. The direct PKG stopped before installing its payload." >&2
+    exit 1
+}
+
+# PackageKit passes the selected target volume as argument 3. This component
+# package is for the running system's /usr/local only; scanning host accounts
+# while writing another volume would violate the ownership check.
+case "${3-}" in
+    /) ;;
+    *) fail_closed 'supports only the current system volume (/); select the startup disk and retry.' ;;
 esac
 
-if [ -z "${user_home:-}" ]; then
-    user_home=$(/usr/bin/dscl . -read "/Users/${console_user}" NFSHomeDirectory 2>/dev/null \
-        | /usr/bin/awk '{print $2}')
+# macOS normally allocates local login accounts from UID 501 upward; those
+# records are mandatory and fail closed across Open Directory's complete
+# unsigned 32-bit UniqueID width. Positive lower UIDs are system territory, but
+# any such record (including a manually assigned UID 500 user) with one safely
+# inspectable home is scanned defensively. UID 0 and negative sentinels
+# (including nobody=-2) are excluded. Values outside UInt32 are malformed and
+# block the package instead of becoming an ownership blind spot.
+minimum_human_uid=501
+maximum_human_uid=4294967295
+
+preinstall_state=$(/usr/bin/mktemp -d "/private/tmp/tr300-pkg-preinstall.XXXXXXXX") ||
+    fail_closed 'could not create private inspection state.'
+case "$preinstall_state" in
+    /private/tmp/tr300-pkg-preinstall.*) ;;
+    *) fail_closed 'received an unsafe private inspection path.' ;;
+esac
+accounts_file="${preinstall_state}/accounts"
+record_plist="${preinstall_state}/record.plist"
+seen_homes="${preinstall_state}/seen-homes"
+directory_listing="${preinstall_state}/directory-listing"
+entry_matches="${preinstall_state}/entry-matches"
+
+# Invoked indirectly by the exit trap below.
+# shellcheck disable=SC2329
+cleanup_preinstall_state() {
+    /bin/rm -f "$accounts_file" "$record_plist" "$seen_homes" \
+        "$directory_listing" "$entry_matches"
+    /bin/rmdir "$preinstall_state" 2>/dev/null || true
+}
+trap cleanup_preinstall_state 0
+trap 'exit 1' HUP INT TERM
+: > "$seen_homes" || fail_closed 'could not initialize private inspection state.'
+
+read_single_plist_string() {
+    plist_path=$1
+    plist_key=$2
+    case "$plist_key" in
+        dsAttrTypeStandard:UniqueID)
+            plist_entry=':dsAttrTypeStandard\:UniqueID'
+            ;;
+        dsAttrTypeStandard:NFSHomeDirectory)
+            plist_entry=':dsAttrTypeStandard\:NFSHomeDirectory'
+            ;;
+        *) return 1 ;;
+    esac
+    # Keep the PKG compatible with the project's pre-macOS-12 floor: newer
+    # typed plutil extraction is unavailable there. plutil validates the native
+    # plist, then the long-shipped PlistBuddy reads escaped-key array indices.
+    /usr/bin/plutil -lint "$plist_path" >/dev/null 2>&1 || return 1
+    plist_capture_sentinel='__TR300_PLIST_CAPTURE_END__'
+    plist_newline='
+'
+    plist_framed=$(
+        /usr/libexec/PlistBuddy -c "Print ${plist_entry}:0" \
+            "$plist_path" 2>/dev/null || exit 1
+        printf '%s' "$plist_capture_sentinel"
+    ) || return 1
+    case "$plist_framed" in
+        *"$plist_capture_sentinel") ;;
+        *) return 1 ;;
+    esac
+    plist_with_terminator=${plist_framed%"$plist_capture_sentinel"}
+    case "$plist_with_terminator" in
+        *"$plist_newline") ;;
+        *) return 1 ;;
+    esac
+    # PlistBuddy writes one record terminator. Remove exactly that byte while
+    # preserving any newline that belongs to the Directory Service value.
+    single_plist_value=${plist_with_terminator%"$plist_newline"}
+    if /usr/libexec/PlistBuddy -c "Print ${plist_entry}:1" \
+        "$plist_path" >/dev/null 2>&1; then
+        return 1
+    fi
+    return 0
+}
+
+list_standard_directory() {
+    listed_directory=$1
+    listed_home=$2
+    listed_description=$3
+    if [ -L "$listed_directory" ] || [ ! -d "$listed_directory" ]; then
+        fail_uninspectable_home "could not safely inspect ${listed_description} for local home \"${listed_home}\"."
+    fi
+    # Enumerate only this exact directory level. A successful listing lets an
+    # absent fixed child be distinguished from a broken, permission-denied, or
+    # I/O-failed lookup without recursively traversing any user-owned tree.
+    if ! LC_ALL=C /bin/ls -1A "$listed_directory" \
+        > "$directory_listing" 2>/dev/null; then
+        fail_uninspectable_home "could not list ${listed_description} for local home \"${listed_home}\"."
+    fi
+}
+
+standard_entry_present() {
+    entry_parent=$1
+    entry_name=$2
+    entry_home=$3
+    entry_description=$4
+    list_standard_directory "$entry_parent" "$entry_home" "$entry_description"
+    # Default APFS/HFS+ volumes resolve ASCII case variants to the same path.
+    # Match fixed component names case-insensitively even on case-sensitive
+    # volumes so a variant can only over-block, never hide managed evidence.
+    if LC_ALL=C /usr/bin/grep -Fix -e "$entry_name" "$directory_listing" \
+        > "$entry_matches"; then
+        entry_match_count=$(/usr/bin/wc -l < "$entry_matches" |
+            /usr/bin/tr -d '[:space:]')
+        if [ "$entry_match_count" -ne 1 ]; then
+            fail_uninspectable_home "found multiple ASCII-case-insensitive entries matching \"${entry_name}\" in ${entry_description} for local home \"${entry_home}\"."
+        fi
+        return 0
+    else
+        entry_match_status=$?
+        if [ "$entry_match_status" -ne 1 ]; then
+            fail_uninspectable_home "could not compare ${entry_description} entries for local home \"${entry_home}\"."
+        fi
+        return 1
+    fi
+}
+
+standard_leaf_present() {
+    leaf_home=$1
+    first_component=$2
+    second_component=$3
+    leaf_component=$4
+    leaf_description=$5
+    first_path="${leaf_home}/${first_component}"
+    second_path="${first_path}/${second_component}"
+
+    standard_entry_present "$leaf_home" "$first_component" "$leaf_home" \
+        'home directory' || return 1
+    if [ -L "$first_path" ] || [ ! -d "$first_path" ]; then
+        fail_uninspectable_home "found an abnormal ${leaf_description} parent at \"${first_path}\"."
+    fi
+    standard_entry_present "$first_path" "$second_component" "$leaf_home" \
+        "${leaf_description} parent" || return 1
+    if [ -L "$second_path" ] || [ ! -d "$second_path" ]; then
+        fail_uninspectable_home "found an abnormal ${leaf_description} parent at \"${second_path}\"."
+    fi
+    standard_entry_present "$second_path" "$leaf_component" "$leaf_home" \
+        "${leaf_description} directory"
+}
+
+managed_state_present() {
+    home=$1
+    standard_leaf_present "$home" '.cargo' 'bin' 'tr300' \
+        'managed binary' ||
+        standard_leaf_present "$home" '.config' 'tr300' \
+            'tr300-receipt.json' 'managed receipt'
+}
+
+inspect_home_once() {
+    inspected_home=$1
+    inspection_required=$2
+    inspected_home_lines=$(printf '%s\n' "$inspected_home" | /usr/bin/wc -l \
+        | /usr/bin/tr -d '[:space:]')
+    case "$inspected_home" in
+        /)
+            [ "$inspection_required" -eq 0 ] && return 0
+            fail_uninspectable_home 'an eligible local account declared the filesystem root as its home.'
+            ;;
+        /*) ;;
+        *)
+            [ "$inspection_required" -eq 0 ] && return 0
+            fail_uninspectable_home 'an eligible local account did not declare an absolute home.'
+            ;;
+    esac
+    if [ "$inspected_home_lines" -ne 1 ] || [ -L "$inspected_home" ] ||
+        [ ! -d "$inspected_home" ]; then
+        [ "$inspection_required" -eq 0 ] && return 0
+        fail_uninspectable_home "could not inspect eligible local home \"${inspected_home}\"."
+    fi
+    if ! LC_ALL=C /bin/ls -1A "$inspected_home" \
+        > "$directory_listing" 2>/dev/null; then
+        [ "$inspection_required" -eq 0 ] && return 0
+        fail_uninspectable_home "could not list eligible local home \"${inspected_home}\"."
+    fi
+    if /usr/bin/grep -Fqx -e "$inspected_home" "$seen_homes"; then
+        return 0
+    fi
+    printf '%s\n' "$inspected_home" >> "$seen_homes" ||
+        fail_closed 'could not record an inspected local home.'
+    managed_state_present "$inspected_home" && reject_managed_state "$inspected_home"
+}
+
+# The globs below are meaningful only after the directory that expands them has
+# itself been proven stable and enumerable. Otherwise an inaccessible /Users
+# could leave literal unmatched patterns and silently hide unregistered state.
+if [ -L /Users ] || [ ! -d /Users ]; then
+    fail_closed 'could not safely inspect the local /Users directory.'
 fi
-if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
-    echo "TR-300: could not resolve the active user's home; rejecting PKG takeover before payload installation." >&2
-    exit 1
+if ! LC_ALL=C /bin/ls -1A /Users > "$directory_listing" 2>/dev/null; then
+    fail_closed 'could not list the local /Users directory.'
 fi
 
-script_dir=$(/usr/bin/dirname -- "$0") || exit 1
-script_dir=$(unset CDPATH; cd -- "$script_dir" && pwd -P) || exit 1
-preflight_state="${script_dir}/tr300-preflight-state"
-"${script_dir}/tr300-pkg-rollback" check "$user_home" \
-    "${script_dir}/tr300-migration-probe" "$preflight_state"
+# The PKG owns a system-wide path. Scan every conventional home, including
+# dot-prefixed and unregistered residue, then enumerate all local human
+# Directory Service records so a non-console account with a custom home cannot
+# be hidden by the package launch environment. These three safe globs cover
+# ordinary entries plus dot entries while excluding . and ..; inspect_home_once
+# deduplicates overlapping homes.
+for home in /Users/* /Users/.[!.]* /Users/..?*; do
+    if [ -d "$home" ] || [ -L "$home" ]; then
+        inspect_home_once "$home" 1
+    fi
+done
+
+if ! /usr/bin/dscl . -list /Users > "$accounts_file"; then
+    fail_closed 'could not enumerate local Directory Service accounts.'
+fi
+[ -s "$accounts_file" ] || fail_closed 'found no local Directory Service accounts.'
+
+while IFS= read -r account; do
+    case "$account" in
+        ''|.|..|*[!A-Za-z0-9._-]*)
+            fail_closed 'could not safely address a local Directory Service account.'
+            ;;
+    esac
+    if ! /usr/bin/dscl -plist . -read "/Users/${account}" UniqueID > "$record_plist"; then
+        fail_closed "could not resolve the UID for local account \"${account}\"."
+    fi
+    if ! read_single_plist_string "$record_plist" \
+        'dsAttrTypeStandard:UniqueID'; then
+        fail_closed "local account \"${account}\" did not have exactly one UID."
+    fi
+    account_uid=$single_plist_value
+    account_uid_sign=positive
+    case "$account_uid" in
+        -*)
+            account_uid_sign=negative
+            account_uid=${account_uid#-}
+            ;;
+        +*)
+            fail_closed "local account \"${account}\" had a malformed UID."
+            ;;
+    esac
+    case "$account_uid" in
+        ''|*[!0-9]*)
+            fail_closed "local account \"${account}\" had a malformed UID."
+            ;;
+    esac
+    account_uid=$(printf '%s\n' "$account_uid" | /usr/bin/sed 's/^0*//;s/^$/0/')
+    if [ "$account_uid_sign" = negative ] || [ "$account_uid" = 0 ]; then
+        continue
+    fi
+    account_uid_digits=$(printf '%s' "$account_uid" | /usr/bin/wc -c \
+        | /usr/bin/tr -d '[:space:]')
+    if [ "$account_uid_digits" -gt 10 ]; then
+        fail_closed "local account \"${account}\" had a UID outside the supported unsigned 32-bit range."
+    fi
+    if [ "$account_uid" -gt "$maximum_human_uid" ]; then
+        fail_closed "local account \"${account}\" had a UID outside the supported unsigned 32-bit range."
+    fi
+    inspection_required=0
+    if [ "$account_uid" -ge "$minimum_human_uid" ]; then
+        inspection_required=1
+    fi
+    if ! /usr/bin/dscl -plist . -read "/Users/${account}" \
+        NFSHomeDirectory > "$record_plist"; then
+        [ "$inspection_required" -eq 0 ] && continue
+        fail_uninspectable_home "could not resolve the home for eligible local account \"${account}\"."
+    fi
+    if ! read_single_plist_string "$record_plist" \
+        'dsAttrTypeStandard:NFSHomeDirectory'; then
+        [ "$inspection_required" -eq 0 ] && continue
+        fail_uninspectable_home "eligible local account \"${account}\" did not have exactly one home."
+    fi
+    account_home=$single_plist_value
+    inspect_home_once "$account_home" "$inspection_required"
+done < "$accounts_file"
+
+exit 0
 PREINSTALL
 chmod 755 "${pkg_scripts}/preinstall"
-cat > "${pkg_scripts}/postinstall" <<'POSTINSTALL'
-#!/bin/sh
-# A deliberately launched PKG is the user's newest install-channel choice.
-# Remove only the active console user's allowlisted Cargo/cargo-dist copy; the
-# installed Rust helper validates the exact binary name and standard per-user
-# cargo-dist receipt. A custom receipt root is not guessed or searched broadly.
-set -u
-
-console_user=$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)
-case "$console_user" in
-    ''|root|loginwindow|_mbsetupuser)
-        if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != root ]; then
-            console_user=$SUDO_USER
-        else
-            # Headless native CI/MDM has no logged-in console user. Recover only
-            # when exactly one normal home contains the allowlisted CLI copy or
-            # its standard receipt. Zero means there is nothing to converge;
-            # multiple user owners are ambiguous and must fail the package.
-            candidates=''
-            for home in /Users/*; do
-                if { [ ! -e "${home}/.cargo/bin/tr300" ] && \
-                    [ ! -L "${home}/.cargo/bin/tr300" ]; } && \
-                    { [ ! -e "${home}/.config/tr300/tr300-receipt.json" ] && \
-                    [ ! -L "${home}/.config/tr300/tr300-receipt.json" ]; }; then
-                    continue
-                fi
-                candidates="${candidates}${home}\n"
-            done
-            candidate_count=$(printf '%b' "$candidates" | /usr/bin/grep -c '^/Users/' || true)
-            [ "$candidate_count" -ne 0 ] || exit 0
-            if [ "$candidate_count" -ne 1 ]; then
-                echo "TR-300: multiple per-user CLI owners exist and no console user identifies the intended one; preserving them and failing PKG takeover." >&2
-                exit 1
-            fi
-            user_home=$(printf '%b' "$candidates" | /usr/bin/sed -n '1p')
-            console_user=${user_home##*/}
-        fi
-        ;;
-esac
-
-if [ -z "${user_home:-}" ]; then
-    user_home=$(/usr/bin/dscl . -read "/Users/${console_user}" NFSHomeDirectory 2>/dev/null \
-        | /usr/bin/awk '{print $2}')
-fi
-if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
-    echo "TR-300: the active user's home changed after preflight; preserving any CLI install and failing PKG takeover." >&2
-    exit 1
-fi
-
-script_dir=$(/usr/bin/dirname -- "$0") || exit 1
-script_dir=$(unset CDPATH; cd -- "$script_dir" && pwd -P) || exit 1
-preflight_state="${script_dir}/tr300-preflight-state"
-"${script_dir}/tr300-pkg-rollback" run "$user_home" "$preflight_state"
-POSTINSTALL
-chmod 755 "${pkg_scripts}/postinstall"
 pkg="${work_dir}/tr300.pkg"
 pkgbuild --root "$payload" \
     --scripts "$pkg_scripts" \

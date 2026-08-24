@@ -735,18 +735,33 @@ jobs:
             "$OUTPUT_DIRECTORY/tr300-dist-installer.sh"
           mv "$OUTPUT_DIRECTORY/tr300-installer.ps1" \
             "$OUTPUT_DIRECTORY/tr300-dist-installer.ps1"
+          shell_dist_installer_sha256=$(sha256sum \
+            "$OUTPUT_DIRECTORY/tr300-dist-installer.sh")
+          shell_dist_installer_sha256=${shell_dist_installer_sha256%% *}
+          powershell_dist_installer_sha256=$(sha256sum \
+            "$OUTPUT_DIRECTORY/tr300-dist-installer.ps1")
+          powershell_dist_installer_sha256=${powershell_dist_installer_sha256%% *}
+          [[ "$shell_dist_installer_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$powershell_dist_installer_sha256" =~ ^[0-9a-f]{64}$ ]]
           version=${RELEASE_TAG#v}
           sed -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
             -e "s/@TR300_VERSION@/${version}/g" \
+            -e "s/@TR300_DIST_INSTALLER_SHA256@/${shell_dist_installer_sha256}/g" \
             scripts/managed-installers/tr300-installer.sh \
             > "$OUTPUT_DIRECTORY/tr300-installer.sh"
           sed -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
             -e "s/@TR300_VERSION@/${version}/g" \
+            -e "s/@TR300_DIST_INSTALLER_SHA256@/${powershell_dist_installer_sha256}/g" \
             scripts/managed-installers/tr300-installer.ps1 \
             > "$OUTPUT_DIRECTORY/tr300-installer.ps1"
           chmod 0755 "$OUTPUT_DIRECTORY/tr300-installer.sh"
           grep -Fq "tr300_tag='${RELEASE_TAG}'" "$OUTPUT_DIRECTORY/tr300-installer.sh"
           grep -Fq "\$Tr300Tag = '${RELEASE_TAG}'" "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          grep -Fqx "tr300_dist_installer_sha256='${shell_dist_installer_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          grep -Fqx \
+            "\$Tr300DistInstallerSha256 = '${powershell_dist_installer_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"
           if grep -F '@TR300_' "$OUTPUT_DIRECTORY/tr300-installer.sh" \
             "$OUTPUT_DIRECTORY/tr300-installer.ps1"; then
             exit 65
@@ -829,6 +844,12 @@ jobs:
             for asset in "${public_assets[@]}"; do
               sha256sum "$asset" >> __tr300-asset-sha256s
             done
+            grep -Fqx \
+              "${shell_dist_installer_sha256}  tr300-dist-installer.sh" \
+              __tr300-asset-sha256s
+            grep -Fqx \
+              "${powershell_dist_installer_sha256}  tr300-dist-installer.ps1" \
+              __tr300-asset-sha256s
           )
           mapfile -d '' -t prepared < <(find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
           [[ ${#prepared[@]} -eq $((${#public_assets[@]} + 3)) ]]

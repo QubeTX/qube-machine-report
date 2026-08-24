@@ -412,6 +412,30 @@ jobs:
             actual=$(sha256sum "$path"); actual=${actual%% *}
             [[ "$actual" == "${BASH_REMATCH[1]}" ]]
           done < <(jq -r '.assets[] | [.name, .digest, .size] | @tsv' "$work_directory/release-before.json")
+          shell_dist_sha256=$(jq -er '
+            [.assets[] | select(.name == "tr300-dist-installer.sh")] as $records |
+            if ($records | length) == 1 then
+              $records[0].digest | sub("^sha256:"; "")
+            else error("unexpected shell cargo-dist asset count") end
+          ' "$work_directory/release-before.json")
+          powershell_dist_sha256=$(jq -er '
+            [.assets[] | select(.name == "tr300-dist-installer.ps1")] as $records |
+            if ($records | length) == 1 then
+              $records[0].digest | sub("^sha256:"; "")
+            else error("unexpected PowerShell cargo-dist asset count") end
+          ' "$work_directory/release-before.json")
+          [[ "$shell_dist_sha256" =~ ^[0-9a-f]{64}$ &&
+             "$powershell_dist_sha256" =~ ^[0-9a-f]{64}$ ]]
+          grep -Fqx "tr300_dist_installer_sha256='${shell_dist_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          grep -Fqx \
+            "\$Tr300DistInstallerSha256 = '${powershell_dist_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          if grep -Fq '@TR300_' "$OUTPUT_DIRECTORY/tr300-installer.sh" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"; then
+            echo 'managed wrapper placeholder survived release rendering' >&2
+            exit 65
+          fi
           (
             cd "$OUTPUT_DIRECTORY"
             sha256sum -c sha256.sum

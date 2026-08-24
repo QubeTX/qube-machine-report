@@ -211,8 +211,6 @@ jobs:
             [[ "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
                "$WORKFLOW_REF" == refs/heads/main && "$ACTOR_ID" == 30877743 &&
                "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
-            remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-            [[ "$remote_main" == "$WORKFLOW_SHA" ]]
             tag=$DISPATCH_TAG
             if [[ -z "$tag" ]]; then
               [[ "$PREFLIGHT_ONLY" == true ]] || {
@@ -289,6 +287,16 @@ jobs:
             echo 'trusted source SHA is malformed' >&2
             exit 65
           }
+          remote_main=$(gh api \
+            "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$remote_main" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'protected main SHA is malformed' >&2
+            exit 65
+          }
+          [[ "$WORKFLOW_SHA" == "$remote_main" && "$source_sha" == "$remote_main" ]] || {
+            echo "refusing source outside the protected main tip: workflow=$WORKFLOW_SHA source=$source_sha main=$remote_main" >&2
+            exit 65
+          }
           {
             echo "build=$build"
             echo "tag=$tag"
@@ -307,11 +315,20 @@ jobs:
     outputs:
       artifact_id: ${{ steps.trusted-upload.outputs.artifact-id }}
       artifact_digest: ${{ steps.trusted-upload.outputs.artifact-digest }}
+      managed_installer_sha256: ${{ steps.custody.outputs.managed_installer_sha256 }}
+      managed_installer_size: ${{ steps.custody.outputs.managed_installer_size }}
+      dist_installer_sha256: ${{ steps.custody.outputs.dist_installer_sha256 }}
+      dist_installer_size: ${{ steps.custody.outputs.dist_installer_size }}
+      aarch64_archive_sha256: ${{ steps.custody.outputs.aarch64_archive_sha256 }}
+      aarch64_archive_size: ${{ steps.custody.outputs.aarch64_archive_size }}
+      x86_64_archive_sha256: ${{ steps.custody.outputs.x86_64_archive_sha256 }}
+      x86_64_archive_size: ${{ steps.custody.outputs.x86_64_archive_size }}
     permissions:
       actions: read
       contents: read
     steps:
       - name: Download by immutable artifact ID and normalize fixed Apple inputs
+        id: custody
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
@@ -503,6 +520,161 @@ jobs:
             install -m 0644 "$extracted/$sidecar" "$OUTPUT_DIRECTORY/$sidecar"
           done
 
+          # The managed wrapper exercised by both native jobs must be the exact
+          # source-rendered byte set produced before the private draft existed,
+          # not a mutable release-asset download selected only by filename.
+          prepared_artifact_name=tr300-prepared-release-assets
+          IFS=$'\t' read -r \
+            prepared_artifact_id prepared_artifact_digest prepared_expired prepared_size \
+            prepared_run_id prepared_repository_id prepared_head_repository_id \
+            prepared_head_branch prepared_head_sha < <(
+              artifact_record "$work_directory/artifacts-before.json" "$prepared_artifact_name"
+            )
+          [[ "$prepared_artifact_id" =~ ^[1-9][0-9]*$ &&
+             "$prepared_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ &&
+             "$prepared_expired" == false &&
+             "$prepared_size" =~ ^[1-9][0-9]*$ && "$prepared_size" -le 268435456 &&
+             "$prepared_run_id" == "$RELEASE_RUN_ID" &&
+             "$prepared_repository_id" == "$repository_id" &&
+             "$prepared_head_repository_id" == "$repository_id" &&
+             "$prepared_head_branch" == "$RELEASE_TAG" &&
+             "$prepared_head_sha" == "$EXPECTED_SHA" ]]
+
+          prepared_zip="$work_directory/prepared-release.zip"
+          gh api "repos/$EXPECTED_REPOSITORY/actions/artifacts/$prepared_artifact_id/zip" \
+            > "$prepared_zip"
+          prepared_zip_sha=$(sha256sum -- "$prepared_zip")
+          prepared_zip_sha=${prepared_zip_sha%% *}
+          [[ "sha256:$prepared_zip_sha" == "$prepared_artifact_digest" ]]
+
+          prepared_expected=(
+            dist-manifest.json sha256.sum source.tar.gz source.tar.gz.sha256
+            tr-300-installer.ps1 tr-300-installer.sh
+            tr300-aarch64-apple-darwin.tar.xz tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-aarch64-unknown-linux-gnu.tar.xz tr300-aarch64-unknown-linux-gnu.tar.xz.sha256
+            tr300-dist-installer.ps1 tr300-dist-installer.sh
+            tr300-installer.ps1 tr300-installer.sh
+            tr300-x86_64-apple-darwin.tar.xz tr300-x86_64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-pc-windows-msvc.msi tr300-x86_64-pc-windows-msvc.msi.sha256
+            tr300-x86_64-pc-windows-msvc.zip tr300-x86_64-pc-windows-msvc.zip.sha256
+            tr300-x86_64-unknown-linux-gnu.tar.xz tr300-x86_64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-unknown-linux-musl.tar.xz tr300-x86_64-unknown-linux-musl.tar.xz.sha256
+            __tr300-release-metadata.json __tr300-notes.txt __tr300-asset-sha256s
+          )
+          prepared_extracted="$work_directory/prepared-release"
+          mkdir -m 700 "$prepared_extracted"
+          python3 - "$prepared_zip" "$prepared_extracted" "${prepared_expected[@]}" <<'PY'
+          import os
+          import shutil
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          archive_path, output_path, *expected = sys.argv[1:]
+          expected_names = set(expected)
+          selected_names = {
+              "tr300-installer.sh",
+              "tr300-dist-installer.sh",
+              "tr300-aarch64-apple-darwin.tar.xz",
+              "tr300-x86_64-apple-darwin.tar.xz",
+              "__tr300-asset-sha256s",
+          }
+          output = Path(output_path)
+          with zipfile.ZipFile(archive_path) as source:
+              members = source.infolist()
+              names = [member.filename for member in members]
+              if len(names) != len(expected_names) or set(names) != expected_names:
+                  raise SystemExit(f"unexpected prepared Release artifact members: {names!r}")
+              if sum(member.file_size for member in members) > 256 * 1024 * 1024:
+                  raise SystemExit("prepared Release artifact expands beyond the custody limit")
+              for member in members:
+                  pure = PurePosixPath(member.filename)
+                  mode = member.external_attr >> 16
+                  if (
+                      pure.name != member.filename
+                      or pure.is_absolute()
+                      or ".." in pure.parts
+                      or member.is_dir()
+                      or member.file_size <= 0
+                      or member.file_size > 256 * 1024 * 1024
+                      or stat.S_ISLNK(mode)
+                  ):
+                      raise SystemExit(f"unsafe prepared Release member: {member.filename!r}")
+                  if member.filename not in selected_names:
+                      continue
+                  destination = output / member.filename
+                  flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                  if hasattr(os, "O_NOFOLLOW"):
+                      flags |= os.O_NOFOLLOW
+                  descriptor = os.open(destination, flags, 0o600)
+                  try:
+                      with source.open(member) as src, os.fdopen(descriptor, "wb") as dst:
+                          descriptor = -1
+                          shutil.copyfileobj(src, dst, length=1024 * 1024)
+                  finally:
+                      if descriptor >= 0:
+                          os.close(descriptor)
+          PY
+
+          managed_installer="$prepared_extracted/tr300-installer.sh"
+          dist_installer="$prepared_extracted/tr300-dist-installer.sh"
+          asset_manifest="$prepared_extracted/__tr300-asset-sha256s"
+          [[ -f "$managed_installer" && ! -L "$managed_installer" && -s "$managed_installer" ]]
+          [[ -f "$dist_installer" && ! -L "$dist_installer" && -s "$dist_installer" ]]
+          [[ -f "$asset_manifest" && ! -L "$asset_manifest" && -s "$asset_manifest" ]]
+          [[ "$(wc -l < "$asset_manifest" | tr -d '[:space:]')" == 24 ]]
+          [[ "$(grep -Ec '^[0-9a-f]{64}  tr300-installer\.sh$' "$asset_manifest")" == 1 ]]
+          [[ "$(grep -Ec '^[0-9a-f]{64}  tr300-dist-installer\.sh$' "$asset_manifest")" == 1 ]]
+          managed_manifest_sha256=$(awk '$2 == "tr300-installer.sh" { print $1 }' "$asset_manifest")
+          dist_manifest_sha256=$(awk '$2 == "tr300-dist-installer.sh" { print $1 }' "$asset_manifest")
+          managed_installer_sha256=$(sha256sum -- "$managed_installer")
+          managed_installer_sha256=${managed_installer_sha256%% *}
+          managed_installer_size=$(stat -c %s -- "$managed_installer")
+          dist_installer_sha256=$(sha256sum -- "$dist_installer")
+          dist_installer_sha256=${dist_installer_sha256%% *}
+          dist_installer_size=$(stat -c %s -- "$dist_installer")
+          [[ "$managed_installer_sha256" =~ ^[0-9a-f]{64}$ &&
+             "$managed_installer_sha256" == "$managed_manifest_sha256" &&
+             "$managed_installer_size" =~ ^[1-9][0-9]*$ &&
+             "$managed_installer_size" -le 1048576 ]]
+          [[ "$dist_installer_sha256" =~ ^[0-9a-f]{64}$ &&
+             "$dist_installer_sha256" == "$dist_manifest_sha256" &&
+             "$dist_installer_size" =~ ^[1-9][0-9]*$ &&
+             "$dist_installer_size" -le 1048576 ]]
+          grep -Fq "tr300_tag='${RELEASE_TAG}'" "$managed_installer"
+          grep -Fq "tr300_dist_installer_sha256='${dist_installer_sha256}'" \
+            "$managed_installer"
+          for target in aarch64 x86_64; do
+            archive_name="tr300-${target}-apple-darwin.tar.xz"
+            archive_path="$prepared_extracted/$archive_name"
+            [[ -f "$archive_path" && ! -L "$archive_path" && -s "$archive_path" ]]
+            [[ "$(grep -Ec "^[0-9a-f]{64}  ${archive_name}$" "$asset_manifest")" == 1 ]]
+            archive_manifest_sha256=$(awk -v name="$archive_name" \
+              '$2 == name { print $1 }' "$asset_manifest")
+            archive_sha256=$(sha256sum -- "$archive_path")
+            archive_sha256=${archive_sha256%% *}
+            archive_size=$(stat -c %s -- "$archive_path")
+            [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ &&
+               "$archive_sha256" == "$archive_manifest_sha256" &&
+               "$archive_size" =~ ^[1-9][0-9]*$ &&
+               "$archive_size" -le 67108864 ]]
+            case "$target" in
+              aarch64)
+                aarch64_archive_sha256=$archive_sha256
+                aarch64_archive_size=$archive_size
+                ;;
+              x86_64)
+                x86_64_archive_sha256=$archive_sha256
+                x86_64_archive_size=$archive_size
+                ;;
+            esac
+          done
+          if grep -Fq '@TR300_' "$managed_installer"; then
+            echo 'source-rendered managed wrapper retained a template placeholder' >&2
+            exit 65
+          fi
+
           # A rerun can replace artifacts under the same run ID. Re-read both
           # identities after download and reject any mid-flight attempt or
           # immutable-ID/digest change before the normalized bytes leave this job.
@@ -518,10 +690,25 @@ jobs:
             after=$(artifact_record "$work_directory/artifacts-after.json" "$artifact_name")
             [[ "$after" == "$before" ]]
           done
+          prepared_before=$(artifact_record \
+            "$work_directory/artifacts-before.json" "$prepared_artifact_name")
+          prepared_after=$(artifact_record \
+            "$work_directory/artifacts-after.json" "$prepared_artifact_name")
+          [[ "$prepared_after" == "$prepared_before" ]]
           mapfile -d '' -t normalized < <(
             find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0
           )
           [[ ${#normalized[@]} -eq 4 ]]
+          {
+            echo "managed_installer_sha256=$managed_installer_sha256"
+            echo "managed_installer_size=$managed_installer_size"
+            echo "dist_installer_sha256=$dist_installer_sha256"
+            echo "dist_installer_size=$dist_installer_size"
+            echo "aarch64_archive_sha256=$aarch64_archive_sha256"
+            echo "aarch64_archive_size=$aarch64_archive_size"
+            echo "x86_64_archive_sha256=$x86_64_archive_sha256"
+            echo "x86_64_archive_size=$x86_64_archive_size"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload normalized trusted Apple archives
         id: trusted-upload
@@ -677,42 +864,31 @@ jobs:
           chmod 0755 "$OUTPUT_DIRECTORY/tr300-universal"
           lipo "$OUTPUT_DIRECTORY/tr300-universal" -verify_arch arm64 x86_64
 
-          xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
-            -mmacosx-version-min=11.0 -arch arm64 -arch x86_64 \
-            verified-source/scripts/macos-pkg-rollback.c \
-            -o "$OUTPUT_DIRECTORY/tr300-pkg-rollback"
-          chmod 0755 "$OUTPUT_DIRECTORY/tr300-pkg-rollback"
-          lipo "$OUTPUT_DIRECTORY/tr300-pkg-rollback" -verify_arch arm64 x86_64
-
           python3 - verified-source/scripts/build-sign-notarize-macos-installer.sh \
-            "$OUTPUT_DIRECTORY/preinstall" "$OUTPUT_DIRECTORY/postinstall" <<'PY'
+            "$OUTPUT_DIRECTORY/preinstall" <<'PY'
           import os
           import re
           import sys
           from pathlib import Path
 
-          source_path, preinstall_path, postinstall_path = map(Path, sys.argv[1:])
+          source_path, preinstall_path = map(Path, sys.argv[1:])
           source = source_path.read_text(encoding="utf-8")
-          for name, marker, destination in (
-              ("preinstall", "PREINSTALL", preinstall_path),
-              ("postinstall", "POSTINSTALL", postinstall_path),
-          ):
-              pattern = re.compile(
-                  rf'^cat > "\$\{{pkg_scripts\}}/{name}" <<\'{marker}\'\n(.*?)\n{marker}$',
-                  re.MULTILINE | re.DOTALL,
-              )
-              matches = pattern.findall(source)
-              if len(matches) != 1:
-                  raise SystemExit(f"expected exactly one {name} package-script template")
-              payload = matches[0] + "\n"
-              if not payload.startswith("#!/bin/sh\n") or "\x00" in payload or len(payload) > 32768:
-                  raise SystemExit(f"unsafe {name} package-script template")
-              flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-              if hasattr(os, "O_NOFOLLOW"):
-                  flags |= os.O_NOFOLLOW
-              descriptor = os.open(destination, flags, 0o700)
-              with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
-                  output.write(payload)
+          pattern = re.compile(
+              r'^cat > "\$\{pkg_scripts\}/preinstall" <<\'PREINSTALL\'\n(.*?)\nPREINSTALL$',
+              re.MULTILINE | re.DOTALL,
+          )
+          matches = pattern.findall(source)
+          if len(matches) != 1:
+              raise SystemExit("expected exactly one preinstall package-script template")
+          payload = matches[0] + "\n"
+          if not payload.startswith("#!/bin/sh\n") or "\x00" in payload or len(payload) > 32768:
+              raise SystemExit("unsafe preinstall package-script template")
+          flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+          if hasattr(os, "O_NOFOLLOW"):
+              flags |= os.O_NOFOLLOW
+          descriptor = os.open(preinstall_path, flags, 0o700)
+          with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+              output.write(payload)
           PY
 
           printf 'source_sha=%s\nrelease_tag=%s\nversion=%s\n' \
@@ -722,14 +898,14 @@ jobs:
           (
             cd "$OUTPUT_DIRECTORY"
             shasum -a 256 \
-              tr300-universal tr300-pkg-rollback preinstall postinstall PROVENANCE \
+              tr300-universal preinstall PROVENANCE \
               > SHA256SUMS
             shasum -a 256 -c SHA256SUMS
           )
           mapfile -d '' -t prepared < <(
             find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0
           )
-          [[ ${#prepared[@]} -eq 6 ]]
+          [[ ${#prepared[@]} -eq 4 ]]
           for path in "${prepared[@]}"; do
             [[ -f "$path" && ! -L "$path" && -s "$path" ]]
           done
@@ -743,9 +919,7 @@ jobs:
           retention-days: 1
           path: |
             ${{ runner.temp }}/tr300-prepared-installer-inputs/tr300-universal
-            ${{ runner.temp }}/tr300-prepared-installer-inputs/tr300-pkg-rollback
             ${{ runner.temp }}/tr300-prepared-installer-inputs/preinstall
-            ${{ runner.temp }}/tr300-prepared-installer-inputs/postinstall
             ${{ runner.temp }}/tr300-prepared-installer-inputs/PROVENANCE
             ${{ runner.temp }}/tr300-prepared-installer-inputs/SHA256SUMS
 
@@ -968,9 +1142,7 @@ jobs:
           mkdir -m 700 "$PREPARED_DIRECTORY"
           expected=(
             tr300-universal
-            tr300-pkg-rollback
             preinstall
-            postinstall
             PROVENANCE
             SHA256SUMS
           )
@@ -1036,22 +1208,19 @@ jobs:
           [[ "$(cat "$PREPARED_DIRECTORY/PROVENANCE")" == "$expected_provenance" ]]
           (
             cd "$PREPARED_DIRECTORY"
-            [[ $(wc -l < SHA256SUMS | tr -d '[:space:]') == 5 ]]
+            [[ $(wc -l < SHA256SUMS | tr -d '[:space:]') == 3 ]]
             shasum -a 256 -c SHA256SUMS
           )
           mapfile -t checksum_names < <(awk '{print $2}' "$PREPARED_DIRECTORY/SHA256SUMS" | sort)
-          [[ ${#checksum_names[@]} -eq 5 ]]
+          [[ ${#checksum_names[@]} -eq 3 ]]
           printf '%s\n' "${checksum_names[@]}" | cmp -s - <(
-            printf '%s\n' PROVENANCE postinstall preinstall tr300-pkg-rollback tr300-universal
+            printf '%s\n' PROVENANCE preinstall tr300-universal
           )
           awk 'length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || NF != 2 { exit 1 }' \
             "$PREPARED_DIRECTORY/SHA256SUMS"
           [[ $(head -n 1 "$PREPARED_DIRECTORY/preinstall") == '#!/bin/sh' ]]
-          [[ $(head -n 1 "$PREPARED_DIRECTORY/postinstall") == '#!/bin/sh' ]]
           [[ $(wc -c < "$PREPARED_DIRECTORY/preinstall") -le 32768 ]]
-          [[ $(wc -c < "$PREPARED_DIRECTORY/postinstall") -le 32768 ]]
           lipo "$PREPARED_DIRECTORY/tr300-universal" -verify_arch arm64 x86_64
-          lipo "$PREPARED_DIRECTORY/tr300-pkg-rollback" -verify_arch arm64 x86_64
 
       - name: Build direct PKG and legacy DMG bridge
         timeout-minutes: 45
@@ -1091,7 +1260,7 @@ jobs:
               exit 78
             }
           done
-          for name in tr300-universal tr300-pkg-rollback preinstall postinstall; do
+          for name in tr300-universal preinstall; do
             path="$PREPARED_DIRECTORY/$name"
             [[ -f "$path" && ! -L "$path" && -s "$path" ]]
           done
@@ -1147,16 +1316,10 @@ jobs:
             "$keychain" >/dev/null
 
           universal="$work_directory/tr300"
-          rollback_helper="$work_directory/tr300-pkg-rollback"
           install -m 0755 "$PREPARED_DIRECTORY/tr300-universal" "$universal"
-          install -m 0755 "$PREPARED_DIRECTORY/tr300-pkg-rollback" "$rollback_helper"
           lipo "$universal" -verify_arch arm64 x86_64
-          lipo "$rollback_helper" -verify_arch arm64 x86_64
           codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
             --keychain "$keychain" --sign "$signing_fingerprint" "$universal"
-          codesign --force --identifier com.qubetx.tr300.pkg-rollback \
-            --options runtime --timestamp --keychain "$keychain" \
-            --sign "$signing_fingerprint" "$rollback_helper"
 
           verify_code_signature() {
             local path=$1
@@ -1176,7 +1339,6 @@ jobs:
             [[ "$embedded_fingerprint" == "$signing_fingerprint" ]]
           }
           verify_code_signature "$universal" com.qubetx.tr300
-          verify_code_signature "$rollback_helper" com.qubetx.tr300.pkg-rollback
 
           notarize() {
             local artifact=$1
@@ -1214,10 +1376,7 @@ jobs:
           install -m 0755 "$universal" "$payload/usr/local/bin/tr300"
           package_scripts="$work_directory/pkg-scripts"
           mkdir -m 0755 "$package_scripts"
-          install -m 0755 "$universal" "$package_scripts/tr300-migration-probe"
-          install -m 0755 "$rollback_helper" "$package_scripts/tr300-pkg-rollback"
           install -m 0755 "$PREPARED_DIRECTORY/preinstall" "$package_scripts/preinstall"
-          install -m 0755 "$PREPARED_DIRECTORY/postinstall" "$package_scripts/postinstall"
 
           package="$work_directory/tr300.pkg"
           pkgbuild --root "$payload" --scripts "$package_scripts" \
@@ -1235,6 +1394,16 @@ jobs:
           verify_pkg_signature "$direct_package"
           xcrun stapler validate "$direct_package"
           spctl --assess --type install --verbose=4 "$direct_package"
+          bound_package="$work_directory/bound-direct-pkg"
+          test ! -e "$bound_package"
+          test ! -L "$bound_package"
+          pkgutil --expand-full "$direct_package" "$bound_package"
+          test -f "$bound_package/Scripts/preinstall"
+          test ! -L "$bound_package/Scripts/preinstall"
+          cmp "$PREPARED_DIRECTORY/preinstall" "$bound_package/Scripts/preinstall"
+          rm -rf "$bound_package"
+          test ! -e "$bound_package"
+          test ! -L "$bound_package"
           package_hash=$(shasum -a 256 "$direct_package" | awk '{print $1}')
           printf '%s *%s\n' "$package_hash" "$(basename "$direct_package")" \
             > "$direct_package.sha256"
@@ -1285,37 +1454,214 @@ jobs:
 
   validate:
     name: Validate direct PKG (${{ matrix.name }})
-    needs: build
+    needs: [build, source-custody]
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Apple Silicon
             runner: macos-15
+            arch: arm64
           - name: Intel
             runner: macos-15-intel
+            arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: tr300-universal-macos-installer
-          path: artifact
-
       - name: Validate, install, and exercise the universal package
         shell: bash
         env:
-          # The installed updater uses this existing token only for its
-          # read-only /releases/latest probe. It never prints or persists it.
+          # This job keeps the token read-only: gh binds exact release/draft
+          # custody, and the executed managed wrapper/updater receives the same
+          # token for GitHub release discovery. No path prints or persists it.
           GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          EXPECTED_SHA: ${{ needs.build.outputs.source_sha }}
           REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+          BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          VALIDATION_PROOF: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json
+          SOURCE_MANAGED_INSTALLER_SHA256: ${{ needs.source-custody.outputs.managed_installer_sha256 }}
+          SOURCE_MANAGED_INSTALLER_SIZE: ${{ needs.source-custody.outputs.managed_installer_size }}
+          SOURCE_DIST_INSTALLER_SHA256: ${{ needs.source-custody.outputs.dist_installer_sha256 }}
+          SOURCE_DIST_INSTALLER_SIZE: ${{ needs.source-custody.outputs.dist_installer_size }}
+          SOURCE_AARCH64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.aarch64_archive_sha256 }}
+          SOURCE_AARCH64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.aarch64_archive_size }}
+          SOURCE_X86_64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.x86_64_archive_sha256 }}
+          SOURCE_X86_64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.x86_64_archive_size }}
           APPLE_INSTALLER_SIGNING_IDENTITY: ${{ vars.APPLE_INSTALLER_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          pkg="$PWD/artifact/tr300-universal-apple-darwin.pkg"
-          (cd artifact && shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256)
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REPOSITORY" == QubeTX/qube-machine-report &&
+             "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
+             "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
+             "$BUILD_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
+             "$BUILD_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$MATRIX_ARCH" == arm64 || "$MATRIX_ARCH" == x86_64 ]]
+          [[ "$(uname -m)" == "$MATRIX_ARCH" ]]
+          [[ "$SOURCE_MANAGED_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_MANAGED_INSTALLER_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_MANAGED_INSTALLER_SIZE" -le 1048576 ]]
+          [[ "$SOURCE_DIST_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_DIST_INSTALLER_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_DIST_INSTALLER_SIZE" -le 1048576 ]]
+          [[ "$SOURCE_AARCH64_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_AARCH64_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_AARCH64_ARCHIVE_SIZE" -le 67108864 ]]
+          [[ "$SOURCE_X86_64_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_X86_64_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_X86_64_ARCHIVE_SIZE" -le 67108864 ]]
+          artifact_directory="$RUNNER_TEMP/tr300-native-build-artifact"
+          artifact_zip="$RUNNER_TEMP/tr300-native-build-artifact.zip"
+          mkdir -m 700 "$artifact_directory"
+          repository_id=$(gh api "repos/$REPOSITORY" --jq .id)
+          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
+          validate_build_artifact() {
+            local path=$1
+            jq -e --argjson id "$BUILD_ARTIFACT_ID" \
+              --argjson run "$CURRENT_RUN_ID" \
+              --argjson repository "$repository_id" \
+              --arg digest "sha256:$BUILD_ARTIFACT_DIGEST" \
+              --arg sha "$EXPECTED_SHA" '
+                .id == $id and .name == "tr300-universal-macos-installer" and
+                .expired == false and
+                (.size_in_bytes > 0 and .size_in_bytes <= 268435456) and
+                .digest == $digest and .workflow_run.id == $run and
+                .workflow_run.repository_id == $repository and
+                .workflow_run.head_repository_id == $repository and
+                .workflow_run.head_sha == $sha
+              ' "$path" >/dev/null
+          }
+          build_artifact_record() {
+            jq -r '
+              [.id, .name, .digest, .expired, .size_in_bytes,
+               .workflow_run.id, .workflow_run.repository_id,
+               .workflow_run.head_repository_id, .workflow_run.head_sha] | @tsv
+            ' "$1"
+          }
+          build_artifact_before="$RUNNER_TEMP/tr300-native-build-artifact-before.json"
+          gh api "repos/$REPOSITORY/actions/artifacts/$BUILD_ARTIFACT_ID" \
+            > "$build_artifact_before"
+          validate_build_artifact "$build_artifact_before"
+          build_record_before=$(build_artifact_record "$build_artifact_before")
+          gh api "repos/$REPOSITORY/actions/artifacts/$BUILD_ARTIFACT_ID/zip" \
+            > "$artifact_zip"
+          artifact_zip_sha256=$(shasum -a 256 "$artifact_zip" | awk '{print $1}')
+          [[ "$artifact_zip_sha256" == "$BUILD_ARTIFACT_DIGEST" ]]
+          python3 - "$artifact_zip" "$artifact_directory" <<'PY'
+          import os
+          import shutil
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          archive_path, output_path = sys.argv[1:]
+          expected = {
+              "tr300-universal-apple-darwin.pkg",
+              "tr300-universal-apple-darwin.pkg.sha256",
+              "tr300-universal-apple-darwin.dmg",
+              "tr300-universal-apple-darwin.dmg.sha256",
+          }
+          output = Path(output_path)
+          with zipfile.ZipFile(archive_path) as source:
+              members = source.infolist()
+              names = [member.filename for member in members]
+              if len(names) != len(expected) or set(names) != expected:
+                  raise SystemExit(f"unexpected native-validation artifact members: {names!r}")
+              if sum(member.file_size for member in members) > 256 * 1024 * 1024:
+                  raise SystemExit("native-validation artifact expands beyond the custody limit")
+              for member in members:
+                  pure = PurePosixPath(member.filename)
+                  mode = member.external_attr >> 16
+                  if (
+                      pure.name != member.filename
+                      or pure.is_absolute()
+                      or ".." in pure.parts
+                      or member.is_dir()
+                      or member.file_size <= 0
+                      or member.file_size > 256 * 1024 * 1024
+                      or stat.S_ISLNK(mode)
+                  ):
+                      raise SystemExit(f"unsafe native-validation member: {member.filename!r}")
+                  destination = output / member.filename
+                  flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                  if hasattr(os, "O_NOFOLLOW"):
+                      flags |= os.O_NOFOLLOW
+                  descriptor = os.open(destination, flags, 0o600)
+                  try:
+                      with source.open(member) as src, os.fdopen(descriptor, "wb") as dst:
+                          descriptor = -1
+                          shutil.copyfileobj(src, dst, length=1024 * 1024)
+                  finally:
+                      if descriptor >= 0:
+                          os.close(descriptor)
+          PY
+          pkg="$artifact_directory/tr300-universal-apple-darwin.pkg"
+          mount=''
+          custom_fixture_user=tr300pkgcustom
+          custom_fixture_uid=3000000000
+          custom_fixture_created=0
+          custom_fixture_home=''
+          custom_fixture_receipt=''
+          custom_fixture_plist="$RUNNER_TEMP/tr300-signed-pkg-custom-user.plist"
+
+          release_asset_record() {
+            local release_json=$1
+            local asset_name=$2
+            jq -er --arg name "$asset_name" '
+              [.assets[] | select(.name == $name)] |
+              if length != 1 then error("expected exactly one release asset named " + $name)
+              else .[0] | [.id, .digest, .size] | @tsv
+              end
+            ' "$release_json"
+          }
+
+          validate_release_identity() {
+            local release_json=$1
+            local expected_tag=$2
+            local expected_sha=$3
+            local expected_draft=$4
+            jq -e --arg tag "$expected_tag" --arg sha "$expected_sha" \
+              --argjson draft "$expected_draft" '
+                .tag_name == $tag and .target_commitish == $sha and
+                .draft == $draft and .prerelease == false
+              ' "$release_json" >/dev/null
+          }
+
+          cleanup_native_validation() {
+            if [ -n "$mount" ]; then
+              hdiutil detach "$mount" >/dev/null 2>&1 || true
+            fi
+            if [ "$custom_fixture_created" -eq 1 ]; then
+              sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user" \
+                >/dev/null 2>&1 || true
+            fi
+            rm -f "$custom_fixture_plist"
+            if [ -n "$custom_fixture_home" ]; then
+              case "$custom_fixture_home" in
+                "/private/tmp/tr300 signed pkg custom home."*)
+                  rm -f "$custom_fixture_receipt"
+                  rmdir "$custom_fixture_home/.config/tr300" 2>/dev/null || true
+                  rmdir "$custom_fixture_home/.config" 2>/dev/null || true
+                  rmdir "$custom_fixture_home" 2>/dev/null || true
+                  ;;
+                *)
+                  echo "refusing unsafe signed custom-home cleanup: $custom_fixture_home" >&2
+                  ;;
+              esac
+            fi
+          }
+          trap cleanup_native_validation EXIT
+
+          (cd "$artifact_directory" && \
+            shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256)
           package_signature=$(pkgutil --check-signature "$pkg" 2>&1)
           printf '%s\n' "$package_signature"
           grep -Fq 'Status: signed by a developer certificate' <<< "$package_signature"
@@ -1327,8 +1673,9 @@ jobs:
           # Immutable v4.1.x updaters require the legacy DMG filename. Prove
           # the bridge is trusted and contains this exact direct-PKG byte set,
           # but install from the direct package used by all current clients.
-          dmg="$PWD/artifact/tr300-universal-apple-darwin.dmg"
-          (cd artifact && shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
+          dmg="$artifact_directory/tr300-universal-apple-darwin.dmg"
+          (cd "$artifact_directory" && \
+            shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
           codesign --verify --deep --strict --verbose=4 "$dmg"
           xcrun stapler validate "$dmg"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
@@ -1336,46 +1683,205 @@ jobs:
           mount="$RUNNER_TEMP/tr300-mount"
           mkdir "$mount"
           hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
-          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true' EXIT
           cmp "$pkg" "$mount/tr300.pkg"
 
-          # Managed CLI is the advertised default. First install that exact-tag
-          # channel, then prove a deliberately launched PKG removes its binary
-          # and matching cargo-dist receipt before claiming native ownership.
-          managed_directory="$RUNNER_TEMP/tr300-managed-draft"
-          mkdir "$managed_directory"
-          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" \
-            --pattern tr300-installer.sh --dir "$managed_directory"
-          managed_installer="$managed_directory/tr300-installer.sh"
-          [[ -f "$managed_installer" && ! -L "$managed_installer" && -s "$managed_installer" ]]
-          sh "$managed_installer"
-          test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
-          test -f "$HOME/.config/tr300/tr300-receipt.json"
-
-          # A foreign/malformed receipt is conflicting ownership, not license
-          # to delete a working CLI copy. Require the PKG transaction to fail,
-          # restore the pair byte-for-byte, and roll back its payload/receipt.
-          managed_hash=$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')
-          printf '%s' '{"provider":{"source":"foreign"},"source":{"app_name":"tr300"},"install_prefix":"/ambiguous"}' \
-            > "$HOME/.config/tr300/tr300-receipt.json"
-          invalid_receipt=$(cat "$HOME/.config/tr300/tr300-receipt.json")
-          set +e
-          sudo installer -pkg "$pkg" -target /
-          invalid_status=$?
-          set -e
-          if [ "$invalid_status" -eq 0 ]; then
-            echo 'malformed managed receipt was incorrectly accepted' >&2
+          # Inspect the signed package itself before any install. The BOM may
+          # contain only the native binary, and Scripts may contain only the
+          # regular, non-link preinstall gate prepared from reviewed source.
+          expanded_pkg="$RUNNER_TEMP/tr300-direct-pkg-expanded"
+          case "$expanded_pkg" in
+            "$RUNNER_TEMP"/tr300-direct-pkg-expanded) ;;
+            *)
+              echo "unsafe direct-PKG expansion path: $expanded_pkg" >&2
+              exit 1
+              ;;
+          esac
+          test ! -e "$expanded_pkg"
+          test ! -L "$expanded_pkg"
+          # Plain --expand leaves Payload/Scripts as archive members. The
+          # supported full form materializes Scripts for link/type inventory.
+          pkgutil --expand-full "$pkg" "$expanded_pkg"
+          test -f "$expanded_pkg/Bom"
+          test ! -L "$expanded_pkg/Bom"
+          payload_inventory="$RUNNER_TEMP/tr300-direct-pkg-payload-inventory"
+          lsbom -s -f "$expanded_pkg/Bom" | sed 's#^\./##' > "$payload_inventory"
+          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 1 ] ||
+            ! grep -Fqx 'usr/local/bin/tr300' "$payload_inventory"; then
+            echo 'unexpected direct-PKG payload inventory' >&2
             exit 1
           fi
-          if [ "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" != "$managed_hash" ]; then
+          test -d "$expanded_pkg/Scripts"
+          test ! -L "$expanded_pkg/Scripts"
+          script_member_count=$(find "$expanded_pkg/Scripts" \
+            -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')
+          if [ "$script_member_count" -ne 1 ]; then
+            echo 'unexpected direct-PKG Scripts inventory' >&2
+            exit 1
+          fi
+          test -f "$expanded_pkg/Scripts/preinstall"
+          test ! -L "$expanded_pkg/Scripts/preinstall"
+          test -x "$expanded_pkg/Scripts/preinstall"
+          for forbidden_package_script in \
+            postinstall tr300-pkg-rollback tr300-migration-probe; do
+            test ! -e "$expanded_pkg/Scripts/$forbidden_package_script"
+            test ! -L "$expanded_pkg/Scripts/$forbidden_package_script"
+          done
+          rm -f "$payload_inventory"
+          rm -rf "$expanded_pkg"
+          test ! -e "$expanded_pkg"
+          test ! -L "$expanded_pkg"
+
+          # Reproduce the public-client recovery path rather than starting from
+          # candidate state. Bind the known public v4.2.2 source, wrapper size,
+          # and wrapper SHA-256 before executing that exact asset; live release
+          # metadata is corroboration and cannot redefine these pinned facts.
+          baseline_managed_directory="$RUNNER_TEMP/tr300-managed-v422"
+          managed_directory="$RUNNER_TEMP/tr300-managed-draft"
+          mkdir "$baseline_managed_directory" "$managed_directory"
+          baseline_managed_release="$baseline_managed_directory/release.json"
+          baseline_managed_digest=eed23f5e71bd3fa455bd439e4313f596b99067d5145fbd5e01652ce4cb1c1751
+          baseline_managed_size=14904
+          baseline_dist_digest=497b238d725d61145888d430a1137cb5eb2362341fe0b3e4af0b8b81bd890444
+          baseline_dist_size=55485
+          case "$(uname -m)" in
+            arm64)
+              baseline_archive_name=tr300-aarch64-apple-darwin.tar.xz
+              baseline_archive_digest=4b4ab3e05dc3719cac9d1e07a3202616db359f9d3c8221625362d805ef3f226c
+              baseline_archive_size=1390748
+              ;;
+            x86_64)
+              baseline_archive_name=tr300-x86_64-apple-darwin.tar.xz
+              baseline_archive_digest=127a8a52c3b5c5db257dcfc81b0ab96972bf3a8589fc8a3af7cc00cef96ec739
+              baseline_archive_size=1563320
+              ;;
+            *)
+              echo "unsupported native validation architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+          gh api "repos/$REPOSITORY/releases/tags/v4.2.2" > "$baseline_managed_release"
+          validate_release_identity "$baseline_managed_release" v4.2.2 \
+            db0f538c82961569a7118b105a20e967b15476f0 false
+          baseline_wrapper_before=$(release_asset_record \
+            "$baseline_managed_release" tr300-installer.sh)
+          baseline_dist_before=$(release_asset_record \
+            "$baseline_managed_release" tr300-dist-installer.sh)
+          baseline_archive_before=$(release_asset_record \
+            "$baseline_managed_release" "$baseline_archive_name")
+          IFS=$'\t' read -r baseline_wrapper_id baseline_wrapper_digest \
+            baseline_wrapper_size <<< "$baseline_wrapper_before"
+          IFS=$'\t' read -r baseline_dist_id baseline_dist_record_digest \
+            baseline_dist_record_size <<< "$baseline_dist_before"
+          IFS=$'\t' read -r baseline_archive_id baseline_archive_record_digest \
+            baseline_archive_record_size <<< "$baseline_archive_before"
+          [[ "$baseline_wrapper_id" =~ ^[1-9][0-9]*$ &&
+             "$baseline_wrapper_digest" == "sha256:$baseline_managed_digest" &&
+             "$baseline_wrapper_size" == "$baseline_managed_size" &&
+             "$baseline_dist_id" =~ ^[1-9][0-9]*$ &&
+             "$baseline_dist_record_digest" == "sha256:$baseline_dist_digest" &&
+             "$baseline_dist_record_size" == "$baseline_dist_size" &&
+             "$baseline_archive_id" =~ ^[1-9][0-9]*$ &&
+             "$baseline_archive_record_digest" == "sha256:$baseline_archive_digest" &&
+             "$baseline_archive_record_size" == "$baseline_archive_size" ]]
+          gh release download v4.2.2 --repo "$REPOSITORY" \
+            --pattern tr300-installer.sh --dir "$baseline_managed_directory"
+          baseline_managed_installer="$baseline_managed_directory/tr300-installer.sh"
+          [[ -f "$baseline_managed_installer" && ! -L "$baseline_managed_installer" && \
+            -s "$baseline_managed_installer" ]]
+          baseline_managed_actual=$(shasum -a 256 "$baseline_managed_installer" | \
+            awk '{print $1}')
+          [[ "$baseline_managed_actual" == "$baseline_managed_digest" ]]
+          grep -Fq "tr300_tag='v4.2.2'" "$baseline_managed_installer"
+          if grep -Fq '@TR300_' "$baseline_managed_installer"; then
+            echo 'published v4.2.2 managed wrapper retained a template placeholder' >&2
+            exit 1
+          fi
+          # cargo-dist 0.31's historical shell installer looks specifically
+          # for sha256sum. macOS provides only shasum, so expose one private,
+          # exact adapter to the v4.2.2 wrapper and every child it launches;
+          # otherwise that immutable baseline can silently skip archive hashing.
+          baseline_checksum_bin="$baseline_managed_directory/checksum-bin"
+          baseline_checksum_shim="$baseline_checksum_bin/sha256sum"
+          mkdir -m 700 "$baseline_checksum_bin"
+          (
+            umask 077
+            set -C
+            cat > "$baseline_checksum_shim" <<'SH'
+          #!/bin/sh
+          set -eu
+          exec /usr/bin/shasum -a 256 "$@"
+          SH
+          )
+          chmod 0700 "$baseline_checksum_shim"
+          [[ -f "$baseline_checksum_shim" && ! -L "$baseline_checksum_shim" &&
+             "$(wc -l < "$baseline_checksum_shim" | tr -d '[:space:]')" == 3 ]]
+          grep -Fqx '#!/bin/sh' "$baseline_checksum_shim"
+          grep -Fqx 'set -eu' "$baseline_checksum_shim"
+          grep -Fqx 'exec /usr/bin/shasum -a 256 "$@"' "$baseline_checksum_shim"
+          checksum_probe="$baseline_managed_directory/checksum-probe"
+          printf '%s\n' 'TR-300 v4.2.2 checksum adapter probe' > "$checksum_probe"
+          shim_probe=$(
+            "$baseline_checksum_shim" -b "$checksum_probe" | awk '{print $1}'
+          )
+          native_probe=$(/usr/bin/shasum -a 256 "$checksum_probe" | awk '{print $1}')
+          [[ "$shim_probe" =~ ^[0-9a-f]{64}$ && "$shim_probe" == "$native_probe" ]]
+          resolved_checksum_shim=$(PATH="$baseline_checksum_bin:$PATH" command -v sha256sum)
+          [[ "$resolved_checksum_shim" == "$baseline_checksum_shim" ]]
+          PATH="$baseline_checksum_bin:$PATH" sh "$baseline_managed_installer"
+          baseline_managed_after="$baseline_managed_directory/release-after.json"
+          gh api "repos/$REPOSITORY/releases/tags/v4.2.2" > "$baseline_managed_after"
+          validate_release_identity "$baseline_managed_after" v4.2.2 \
+            db0f538c82961569a7118b105a20e967b15476f0 false
+          baseline_wrapper_after=$(release_asset_record \
+            "$baseline_managed_after" tr300-installer.sh)
+          baseline_dist_after=$(release_asset_record \
+            "$baseline_managed_after" tr300-dist-installer.sh)
+          baseline_archive_after=$(release_asset_record \
+            "$baseline_managed_after" "$baseline_archive_name")
+          [[ "$baseline_wrapper_after" == "$baseline_wrapper_before" &&
+             "$baseline_dist_after" == "$baseline_dist_before" &&
+             "$baseline_archive_after" == "$baseline_archive_before" ]]
+          rm -f "$checksum_probe" "$baseline_checksum_shim"
+          rmdir "$baseline_checksum_bin"
+          test "$("$HOME/.cargo/bin/tr300" --version)" = 'tr300 4.2.2'
+          managed_receipt="$HOME/.config/tr300/tr300-receipt.json"
+          jq -e --arg version 4.2.2 '
+            .provider.source == "cargo-dist" and .source.app_name == "tr300" and
+            .version == $version
+          ' "$managed_receipt" >/dev/null
+          "$HOME/.cargo/bin/tr300" --install
+          profile_marker_found=0
+          for profile in "$HOME/.bashrc" "$HOME/.zshrc"; do
+            if [ -f "$profile" ] && grep -Fq '# TR-300 Machine Report' "$profile"; then
+              profile_marker_found=1
+            fi
+          done
+          test "$profile_marker_found" -eq 1
+
+          baseline_managed_hash=$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')
+          baseline_managed_receipt_hash=$(shasum -a 256 "$managed_receipt" | awk '{print $1}')
+          managed_conflict_log="$RUNNER_TEMP/tr300-v422-managed-pkg-conflict.log"
+          set +e
+          # The unprivileged runner shell intentionally owns this diagnostic log.
+          # shellcheck disable=SC2024
+          sudo installer -pkg "$pkg" -target / > "$managed_conflict_log" 2>&1
+          managed_conflict_status=$?
+          set -e
+          if [ "$managed_conflict_status" -eq 0 ]; then
+            echo 'managed ownership was incorrectly accepted by the direct PKG' >&2
+            exit 1
+          fi
+          grep -Fq 'Rerun the managed installer to refresh this copy to a receipt-aware version' \
+            "$managed_conflict_log"
+          if [ "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" != "$baseline_managed_hash" ]; then
             echo 'rejected package changed the managed binary' >&2
             exit 1
           fi
-          if [ "$(cat "$HOME/.config/tr300/tr300-receipt.json")" != "$invalid_receipt" ]; then
+          if [ "$(shasum -a 256 "$managed_receipt" | awk '{print $1}')" != "$baseline_managed_receipt_hash" ]; then
             echo 'rejected package changed the managed receipt' >&2
             exit 1
           fi
-          if [ -e /usr/local/bin/tr300 ]; then
+          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ]; then
             echo 'rejected package left its payload behind' >&2
             exit 1
           fi
@@ -1384,13 +1890,338 @@ jobs:
             exit 1
           fi
 
-          # Restore a legitimate managed state through the same exact-tag
-          # wrapper, then prove the successful native takeover.
-          rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
+          # Exercise the complete recovery sequence shown by preinstall: an old
+          # public managed client is first refreshed through the exact candidate
+          # wrapper, then its receipt-aware Complete uninstall removes binary,
+          # receipt, and profile block before the PKG is retried.
+          candidate_managed_release="$managed_directory/release.json"
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > "$candidate_managed_release"
+          validate_release_identity "$candidate_managed_release" "$RELEASE_TAG" \
+            "$EXPECTED_SHA" true
+          case "$(uname -m)" in
+            arm64)
+              candidate_archive_name=tr300-aarch64-apple-darwin.tar.xz
+              candidate_archive_digest=$SOURCE_AARCH64_ARCHIVE_SHA256
+              candidate_archive_size=$SOURCE_AARCH64_ARCHIVE_SIZE
+              ;;
+            x86_64)
+              candidate_archive_name=tr300-x86_64-apple-darwin.tar.xz
+              candidate_archive_digest=$SOURCE_X86_64_ARCHIVE_SHA256
+              candidate_archive_size=$SOURCE_X86_64_ARCHIVE_SIZE
+              ;;
+            *)
+              echo "unsupported native validation architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+          candidate_wrapper_before=$(release_asset_record \
+            "$candidate_managed_release" tr300-installer.sh)
+          candidate_dist_before=$(release_asset_record \
+            "$candidate_managed_release" tr300-dist-installer.sh)
+          candidate_archive_before=$(release_asset_record \
+            "$candidate_managed_release" "$candidate_archive_name")
+          IFS=$'\t' read -r candidate_wrapper_id candidate_wrapper_digest \
+            candidate_wrapper_size <<< "$candidate_wrapper_before"
+          IFS=$'\t' read -r candidate_dist_id candidate_dist_record_digest \
+            candidate_dist_record_size <<< "$candidate_dist_before"
+          IFS=$'\t' read -r candidate_archive_id candidate_archive_record_digest \
+            candidate_archive_record_size <<< "$candidate_archive_before"
+          [[ "$candidate_wrapper_id" =~ ^[1-9][0-9]*$ &&
+             "$candidate_wrapper_digest" == "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" &&
+             "$candidate_wrapper_size" == "$SOURCE_MANAGED_INSTALLER_SIZE" &&
+             "$candidate_dist_id" =~ ^[1-9][0-9]*$ &&
+             "$candidate_dist_record_digest" == "sha256:$SOURCE_DIST_INSTALLER_SHA256" &&
+             "$candidate_dist_record_size" == "$SOURCE_DIST_INSTALLER_SIZE" &&
+             "$candidate_archive_id" =~ ^[1-9][0-9]*$ &&
+             "$candidate_archive_record_digest" == "sha256:$candidate_archive_digest" &&
+             "$candidate_archive_record_size" == "$candidate_archive_size" ]]
+          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" \
+            --pattern tr300-installer.sh --dir "$managed_directory"
+          managed_installer="$managed_directory/tr300-installer.sh"
+          [[ -f "$managed_installer" && ! -L "$managed_installer" && -s "$managed_installer" ]]
+          candidate_managed_size=$(wc -c < "$managed_installer" | tr -d '[:space:]')
+          candidate_managed_sha256=$(shasum -a 256 "$managed_installer" | awk '{print $1}')
+          [[ "$candidate_managed_size" == "$SOURCE_MANAGED_INSTALLER_SIZE" &&
+             "$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256" ]]
+          grep -Fq "tr300_tag='${RELEASE_TAG}'" "$managed_installer"
+          grep -Fq "tr300_dist_installer_sha256='${SOURCE_DIST_INSTALLER_SHA256}'" \
+            "$managed_installer"
+          if grep -Fq '@TR300_' "$managed_installer"; then
+            echo 'candidate managed wrapper retained a template placeholder' >&2
+            exit 1
+          fi
           sh "$managed_installer"
-          sudo installer -pkg "$pkg" -target /
+          candidate_managed_after="$managed_directory/release-after.json"
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > "$candidate_managed_after"
+          validate_release_identity "$candidate_managed_after" "$RELEASE_TAG" \
+            "$EXPECTED_SHA" true
+          candidate_wrapper_after=$(release_asset_record \
+            "$candidate_managed_after" tr300-installer.sh)
+          candidate_dist_after=$(release_asset_record \
+            "$candidate_managed_after" tr300-dist-installer.sh)
+          candidate_archive_after=$(release_asset_record \
+            "$candidate_managed_after" "$candidate_archive_name")
+          [[ "$candidate_wrapper_after" == "$candidate_wrapper_before" &&
+             "$candidate_dist_after" == "$candidate_dist_before" &&
+             "$candidate_archive_after" == "$candidate_archive_before" ]]
+          test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
+          jq -e --arg version "$RELEASE_VERSION" '
+            .provider.source == "cargo-dist" and .source.app_name == "tr300" and
+            .version == $version
+          ' "$managed_receipt" >/dev/null
+          test "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" != \
+            "$baseline_managed_hash"
+          test "$(shasum -a 256 "$managed_receipt" | awk '{print $1}')" != \
+            "$baseline_managed_receipt_hash"
+          "$HOME/.cargo/bin/tr300" --install
+          printf '2\ny\n' | "$HOME/.cargo/bin/tr300" uninstall
           test ! -e "$HOME/.cargo/bin/tr300"
+          test ! -L "$HOME/.cargo/bin/tr300"
           test ! -e "$HOME/.config/tr300/tr300-receipt.json"
+          test ! -L "$HOME/.config/tr300/tr300-receipt.json"
+          for profile in "$HOME/.bashrc" "$HOME/.zshrc"; do
+            if [ -f "$profile" ] && grep -Fq '# TR-300 Machine Report' "$profile"; then
+              echo "complete uninstall left profile evidence in $profile" >&2
+              exit 1
+            fi
+          done
+
+          # The PKG owns a system path, so an active console user must not hide
+          # managed ownership in another local home. Leave only a receipt in a
+          # second /Users home and prove the preinstall rejects it unchanged.
+          second_home="/Users/tr300-pkg-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          case "$second_home" in
+            /Users/tr300-pkg-fixture-[0-9]*-[0-9]*-[0-9]*) ;;
+            *)
+              echo "unsafe second-home fixture path: $second_home" >&2
+              exit 1
+              ;;
+          esac
+          test ! -e "$second_home"
+          test ! -L "$second_home"
+          sudo install -d -m 0755 "$second_home"
+          sudo chown "$(id -u):$(id -g)" "$second_home"
+          second_receipt="$second_home/.config/tr300/tr300-receipt.json"
+          mkdir -p "$(dirname "$second_receipt")"
+          printf '%s\n' '{"second_user_fixture":true}' > "$second_receipt"
+          second_receipt_hash=$(shasum -a 256 "$second_receipt" | awk '{print $1}')
+          set +e
+          sudo installer -pkg "$pkg" -target /
+          second_home_status=$?
+          set -e
+          if [ "$second_home_status" -eq 0 ]; then
+            echo 'second-home managed evidence was incorrectly accepted' >&2
+            exit 1
+          fi
+          test "$(shasum -a 256 "$second_receipt" | awk '{print $1}')" = \
+            "$second_receipt_hash"
+          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ]; then
+            echo 'second-home rejection left its payload behind' >&2
+            exit 1
+          fi
+          if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+            echo 'second-home rejection left a package receipt behind' >&2
+            exit 1
+          fi
+          rm -f "$second_receipt"
+          rmdir "$second_home/.config/tr300" "$second_home/.config" "$second_home"
+
+          # A non-console local human account may have a home outside /Users.
+          # Prove the exact signed candidate enumerates Directory Service with
+          # no reliance on sudo environment variables and rejects that owner
+          # before either the system payload or native receipt is committed.
+          if /usr/bin/dscl . -read "/Users/$custom_fixture_user" >/dev/null 2>&1; then
+            echo "Directory Service fixture user already exists: $custom_fixture_user" >&2
+            exit 1
+          fi
+          if /usr/bin/dscl . -search /Users UniqueID "$custom_fixture_uid" 2>/dev/null |
+            grep -q .; then
+            echo "Directory Service fixture uid already exists: $custom_fixture_uid" >&2
+            exit 1
+          fi
+          custom_fixture_home=$(mktemp -d \
+            "/private/tmp/tr300 signed pkg custom home.XXXXXXXX")
+          case "$custom_fixture_home" in
+            "/private/tmp/tr300 signed pkg custom home."*) ;;
+            *)
+              echo "unsafe signed custom-home fixture: $custom_fixture_home" >&2
+              exit 1
+              ;;
+          esac
+          test "${custom_fixture_home#/Users/}" = "$custom_fixture_home"
+          test "$custom_fixture_user" != "$(/usr/bin/stat -f '%Su' /dev/console)"
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user"
+          custom_fixture_created=1
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            UniqueID "$custom_fixture_uid"
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" PrimaryGroupID 20
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" UserShell /usr/bin/false
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            RealName 'TR-300 signed PKG custom-home fixture'
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" IsHidden 1
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            NFSHomeDirectory "$custom_fixture_home"
+          test "$(/usr/bin/id -u "$custom_fixture_user")" = "$custom_fixture_uid"
+          /usr/bin/dscl -plist . -read "/Users/$custom_fixture_user" \
+            NFSHomeDirectory > "$custom_fixture_plist"
+          /usr/bin/plutil -lint "$custom_fixture_plist" >/dev/null
+          resolved_custom_home=$(/usr/libexec/PlistBuddy -c \
+            'Print :dsAttrTypeStandard\:NFSHomeDirectory:0' \
+            "$custom_fixture_plist")
+          if /usr/libexec/PlistBuddy -c \
+            'Print :dsAttrTypeStandard\:NFSHomeDirectory:1' \
+            "$custom_fixture_plist" >/dev/null 2>&1; then
+            echo 'signed custom-home fixture unexpectedly has multiple home values' >&2
+            exit 1
+          fi
+          test "$resolved_custom_home" = "$custom_fixture_home"
+
+          custom_fixture_receipt="$custom_fixture_home/.config/tr300/tr300-receipt.json"
+          mkdir -p "$(dirname "$custom_fixture_receipt")"
+          printf '%s\n' '{"signed_custom_home_fixture":true}' > "$custom_fixture_receipt"
+          custom_fixture_hash=$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')
+          set +e
+          sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$pkg" -target /
+          custom_home_status=$?
+          set -e
+          if [ "$custom_home_status" -eq 0 ]; then
+            echo 'signed PKG incorrectly accepted custom-home managed evidence' >&2
+            exit 1
+          fi
+          test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
+            "$custom_fixture_hash"
+          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ]; then
+            echo 'custom-home rejection left the signed payload behind' >&2
+            exit 1
+          fi
+          if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+            echo 'custom-home rejection left the signed package receipt behind' >&2
+            exit 1
+          fi
+
+          rm -f "$custom_fixture_receipt"
+          rmdir "$custom_fixture_home/.config/tr300" "$custom_fixture_home/.config" \
+            "$custom_fixture_home"
+          sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"
+          if /usr/bin/dscl . -read "/Users/$custom_fixture_user" >/dev/null 2>&1; then
+            echo 'signed Directory Service fixture survived exact cleanup' >&2
+            exit 1
+          fi
+          custom_fixture_created=0
+
+          # Broken final-component symlinks are ownership evidence too. Neither
+          # may be followed, replaced, or treated as an absent managed install.
+          missing_binary="$RUNNER_TEMP/tr300-missing-managed-binary"
+          missing_receipt="$RUNNER_TEMP/tr300-missing-managed-receipt"
+          rm -f "$missing_binary" "$missing_receipt"
+          ln -s "$missing_binary" "$HOME/.cargo/bin/tr300"
+          ln -s "$missing_receipt" "$HOME/.config/tr300/tr300-receipt.json"
+          set +e
+          sudo installer -pkg "$pkg" -target /
+          broken_link_status=$?
+          set -e
+          if [ "$broken_link_status" -eq 0 ]; then
+            echo 'broken managed symlink evidence was incorrectly accepted' >&2
+            exit 1
+          fi
+          test -L "$HOME/.cargo/bin/tr300"
+          test -L "$HOME/.config/tr300/tr300-receipt.json"
+          test "$(readlink "$HOME/.cargo/bin/tr300")" = "$missing_binary"
+          test "$(readlink "$HOME/.config/tr300/tr300-receipt.json")" = "$missing_receipt"
+          test ! -e "$missing_binary"
+          test ! -e "$missing_receipt"
+          test ! -e /usr/local/bin/tr300
+          test ! -L /usr/local/bin/tr300
+          if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+            echo 'broken-link rejection left a package receipt behind' >&2
+            exit 1
+          fi
+
+          # Exact fixture cleanup leaves no managed evidence. First prove a
+          # genuinely fresh candidate install, then reset only its exact native
+          # payload/receipt so the published v4.2.2 native upgrade can run.
+          rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
+          sudo installer -pkg "$pkg" -target /
+          test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
+          grep -Fqx "version: $RELEASE_VERSION" \
+            < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
+          sudo rm -f /usr/local/bin/tr300
+          sudo pkgutil --forget com.qubetx.tr300.pkg >/dev/null
+          test ! -e /usr/local/bin/tr300
+          test ! -L /usr/local/bin/tr300
+          if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+            echo 'fresh-install fixture reset left a package receipt behind' >&2
+            exit 1
+          fi
+
+          # v4.2.2 is the last published direct-PKG baseline. Verify its public
+          # sidecar, install it natively, then prove this candidate upgrades the
+          # same receipt-owned path on each private native runner.
+          baseline_directory="$RUNNER_TEMP/tr300-v422-direct-pkg"
+          mkdir "$baseline_directory"
+          baseline_native_release="$baseline_directory/release.json"
+          baseline_pkg_sha256=717f233eedfac679a507bc9ce2b16ba195f050e289295665a8c68d83ba10c979
+          baseline_pkg_size=7571628
+          baseline_pkg_sidecar_sha256=1530d1f9fd73a7d7ab84de30fe4929b3ab5ecacc0715f8c461cd0ce2c76b5aec
+          baseline_pkg_sidecar_size=99
+          gh release view v4.2.2 --repo "$REPOSITORY" \
+            --json tagName,targetCommitish,isDraft,isPrerelease,assets \
+            > "$baseline_native_release"
+          jq -e --arg pkg_digest "sha256:${baseline_pkg_sha256}" \
+            --argjson pkg_size "$baseline_pkg_size" \
+            --arg sidecar_digest "sha256:${baseline_pkg_sidecar_sha256}" \
+            --argjson sidecar_size "$baseline_pkg_sidecar_size" '
+              .tagName == "v4.2.2" and
+              .targetCommitish == "db0f538c82961569a7118b105a20e967b15476f0" and
+              .isDraft == false and .isPrerelease == false and
+              ([.assets[] | select(.name == "tr300-universal-apple-darwin.pkg")] |
+                length) == 1 and
+              ([.assets[] | select(.name == "tr300-universal-apple-darwin.pkg")][0] |
+                .digest == $pkg_digest and .size == $pkg_size) and
+              ([.assets[] | select(.name == "tr300-universal-apple-darwin.pkg.sha256")] |
+                length) == 1 and
+              ([.assets[] | select(.name == "tr300-universal-apple-darwin.pkg.sha256")][0] |
+                .digest == $sidecar_digest and .size == $sidecar_size)
+            ' "$baseline_native_release" >/dev/null
+          gh release download v4.2.2 --repo "$REPOSITORY" \
+            --pattern tr300-universal-apple-darwin.pkg \
+            --pattern tr300-universal-apple-darwin.pkg.sha256 \
+            --dir "$baseline_directory"
+          baseline_pkg="$baseline_directory/tr300-universal-apple-darwin.pkg"
+          baseline_pkg_sidecar="$baseline_directory/tr300-universal-apple-darwin.pkg.sha256"
+          [[ -f "$baseline_pkg" && ! -L "$baseline_pkg" && -s "$baseline_pkg" &&
+             -f "$baseline_pkg_sidecar" && ! -L "$baseline_pkg_sidecar" &&
+             -s "$baseline_pkg_sidecar" ]]
+          baseline_pkg_actual_size=$(wc -c < "$baseline_pkg" | tr -d '[:space:]')
+          baseline_pkg_actual_sha256=$(shasum -a 256 "$baseline_pkg" | awk '{print $1}')
+          baseline_sidecar_actual_size=$(wc -c < "$baseline_pkg_sidecar" | tr -d '[:space:]')
+          baseline_sidecar_actual_sha256=$(shasum -a 256 "$baseline_pkg_sidecar" | awk '{print $1}')
+          [[ "$baseline_pkg_actual_size" == "$baseline_pkg_size" &&
+             "$baseline_pkg_actual_sha256" == "$baseline_pkg_sha256" &&
+             "$baseline_sidecar_actual_size" == "$baseline_pkg_sidecar_size" &&
+             "$baseline_sidecar_actual_sha256" == "$baseline_pkg_sidecar_sha256" ]]
+          (cd "$baseline_directory" && \
+            shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256)
+          baseline_signature=$(pkgutil --check-signature "$baseline_pkg" 2>&1)
+          grep -Fq 'Status: signed by a developer certificate' <<< "$baseline_signature"
+          grep -Fq -- "$APPLE_INSTALLER_SIGNING_IDENTITY" <<< "$baseline_signature"
+          grep -Fq -- "($APPLE_TEAM_ID)" <<< "$baseline_signature"
+          xcrun stapler validate "$baseline_pkg"
+          spctl --assess --type install --verbose=4 "$baseline_pkg"
+          sudo installer -pkg "$baseline_pkg" -target /
+          test "$(/usr/local/bin/tr300 --version)" = 'tr300 4.2.2'
+          baseline_package_info=$(pkgutil --pkg-info com.qubetx.tr300.pkg)
+          grep -Fqx 'package-id: com.qubetx.tr300.pkg' <<< "$baseline_package_info"
+          grep -Fqx 'version: 4.2.2' <<< "$baseline_package_info"
+          pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/tr300'
+
+          sudo installer -pkg "$pkg" -target /
+          test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
+          grep -Fqx "version: $RELEASE_VERSION" \
+            < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
 
           package_info=$(pkgutil --pkg-info com.qubetx.tr300.pkg)
           grep -Fqx 'package-id: com.qubetx.tr300.pkg' <<< "$package_info"
@@ -1415,6 +2246,13 @@ jobs:
           lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64
           /usr/local/bin/tr300 --fast --json | jq -e '.schema_version == 1'
           /usr/local/bin/tr300 --ascii --fast >/dev/null
+          native_hash=$(shasum -a 256 /usr/local/bin/tr300 | awk '{print $1}')
+          sudo installer -pkg "$pkg" -target /
+          test "$(shasum -a 256 /usr/local/bin/tr300 | awk '{print $1}')" = "$native_hash"
+          test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
+          grep -Fqx "version: $RELEASE_VERSION" \
+            < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
+
           # A fresh managed shell install is equally authoritative. Its wrapper
           # verifies exact receipt/payload/signature evidence before one sudo
           # ceremony removes the PKG payload and receipt.
@@ -1427,9 +2265,60 @@ jobs:
           test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
           rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
 
+          # Seal this architecture's success to the exact build artifact and
+          # source-produced wrapper/raw/archive byte identities. The publisher
+          # independently downloads and validates both proof artifacts.
+          build_artifact_after="$RUNNER_TEMP/tr300-native-build-artifact-after.json"
+          gh api "repos/$REPOSITORY/actions/artifacts/$BUILD_ARTIFACT_ID" \
+            > "$build_artifact_after"
+          validate_build_artifact "$build_artifact_after"
+          build_record_after=$(build_artifact_record "$build_artifact_after")
+          [[ "$build_record_after" == "$build_record_before" ]]
+          [[ ! -e "$VALIDATION_PROOF" && ! -L "$VALIDATION_PROOF" ]]
+          jq -n \
+            --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
+            --argjson run "$CURRENT_RUN_ID" \
+            --argjson attempt "$CURRENT_RUN_ATTEMPT" \
+            --arg arch "$MATRIX_ARCH" \
+            --argjson build_id "$BUILD_ARTIFACT_ID" \
+            --arg build_digest "sha256:$BUILD_ARTIFACT_DIGEST" \
+            --arg managed_digest "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" \
+            --argjson managed_size "$SOURCE_MANAGED_INSTALLER_SIZE" \
+            --arg dist_digest "sha256:$SOURCE_DIST_INSTALLER_SHA256" \
+            --argjson dist_size "$SOURCE_DIST_INSTALLER_SIZE" \
+            --arg arm_digest "sha256:$SOURCE_AARCH64_ARCHIVE_SHA256" \
+            --argjson arm_size "$SOURCE_AARCH64_ARCHIVE_SIZE" \
+            --arg intel_digest "sha256:$SOURCE_X86_64_ARCHIVE_SHA256" \
+            --argjson intel_size "$SOURCE_X86_64_ARCHIVE_SIZE" '
+              {
+                schema_version: 1,
+                tag: $tag,
+                source_sha: $sha,
+                workflow_run_id: $run,
+                workflow_run_attempt: $attempt,
+                architecture: $arch,
+                build_artifact_id: $build_id,
+                build_artifact_digest: $build_digest,
+                managed_installer: {digest: $managed_digest, size: $managed_size},
+                dist_installer: {digest: $dist_digest, size: $dist_size},
+                aarch64_archive: {digest: $arm_digest, size: $arm_size},
+                x86_64_archive: {digest: $intel_digest, size: $intel_size}
+              }
+            ' > "$VALIDATION_PROOF"
+          [[ -f "$VALIDATION_PROOF" && ! -L "$VALIDATION_PROOF" &&
+             -s "$VALIDATION_PROOF" && "$(wc -c < "$VALIDATION_PROOF")" -le 16384 ]]
+
+      - name: Upload exact native validation proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: tr300-macos-native-validation-${{ matrix.arch }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 1
+          path: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json
+
   publish:
     name: Complete and publish the exact 34-asset GitHub Release
-    needs: [build, validate]
+    needs: [build, validate, source-custody]
     runs-on: ubuntu-24.04
     environment: release-publishing
     permissions:
@@ -1444,8 +2333,17 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           ASSET_DIRECTORY: ${{ runner.temp }}/macos-release-assets
           CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
           MACOS_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
           MACOS_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          SOURCE_MANAGED_INSTALLER_SHA256: ${{ needs.source-custody.outputs.managed_installer_sha256 }}
+          SOURCE_MANAGED_INSTALLER_SIZE: ${{ needs.source-custody.outputs.managed_installer_size }}
+          SOURCE_DIST_INSTALLER_SHA256: ${{ needs.source-custody.outputs.dist_installer_sha256 }}
+          SOURCE_DIST_INSTALLER_SIZE: ${{ needs.source-custody.outputs.dist_installer_size }}
+          SOURCE_AARCH64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.aarch64_archive_sha256 }}
+          SOURCE_AARCH64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.aarch64_archive_size }}
+          SOURCE_X86_64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.x86_64_archive_sha256 }}
+          SOURCE_X86_64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.x86_64_archive_size }}
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
           DISPATCH_WINDOWS_VALIDATION_RUN_ID: ${{ inputs.windows_validation_run_id }}
@@ -1494,8 +2392,21 @@ jobs:
           [[ "$REPOSITORY" == QubeTX/qube-machine-report &&
              "$WORKFLOW_SHA" == "$EXPECTED_SHA" ]]
           [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
+             "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
              "$MACOS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
              "$MACOS_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_MANAGED_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_MANAGED_INSTALLER_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_MANAGED_INSTALLER_SIZE" -le 1048576 ]]
+          [[ "$SOURCE_DIST_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_DIST_INSTALLER_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_DIST_INSTALLER_SIZE" -le 1048576 ]]
+          [[ "$SOURCE_AARCH64_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_AARCH64_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_AARCH64_ARCHIVE_SIZE" -le 67108864 ]]
+          [[ "$SOURCE_X86_64_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_X86_64_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_X86_64_ARCHIVE_SIZE" -le 67108864 ]]
 
           asset_names=(
             tr300-universal-apple-darwin.pkg
@@ -1568,6 +2479,140 @@ jobs:
             > "$work_directory/macos-artifact-after.json"
           validate_macos_artifact "$work_directory/macos-artifact-after.json"
           cmp "$work_directory/macos-artifact-before.json" "$work_directory/macos-artifact-after.json"
+
+          # Both native architectures must have validated this exact build
+          # artifact and the exact source-rendered managed-install chain. Bind
+          # each proof by current run attempt, immutable artifact ID/API digest,
+          # ZIP bytes, safe member inventory, and typed proof contents.
+          proof_inventory="$work_directory/native-validation-proofs.json"
+          gh api "repos/$REPOSITORY/actions/runs/$CURRENT_RUN_ID/artifacts?per_page=100" \
+            > "$proof_inventory"
+          proof_total=$(jq -r .total_count "$proof_inventory")
+          proof_returned=$(jq -r '.artifacts | length' "$proof_inventory")
+          [[ "$proof_total" =~ ^[0-9]+$ && "$proof_total" -le 100 &&
+             "$proof_returned" == "$proof_total" ]]
+          proof_artifact_record() {
+            local inventory=$1
+            local name=$2
+            jq -er --arg name "$name" '
+              [.artifacts[] | select(.name == $name)] |
+              if length != 1 then error("expected exactly one native proof artifact named " + $name)
+              else .[0] |
+                [.id, .name, .digest, .expired, .size_in_bytes,
+                 .workflow_run.id, .workflow_run.repository_id,
+                 .workflow_run.head_repository_id, .workflow_run.head_sha] | @tsv
+              end
+            ' "$inventory"
+          }
+          direct_proof_record() {
+            jq -r '
+              [.id, .name, .digest, .expired, .size_in_bytes,
+               .workflow_run.id, .workflow_run.repository_id,
+               .workflow_run.head_repository_id, .workflow_run.head_sha] | @tsv
+            ' "$1"
+          }
+          validate_native_proof() {
+            local path=$1
+            local arch=$2
+            jq -e \
+              --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
+              --argjson run "$CURRENT_RUN_ID" \
+              --argjson attempt "$CURRENT_RUN_ATTEMPT" \
+              --arg arch "$arch" \
+              --argjson build_id "$MACOS_ARTIFACT_ID" \
+              --arg build_digest "sha256:$MACOS_ARTIFACT_DIGEST" \
+              --arg managed_digest "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" \
+              --argjson managed_size "$SOURCE_MANAGED_INSTALLER_SIZE" \
+              --arg dist_digest "sha256:$SOURCE_DIST_INSTALLER_SHA256" \
+              --argjson dist_size "$SOURCE_DIST_INSTALLER_SIZE" \
+              --arg arm_digest "sha256:$SOURCE_AARCH64_ARCHIVE_SHA256" \
+              --argjson arm_size "$SOURCE_AARCH64_ARCHIVE_SIZE" \
+              --arg intel_digest "sha256:$SOURCE_X86_64_ARCHIVE_SHA256" \
+              --argjson intel_size "$SOURCE_X86_64_ARCHIVE_SIZE" '
+                .schema_version == 1 and .tag == $tag and .source_sha == $sha and
+                .workflow_run_id == $run and .workflow_run_attempt == $attempt and
+                .architecture == $arch and .build_artifact_id == $build_id and
+                .build_artifact_digest == $build_digest and
+                .managed_installer == {digest: $managed_digest, size: $managed_size} and
+                .dist_installer == {digest: $dist_digest, size: $dist_size} and
+                .aarch64_archive == {digest: $arm_digest, size: $arm_size} and
+                .x86_64_archive == {digest: $intel_digest, size: $intel_size} and
+                (keys | sort) == (["aarch64_archive", "architecture", "build_artifact_digest",
+                  "build_artifact_id", "dist_installer", "managed_installer", "schema_version",
+                  "source_sha", "tag", "workflow_run_attempt", "workflow_run_id",
+                  "x86_64_archive"] | sort)
+              ' "$path" >/dev/null
+          }
+          for arch in arm64 x86_64; do
+            proof_name="tr300-macos-native-validation-${arch}-${CURRENT_RUN_ATTEMPT}"
+            proof_file="tr300-macos-native-validation-${arch}.json"
+            proof_before=$(proof_artifact_record "$proof_inventory" "$proof_name")
+            IFS=$'\t' read -r proof_id returned_name proof_digest proof_expired \
+              proof_size proof_run proof_repository proof_head_repository proof_sha \
+              <<< "$proof_before"
+            [[ "$proof_id" =~ ^[1-9][0-9]*$ && "$returned_name" == "$proof_name" &&
+               "$proof_digest" =~ ^sha256:[0-9a-f]{64}$ && "$proof_expired" == false &&
+               "$proof_size" =~ ^[1-9][0-9]*$ && "$proof_size" -le 1048576 &&
+               "$proof_run" == "$CURRENT_RUN_ID" &&
+               "$proof_repository" == "$repository_id" &&
+               "$proof_head_repository" == "$repository_id" &&
+               "$proof_sha" == "$EXPECTED_SHA" ]]
+            proof_metadata="$work_directory/${arch}-proof-before.json"
+            gh api "repos/$REPOSITORY/actions/artifacts/$proof_id" > "$proof_metadata"
+            [[ "$(direct_proof_record "$proof_metadata")" == "$proof_before" ]]
+            proof_zip="$work_directory/${arch}-proof.zip"
+            gh api "repos/$REPOSITORY/actions/artifacts/$proof_id/zip" > "$proof_zip"
+            proof_zip_sha=$(sha256sum "$proof_zip"); proof_zip_sha=${proof_zip_sha%% *}
+            [[ "sha256:$proof_zip_sha" == "$proof_digest" ]]
+            proof_directory="$work_directory/${arch}-proof"
+            mkdir -m 700 "$proof_directory"
+            python3 - "$proof_zip" "$proof_directory" "$proof_file" <<'PY'
+          import os
+          import shutil
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          zip_path, output_path, expected = sys.argv[1:]
+          output = Path(output_path)
+          with zipfile.ZipFile(zip_path) as source:
+              members = source.infolist()
+              names = [member.filename for member in members]
+              if names != [expected]:
+                  raise SystemExit(f"unexpected native proof members: {names!r}")
+              member = members[0]
+              pure = PurePosixPath(member.filename)
+              mode = member.external_attr >> 16
+              if (
+                  pure.name != member.filename
+                  or pure.is_absolute()
+                  or ".." in pure.parts
+                  or member.is_dir()
+                  or member.file_size <= 0
+                  or member.file_size > 16384
+                  or stat.S_ISLNK(mode)
+              ):
+                  raise SystemExit(f"unsafe native proof member: {member.filename!r}")
+              destination = output / member.filename
+              flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+              if hasattr(os, "O_NOFOLLOW"):
+                  flags |= os.O_NOFOLLOW
+              descriptor = os.open(destination, flags, 0o600)
+              try:
+                  with source.open(member) as src, os.fdopen(descriptor, "wb") as dst:
+                      descriptor = -1
+                      shutil.copyfileobj(src, dst, length=16384)
+              finally:
+                  if descriptor >= 0:
+                      os.close(descriptor)
+          PY
+            validate_native_proof "$proof_directory/$proof_file" "$arch"
+            proof_after_metadata="$work_directory/${arch}-proof-after.json"
+            gh api "repos/$REPOSITORY/actions/artifacts/$proof_id" \
+              > "$proof_after_metadata"
+            [[ "$(direct_proof_record "$proof_after_metadata")" == "$proof_before" ]]
+          done
 
           declare -A expected_names=()
           for name in "${asset_names[@]}"; do
@@ -1930,13 +2975,35 @@ jobs:
             --argjson windows_run "$windows_run_id" \
             --argjson windows_attempt "$windows_run_attempt" \
             --argjson windows_artifact "$windows_artifact_id" \
-            --arg windows_digest "$windows_artifact_digest" '
+            --arg windows_digest "$windows_artifact_digest" \
+            --arg managed_digest "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" \
+            --argjson managed_size "$SOURCE_MANAGED_INSTALLER_SIZE" \
+            --arg dist_digest "sha256:$SOURCE_DIST_INSTALLER_SHA256" \
+            --argjson dist_size "$SOURCE_DIST_INSTALLER_SIZE" \
+            --arg arm_digest "sha256:$SOURCE_AARCH64_ARCHIVE_SHA256" \
+            --argjson arm_size "$SOURCE_AARCH64_ARCHIVE_SIZE" \
+            --arg intel_digest "sha256:$SOURCE_X86_64_ARCHIVE_SHA256" \
+            --argjson intel_size "$SOURCE_X86_64_ARCHIVE_SIZE" '
               .schema_version == 1 and .validation_mode == "private" and
               .tag == $tag and .source_sha == $sha and .upstream_run_id == $windows_run and
               .upstream_run_attempt == $windows_attempt and
               .windows_artifact_id == $windows_artifact and
               .windows_artifact_digest == $windows_digest and
               (.release_assets | length) == 30 and
+              ([.release_assets[] | select(.name == "tr300-installer.sh")] | length) == 1 and
+              ([.release_assets[] | select(.name == "tr300-installer.sh")][0] |
+                .digest == $managed_digest and .size == $managed_size) and
+              ([.release_assets[] | select(.name == "tr300-dist-installer.sh")] | length) == 1 and
+              ([.release_assets[] | select(.name == "tr300-dist-installer.sh")][0] |
+                .digest == $dist_digest and .size == $dist_size) and
+              ([.release_assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")] |
+                length) == 1 and
+              ([.release_assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")][0] |
+                .digest == $arm_digest and .size == $arm_size) and
+              ([.release_assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")] |
+                length) == 1 and
+              ([.release_assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")][0] |
+                .digest == $intel_digest and .size == $intel_size) and
               ([.release_assets[] | (.id | type == "number") and (.size > 0) and
                 (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
             ' "$validation_manifest" >/dev/null
@@ -1945,8 +3012,31 @@ jobs:
           # identities and bytes accepted by the Windows matrix.
           gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
             > "$work_directory/validated-draft.json"
-          jq -e --arg sha "$EXPECTED_SHA" --slurpfile manifest "$validation_manifest" '
+          jq -e --arg sha "$EXPECTED_SHA" \
+            --arg managed_digest "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" \
+            --argjson managed_size "$SOURCE_MANAGED_INSTALLER_SIZE" \
+            --arg dist_digest "sha256:$SOURCE_DIST_INSTALLER_SHA256" \
+            --argjson dist_size "$SOURCE_DIST_INSTALLER_SIZE" \
+            --arg arm_digest "sha256:$SOURCE_AARCH64_ARCHIVE_SHA256" \
+            --argjson arm_size "$SOURCE_AARCH64_ARCHIVE_SIZE" \
+            --arg intel_digest "sha256:$SOURCE_X86_64_ARCHIVE_SHA256" \
+            --argjson intel_size "$SOURCE_X86_64_ARCHIVE_SIZE" \
+            --slurpfile manifest "$validation_manifest" '
               .target_commitish == $sha and .draft == true and .prerelease == false and
+              ([.assets[] | select(.name == "tr300-installer.sh")] | length) == 1 and
+              ([.assets[] | select(.name == "tr300-installer.sh")][0] |
+                .digest == $managed_digest and .size == $managed_size) and
+              ([.assets[] | select(.name == "tr300-dist-installer.sh")] | length) == 1 and
+              ([.assets[] | select(.name == "tr300-dist-installer.sh")][0] |
+                .digest == $dist_digest and .size == $dist_size) and
+              ([.assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")] |
+                length) == 1 and
+              ([.assets[] | select(.name == "tr300-aarch64-apple-darwin.tar.xz")][0] |
+                .digest == $arm_digest and .size == $arm_size) and
+              ([.assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")] |
+                length) == 1 and
+              ([.assets[] | select(.name == "tr300-x86_64-apple-darwin.tar.xz")][0] |
+                .digest == $intel_digest and .size == $intel_size) and
               ([.assets[] | {id, name, size, digest}] | sort_by(.name)) ==
                 ($manifest[0].release_assets | sort_by(.name))
             ' "$work_directory/validated-draft.json" >/dev/null

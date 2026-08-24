@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 WINDOWS_WORKFLOW = ROOT / ".github" / "workflows" / "windows-installers.yml"
 MACOS_WORKFLOW = ROOT / ".github" / "workflows" / "macos-installer.yml"
+MACOS_INSTALLER_BUILDER = ROOT / "scripts" / "build-sign-notarize-macos-installer.sh"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CRATES_WORKFLOW = ROOT / ".github" / "workflows" / "crates-publish.yml"
 APPLE_MIGRATION_WORKFLOW = ROOT / ".github" / "workflows" / "apple-secret-migration.yml"
@@ -98,6 +99,38 @@ MACOS_RELEASE_RUN_ARTIFACTS = (
     "artifacts-build-local-x86_64-apple-darwin",
     "unsigned-artifacts-build-local-aarch64-apple-darwin",
     "unsigned-artifacts-build-local-x86_64-apple-darwin",
+)
+INITIAL_RELEASE_ASSETS = (
+    "dist-manifest.json",
+    "sha256.sum",
+    "source.tar.gz",
+    "source.tar.gz.sha256",
+    "tr-300-installer.ps1",
+    "tr-300-installer.sh",
+    "tr300-aarch64-apple-darwin.tar.xz",
+    "tr300-aarch64-apple-darwin.tar.xz.sha256",
+    "tr300-aarch64-unknown-linux-gnu.tar.xz",
+    "tr300-aarch64-unknown-linux-gnu.tar.xz.sha256",
+    "tr300-dist-installer.ps1",
+    "tr300-dist-installer.sh",
+    "tr300-installer.ps1",
+    "tr300-installer.sh",
+    "tr300-x86_64-apple-darwin.tar.xz",
+    "tr300-x86_64-apple-darwin.tar.xz.sha256",
+    "tr300-x86_64-pc-windows-msvc.msi",
+    "tr300-x86_64-pc-windows-msvc.msi.sha256",
+    "tr300-x86_64-pc-windows-msvc.zip",
+    "tr300-x86_64-pc-windows-msvc.zip.sha256",
+    "tr300-x86_64-unknown-linux-gnu.tar.xz",
+    "tr300-x86_64-unknown-linux-gnu.tar.xz.sha256",
+    "tr300-x86_64-unknown-linux-musl.tar.xz",
+    "tr300-x86_64-unknown-linux-musl.tar.xz.sha256",
+)
+PREPARED_RELEASE_ARTIFACT_MEMBERS = (
+    *INITIAL_RELEASE_ASSETS,
+    "__tr300-release-metadata.json",
+    "__tr300-notes.txt",
+    "__tr300-asset-sha256s",
 )
 
 
@@ -288,6 +321,7 @@ case "$endpoint" in
         case "$endpoint" in
             */101/zip) cat "$MOCK_ARM_ARTIFACT_ZIP" ;;
             */102/zip) cat "$MOCK_X86_ARTIFACT_ZIP" ;;
+            */103/zip) cat "$MOCK_PREPARED_RELEASE_ARTIFACT_ZIP" ;;
             *)
                 [[ -n ${MOCK_PUBLISHER_ARTIFACT_ZIP:-} ]] || exit 89
                 cat "$MOCK_PUBLISHER_ARTIFACT_ZIP"
@@ -380,6 +414,30 @@ for path in paths:
         os.makedirs(path, exist_ok=True)
     else:
         os.mkdir(path)
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    mock.chmod(mock.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def write_windows_shasum_compat(bin_dir: Path) -> None:
+    """Provide the macOS shasum invocation used by native custody fixtures."""
+
+    if os.name != "nt":
+        return
+    mock = bin_dir / "shasum"
+    mock.write_text(
+        """#!/usr/bin/env python3
+import hashlib
+import pathlib
+import sys
+
+arguments = sys.argv[1:]
+if len(arguments) != 3 or arguments[:2] != ["-a", "256"]:
+    raise SystemExit(f"fixture shasum rejects arguments: {arguments!r}")
+path = pathlib.Path(arguments[2])
+print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path}")
 """,
         encoding="utf-8",
         newline="\n",
@@ -490,6 +548,22 @@ elif ".id == $run_id" in normalized and ".workflow_id == $workflow_id" in normal
         data.get("head_sha") == variables.get("sha") and
         data.get("run_attempt") == variables.get("run_attempt")
     )
+elif normalized == (
+    "[.id, .name, .digest, .expired, .size_in_bytes, .workflow_run.id, "
+    ".workflow_run.repository_id, .workflow_run.head_repository_id, "
+    ".workflow_run.head_sha] | @tsv"
+):
+    emit("\t".join(
+        str(value).lower() if isinstance(value, bool) else str(value)
+        for value in (
+            data.get("id"), data.get("name"), data.get("digest"),
+            data.get("expired"), data.get("size_in_bytes"),
+            nested(data, "workflow_run", "id"),
+            nested(data, "workflow_run", "repository_id"),
+            nested(data, "workflow_run", "head_repository_id"),
+            nested(data, "workflow_run", "head_sha"),
+        )
+    ))
 elif ".id == $id" in normalized and ".workflow_run.id == $run" in normalized:
     name_match = re.search(r'\.name == "([^"]+)"', normalized)
     expected_name = name_match.group(1) if name_match else None
@@ -739,6 +813,67 @@ def write_cargo_dist_apple_artifact(
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_prepared_release_artifact(
+    path: Path, mutation: str | None
+) -> tuple[str, dict[str, tuple[str, int]]]:
+    payloads = {
+        name: f"prepared Release fixture for {name}\n".encode()
+        for name in INITIAL_RELEASE_ASSETS
+    }
+    dist_installer = b"#!/bin/sh\nprintf '%s\\n' 'fixture dist installer'\n"
+    payloads["tr300-dist-installer.sh"] = dist_installer
+    dist_installer_sha256 = hashlib.sha256(dist_installer).hexdigest()
+    embedded_dist_sha256 = (
+        "0" * 64
+        if mutation == "prepared-dist-wrapper-pin-mismatch"
+        else dist_installer_sha256
+    )
+    payloads["tr300-installer.sh"] = (
+        "#!/bin/sh\n"
+        "tr300_tag='v4.3.0'\n"
+        f"tr300_dist_installer_sha256='{embedded_dist_sha256}'\n"
+        "printf '%s\\n' \"$tr300_tag\"\n"
+    ).encode()
+    manifest = b"".join(
+        f"{hashlib.sha256(payloads[name]).hexdigest()}  {name}\n".encode()
+        for name in INITIAL_RELEASE_ASSETS
+    )
+    if mutation == "prepared-wrapper-hash-mismatch":
+        payloads["tr300-installer.sh"] += b"# changed after manifest\n"
+    elif mutation == "prepared-dist-hash-mismatch":
+        payloads["tr300-dist-installer.sh"] += b"# changed after manifest\n"
+    elif mutation == "prepared-archive-hash-mismatch":
+        payloads["tr300-aarch64-apple-darwin.tar.xz"] += b"changed after manifest\n"
+    members = {
+        **payloads,
+        "__tr300-release-metadata.json": json.dumps(
+            {"tag": "v4.3.0", "source_sha": TRUSTED_SHA}
+        ).encode(),
+        "__tr300-notes.txt": b"fixture release notes\n",
+        "__tr300-asset-sha256s": manifest,
+    }
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name in PREPARED_RELEASE_ARTIFACT_MEMBERS:
+            archive.writestr(name, members[name])
+        if mutation == "prepared-duplicate-member":
+            archive.writestr("tr300-installer.sh", members["tr300-installer.sh"])
+        elif mutation == "prepared-extra-member":
+            archive.writestr("unexpected", b"unexpected\n")
+    custody_assets = {
+        name: (hashlib.sha256(payloads[name]).hexdigest(), len(payloads[name]))
+        for name in (
+            "tr300-installer.sh",
+            "tr300-dist-installer.sh",
+            "tr300-aarch64-apple-darwin.tar.xz",
+            "tr300-x86_64-apple-darwin.tar.xz",
+        )
+    }
+    return (
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+        custody_assets,
+    )
+
+
 def release_run_json(**overrides: object) -> dict[str, object]:
     record: dict[str, object] = {
         "id": int(RELEASE_RUN_ID),
@@ -793,6 +928,10 @@ def write_macos_release_run_fixture(
     x86_digest = write_cargo_dist_apple_artifact(
         x86_zip, "x86_64-apple-darwin"
     )
+    prepared_zip = directory / "prepared-release.zip"
+    prepared_digest, prepared_custody_assets = (
+        write_prepared_release_artifact(prepared_zip, mutation)
+    )
 
     run_before = release_run_json()
     run_after = release_run_json()
@@ -810,6 +949,15 @@ def write_macos_release_run_fixture(
         ),
         release_artifact_record(
             name=MACOS_RELEASE_RUN_ARTIFACTS[3], artifact_id=202, digest="e" * 64
+        ),
+        release_artifact_record(
+            name="tr300-prepared-release-assets",
+            artifact_id=103,
+            digest=(
+                "0" * 64
+                if mutation == "prepared-digest-mismatch"
+                else prepared_digest
+            ),
         ),
         release_artifact_record(
             name="artifacts-build-local-x86_64-pc-windows-msvc",
@@ -862,6 +1010,21 @@ def write_macos_release_run_fixture(
         artifacts_after = json.loads(json.dumps(artifacts))
     elif mutation == "midflight-artifact-replacement":
         artifacts_after[0]["digest"] = f"sha256:{'9' * 64}"
+    elif mutation == "missing-prepared-artifact":
+        artifacts = [artifact for artifact in artifacts if artifact["id"] != 103]
+        artifacts_after = json.loads(json.dumps(artifacts))
+    elif mutation == "duplicate-prepared-artifact":
+        duplicate = json.loads(
+            json.dumps(next(artifact for artifact in artifacts if artifact["id"] == 103))
+        )
+        duplicate["id"] = 998
+        artifacts.append(duplicate)
+        artifacts_after = json.loads(json.dumps(artifacts))
+    elif mutation == "midflight-prepared-replacement":
+        for artifact in artifacts_after:
+            if artifact["id"] == 103:
+                artifact["digest"] = f"sha256:{'8' * 64}"
+                break
 
     run_before_path = directory / "run-before.json"
     run_after_path = directory / "run-after.json"
@@ -890,6 +1053,31 @@ def write_macos_release_run_fixture(
         "MOCK_DIRECT_ARTIFACT_JSON": direct_artifact_path.as_posix(),
         "MOCK_ARM_ARTIFACT_ZIP": arm_zip.as_posix(),
         "MOCK_X86_ARTIFACT_ZIP": x86_zip.as_posix(),
+        "MOCK_PREPARED_RELEASE_ARTIFACT_ZIP": prepared_zip.as_posix(),
+        "MOCK_PREPARED_WRAPPER_SHA256": prepared_custody_assets[
+            "tr300-installer.sh"
+        ][0],
+        "MOCK_PREPARED_WRAPPER_SIZE": str(
+            prepared_custody_assets["tr300-installer.sh"][1]
+        ),
+        "MOCK_PREPARED_DIST_SHA256": prepared_custody_assets[
+            "tr300-dist-installer.sh"
+        ][0],
+        "MOCK_PREPARED_DIST_SIZE": str(
+            prepared_custody_assets["tr300-dist-installer.sh"][1]
+        ),
+        "MOCK_PREPARED_ARM_SHA256": prepared_custody_assets[
+            "tr300-aarch64-apple-darwin.tar.xz"
+        ][0],
+        "MOCK_PREPARED_ARM_SIZE": str(
+            prepared_custody_assets["tr300-aarch64-apple-darwin.tar.xz"][1]
+        ),
+        "MOCK_PREPARED_INTEL_SHA256": prepared_custody_assets[
+            "tr300-x86_64-apple-darwin.tar.xz"
+        ][0],
+        "MOCK_PREPARED_INTEL_SIZE": str(
+            prepared_custody_assets["tr300-x86_64-apple-darwin.tar.xz"][1]
+        ),
     }
 
 
@@ -955,9 +1143,134 @@ def run_macos_source_custody_case(
             }
             if {path.name for path in output.iterdir()} != expected:
                 raise AssertionError(f"{name}: normalized inventory changed")
+            expected_outputs = {
+                "managed_installer_sha256": environment[
+                    "MOCK_PREPARED_WRAPPER_SHA256"
+                ],
+                "managed_installer_size": environment["MOCK_PREPARED_WRAPPER_SIZE"],
+                "dist_installer_sha256": environment["MOCK_PREPARED_DIST_SHA256"],
+                "dist_installer_size": environment["MOCK_PREPARED_DIST_SIZE"],
+                "aarch64_archive_sha256": environment["MOCK_PREPARED_ARM_SHA256"],
+                "aarch64_archive_size": environment["MOCK_PREPARED_ARM_SIZE"],
+                "x86_64_archive_sha256": environment[
+                    "MOCK_PREPARED_INTEL_SHA256"
+                ],
+                "x86_64_archive_size": environment["MOCK_PREPARED_INTEL_SIZE"],
+            }
+            if parse_outputs(github_output) != expected_outputs:
+                raise AssertionError(f"{name}: managed-wrapper custody outputs changed")
         calls = log.read_text(encoding="utf-8").splitlines()
         if any("/releases/" in call for call in calls):
             raise AssertionError(f"{name}: source custody consulted mutable Release assets")
+
+
+def write_macos_native_build_artifact_fixture(
+    directory: Path, mutation: str | None
+) -> dict[str, str]:
+    artifact_zip = directory / "native-build.zip"
+    expected = (
+        "tr300-universal-apple-darwin.pkg",
+        "tr300-universal-apple-darwin.pkg.sha256",
+        "tr300-universal-apple-darwin.dmg",
+        "tr300-universal-apple-darwin.dmg.sha256",
+    )
+    with zipfile.ZipFile(artifact_zip, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name in expected:
+            archive.writestr(name, f"native build fixture for {name}\n".encode())
+        if mutation == "native-extra-member":
+            archive.writestr("unexpected", b"unexpected\n")
+        elif mutation == "native-duplicate-member":
+            archive.writestr(expected[0], b"duplicate\n")
+        elif mutation == "native-unsafe-path":
+            archive.writestr("../escape", b"escape\n")
+    zip_digest = hashlib.sha256(artifact_zip.read_bytes()).hexdigest()
+    expected_digest = "0" * 64 if mutation == "native-zip-digest-mismatch" else zip_digest
+    artifact_record: dict[str, object] = {
+        "id": 501,
+        "name": "tr300-universal-macos-installer",
+        "digest": f"sha256:{expected_digest}",
+        "expired": False,
+        "size_in_bytes": artifact_zip.stat().st_size,
+        "workflow_run": {
+            "id": int(RELEASE_RUN_ID),
+            "repository_id": int(REPOSITORY_ID),
+            "head_repository_id": int(REPOSITORY_ID),
+            "head_sha": TRUSTED_SHA,
+        },
+    }
+    if mutation == "native-wrong-id":
+        artifact_record["id"] = 502
+    elif mutation == "native-api-digest-mismatch":
+        artifact_record["digest"] = f"sha256:{'f' * 64}"
+    elif mutation == "native-expired":
+        artifact_record["expired"] = True
+    elif mutation == "native-wrong-run":
+        artifact_record["workflow_run"]["id"] = 42  # type: ignore[index]
+    elif mutation == "native-wrong-repository":
+        artifact_record["workflow_run"]["repository_id"] = 42  # type: ignore[index]
+    elif mutation == "native-wrong-head-repository":
+        artifact_record["workflow_run"]["head_repository_id"] = 42  # type: ignore[index]
+    elif mutation == "native-wrong-sha":
+        artifact_record["workflow_run"]["head_sha"] = OTHER_SHA  # type: ignore[index]
+
+    metadata = directory / "native-build-artifact.json"
+    metadata.write_text(json.dumps(artifact_record), encoding="utf-8")
+    return {
+        "RUNNER_TEMP": directory.as_posix(),
+        "REPOSITORY": REPOSITORY,
+        "EXPECTED_SHA": TRUSTED_SHA,
+        "CURRENT_RUN_ID": RELEASE_RUN_ID,
+        "CURRENT_RUN_ATTEMPT": RELEASE_RUN_ATTEMPT,
+        "MATRIX_ARCH": "x86_64",
+        "BUILD_ARTIFACT_ID": "501",
+        "BUILD_ARTIFACT_DIGEST": expected_digest,
+        "SOURCE_MANAGED_INSTALLER_SHA256": "1" * 64,
+        "SOURCE_MANAGED_INSTALLER_SIZE": "1024",
+        "SOURCE_DIST_INSTALLER_SHA256": "2" * 64,
+        "SOURCE_DIST_INSTALLER_SIZE": "2048",
+        "SOURCE_AARCH64_ARCHIVE_SHA256": "3" * 64,
+        "SOURCE_AARCH64_ARCHIVE_SIZE": "4096",
+        "SOURCE_X86_64_ARCHIVE_SHA256": "4" * 64,
+        "SOURCE_X86_64_ARCHIVE_SIZE": "8192",
+        "VALIDATION_PROOF": (directory / "native-proof.json").as_posix(),
+        "MOCK_DIRECT_ARTIFACT_JSON": metadata.as_posix(),
+        "MOCK_PUBLISHER_ARTIFACT_ZIP": artifact_zip.as_posix(),
+    }
+
+
+def run_macos_native_build_custody_case(
+    *,
+    bash: str,
+    mock_bin: Path,
+    block: str,
+    name: str,
+    mutation: str | None,
+    expected_success: bool,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="tr300-macos-native-custody-") as raw:
+        directory = Path(raw)
+        output = directory / "github-output"
+        log = directory / "gh-calls"
+        environment = fixture_environment(mock_bin, output, log)
+        environment.update(write_macos_native_build_artifact_fixture(directory, mutation))
+        script = directory / "native-custody.sh"
+        script.write_text(block, encoding="utf-8", newline="\n")
+        result = subprocess.run(
+            [bash, str(script)],
+            cwd=ROOT,
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+            check=False,
+        )
+        succeeded = result.returncode == 0
+        if succeeded != expected_success:
+            raise AssertionError(
+                f"{name}: return code {result.returncode}, expected_success="
+                f"{expected_success}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            )
 
 
 def write_windows_release_artifact(directory: Path) -> None:
@@ -1258,6 +1571,18 @@ def check_actual_resolvers(
         "Download by immutable artifact ID and normalize fixed Apple inputs",
         MACOS_WORKFLOW.name,
     )
+    macos_native_validation = extract_named_run(
+        macos,
+        "Validate, install, and exercise the universal package",
+        MACOS_WORKFLOW.name,
+    )
+    native_custody_marker = 'pkg="$artifact_directory/tr300-universal-apple-darwin.pkg"'
+    native_custody_end = macos_native_validation.index(native_custody_marker) + len(
+        native_custody_marker
+    )
+    macos_native_custody = macos_native_validation[:native_custody_end] + "\n"
+    if os.name == "nt":
+        macos_native_custody = macos_native_custody.replace("mkdir -m 700 ", "mkdir ")
     macos_publisher = extract_named_run(
         macos,
         "Bind exact supplements, upload macOS assets, and publish the draft",
@@ -1843,6 +2168,42 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         ("fork automatic", {"UPSTREAM_REPOSITORY": "attacker/fork"}, False, None),
         ("upstream SHA mismatch", {"UPSTREAM_SHA": OTHER_SHA}, False, None),
         (
+            "automatic source no longer protected-main tip",
+            {"MOCK_DEFAULT_SHA": OTHER_SHA, "WORKFLOW_SHA": OTHER_SHA},
+            False,
+            None,
+        ),
+        (
+            "automatic downstream workflow not protected-main tip",
+            {"WORKFLOW_SHA": OTHER_SHA},
+            False,
+            None,
+        ),
+        (
+            "tagged dispatch source no longer protected-main tip",
+            {
+                "EVENT_NAME": "workflow_dispatch",
+                "DISPATCH_TAG": "v4.3.0",
+                "PREFLIGHT_ONLY": "true",
+                "DISPATCH_RUN_ID": RELEASE_RUN_ID,
+                "MOCK_DEFAULT_SHA": OTHER_SHA,
+                "WORKFLOW_SHA": OTHER_SHA,
+            },
+            False,
+            None,
+        ),
+        (
+            "tagless preflight workflow not protected-main tip",
+            {
+                "EVENT_NAME": "workflow_dispatch",
+                "DISPATCH_TAG": "",
+                "PREFLIGHT_ONLY": "true",
+                "WORKFLOW_SHA": OTHER_SHA,
+            },
+            False,
+            None,
+        ),
+        (
             "automatic run-attempt mismatch",
             {"MOCK_RELEASE_RUN_ATTEMPT": "2"},
             False,
@@ -1945,6 +2306,24 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         ("extra ZIP member", "extra-zip-member", False),
         ("checksum mismatch", "bad-checksum", False),
         ("midflight artifact replacement", "midflight-artifact-replacement", False),
+        ("missing prepared Release artifact", "missing-prepared-artifact", False),
+        ("duplicate prepared Release artifact", "duplicate-prepared-artifact", False),
+        ("prepared Release API digest mismatch", "prepared-digest-mismatch", False),
+        ("prepared Release extra ZIP member", "prepared-extra-member", False),
+        ("prepared Release duplicate ZIP member", "prepared-duplicate-member", False),
+        ("prepared wrapper hash mismatch", "prepared-wrapper-hash-mismatch", False),
+        ("prepared dist-installer hash mismatch", "prepared-dist-hash-mismatch", False),
+        ("prepared Apple archive hash mismatch", "prepared-archive-hash-mismatch", False),
+        (
+            "prepared wrapper dist-installer pin mismatch",
+            "prepared-dist-wrapper-pin-mismatch",
+            False,
+        ),
+        (
+            "midflight prepared Release artifact replacement",
+            "midflight-prepared-replacement",
+            False,
+        ),
     ]
     for name, mutation, succeeds in custody_cases:
         run_macos_source_custody_case(
@@ -1952,6 +2331,30 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
             mock_bin=mock_bin,
             block=macos_source_custody,
             name=f"macOS exact-run source custody: {name}",
+            mutation=mutation,
+            expected_success=succeeds,
+        )
+
+    native_custody_cases = [
+        ("trusted exact build artifact", None, True),
+        ("wrong immutable artifact ID", "native-wrong-id", False),
+        ("API digest mismatch", "native-api-digest-mismatch", False),
+        ("expired build artifact", "native-expired", False),
+        ("wrong workflow run", "native-wrong-run", False),
+        ("wrong repository", "native-wrong-repository", False),
+        ("wrong head repository", "native-wrong-head-repository", False),
+        ("wrong source SHA", "native-wrong-sha", False),
+        ("ZIP digest mismatch", "native-zip-digest-mismatch", False),
+        ("extra ZIP member", "native-extra-member", False),
+        ("duplicate ZIP member", "native-duplicate-member", False),
+        ("unsafe ZIP path", "native-unsafe-path", False),
+    ]
+    for name, mutation, succeeds in native_custody_cases:
+        run_macos_native_build_custody_case(
+            bash=bash,
+            mock_bin=mock_bin,
+            block=macos_native_custody,
+            name=f"macOS native build custody: {name}",
             mutation=mutation,
             expected_success=succeeds,
         )
@@ -2182,11 +2585,365 @@ def check_windows_publish_boundary(workflow: str) -> None:
 
 def check_macos_publish_boundary(workflow: str) -> None:
     label = MACOS_WORKFLOW.name
+    builder = MACOS_INSTALLER_BUILDER.read_text(encoding="utf-8")
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    resolver = extract_job(workflow, "resolve-release", label)
     custody = extract_job(workflow, "source-custody", label)
     prepare = extract_job(workflow, "prepare-installer-inputs", label)
     preflight = extract_job(workflow, "credential-preflight", label)
     build = extract_job(workflow, "build", label)
+    validate = extract_job(workflow, "validate", label)
     publisher = extract_job(workflow, "publish", label)
+
+    for needle in (
+        "for home in /Users/* /Users/.[!.]* /Users/..?*; do",
+        "minimum_human_uid=501",
+        "maximum_human_uid=4294967295",
+        'while IFS= read -r account; do',
+        '/usr/bin/dscl -plist . -read "/Users/${account}" UniqueID',
+        "'dsAttrTypeStandard:NFSHomeDirectory'",
+        '/usr/bin/plutil -lint "$plist_path"',
+        '/usr/libexec/PlistBuddy -c "Print ${plist_entry}:0"',
+        '/usr/libexec/PlistBuddy -c "Print ${plist_entry}:1"',
+        'case "${3-}" in',
+        'supports only the current system volume (/)',
+        'fail_uninspectable_home() {',
+        'Make the declared home available and inspectable',
+        'account_uid_sign=negative',
+        'account_uid_digits=$(printf \'%s\' "$account_uid" | /usr/bin/wc -c',
+        'if [ "$account_uid_digits" -gt 10 ]; then',
+        'if [ "$account_uid" -gt "$maximum_human_uid" ]; then',
+        'UID outside the supported unsigned 32-bit range',
+        'inspection_required=0',
+        '[ "$account_uid" -ge "$minimum_human_uid" ]',
+        'inspect_home_once "$account_home" "$inspection_required"',
+        'directory_listing="${preinstall_state}/directory-listing"',
+        'entry_matches="${preinstall_state}/entry-matches"',
+        "list_standard_directory() {",
+        "standard_entry_present() {",
+        "standard_leaf_present() {",
+        'if [ -L /Users ] || [ ! -d /Users ]; then',
+        'LC_ALL=C /bin/ls -1A /Users > "$directory_listing"',
+        'LC_ALL=C /bin/ls -1A "$listed_directory"',
+        'LC_ALL=C /usr/bin/grep -Fix -e "$entry_name" "$directory_listing"',
+        '> "$entry_matches"',
+        'entry_match_count=$(/usr/bin/wc -l < "$entry_matches" |',
+        'if [ "$entry_match_count" -ne 1 ]; then',
+        'entry_match_status=$?',
+        'if [ "$entry_match_status" -ne 1 ]; then',
+        "found multiple ASCII-case-insensitive entries matching",
+        "plist_capture_sentinel='__TR300_PLIST_CAPTURE_END__'",
+        "plist_framed=$(",
+        'printf \'%s\' "$plist_capture_sentinel"',
+        'plist_with_terminator=${plist_framed%"$plist_capture_sentinel"}',
+        'single_plist_value=${plist_with_terminator%"$plist_newline"}',
+        'account_uid=$single_plist_value',
+        'account_home=$single_plist_value',
+    ):
+        require(builder, needle, f"{label} preinstall home resolution")
+    users_type_index = builder.index('if [ -L /Users ] || [ ! -d /Users ]; then')
+    users_listing_index = builder.index(
+        'LC_ALL=C /bin/ls -1A /Users > "$directory_listing"'
+    )
+    users_glob_index = builder.index(
+        "for home in /Users/* /Users/.[!.]* /Users/..?*; do"
+    )
+    if not users_type_index < users_listing_index < users_glob_index:
+        raise AssertionError(
+            f"{label}: /Users type/list custody does not precede conventional-home globs"
+        )
+    directory_list_index = builder.index("list_standard_directory() {")
+    entry_present_index = builder.index("standard_entry_present() {")
+    leaf_present_index = builder.index("standard_leaf_present() {")
+    entry_grep_index = builder.index(
+        'LC_ALL=C /usr/bin/grep -Fix -e "$entry_name" "$directory_listing"'
+    )
+    entry_count_index = builder.index(
+        'entry_match_count=$(/usr/bin/wc -l < "$entry_matches" |'
+    )
+    entry_status_index = builder.index("entry_match_status=$?", entry_count_index)
+    if not (
+        directory_list_index
+        < entry_present_index
+        < entry_grep_index
+        < entry_count_index
+        < entry_status_index
+        < leaf_present_index
+    ):
+        raise AssertionError(f"{label}: fixed-depth entry classification is out of order")
+    plist_sentinel_index = builder.index(
+        "plist_capture_sentinel='__TR300_PLIST_CAPTURE_END__'"
+    )
+    plist_framed_index = builder.index("plist_framed=$(")
+    plist_terminator_index = builder.index(
+        'plist_with_terminator=${plist_framed%"$plist_capture_sentinel"}'
+    )
+    plist_global_index = builder.index(
+        'single_plist_value=${plist_with_terminator%"$plist_newline"}'
+    )
+    uid_read_index = builder.index(
+        "read_single_plist_string \"$record_plist\" \\\n"
+        "        'dsAttrTypeStandard:UniqueID'"
+    )
+    uid_assignment_index = builder.index("account_uid=$single_plist_value", uid_read_index)
+    home_read_index = builder.index(
+        "read_single_plist_string \"$record_plist\" \\\n"
+        "        'dsAttrTypeStandard:NFSHomeDirectory'",
+        uid_assignment_index,
+    )
+    home_assignment_index = builder.index(
+        "account_home=$single_plist_value", home_read_index
+    )
+    if not (
+        plist_sentinel_index
+        < plist_framed_index
+        < plist_terminator_index
+        < plist_global_index
+        < uid_read_index
+        < uid_assignment_index
+        < home_read_index
+        < home_assignment_index
+    ):
+        raise AssertionError(f"{label}: sentinel-framed plist assignment is out of order")
+    uid_normalize_index = builder.index(
+        "account_uid=$(printf '%s\\n' \"$account_uid\" | /usr/bin/sed 's/^0*//;s/^$/0/')"
+    )
+    uid_digits_index = builder.index(
+        'account_uid_digits=$(printf \'%s\' "$account_uid" | /usr/bin/wc -c',
+        uid_normalize_index,
+    )
+    uid_width_branch_index = builder.index(
+        'if [ "$account_uid_digits" -gt 10 ]; then', uid_digits_index
+    )
+    uid_range_branch_index = builder.index(
+        'if [ "$account_uid" -gt "$maximum_human_uid" ]; then',
+        uid_width_branch_index,
+    )
+    uid_inspection_index = builder.index(
+        'inspection_required=0', uid_range_branch_index
+    )
+    if not (
+        uid_normalize_index
+        < uid_digits_index
+        < uid_width_branch_index
+        < uid_range_branch_index
+        < uid_inspection_index
+    ):
+        raise AssertionError(f"{label}: unsigned UID validation is out of order")
+    uid_range_diagnostic = "UID outside the supported unsigned 32-bit range"
+    if builder.count(uid_range_diagnostic) != 2:
+        raise AssertionError(
+            f"{label}: both unsupported-positive-UID branches must fail closed"
+        )
+    uid_validation_slice = builder[uid_digits_index:uid_inspection_index]
+    if "continue" in uid_validation_slice or uid_validation_slice.count("fail_closed") != 2:
+        raise AssertionError(
+            f"{label}: unsupported positive UIDs can bypass fail-closed validation"
+        )
+    for forbidden_assignment in (
+        "account_uid=$(read_single_plist_string",
+        "account_home=$(read_single_plist_string",
+    ):
+        if forbidden_assignment in builder:
+            raise AssertionError(
+                f"{label}: plist value lost through nested command substitution"
+            )
+    for forbidden in (
+        "SUDO_USER",
+        "SUDO_UID",
+        "console_user=",
+        "/usr/bin/awk '{print $2}'",
+        "plutil -extract",
+        " -expect ",
+    ):
+        if forbidden not in builder:
+            continue
+        raise AssertionError(
+            f"{label}: preinstall relies on unsafe invocation/home parsing: {forbidden!r}"
+        )
+
+    ci_test = extract_job(ci_workflow, "test", CI_WORKFLOW.name)
+    preinstall_behavior = extract_named_step(
+        ci_test,
+        "Validate direct-PKG preinstall behavior",
+        f"{CI_WORKFLOW.name} macOS preinstall behavior",
+    )
+    for needle in (
+        "custom_fixture_user=tr300pkgcustom",
+        "custom_fixture_uid=3000000000",
+        "The project supports systems older than macOS 12",
+        "test -x /usr/libexec/PlistBuddy",
+        "preinstall uses plist flags unavailable before macOS 12",
+        'custom_fixture_home=$(mktemp -d "/private/tmp/tr300 pkg custom home.XXXXXXXX")',
+        'NFSHomeDirectory "$custom_fixture_home"',
+        '/usr/bin/dscl -plist . -read "/Users/$custom_fixture_user"',
+        '/usr/bin/plutil -lint "$custom_fixture_plist"',
+        "'Print :dsAttrTypeStandard\\:NFSHomeDirectory:0'",
+        "'Print :dsAttrTypeStandard\\:NFSHomeDirectory:1'",
+        'pkgbuild --root "$fixture_payload" --scripts "$fixture_scripts"',
+        'cmp "$preinstall" "$fixture_expanded/Scripts/preinstall"',
+        '/usr/bin/env -u SUDO_USER -u SUDO_UID',
+        '/usr/sbin/installer -pkg "$fixture_pkg" -target /',
+        "custom-home managed evidence was incorrectly accepted by PackageKit",
+        "Rerun the managed installer to refresh this copy to a receipt-aware version",
+        'test ! -e "$fixture_install_root/payload-marker"',
+        'pkgutil --pkg-info "$fixture_identifier"',
+        "The same exact package must be otherwise viable",
+        'sudo pkgutil --forget "$fixture_identifier"',
+        'hdiutil create -size 64m -fs HFS+ -volname TR300PkgAltTarget',
+        '/usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount"',
+        "alternate-volume package target was incorrectly accepted",
+        "supports only the current system volume (/)",
+        'pkgutil --volume "$fixture_alt_mount" --pkg-info "$fixture_identifier"',
+        "alternate-volume rejection left a target receipt behind",
+        "uninspectable eligible home was incorrectly accepted by PackageKit",
+        'could not inspect eligible local home',
+        "Make the declared home available and inspectable",
+        "uninspectable-home rejection left its fixture receipt behind",
+        'grep -Eq \'^nobody[[:space:]]+-2$\' "$runner_uid_inventory"',
+        'sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"',
+        'rmdir "$custom_fixture_home/.config/tr300"',
+        "test -x /usr/bin/sandbox-exec",
+        '(deny file-read-data (literal "/Users"))',
+        "unlistable /Users root was incorrectly accepted by preinstall",
+        'hidden_home="/Users/.tr300-pkg-preinstall-',
+        'double_dot_home="/Users/..tr300-pkg-preinstall-',
+        '"$hidden_home|$hidden_receipt|$hidden_log"',
+        '"$double_dot_home|$double_dot_receipt|$double_dot_log"',
+        "dot-prefixed home was incorrectly accepted",
+        "broken managed parent was incorrectly accepted by preinstall",
+        "inaccessible managed parent was incorrectly accepted by preinstall",
+        "case-variant managed binary was incorrectly accepted",
+        "case-variant managed receipt was incorrectly accepted",
+        "hdiutil create -size 64m -fs HFSX -volname TR300CaseFold",
+        'mkdir -p "$casefold_home/.cargo/bin" "$casefold_home/.CARGO/BIN"',
+        "dual folded-name managed owner was incorrectly accepted",
+        'found multiple ASCII-case-insensitive entries matching ".cargo"',
+        'test "$(shasum -a 256 "$casefold_binary" | awk \'{print $1}\')" =',
+        "fixture_newline_framed=$(printf '\\nx')",
+        'trailing_fixture_home="${custom_fixture_home}${fixture_newline}"',
+        'NFSHomeDirectory "$trailing_fixture_home"',
+        "fixture_plist_sentinel='__TR300_CI_PLIST_CAPTURE_END__'",
+        'fixture_plist_with_terminator=${fixture_plist_framed%"$fixture_plist_sentinel"}',
+        '"${trailing_fixture_home}${fixture_newline}"',
+        "trailing-newline eligible home was incorrectly accepted by PackageKit",
+        '"$custom_fixture_newline_log"',
+        'test "$(shasum -a 256 "$custom_fixture_receipt" | awk \'{print $1}\')" =',
+        "trailing-newline rejection left its fixture receipt behind",
+        '"4294967296:$custom_fixture_out_of_range_log"',
+        '"10000000000:$custom_fixture_too_wide_uid_log"',
+        'UniqueID "$malformed_uid"',
+        "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit",
+        "UID outside the supported unsigned 32-bit range",
+        "malformed UID $malformed_uid left its fixture receipt behind",
+    ):
+        require(preinstall_behavior, needle, f"{CI_WORKFLOW.name} custom-home PackageKit fixture")
+    newline_value_index = preinstall_behavior.index(
+        "fixture_newline_framed=$(printf '\\nx')"
+    )
+    newline_ds_index = preinstall_behavior.index(
+        'NFSHomeDirectory "$trailing_fixture_home"', newline_value_index
+    )
+    newline_sentinel_index = preinstall_behavior.index(
+        "fixture_plist_sentinel='__TR300_CI_PLIST_CAPTURE_END__'",
+        newline_ds_index,
+    )
+    newline_install_index = preinstall_behavior.index(
+        '"$custom_fixture_newline_log" 2>&1', newline_sentinel_index
+    )
+    newline_hash_index = preinstall_behavior.index(
+        'shasum -a 256 "$custom_fixture_receipt"', newline_install_index
+    )
+    newline_receipt_index = preinstall_behavior.index(
+        "trailing-newline rejection left its fixture receipt behind",
+        newline_hash_index,
+    )
+    if not (
+        newline_value_index
+        < newline_ds_index
+        < newline_sentinel_index
+        < newline_install_index
+        < newline_hash_index
+        < newline_receipt_index
+    ):
+        raise AssertionError(f"{CI_WORKFLOW.name}: trailing-newline fixture is out of order")
+    valid_uid_index = preinstall_behavior.index("custom_fixture_uid=3000000000")
+    valid_uid_write_index = preinstall_behavior.index(
+        'UniqueID "$custom_fixture_uid"', valid_uid_index
+    )
+    valid_uid_read_index = preinstall_behavior.index(
+        'test "$(/usr/bin/id -u "$custom_fixture_user")" = "$custom_fixture_uid"',
+        valid_uid_write_index,
+    )
+    valid_uid_packagekit_index = preinstall_behavior.index(
+        '/usr/sbin/installer -pkg "$fixture_pkg" -target /', valid_uid_read_index
+    )
+    malformed_uid_loop_index = preinstall_behavior.index(
+        "for malformed_uid_case in \\", valid_uid_packagekit_index
+    )
+    malformed_uid_write_index = preinstall_behavior.index(
+        'UniqueID "$malformed_uid"', malformed_uid_loop_index
+    )
+    malformed_uid_packagekit_index = preinstall_behavior.index(
+        '/usr/sbin/installer -pkg "$fixture_pkg" -target /', malformed_uid_write_index
+    )
+    malformed_uid_diagnostic_index = preinstall_behavior.index(
+        "UID outside the supported unsigned 32-bit range",
+        malformed_uid_packagekit_index,
+    )
+    malformed_uid_receipt_index = preinstall_behavior.index(
+        "malformed UID $malformed_uid left its fixture receipt behind",
+        malformed_uid_diagnostic_index,
+    )
+    malformed_uid_cleanup_index = preinstall_behavior.index(
+        'sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"',
+        malformed_uid_receipt_index,
+    )
+    if not (
+        valid_uid_index
+        < valid_uid_write_index
+        < valid_uid_read_index
+        < valid_uid_packagekit_index
+        < malformed_uid_loop_index
+        < malformed_uid_write_index
+        < malformed_uid_packagekit_index
+        < malformed_uid_diagnostic_index
+        < malformed_uid_receipt_index
+        < malformed_uid_cleanup_index
+    ):
+        raise AssertionError(f"{CI_WORKFLOW.name}: UInt32 UID fixtures are out of order")
+
+    resolver_executable = extract_named_run(
+        resolver,
+        "Resolve a trusted source before Apple credential use",
+        f"{label} resolver",
+    )
+    for needle in (
+        "WORKFLOW_SHA: ${{ github.sha }}",
+        'remote_main=$(gh api \\',
+        '"repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)',
+        '[[ "$remote_main" =~ ^[0-9a-f]{40}$ ]]',
+        '[[ "$WORKFLOW_SHA" == "$remote_main" && "$source_sha" == "$remote_main" ]]',
+        "refusing source outside the protected main tip",
+    ):
+        require(resolver, needle, f"{label} protected-main source binding")
+    protected_main_index = resolver_executable.index(
+        'remote_main=$(gh api \\\n'
+        '  "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)'
+    )
+    source_output_index = resolver_executable.index('echo "source_sha=$source_sha"')
+    if protected_main_index > source_output_index:
+        raise AssertionError(f"{label}: protected-main equality runs after custody outputs")
+    require(
+        preflight,
+        "needs: [resolve-release, source-custody]",
+        f"{label} credential preflight resolver dependency",
+    )
+    require(
+        build,
+        "needs: [resolve-release, source-custody, prepare-installer-inputs, credential-preflight]",
+        f"{label} build resolver dependency",
+    )
 
     if workflow.count("contents: write") != 1:
         raise AssertionError(
@@ -2207,6 +2964,61 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "artifact_digest: ${{ steps.trusted-upload.outputs.artifact-digest }}",
         f"{label} normalized artifact digest output",
     )
+    for needle in (
+        "managed_installer_sha256: ${{ steps.custody.outputs.managed_installer_sha256 }}",
+        "managed_installer_size: ${{ steps.custody.outputs.managed_installer_size }}",
+        "dist_installer_sha256: ${{ steps.custody.outputs.dist_installer_sha256 }}",
+        "dist_installer_size: ${{ steps.custody.outputs.dist_installer_size }}",
+        "aarch64_archive_sha256: ${{ steps.custody.outputs.aarch64_archive_sha256 }}",
+        "aarch64_archive_size: ${{ steps.custody.outputs.aarch64_archive_size }}",
+        "x86_64_archive_sha256: ${{ steps.custody.outputs.x86_64_archive_sha256 }}",
+        "x86_64_archive_size: ${{ steps.custody.outputs.x86_64_archive_size }}",
+        "prepared_artifact_name=tr300-prepared-release-assets",
+        'artifact_record "$work_directory/artifacts-before.json" "$prepared_artifact_name"',
+        '"$prepared_run_id" == "$RELEASE_RUN_ID"',
+        '"$prepared_repository_id" == "$repository_id"',
+        '"$prepared_head_repository_id" == "$repository_id"',
+        '"$prepared_head_branch" == "$RELEASE_TAG"',
+        '"$prepared_head_sha" == "$EXPECTED_SHA"',
+        "actions/artifacts/$prepared_artifact_id/zip",
+        '[[ "sha256:$prepared_zip_sha" == "$prepared_artifact_digest" ]]',
+        "selected_names = {",
+        '"tr300-installer.sh",',
+        '"tr300-dist-installer.sh",',
+        '"tr300-aarch64-apple-darwin.tar.xz",',
+        '"tr300-x86_64-apple-darwin.tar.xz",',
+        '"__tr300-asset-sha256s",',
+        "unexpected prepared Release artifact members",
+        "os.O_EXCL",
+        "os.O_NOFOLLOW",
+        "stat.S_ISLNK(mode)",
+        "__tr300-asset-sha256s",
+        "'^[0-9a-f]{64}  tr300-installer\\.sh$'",
+        "'^[0-9a-f]{64}  tr300-dist-installer\\.sh$'",
+        'managed_manifest_sha256=$(awk',
+        '$2 == "tr300-installer.sh" { print $1 }',
+        '$2 == "tr300-dist-installer.sh" { print $1 }',
+        'managed_installer_sha256=$(sha256sum -- "$managed_installer")',
+        '"$managed_installer_sha256" == "$managed_manifest_sha256"',
+        'dist_installer_sha256=$(sha256sum -- "$dist_installer")',
+        '"$dist_installer_sha256" == "$dist_manifest_sha256"',
+        'grep -Fq "tr300_dist_installer_sha256=\'${dist_installer_sha256}\'"',
+        'archive_manifest_sha256=$(awk -v name="$archive_name"',
+        '"$archive_sha256" == "$archive_manifest_sha256"',
+        'prepared_after=$(artifact_record',
+        '[[ "$prepared_after" == "$prepared_before" ]]',
+        'echo "managed_installer_sha256=$managed_installer_sha256"',
+        'echo "managed_installer_size=$managed_installer_size"',
+        'echo "dist_installer_sha256=$dist_installer_sha256"',
+        'echo "dist_installer_size=$dist_installer_size"',
+        'echo "aarch64_archive_sha256=$aarch64_archive_sha256"',
+        'echo "aarch64_archive_size=$aarch64_archive_size"',
+        'echo "x86_64_archive_sha256=$x86_64_archive_sha256"',
+        'echo "x86_64_archive_size=$x86_64_archive_size"',
+    ):
+        require(custody, needle, f"{label} managed-wrapper source custody")
+    for asset in PREPARED_RELEASE_ARTIFACT_MEMBERS:
+        require(custody, asset, f"{label} prepared Release inventory")
     require(prepare, f"uses: {CHECKOUT_ACTION}", f"{label} read-only prep")
     require(prepare, f"uses: {DOWNLOAD_ARTIFACT_ACTION}", f"{label} read-only prep")
     require(prepare, f"uses: {UPLOAD_ARTIFACT_ACTION}", f"{label} read-only prep")
@@ -2263,14 +3075,375 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "codesign --force --identifier com.qubetx.tr300",
         "pkgbuild --root",
         "xcrun notarytool submit",
-        "tr300-pkg-rollback",
-        "tr300-migration-probe",
+        'install -m 0755 "$PREPARED_DIRECTORY/preinstall" "$package_scripts/preinstall"',
+        'pkgutil --expand-full "$direct_package" "$bound_package"',
+        'cmp "$PREPARED_DIRECTORY/preinstall" "$bound_package/Scripts/preinstall"',
     ):
         require(secret_step, needle, f"{label} inline system-tool builder")
+    for forbidden in (
+        "tr300-pkg-rollback",
+        "tr300-migration-probe",
+        "macos-pkg-rollback",
+        "$package_scripts/postinstall",
+    ):
+        if forbidden in prepare or forbidden in build:
+            raise AssertionError(
+                f"{label}: direct PKG retained post-payload migration input {forbidden!r}"
+            )
+
+    native_validation = extract_named_step(
+        validate,
+        "Validate, install, and exercise the universal package",
+        f"{label} native validation",
+    )
+    require(validate, "needs: [build, source-custody]", f"{label} native wrapper custody needs")
+    if "actions/download-artifact" in validate:
+        raise AssertionError(f"{label}: native validation regained mutable-name download")
+    if validate.count(f"uses: {UPLOAD_ARTIFACT_ACTION}") != 1:
+        raise AssertionError(f"{label}: native validation must emit two matrix proof artifacts")
+    for arch in ("arm64", "x86_64"):
+        require(validate, f"arch: {arch}", f"{label} native validation architecture")
+    for needle in (
+        "GH_TOKEN: ${{ github.token }}",
+        "CURRENT_RUN_ID: ${{ github.run_id }}",
+        "CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}",
+        "MATRIX_ARCH: ${{ matrix.arch }}",
+        "BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}",
+        "BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}",
+        "VALIDATION_PROOF: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json",
+        '[[ "$(uname -m)" == "$MATRIX_ARCH" ]]',
+        "validate_build_artifact() {",
+        '.id == $id and .name == "tr300-universal-macos-installer"',
+        '.workflow_run.id == $run',
+        '.workflow_run.repository_id == $repository',
+        '.workflow_run.head_repository_id == $repository',
+        '.workflow_run.head_sha == $sha',
+        'actions/artifacts/$BUILD_ARTIFACT_ID"',
+        'actions/artifacts/$BUILD_ARTIFACT_ID/zip"',
+        '[[ "$artifact_zip_sha256" == "$BUILD_ARTIFACT_DIGEST" ]]',
+        "unexpected native-validation artifact members",
+        "native-validation artifact expands beyond the custody limit",
+        "os.O_EXCL",
+        "os.O_NOFOLLOW",
+        "stat.S_ISLNK(mode)",
+        'build_record_before=$(build_artifact_record "$build_artifact_before")',
+        'build_record_after=$(build_artifact_record "$build_artifact_after")',
+        '[[ "$build_record_after" == "$build_record_before" ]]',
+        "schema_version: 1",
+        "workflow_run_attempt: $attempt",
+        "build_artifact_digest: $build_digest",
+        "managed_installer: {digest: $managed_digest, size: $managed_size}",
+        "dist_installer: {digest: $dist_digest, size: $dist_size}",
+        "aarch64_archive: {digest: $arm_digest, size: $arm_size}",
+        "x86_64_archive: {digest: $intel_digest, size: $intel_size}",
+        'pkgutil --expand-full "$pkg" "$expanded_pkg"',
+        'lsbom -s -f "$expanded_pkg/Bom"',
+        "unexpected direct-PKG payload inventory",
+        "unexpected direct-PKG Scripts inventory",
+        'test -f "$expanded_pkg/Scripts/preinstall"',
+        'test ! -L "$expanded_pkg/Scripts/preinstall"',
+        "postinstall tr300-pkg-rollback tr300-migration-probe",
+        'rm -rf "$expanded_pkg"',
+        'custom_fixture_home=$(mktemp -d \\',
+        '"/private/tmp/tr300 signed pkg custom home.XXXXXXXX")',
+        "custom_fixture_uid=3000000000",
+        'UniqueID "$custom_fixture_uid"',
+        'test "$(/usr/bin/id -u "$custom_fixture_user")" = "$custom_fixture_uid"',
+        '/usr/bin/dscl -plist . -read "/Users/$custom_fixture_user"',
+        '/usr/bin/plutil -lint "$custom_fixture_plist"',
+        "'Print :dsAttrTypeStandard\\:NFSHomeDirectory:0'",
+        '/usr/bin/env -u SUDO_USER -u SUDO_UID',
+        '/usr/sbin/installer -pkg "$pkg" -target /',
+        "signed PKG incorrectly accepted custom-home managed evidence",
+        "custom-home rejection left the signed payload behind",
+        "custom-home rejection left the signed package receipt behind",
+        'sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"',
+        'rmdir "$custom_fixture_home/.config/tr300"',
+        'baseline_managed_directory="$RUNNER_TEMP/tr300-managed-v422"',
+        "baseline_managed_digest=eed23f5e71bd3fa455bd439e4313f596b99067d5145fbd5e01652ce4cb1c1751",
+        "baseline_managed_size=14904",
+        "baseline_dist_digest=497b238d725d61145888d430a1137cb5eb2362341fe0b3e4af0b8b81bd890444",
+        "baseline_dist_size=55485",
+        "baseline_archive_digest=4b4ab3e05dc3719cac9d1e07a3202616db359f9d3c8221625362d805ef3f226c",
+        "baseline_archive_size=1390748",
+        "baseline_archive_digest=127a8a52c3b5c5db257dcfc81b0ab96972bf3a8589fc8a3af7cc00cef96ec739",
+        "baseline_archive_size=1563320",
+        'gh api "repos/$REPOSITORY/releases/tags/v4.2.2"',
+        "db0f538c82961569a7118b105a20e967b15476f0 false",
+        'baseline_wrapper_before=$(release_asset_record',
+        '"$baseline_managed_release" tr300-installer.sh)',
+        'baseline_dist_before=$(release_asset_record',
+        '"$baseline_managed_release" tr300-dist-installer.sh)',
+        'baseline_archive_before=$(release_asset_record',
+        '"$baseline_managed_release" "$baseline_archive_name")',
+        '"$baseline_wrapper_id" =~ ^[1-9][0-9]*$',
+        '"$baseline_dist_record_digest" == "sha256:$baseline_dist_digest"',
+        '"$baseline_archive_record_digest" == "sha256:$baseline_archive_digest"',
+        '--pattern tr300-installer.sh --dir "$baseline_managed_directory"',
+        '[[ "$baseline_managed_actual" == "$baseline_managed_digest" ]]',
+        'baseline_checksum_bin="$baseline_managed_directory/checksum-bin"',
+        'baseline_checksum_shim="$baseline_checksum_bin/sha256sum"',
+        'set -C',
+        'exec /usr/bin/shasum -a 256 "$@"',
+        '[[ -f "$baseline_checksum_shim" && ! -L "$baseline_checksum_shim"',
+        '"$baseline_checksum_shim" -b "$checksum_probe"',
+        '"$shim_probe" =~ ^[0-9a-f]{64}$',
+        '"$resolved_checksum_shim" == "$baseline_checksum_shim"',
+        'PATH="$baseline_checksum_bin:$PATH" sh "$baseline_managed_installer"',
+        'baseline_managed_after="$baseline_managed_directory/release-after.json"',
+        '"$baseline_managed_after" tr300-dist-installer.sh)',
+        '"$baseline_managed_after" "$baseline_archive_name")',
+        '"$baseline_wrapper_after" == "$baseline_wrapper_before"',
+        '"$baseline_dist_after" == "$baseline_dist_before"',
+        '"$baseline_archive_after" == "$baseline_archive_before"',
+        'test "$("$HOME/.cargo/bin/tr300" --version)" = \'tr300 4.2.2\'',
+        "Rerun the managed installer to refresh this copy to a receipt-aware version",
+        'sh "$managed_installer"',
+        'test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"',
+        "printf '2\\ny\\n' | \"$HOME/.cargo/bin/tr300\" uninstall",
+        "gh release download v4.2.2",
+        "baseline_pkg_sha256=717f233eedfac679a507bc9ce2b16ba195f050e289295665a8c68d83ba10c979",
+        "baseline_pkg_size=7571628",
+        "baseline_pkg_sidecar_sha256=1530d1f9fd73a7d7ab84de30fe4929b3ab5ecacc0715f8c461cd0ce2c76b5aec",
+        "baseline_pkg_sidecar_size=99",
+        '.targetCommitish == "db0f538c82961569a7118b105a20e967b15476f0"',
+        '.isDraft == false and .isPrerelease == false',
+        'select(.name == "tr300-universal-apple-darwin.pkg")',
+        'select(.name == "tr300-universal-apple-darwin.pkg.sha256")',
+        '.digest == $pkg_digest and .size == $pkg_size',
+        '.digest == $sidecar_digest and .size == $sidecar_size',
+        '"$baseline_pkg_actual_sha256" == "$baseline_pkg_sha256"',
+        '"$baseline_sidecar_actual_sha256" == "$baseline_pkg_sidecar_sha256"',
+        'sudo installer -pkg "$baseline_pkg" -target /',
+        'test "$(/usr/local/bin/tr300 --version)" = \'tr300 4.2.2\'',
+        "SOURCE_MANAGED_INSTALLER_SHA256: ${{ needs.source-custody.outputs.managed_installer_sha256 }}",
+        "SOURCE_MANAGED_INSTALLER_SIZE: ${{ needs.source-custody.outputs.managed_installer_size }}",
+        "SOURCE_DIST_INSTALLER_SHA256: ${{ needs.source-custody.outputs.dist_installer_sha256 }}",
+        "SOURCE_DIST_INSTALLER_SIZE: ${{ needs.source-custody.outputs.dist_installer_size }}",
+        "SOURCE_AARCH64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.aarch64_archive_sha256 }}",
+        "SOURCE_AARCH64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.aarch64_archive_size }}",
+        "SOURCE_X86_64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.x86_64_archive_sha256 }}",
+        "SOURCE_X86_64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.x86_64_archive_size }}",
+        "release_asset_record() {",
+        '[.id, .digest, .size] | @tsv',
+        'gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG"',
+        '.tag_name == $tag and .target_commitish == $sha',
+        '.draft == $draft and .prerelease == false',
+        'validate_release_identity "$candidate_managed_release" "$RELEASE_TAG"',
+        '"$EXPECTED_SHA" true',
+        'candidate_wrapper_before=$(release_asset_record',
+        '"$candidate_managed_release" tr300-installer.sh)',
+        'candidate_dist_before=$(release_asset_record',
+        '"$candidate_managed_release" tr300-dist-installer.sh)',
+        'candidate_archive_before=$(release_asset_record',
+        '"$candidate_managed_release" "$candidate_archive_name")',
+        '"$candidate_dist_record_digest" == "sha256:$SOURCE_DIST_INSTALLER_SHA256"',
+        '"$candidate_archive_record_digest" == "sha256:$candidate_archive_digest"',
+        'candidate_managed_sha256=$(shasum -a 256 "$managed_installer"',
+        '"$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256"',
+        '"$candidate_managed_size" == "$SOURCE_MANAGED_INSTALLER_SIZE"',
+        'grep -Fq "tr300_dist_installer_sha256=\'${SOURCE_DIST_INSTALLER_SHA256}\'"',
+        'candidate_managed_after="$managed_directory/release-after.json"',
+        '"$candidate_managed_after" tr300-dist-installer.sh)',
+        '"$candidate_managed_after" "$candidate_archive_name")',
+        '"$candidate_wrapper_after" == "$candidate_wrapper_before"',
+        '"$candidate_dist_after" == "$candidate_dist_before"',
+        '"$candidate_archive_after" == "$candidate_archive_before"',
+    ):
+        require(native_validation, needle, f"{label} native package inventory/upgrade")
+    native_uint32_uid_index = native_validation.index("custom_fixture_uid=3000000000")
+    native_uint32_write_index = native_validation.index(
+        'UniqueID "$custom_fixture_uid"', native_uint32_uid_index
+    )
+    native_uint32_read_index = native_validation.index(
+        'test "$(/usr/bin/id -u "$custom_fixture_user")" = "$custom_fixture_uid"',
+        native_uint32_write_index,
+    )
+    native_uint32_packagekit_index = native_validation.index(
+        '/usr/sbin/installer -pkg "$pkg" -target /', native_uint32_read_index
+    )
+    if not (
+        native_uint32_uid_index
+        < native_uint32_write_index
+        < native_uint32_read_index
+        < native_uint32_packagekit_index
+    ):
+        raise AssertionError(f"{label}: native UInt32 UID fixture is out of order")
+    if re.search(r'^sh "\$baseline_managed_installer"$', native_validation, re.MULTILINE):
+        raise AssertionError(f"{label}: historical wrapper escaped its checksum shim")
+    for needle in (
+        "name: Upload exact native validation proof",
+        "name: tr300-macos-native-validation-${{ matrix.arch }}-${{ github.run_attempt }}",
+        "path: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json",
+    ):
+        require(validate, needle, f"{label} native matrix proof upload")
+    build_artifact_before_index = native_validation.index(
+        'actions/artifacts/$BUILD_ARTIFACT_ID"'
+    )
+    build_zip_index = native_validation.index(
+        'actions/artifacts/$BUILD_ARTIFACT_ID/zip"', build_artifact_before_index
+    )
+    package_trust_index = native_validation.index(
+        "shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256",
+        build_zip_index,
+    )
+    build_artifact_after_index = native_validation.index(
+        'build_record_after=$(build_artifact_record "$build_artifact_after")',
+        package_trust_index,
+    )
+    proof_write_index = native_validation.index(
+        "schema_version: 1", build_artifact_after_index
+    )
+    if not (
+        build_artifact_before_index
+        < build_zip_index
+        < package_trust_index
+        < build_artifact_after_index
+        < proof_write_index
+    ):
+        raise AssertionError(f"{label}: native build custody/proof sequence is out of order")
+    if native_validation.index(
+        'pkgutil --expand-full "$pkg" "$expanded_pkg"'
+    ) > native_validation.index('sudo installer -pkg "$pkg" -target /'):
+        raise AssertionError(f"{label}: native package inventory runs after installation")
+    managed_baseline_index = native_validation.index('sh "$baseline_managed_installer"')
+    baseline_record_before_index = native_validation.index(
+        'baseline_wrapper_before=$(release_asset_record'
+    )
+    baseline_shim_index = native_validation.index(
+        'baseline_checksum_shim="$baseline_checksum_bin/sha256sum"',
+        baseline_record_before_index,
+    )
+    baseline_record_after_index = native_validation.index(
+        'baseline_managed_after="$baseline_managed_directory/release-after.json"',
+        managed_baseline_index,
+    )
+    if not (
+        baseline_record_before_index
+        < baseline_shim_index
+        < managed_baseline_index
+        < baseline_record_after_index
+    ):
+        raise AssertionError(
+            f"{label}: v4.2.2 wrapper/raw/archive record sandwich is out of order"
+        )
+    managed_rejection_index = native_validation.index(
+        'sudo installer -pkg "$pkg" -target /', managed_baseline_index
+    )
+    managed_refresh_index = native_validation.index(
+        'sh "$managed_installer"', managed_rejection_index
+    )
+    candidate_release_index = native_validation.index(
+        'gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG"',
+        managed_rejection_index,
+    )
+    candidate_byte_index = native_validation.index(
+        '"$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256"',
+        candidate_release_index,
+    )
+    candidate_record_before_index = native_validation.index(
+        'candidate_wrapper_before=$(release_asset_record', candidate_release_index
+    )
+    candidate_record_after_index = native_validation.index(
+        'candidate_managed_after="$managed_directory/release-after.json"',
+        managed_refresh_index,
+    )
+    managed_complete_index = native_validation.index(
+        "printf '2\\ny\\n' | \"$HOME/.cargo/bin/tr300\" uninstall",
+        managed_refresh_index,
+    )
+    fresh_pkg_index = native_validation.index(
+        'sudo installer -pkg "$pkg" -target /', managed_complete_index
+    )
+    if not (
+        managed_baseline_index
+        < managed_rejection_index
+        < candidate_release_index
+        < candidate_record_before_index
+        < candidate_byte_index
+        < managed_refresh_index
+        < candidate_record_after_index
+        < managed_complete_index
+        < fresh_pkg_index
+    ):
+        raise AssertionError(
+            f"{label}: public managed baseline recovery does not precede fresh PKG install"
+        )
+    baseline_install_index = native_validation.index('sudo installer -pkg "$baseline_pkg" -target /')
+    baseline_metadata_index = native_validation.index(
+        "baseline_pkg_sha256=717f233eedfac679a507bc9ce2b16ba195f050e289295665a8c68d83ba10c979"
+    )
+    baseline_download_index = native_validation.index(
+        "gh release download v4.2.2", baseline_metadata_index
+    )
+    baseline_bytes_index = native_validation.index(
+        '"$baseline_pkg_actual_sha256" == "$baseline_pkg_sha256"',
+        baseline_download_index,
+    )
+    baseline_sidecar_check_index = native_validation.index(
+        "shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256",
+        baseline_bytes_index,
+    )
+    baseline_signature_index = native_validation.index(
+        'baseline_signature=$(pkgutil --check-signature "$baseline_pkg"',
+        baseline_sidecar_check_index,
+    )
+    baseline_notary_index = native_validation.index(
+        'xcrun stapler validate "$baseline_pkg"', baseline_signature_index
+    )
+    if not (
+        baseline_metadata_index
+        < baseline_download_index
+        < baseline_bytes_index
+        < baseline_sidecar_check_index
+        < baseline_signature_index
+        < baseline_notary_index
+        < baseline_install_index
+    ):
+        raise AssertionError(
+            f"{label}: v4.2.2 native PKG pins do not precede trust and install checks"
+        )
+    candidate_upgrade_index = native_validation.index(
+        'sudo installer -pkg "$pkg" -target /', baseline_install_index
+    )
+    same_version_repair_index = native_validation.index(
+        'native_hash=$(shasum -a 256 /usr/local/bin/tr300'
+    )
+    if not baseline_install_index < candidate_upgrade_index < same_version_repair_index:
+        raise AssertionError(f"{label}: same-version repair precedes the v4.2.2 native upgrade")
 
     require(publisher, "permissions:\n      actions: read\n      contents: write", f"{label} publisher")
     require(publisher, "actions: read", f"{label} publisher artifact custody")
     require(publisher, "environment: release-publishing", f"{label} publisher environment")
+    require(
+        publisher,
+        "needs: [build, validate, source-custody]",
+        f"{label} publisher managed-wrapper custody needs",
+    )
+    require(
+        publisher,
+        "SOURCE_MANAGED_INSTALLER_SHA256: ${{ needs.source-custody.outputs.managed_installer_sha256 }}",
+        f"{label} publisher source-bound wrapper hash",
+    )
+    require(
+        publisher,
+        "SOURCE_MANAGED_INSTALLER_SIZE: ${{ needs.source-custody.outputs.managed_installer_size }}",
+        f"{label} publisher source-bound wrapper size",
+    )
+    for needle in (
+        "SOURCE_DIST_INSTALLER_SHA256: ${{ needs.source-custody.outputs.dist_installer_sha256 }}",
+        "SOURCE_DIST_INSTALLER_SIZE: ${{ needs.source-custody.outputs.dist_installer_size }}",
+        "SOURCE_AARCH64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.aarch64_archive_sha256 }}",
+        "SOURCE_AARCH64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.aarch64_archive_size }}",
+        "SOURCE_X86_64_ARCHIVE_SHA256: ${{ needs.source-custody.outputs.x86_64_archive_sha256 }}",
+        "SOURCE_X86_64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.x86_64_archive_size }}",
+    ):
+        require(publisher, needle, f"{label} publisher transitive source custody")
+    require(
+        publisher,
+        "CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}",
+        f"{label} publisher native-proof attempt binding",
+    )
     if "actions/checkout" in publisher:
         raise AssertionError(f"{label}: publisher must not check out repository source")
     uses = [
@@ -2322,8 +3495,95 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "release-patch-response.json",
         "patch_status=$?",
         "release-published.json",
+        '--arg managed_digest "sha256:$SOURCE_MANAGED_INSTALLER_SHA256"',
+        '--argjson managed_size "$SOURCE_MANAGED_INSTALLER_SIZE"',
+        '--arg dist_digest "sha256:$SOURCE_DIST_INSTALLER_SHA256"',
+        '--argjson dist_size "$SOURCE_DIST_INSTALLER_SIZE"',
+        '--arg arm_digest "sha256:$SOURCE_AARCH64_ARCHIVE_SHA256"',
+        '--argjson arm_size "$SOURCE_AARCH64_ARCHIVE_SIZE"',
+        '--arg intel_digest "sha256:$SOURCE_X86_64_ARCHIVE_SHA256"',
+        '--argjson intel_size "$SOURCE_X86_64_ARCHIVE_SIZE"',
+        '([.release_assets[] | select(.name == "tr300-installer.sh")] | length) == 1',
+        '.digest == $managed_digest and .size == $managed_size',
+        '([.release_assets[] | select(.name == "tr300-dist-installer.sh")] | length) == 1',
+        '.digest == $dist_digest and .size == $dist_size',
+        'select(.name == "tr300-aarch64-apple-darwin.tar.xz")',
+        '.digest == $arm_digest and .size == $arm_size',
+        'select(.name == "tr300-x86_64-apple-darwin.tar.xz")',
+        '.digest == $intel_digest and .size == $intel_size',
+        '([.assets[] | select(.name == "tr300-installer.sh")] | length) == 1',
+        '([.assets[] | select(.name == "tr300-dist-installer.sh")] | length) == 1',
+        'actions/runs/$CURRENT_RUN_ID/artifacts?per_page=100',
+        "proof_artifact_record() {",
+        "direct_proof_record() {",
+        "validate_native_proof() {",
+        'proof_name="tr300-macos-native-validation-${arch}-${CURRENT_RUN_ATTEMPT}"',
+        'proof_file="tr300-macos-native-validation-${arch}.json"',
+        'actions/artifacts/$proof_id"',
+        'actions/artifacts/$proof_id/zip"',
+        '[[ "sha256:$proof_zip_sha" == "$proof_digest" ]]',
+        "unexpected native proof members",
+        "unsafe native proof member",
+        '.workflow_run_id == $run and .workflow_run_attempt == $attempt',
+        '.build_artifact_id == $build_id',
+        '.build_artifact_digest == $build_digest',
+        '.managed_installer == {digest: $managed_digest, size: $managed_size}',
+        '.dist_installer == {digest: $dist_digest, size: $dist_size}',
+        '.aarch64_archive == {digest: $arm_digest, size: $arm_size}',
+        '.x86_64_archive == {digest: $intel_digest, size: $intel_size}',
+        'validate_native_proof "$proof_directory/$proof_file" "$arch"',
+        '[[ "$(direct_proof_record "$proof_after_metadata")" == "$proof_before" ]]',
     ):
         require(executable, needle, f"{label} Windows acceptance custody")
+    proof_inventory_index = executable.index(
+        'actions/runs/$CURRENT_RUN_ID/artifacts?per_page=100'
+    )
+    proof_validation_index = executable.index(
+        'validate_native_proof "$proof_directory/$proof_file" "$arch"',
+        proof_inventory_index,
+    )
+    manifest_custody_index = executable.index(
+        '([.release_assets[] | select(.name == "tr300-installer.sh")] | length) == 1'
+    )
+    manifest_transitive_indices = [
+        executable.index(
+            f'([.release_assets[] | select(.name == "{asset}")]',
+            manifest_custody_index,
+        )
+        for asset in (
+            "tr300-dist-installer.sh",
+            "tr300-aarch64-apple-darwin.tar.xz",
+            "tr300-x86_64-apple-darwin.tar.xz",
+        )
+    ]
+    draft_custody_index = executable.index(
+        '([.assets[] | select(.name == "tr300-installer.sh")] | length) == 1'
+    )
+    draft_transitive_indices = [
+        executable.index(
+            f'([.assets[] | select(.name == "{asset}")]', draft_custody_index
+        )
+        for asset in (
+            "tr300-dist-installer.sh",
+            "tr300-aarch64-apple-darwin.tar.xz",
+            "tr300-x86_64-apple-darwin.tar.xz",
+        )
+    ]
+    upload_index = executable.index("gh release upload")
+    publish_index = executable.index("-F draft=false -f make_latest=true")
+    if not (
+        proof_inventory_index
+        < proof_validation_index
+        < manifest_custody_index
+        < max(manifest_transitive_indices)
+        < draft_custody_index
+        < max(draft_transitive_indices)
+        < upload_index
+        < publish_index
+    ):
+        raise AssertionError(
+            f"{label}: managed-wrapper manifest/draft custody does not precede publication"
+        )
     require(executable, "actions/workflows/ci.yml/runs?event=push", f"{label} exact CI rebind")
     require(executable, '[[ ${#existing_assets[@]} -eq 30 ]]', f"{label} draft inventory")
     require(executable, '[[ ${#final_entries[@]} -eq 34 ]]', f"{label} final inventory")
@@ -2986,6 +4246,7 @@ def main() -> None:
         mock_bin.mkdir()
         write_mock_gh(mock_bin)
         write_windows_mkdir_compat(mock_bin)
+        write_windows_shasum_compat(mock_bin)
         write_fixture_jq_compat(mock_bin)
         check_actual_resolvers(
             release, windows, macos, windows_validation, bash, mock_bin

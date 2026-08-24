@@ -166,6 +166,24 @@ try {
     } catch {
         if ($_.Exception.Message -eq 'invalid managed receipt was accepted') { throw }
     }
+
+    $rawDistInstaller = Join-Path $fixture 'tr300-dist-installer.ps1'
+    Set-Content -LiteralPath $rawDistInstaller -Value '# exact cargo-dist fixture bytes' -NoNewline
+    $Tr300DistInstallerSha256 = Get-Tr300Sha256 -Path $rawDistInstaller
+    Assert-Tr300DistInstallerHash -Path $rawDistInstaller
+    $Tr300DistInstallerSha256 = '0' * 64
+    $mismatchExecutionMarker = Join-Path $fixture 'mismatch-executed'
+    $mismatchMessage = $null
+    try {
+        Assert-Tr300DistInstallerHash -Path $rawDistInstaller
+        Set-Content -LiteralPath $mismatchExecutionMarker -Value executed -NoNewline
+    } catch {
+        $mismatchMessage = $_.Exception.Message
+    }
+    if ($mismatchMessage -ne 'the downloaded cargo-dist installer checksum did not match this release' -or
+        (Test-Path -LiteralPath $mismatchExecutionMarker)) {
+        throw 'mismatched cargo-dist installer was not rejected before execution'
+    }
     Write-Host 'managed PowerShell transaction fixtures: PASS'
 } finally {
     $env:TR300_MANAGED_INSTALLER_TEST_ONLY = $oldTestOnly
