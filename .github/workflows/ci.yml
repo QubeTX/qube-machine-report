@@ -367,8 +367,10 @@ jobs:
           grep -Fq "\$Tr300Tag = '${render_tag}'" "$render_dir/tr300-installer.ps1"
           grep -Fq "releases/download/\$Tr300Tag\"" "$render_dir/tr300-installer.ps1"
           grep -Fq "\$Tr300ReleaseBase/tr300-dist-installer.ps1" "$render_dir/tr300-installer.ps1"
-          grep -Fq 'mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh' "$release"
-          grep -Fq 'mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1' "$release"
+          grep -F -A1 'mv "$OUTPUT_DIRECTORY/tr300-installer.sh"' "$release" |
+            grep -Fq '"$OUTPUT_DIRECTORY/tr300-dist-installer.sh"'
+          grep -F -A1 'mv "$OUTPUT_DIRECTORY/tr300-installer.ps1"' "$release" |
+            grep -Fq '"$OUTPUT_DIRECTORY/tr300-dist-installer.ps1"'
           # The PowerShell expression below is literal fixture text.
           # shellcheck disable=SC2016
           grep -Fq 'Switching TR-300 ownership from $($Product.Channel) to powershell-installer' "$powershell_wrapper"

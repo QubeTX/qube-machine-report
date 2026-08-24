@@ -3,6 +3,14 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 compiler=${CC:-cc}
+if [ -x /usr/bin/true ]; then
+    system_true=/usr/bin/true
+elif [ -x /bin/true ]; then
+    system_true=/bin/true
+else
+    echo 'rollback fixture requires an absolute system true binary' >&2
+    exit 1
+fi
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/tr300-pkg-rollback-test.XXXXXXXX")
 work_dir=$(cd -- "$work_dir" && pwd -P)
 trap 'rm -rf "$work_dir"' EXIT INT TERM
@@ -39,8 +47,8 @@ switched_receipt="${switched_home}/.config/tr300/tr300-receipt.json"
 mkdir -p "$(dirname -- "$binary")" "$(dirname -- "$receipt")"
 mkdir -p "$(dirname -- "$switched_binary")" \
     "$(dirname -- "$switched_receipt")"
-cp /bin/true "$binary"
-cp /bin/true "$switched_binary"
+cp "$system_true" "$binary"
+cp "$system_true" "$switched_binary"
 printf '%s\n' '{"provider":{"source":"cargo-dist"},"source":{"app_name":"tr300"}}' \
     > "$receipt"
 printf '%s\n' '{"provider":{"source":"cargo-dist"},"source":{"app_name":"tr300"}}' \
@@ -542,14 +550,14 @@ set -e
 [ -L "$binary" ]
 [ "$(digest_file "$binary_canary")" = "$binary_canary_before" ]
 rm -f "$binary"
-cp /bin/true "$binary"
+cp "$system_true" "$binary"
 chmod 751 "$binary"
 
 # A multiply-linked source is not an exclusive managed identity. Both hardlink
 # names and their bytes must survive a check-mode rejection unchanged.
 hardlink_source="${work_dir}/hardlink-source"
 rm -f "$binary"
-cp /bin/true "$hardlink_source"
+cp "$system_true" "$hardlink_source"
 chmod 751 "$hardlink_source"
 ln "$hardlink_source" "$binary"
 hardlink_digest=$(digest_file "$hardlink_source")
@@ -565,7 +573,7 @@ set -e
 [ "$(digest_file "$binary")" = "$hardlink_digest" ]
 [ "$(digest_file "$hardlink_source")" = "$hardlink_digest" ]
 rm -f "$binary" "$hardlink_source"
-cp /bin/true "$binary"
+cp "$system_true" "$binary"
 chmod 751 "$binary"
 
 # A successful strict cleanup must commit with neither managed name left.
@@ -586,7 +594,7 @@ TR300_ROLLBACK_FIXTURE_CASE=success \
 # ignored, a signal delivered after the first unlink must not strand a partial
 # pair. The test-only hook raises SIGTERM at that exact boundary; commit remains
 # atomic and removes both managed names.
-cp /bin/true "$binary"
+cp "$system_true" "$binary"
 printf '%s\n' \
     '{"provider":{"source":"cargo-dist"},"source":{"app_name":"tr300"}}' \
     > "$receipt"

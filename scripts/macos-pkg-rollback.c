@@ -1471,7 +1471,12 @@ static int testing_after_first_discard(void) {
         return -1;
     }
     if (strcmp(fixture_case, "commit-signal") == 0) {
-        if (raise(SIGTERM) != 0 || transaction_signal_pending() != 0) {
+        /* The commit boundary has already blocked termination and installed
+         * SIG_IGN. The invariant under test is that an actual signal cannot
+         * interrupt the second discard; inspecting the transient pending mask
+         * here makes the fixture platform-dependent and can re-arm the test
+         * signal on the rollback path before it is discarded. */
+        if (raise(SIGTERM) != 0) {
             errno = ECANCELED;
             return -1;
         }

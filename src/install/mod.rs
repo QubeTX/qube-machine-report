@@ -16,6 +16,13 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+// ReplaceFileW is a multi-step identity/metadata merge and is not linearizable
+// across simultaneous callers. Serialize the complete Windows transaction so
+// an overlapping replacement cannot restore an older target after another
+// caller has already reported success.
+#[cfg(windows)]
+static WINDOWS_ATOMIC_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub use prompt::{confirm_complete_uninstall, prompt_uninstall_option, UninstallOption};
 
 #[cfg(windows)]
@@ -90,6 +97,11 @@ fn replace_existing_windows_file(path: &Path, replacement: &Path) -> io::Result<
 /// and atomically renames over the target. The target file ends up either
 /// fully replaced or completely untouched — never partial.
 pub(crate) fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
+    #[cfg(windows)]
+    let _windows_write_guard = WINDOWS_ATOMIC_WRITE_LOCK.lock().map_err(|_| {
+        io::Error::other("TR-300 Windows profile-write serialization lock was poisoned")
+    })?;
+
     // If the target is a symlink (e.g. `~/.bashrc -> ~/dotfiles/bashrc`),
     // resolve it to the real file so the temp-then-rename happens in the real
     // file's directory and the symlink is preserved. Renaming over the symlink
@@ -429,7 +441,12 @@ mod shared_tests {
 
         assert!(outcomes.iter().any(|outcome| outcome.is_ok()));
         let final_content = fs::read_to_string(&path).unwrap();
-        assert!(payloads.iter().any(|payload| payload == &final_content));
+        assert!(
+            payloads.iter().any(|payload| payload == &final_content),
+            "final len={} prefix={:?}; outcomes={outcomes:?}",
+            final_content.len(),
+            final_content.chars().take(64).collect::<String>()
+        );
         let leftovers: Vec<_> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
