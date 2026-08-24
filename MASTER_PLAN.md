@@ -4,21 +4,30 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-08-21
+**Last updated:** 2026-08-23
 **Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.3.0
-(working manifest `4.3.0` on branch `feature/v4.3.0-battery-perf-thermals`,
-pending review/merge and release; v4.2.2 remains the last fully published state)
+(working manifest `4.3.0` is the unreleased candidate in open PR #14 on branch
+`feature/v4.3.0-battery-perf-thermals`; repaired-code local gates pass and
+exact-head hosted revalidation remains pending. The operator requires the PR to
+stay open after validation. v4.2.2 remains the last fully published state.)
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.0, this branch):** Linux battery phantom-supply hardening,
-Windows full-mode latency (~5.2 s → ~2.1 s on the Alienware), thermal
-reporting (`CPU TEMP`/`GPU TEMP` on Linux + Windows, additive schema-v1 JSON),
-and an explicit `-f/--full` flag. Open maintainer action: capture
-`/sys/class/power_supply/*` diagnostics on the Raspberry Pi to confirm which
-node produced the historical phantom "30%" reading; AMD64 Linux laptop and
-Pi runtime verification remain open for the thermal/battery rows.
+**In flight (v4.3.0, open PR #14):** Linux battery-selection hardening accepts
+well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
+contradictory device/absence evidence; the historical Pi "30%" source remains
+unproven. Linux thermals choose the hottest valid sensor deterministically,
+honor hwmon fault state, and include `soc_thermal`. Windows reports NVIDIA GPU
+temperature only through mode-bounded `nvidia-smi`; Windows CPU temperature
+stays absent/JSON `null`. macOS requires an InternalBattery record for the
+`pmset` fallback and reports no thermals. Seven alternating Windows full runs
+produced medians of 5138.6 ms and 2092.3 ms (~3046.3 ms, 59.3%, 2.46×), while
+11 alternating fast runs at 247.0 ms and 238.9 ms (-3.3%) are background-level
+and support no gain claim. The explicit `-f/--full` flag is also included.
+The full repaired-code local gate passes at `d22c438`; exact-head hosted checks
+remain pending. Physical AMD64 Linux and Raspberry Pi verification is separate
+and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 

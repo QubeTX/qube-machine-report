@@ -5,13 +5,13 @@ Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
 Companion docs:
 - [`CLAUDE.md`](./CLAUDE.md) — edit-time rules, the canonical 7-phase development workflow, CI gates, code patterns.
-- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-07-18: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
+- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger reconciled through 2026-08-23, including the unreleased v4.3 candidate decisions: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-08-21
+Last verified against source: 2026-08-23
 
 ## Task management system
 
@@ -55,9 +55,21 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Library import path: `tr300`
 - Current published version: `4.2.2`. Working manifest on the
   `feature/v4.3.0-battery-perf-thermals` branch: `4.3.0`
-  (battery hardening, Windows full-mode latency, thermal reporting — pending
-  review/merge and release). v4.2.2 remains the last fully published
-  distribution state.
+  (battery hardening, Windows full-mode latency, thermal reporting) in open PR
+  #14. The candidate is unreleased; repaired-code local gates pass and hosted
+  exact-head revalidation remains pending. The operator requires PR #14 to stay
+  open after validation unless separately authorizing a merge. v4.2.2 remains
+  the last fully published distribution state.
+  The v4.3 candidate's Linux thermals select the hottest valid sensor
+  deterministically, honor hwmon fault state, and include `soc_thermal`;
+  Windows exposes NVIDIA GPU temperature only through mode-bounded
+  `nvidia-smi`, with CPU temperature absent/JSON `null`; macOS exposes no
+  thermals. Linux battery hardening recognizes `*_avg` and valid signed
+  current/power readings, but does not prove the source of the historical Pi
+  "30%" report. Seven alternating Windows full runs produced medians of
+  5138.6 ms versus 2092.3 ms (~3046.3 ms, 59.3%, 2.46×); 11 alternating fast
+  runs at 247.0 ms versus 238.9 ms (-3.3%) are background-level and carry no
+  gain claim.
   v4.2.2 passed exact-SHA CI/crates, signed archives, every Windows package and
   transition job, and universal PKG/compatibility-DMG sign/notary/install/
   update/uninstall gates on native Intel and Apple Silicon. It fixes the
@@ -282,6 +294,17 @@ After collection it:
 `--fast` is intended for shell startup auto-run and avoids slow subprocess-heavy checks where possible.
 
 Install profile auto-run uses `tr300 --fast`; the `report` alias still runs full mode. Exact skipped work varies by platform collector, so check `src/collectors/platform/{linux,macos,windows}.rs` before changing fast-mode behavior.
+
+v4.3 thermal/battery tripwires: Linux's pure-sysfs thermal scan runs in both
+modes, chooses the hottest valid sensor deterministically within the preferred
+class, treats unreadable/malformed fault state as a bad channel, and recognizes
+`soc_thermal`. Windows may run `nvidia-smi` in fast mode only after NVIDIA
+adapter detection and must use the collection mode's command budget; it does
+not report a Windows CPU temperature because ACPI zone identity is not trusted.
+macOS reports no thermals, and its `pmset` fallback requires an
+`-InternalBattery-N` record. Linux battery corroboration includes `*_avg` and
+valid signed current/power readings. Do not claim the historical Pi battery
+source is known until physical sysfs evidence exists.
 
 ### Rendering flow (`src/report.rs`)
 
@@ -508,18 +531,31 @@ Adds OS-specific enrichments, some not currently rendered:
 - desktop/display server/edition/codename/boot mode metadata
 
 Platform implementations:
-- `linux.rs`: `/proc`, `lscpu`, `/sys` (including hwmon/thermal-zone
-  temperatures and hardened power_supply battery selection), `ip`, resolver
-  files, ZFS and elevated `dmidecode` commands where available
+- `linux.rs`: `/proc`, `lscpu`, `/sys` (including deterministic hottest-valid,
+  fault-aware hwmon/thermal-zone temperatures with `soc_thermal`, plus hardened
+  power_supply battery selection that accepts `*_avg` plus signed current/power
+  readings), `ip`, resolver files, ZFS and elevated `dmidecode` commands where
+  available. AMD64 laptop and Raspberry Pi physical verification remain open;
+  fixture coverage is not physical proof of the historical Pi symptom.
 - `macos.rs`: quick `sysctl`/`sw_vers`/environment/`pmset`/`ioreg` probes plus
   one full-mode `system_profiler` JSON snapshot for hardware, displays, power,
   and software. Under Rosetta it requests the native arm64 profiler slice, then
-  falls back to translated output. It never surfaces serial/UUID fields. No
-  thermal collection (SMC requires unsafe IOKit or sudo).
+  falls back to translated output. It never surfaces serial/UUID fields. The
+  `pmset` fallback requires an `-InternalBattery-N` record. No thermal
+  collection (SMC requires unsafe IOKit or sudo).
 - `windows.rs`: Win32 APIs and registry first, WMI/PowerShell fallbacks in full
-  mode only. Thermal: NVIDIA GPU temperature via `nvidia-smi` when an NVIDIA
-  adapter was detected (both modes), ACPI thermal-zone probe on a bounded
-  worker thread with a 1 s cap; unsupported boards return `None`.
+  mode only. Thermal: NVIDIA GPU temperature via mode-bounded `nvidia-smi` when
+  an NVIDIA adapter was detected (both modes). CPU temperature is always
+  `None`/JSON `null`; do not revive ACPI thermal-zone output without a reliable
+  CPU-identity contract and a new architecture decision.
+
+The v4.3 Windows benchmark records seven alternating full-mode runs with
+medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
+Eleven alternating fast runs produced 247.0 ms and 238.9 ms medians; the
+apparent -3.3% is background-level, so documentation and tests must not claim a
+fast-mode performance gain. The full repaired-code local gate passes at
+`d22c438`; exact-head hosted PR checks remain pending. A green PR does not
+authorize merge or establish AMD64 Linux/Raspberry Pi physical acceptance.
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should

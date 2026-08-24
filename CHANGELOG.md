@@ -7,55 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.3.0] - 2026-08-21
+## [4.3.0] - Unreleased
 
 ### Added
 - **Thermal reporting (`CPU TEMP` / `GPU TEMP` rows).** Linux reads CPU
   package/SoC temperature from hwmon devices (coretemp `Package id`,
   k10temp/zenpower `Tctl`/`Tdie`, ARM SBC `cpu_thermal`/`soc_thermal`) with a
   cpu/soc-labeled thermal-zone fallback, and GPU temperature from
-  amdgpu/nouveau/nvidia hwmon devices — pure sysfs reads that also run in
-  `--fast`. Windows reports discrete NVIDIA GPU temperature via `nvidia-smi`
-  when an NVIDIA adapter was detected (AMD/Intel-only machines never spawn the
-  probe), plus an ACPI thermal-zone query on its own bounded worker thread;
-  boards without a usable zone omit the row instead of mislabeling a board
-  sensor as CPU temperature, and disabled-sensor sentinel readings (~0 °C) are
-  rejected by plausibility bounds. macOS intentionally reports no thermal data
-  this release (SMC access requires unsafe IOKit or sudo). JSON gains additive
-  schema-v1 keys `cpu.temperature_c` / `cpu.gpu_temperature_c` (null when no
-  trusted sensor answered); saved Markdown mirrors the rows.
+  amdgpu/nouveau/nvidia hwmon devices. The pure-sysfs scan runs in both modes,
+  rejects faulted, malformed, non-finite, and implausible channels, and chooses
+  the hottest valid sensor deterministically within the preferred class.
+  Windows reports only discrete NVIDIA GPU temperature via `nvidia-smi` when
+  an NVIDIA adapter was detected, using the timeout budget for the active
+  collection mode; Windows CPU temperature intentionally remains unavailable
+  because an ACPI thermal-zone instance cannot be trusted to identify the CPU.
+  macOS intentionally reports no thermal data this release (SMC access requires
+  unsafe IOKit or sudo). JSON gains additive schema-v1 keys
+  `cpu.temperature_c` / `cpu.gpu_temperature_c` (null when no trusted sensor
+  answered); saved Markdown mirrors the CPU-section rows.
 - **Explicit `-f/--full` flag** as the symmetric counterpart to `--fast`.
   Full collection remains the default; the flag conflicts with `--fast`.
 
 ### Changed
-- **Windows full-mode report is roughly 2.5× faster on real hardware**
-  (measured 5.2 s → ~2.1 s on an Alienware m16 R2, Win11 Home): the BitLocker
-  security-namespace probe — which hangs to its full shared timeout on SKUs
-  without the BitLocker provider — now runs concurrently with the main WMI
-  batch under a dedicated 2-second cap instead of serially after it;
-  `Win32_ComputerSystem` and `Win32_NetworkAdapterConfiguration` are queried
-  once per report instead of twice; terminal and shell detection share one
-  process-table snapshot; GPU enumeration, OS registry info, and PowerShell
-  Core version detection read the registry natively instead of spawning
-  `reg.exe` (the `--fast` GPU walk no longer spawns any subprocess at all);
-  and after a total WMI batch failure one batched PowerShell fallback covers
-  every field rather than stacked per-field rescues.
+- **Windows full-mode report is materially faster on the benchmark machine.**
+  Seven alternating Alienware m16 R2 runs produced baseline/candidate medians
+  of 5138.6 ms and 2092.3 ms: about 3046.3 ms (59.3%) less elapsed time, a
+  2.46× runtime ratio.
+  The BitLocker security-namespace probe now starts concurrently with the main
+  WMI batch under a dedicated 2-second, launch-relative deadline instead of
+  serially consuming the shared timeout. Duplicate WMI/process lookups and
+  unnecessary registry subprocesses are also consolidated. Eleven alternating
+  fast-mode runs produced medians of 247.0 ms and 238.9 ms; the apparent -3.3%
+  difference is background-level, so this release makes no fast-mode
+  performance-gain claim.
 
 ### Fixed
-- **Linux phantom batteries are rejected.** The power_supply scan admitted
-  per-device batteries (`scope=Device`: wireless mice, gamepads, HID
-  peripherals — typically reading 25–35%) and capacity-only gauge nodes with
-  no live measurement backing, rendering a bogus `BATTERY` row on machines
-  without a system battery such as the Raspberry Pi; unspecified directory
-  order also made the winner nondeterministic when several Battery-typed
-  nodes existed. Selection now requires scope ≠ Device, present ≠ 0 when
-  exposed, at least one live measurement attribute, `capacity` cross-validated
-  against an energy or charge pair within 20 points, and deterministic
-  BAT*-first ordering; a missing status renders a bare percentage instead of
-  fabricating "(Unknown)". The regression arrived in v3.14.0's type-checked
-  walk; pre-v3.14 installs were safe on headless SBCs only by accident.
-- **macOS battery parsing anchors on the `-InternalBattery-N` line**, so a
-  stray percentage elsewhere in `pmset -g batt` output can no longer be
+- **Linux system-battery selection is hardened against phantom supplies.**
+  Selection rejects explicit `scope=Device` and `present=0` evidence, requires
+  a well-formed live `*_now` or `*_avg` measurement (including valid signed
+  current/power readings), cross-validates capacity when a compatible energy
+  or charge pair is available, and uses deterministic BAT*-first ordering. A
+  missing status renders a bare percentage instead of fabricating
+  "(Unknown)". These rules address plausible misattribution paths, but the
+  source of the historical Raspberry Pi "30%" reading is not yet proven and
+  still requires physical sysfs diagnostics.
+- **macOS `pmset` battery parsing requires an `-InternalBattery-N` record**, so
+  a stray percentage elsewhere in `pmset -g batt` output cannot be
   misattributed to the system battery.
 
 ## [4.2.2] - 2026-07-18

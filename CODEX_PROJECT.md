@@ -7,11 +7,14 @@ machine reports on macOS, Linux, and Windows. The v4 release line hardens
 cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
 notarization. v4.1 added origin-preserving updates and a native universal
-package verified on hosted Apple Silicon and Intel. v4.2 is the MIC-1 candidate:
-managed CLI installers are the recommended default, fresh installer intent is
-authoritative, and the Mac native artifact is a direct PKG with a compatibility-
-only DMG bridge. Alienware Windows evidence is captured; AMD64 Linux laptop and
-Raspberry Pi 4 checks remain open.
+package verified on hosted Apple Silicon and Intel. v4.2.2 is the completed
+MIC-1 release: managed CLI installers are the recommended default, fresh
+installer intent is authoritative, and the Mac native artifact is a direct PKG
+with a compatibility-only DMG bridge. v4.3.0 is an unreleased candidate in open
+PR #14. Repairs and repaired-code local gates pass; exact-head hosted checks are
+pending, and the operator requires the PR to remain open after validation.
+Alienware Windows evidence is captured; AMD64 Linux laptop and Raspberry Pi 4
+checks remain separate and open.
 
 Start the next session with
 [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md),
@@ -20,23 +23,28 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Complete GitHub distribution: `4.1.3` (2026-07-18); crates.io package and
-  latest incomplete GitHub Release: `4.2.1`; working manifest / candidate:
-  `4.2.2`. v4.1.3 passed exact-SHA
-  CI/crates, signed archives, all Windows
-  package/transition jobs, the native Intel/ARM PKG-in-DMG lifecycle, a
-  30-asset public audit, and the Alienware's real Global MSI v4.0.1→v4.1.3 UAC
-  transition. Its release source is
-  `c5a25617b8b6438b1e7589e7518a1c1bd305ed64`. Exact v4.2.1 source
-  `b45ec00b528c5707c9effd4f4407dacb2b6ae1b9` passed exact-SHA CI/crates,
-  release hosting, Apple archive trust, and Windows packaging. Both native Mac
-  validators then rejected post-payload malformed-receipt handling and withheld
-  four assets; the Windows transition resolver separately rejected v4.1.3 for
-  lacking a future-only internal script. Its 30-asset release/tag/crate remain
-  immutable; v4.2.2 fixes forward and must earn complete hosted evidence.
-- Homepage commit `d77397479ad2b1189cce86b5402eaf1cc966abdf` is live at
-  `https://reports.qubetx.com/` with the v4.0.1 persistence, accuracy,
-  update-failure, and Mac trust contract.
+- Complete GitHub distribution and crates.io package: `4.2.2` (2026-07-18).
+  Exact source `db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA
+  CI/crates, all six release targets, signed Apple archives, every Windows
+  package/transition job, native Intel/ARM direct-PKG and compatibility-DMG
+  lifecycles, and the fresh 34-asset public-byte audit.
+- Working manifest / candidate: `4.3.0` on
+  `feature/v4.3.0-battery-perf-thermals`, open PR #14. It is unreleased and
+  repaired-code local gates pass at `d22c438`; exact-head hosted gates remain
+  pending. No earlier green run proves the repaired head, and the operator has
+  withheld merge authority even after validation.
+- The v4.3 candidate adds deterministic, fault-aware hottest-valid Linux
+  CPU/GPU thermals (including `soc_thermal`), mode-bounded NVIDIA GPU thermals
+  on Windows while Windows CPU stays absent/JSON `null`, no macOS thermals, and
+  stricter Linux/macOS battery identity. Linux battery corroboration includes
+  `*_avg` and valid signed current/power readings; the historical Raspberry Pi
+  "30%" source is still unproven. Seven alternating Windows full runs produced
+  medians of 5138.6 ms versus 2092.3 ms (~3046.3 ms, 59.3%, 2.46×); 11
+  alternating fast runs at 247.0 ms versus 238.9 ms (-3.3%) are background-
+  level and carry no performance-gain claim.
+- Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
+  `https://reports.qubetx.com/` for the published v4.2.2 distribution. Do not
+  advertise v4.3.0 before its release gates and publication complete.
 - Personal-fleet evidence: the Alienware Global MSI update and report/hardware
   facts now have real evidence; never claim the AMD laptop or Pi 4 is verified
   until its board task contains real evidence
@@ -58,16 +66,40 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   29559148638 with zero annotations; exact-SHA crates run 29559305341 safely
   skipped already-published 4.0.1 without token or publish access.
 - Architecture ledger: `docs/architecture-decisions.md` is reconciled through
-  2026-07-18. It covers the complete accepted v4/session decision surface and
-  explicitly backfills the one-product/mode/output contracts, the historical
-  Windows advisory cleanup and MIC-1's strict superseding behavior, plus the
-  exhaustive `main`/checkout-v6 rationale and evidence.
+  2026-08-23. It distinguishes the accepted, published v4.2.2 decisions from
+  the unreleased v4.3 candidate's thermal, battery, and bounded-probe rationale,
+  and retains the one-product/mode/output, MIC-1, `main`, checkout-v6, and
+  evidence-boundary contracts.
 - Release tooling: cargo-dist `0.31.0`
 - Last physical-Mac source verification: 2026-07-15 on a MacBook Pro M2,
-  macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
-  documentation/workflow state reconciled 2026-07-18.
+  macOS 26.3.1 build 25D2128. Published v4.2.2 hosted Installer-identity and
+  workflow evidence was reconciled 2026-07-18; v4.3 native Mac gates remain
+  pending and the candidate has no thermal collection.
 
-### v4.2.2 managed-install/direct-PKG fix-forward candidate
+### v4.3.0 open thermal/battery/latency candidate
+
+- Linux thermal collection is pure sysfs in both modes. It deterministically
+  chooses the hottest plausible healthy reading within the preferred sensor
+  class, rejects faulted/malformed channels, recognizes `soc_thermal`, and
+  preserves absence when no trusted CPU/GPU sensor answers.
+- Windows thermal collection is NVIDIA GPU-only through `nvidia-smi`, gated on
+  detected NVIDIA hardware and bounded by the active collection mode. Windows
+  CPU temperature remains absent/JSON `null`; ACPI thermal zones are rejected
+  because their instance identity cannot prove a CPU sensor. macOS reports no
+  thermals.
+- Linux battery selection recognizes `*_avg` attributes and signed current or
+  power readings while rejecting contradictory device/absence evidence. The
+  macOS `pmset` fallback requires `-InternalBattery-N`. These are hardening
+  decisions, not proof of the historical Raspberry Pi symptom's source.
+- Seven alternating Windows full-mode runs produced medians of 5138.6 ms before
+  and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×). Eleven alternating fast runs
+  produced 247.0 ms and 238.9 ms medians; the apparent -3.3% is background-level
+  and supports no fast-mode performance claim.
+- PR #14 is open and must remain unmerged by direct operator instruction. The
+  repaired-code local gate passes; exact-head hosted checks remain pending.
+  Physical AMD64 Linux and Raspberry Pi checks are independent evidence debts.
+
+### v4.2.2 managed-install/direct-PKG release closure
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
@@ -107,11 +139,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 - Alienware validation confirmed the existing Global MSI v3.17.0 upgraded in
   place through v4.0.1 to v4.1.3 at the same Program Files path/registration;
   corrected hybrid topology reports `6P + 10E`, 16 physical, 22 logical cores.
-- The v4.2.2 target is 34 stable-name assets. Required pending evidence is the
-  full local and clean committed-tree gate set, exact-SHA CI/crates,
-  disposable Windows managed/
-  native matrices, both Apple-native direct-PKG/bridge lifecycles, public-byte
-  audit, and homepage update.
+- v4.2.2 published 34 stable-name assets after the full local/clean-tree gate
+  set, exact-SHA CI/crates, disposable Windows managed/native matrices, both
+  Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
+  update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
 
 ### v4.0.0 feature set, released through the v4.0.1 fix-forward
 
@@ -176,28 +207,34 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
-1. Keep `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.2.2` while clearly labeling it a candidate.
-2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
-   package list, publish dry-run, security audit, cargo-dist plan, actionlint,
-   shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
-   sign/notary/staple/install proof.
-3. Commit and push `main`; wait for `.github/workflows/ci.yml` to pass on the
-   exact commit and for `crates-publish.yml` to publish that same SHA.
-4. Create and push only tag `v4.2.2` after CI/crates settle. Existing immutable
-   v4 tags must not move.
-5. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
-   extracted signatures/checksums from both public Mac archives.
-6. Verify cargo-dist's GitHub Release, both supplemental installer workflows,
-   all four Windows installers, managed/legacy wrappers, direct PKG, bridge DMG,
-   and expected 34 assets.
-7. Only then update, test, commit, and push the homepage repository.
-8. Keep AMD/Pi tasks open and patch forward from real findings.
+1. Preserve `4.2.2` as the last published boundary. Keep `Cargo.toml`,
+   `Cargo.lock`, generated man page, and the approved docs synchronized at
+   `4.3.0`, with both changelogs explicitly labeled `Unreleased` until the
+   release date is real.
+2. Preserve the completed review repairs on the feature branch. PR #14 must
+   remain unmerged by operator instruction; an earlier green run is not evidence
+   for the repaired head.
+3. Keep the complete locked local gate set green on the repaired tree: fmt, warnings-
+   denied Clippy, all-target tests, package list, publish dry-run, release build,
+   audit, cargo-dist plan, workflow/script checks, and required runtime smokes.
+   These gates passed on repaired code commit `d22c438`.
+4. Require hosted PR checks on the exact repaired commit and resolve the review.
+   Leave the PR open. Merge/default-branch/release work requires separate
+   operator authorization and remains in task `#r43`.
+5. Create and push only tag `v4.3.0` after main CI and crates publication settle.
+   Existing immutable v4 tags must not move.
+6. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
+   extracted signatures/checksums, then require supplemental native Mac and
+   Windows installer/transition workflows.
+7. Audit the final public assets, stable `latest` entrypoints, rendered wrappers,
+   and release metadata. Only then update, test, commit, and push the homepage.
+8. Keep AMD64 Linux/Pi physical tasks open and report them as open evidence
+   rather than inferring hardware success from fixtures or hosted runners.
 
-Observed v4.0.1 runs: CI 29391956665, crates 29392101640, cargo-dist
-29392185522, and Windows Installers 29392382949. The public tag/release targets
-the exact source SHA above; the complete hashes and Apple submission IDs live
-in `TESTING.md` and the tracked handoff.
+Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,
+native macOS 29664824418, Windows packaging 29664824432, and Windows transition
+validation 29664948031. The current v4.3.0 candidate has no publication run or
+release evidence yet.
 
 Never publish locally merely because a token exists. Never tag before the
 default-branch CI and crates workflow settle.

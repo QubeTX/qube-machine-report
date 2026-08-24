@@ -10,15 +10,18 @@
 > revised) the decision. Verbatim moves from CLAUDE.md preserved word-for-word
 > so `git blame` history continues to make sense.
 >
-> **Coverage reconciled through 2026-07-18.** This is the repository's
+> **Coverage reconciled through 2026-08-23.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
-> one file per decision. Accepted decisions remain binding until a later dated
-> section explicitly supersedes them. Historical failure evidence is retained
-> because it explains why the guardrails exist.
+> one file per decision. v4.2.2 is the last accepted published release; the
+> v4.3.0 section is explicitly an unreleased PR #14 candidate. Its repaired-code
+> local gates pass; exact-head hosted gates remain pending, and the operator has
+> withheld merge authority. Accepted decisions remain binding
+> until a later dated section explicitly supersedes them. Historical failure
+> evidence is retained because it explains why the guardrails exist.
 
 ## Table of contents
 
-- [Decision ledger status (through v4.2.2)](#decision-ledger-status-through-v422)
+- [Decision ledger status (published through v4.2.2; v4.3.0 candidate)](#decision-ledger-status-published-through-v422-v430-candidate)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -69,22 +72,25 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-candidate)
 
 ---
 
-## Decision ledger status (through v4.2.2)
+## Decision ledger status (published through v4.2.2; v4.3.0 candidate)
 
 This reconciliation compared the ledger against current source, all release
-and validation workflows, the v4 thinking record, both Mac/Alienware handoffs, the testing
-ledger, technical and human changelogs, agent guides, and the public v4.0.1
-release state. The result is an accepted decision set, not a claim that every
-future hardware row has already been exercised.
+and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
+the testing ledger, technical and human changelogs, agent guides, and the public
+v4.2.2 release state. The accepted published decision set ends at v4.2.2. The
+v4.3.0 rows describe the intended contract of open, unmerged PR #14, not a
+claim that its repaired head or every hardware row has passed acceptance.
 
 | Decision family | Status | Enforcement / source of truth |
 |---|---|---|
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Unreleased candidate; repaired-code local gates pass; exact-head hosted checks pending; merge not authorized | candidate source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -2961,48 +2967,83 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)
 
-**Decision 1 — thermals report only trusted sensors, in both `--fast` and
-full mode.** Linux CPU temperature prefers hwmon package sensors (coretemp
-`Package id`, k10temp/zenpower `Tctl`/`Tdie`) with a cpu/soc-labeled
-thermal-zone fallback; this covers the Raspberry Pi SoC sensor at sysfs-read
-cost, which is why temperatures ride along in auto-run fast mode there.
-Windows GPU temperature comes from `nvidia-smi` only when an NVIDIA adapter
-was already detected — AMD/Intel-only machines never pay the spawn. Windows
-CPU temperature uses the ACPI thermal-zone WMI class behind plausibility
-bounds with a 5 °C floor: the documented disabled-sensor sentinel
-(2732 tenths-Kelvin ≈ 0.05 °C) and its kin must fail rather than render.
-Verified on a consumer Dell/Alienware board that this class is unsupported;
-absence omits the row instead of mislabeling a motherboard zone as CPU
-temperature. macOS is intentionally `None` — reading SMC requires unsafe
-IOKit code or sudo `powermetrics`, neither acceptable for an optional row.
+**Status:** Unreleased candidate in open PR #14. Review repairs and the full
+repaired-code local gate pass at `d22c438`; exact-head hosted validation remains
+pending. The operator requires the PR to remain open after validation unless
+separately authorizing a merge. This section records the intended product
+contract and rationale, not release acceptance.
+
+**Decision 1 — thermals report only trusted sensors, in both `--fast` and full
+mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,
+zenpower, `cpu_thermal`, and `soc_thermal`; it prefers explicitly labeled
+package/die/CPU channels and selects the hottest plausible healthy reading
+within the best available class. GPU collection recognizes amdgpu, nouveau,
+and nvidia hwmon devices and likewise selects the hottest valid channel.
+Directory/channel order cannot determine the answer. An absent hwmon fault
+file is allowed, but a present `tempN_fault` must parse as zero; unreadable,
+malformed, nonzero, non-finite, and implausible readings are rejected. If no
+CPU hwmon candidate survives, only CPU/SoC-labeled thermal zones participate
+in the deterministic hottest-valid fallback.
+
+Windows reports only NVIDIA GPU temperature, and only when adapter discovery
+already found NVIDIA hardware. `nvidia-smi` uses the command timeout selected
+by collection mode, so fast mode never silently inherits a full-mode budget.
+Windows CPU temperature remains `None` and JSON `null`: an ACPI thermal-zone
+instance does not reliably identify its physical source, so labeling it as CPU
+would violate the evidence-backed optional-value contract. macOS is also
+intentionally `None` for CPU/GPU thermals because SMC access would require
+unsafe IOKit code or sudo `powermetrics` for an optional row.
+
+Table and saved Markdown rows are omitted on absence and stay in the CPU
+section when present. JSON adds nullable schema-v1
+`cpu.temperature_c`/`cpu.gpu_temperature_c` keys without renaming or changing
+existing keys.
 
 **Rejected alternatives:** NVML bindings (new unsafe dependency for one
 number), LibreHardwareMonitor-style kernel drivers (contradicts the install-
-safety posture), labeling ACPI zones as "CPU" unconditionally (fabricates
-accuracy the platform does not provide).
+safety posture), any Windows ACPI zone-to-CPU label without trustworthy sensor
+identity (fabricates provenance), and macOS sudo/unsafe-SMC collection for an
+optional report field.
 
-**Decision 2 — Linux battery selection requires positive proof of a system
-pack.** The v3.14.0 type-only walk admitted per-device batteries
-(`scope=Device` peripherals such as wireless mice and gamepads, typically
-25–35%) and capacity-only gauge nodes, producing phantom BATTERY rows on
-headless SBCs. Selection now demands: scope ≠ Device, present ≠ 0 when
-exposed, at least one live measurement attribute, `capacity` cross-validated
-against an energy/charge pair within 20 points, and deterministic BAT*-first
-ordering. A missing status renders a bare percentage rather than fabricating
-"(Unknown)". The rules are conservative for real laptops: mainline x86 packs
-satisfy every check by construction.
+**Decision 2 — Linux battery selection requires corroboration without rejecting
+valid kernel ABI forms.** Selection rejects explicit `scope=Device` and
+`present=0` evidence, requires at least one well-formed live measurement, and
+uses deterministic BAT*-first ordering. The Linux power_supply ABI permits
+averaged attributes plus signed current/power discharge direction, so
+`voltage_avg`, `current_avg`, `power_avg`, `charge_avg`, and `energy_avg`
+participate alongside their `*_now` forms, and negative or zero current/power
+readings remain valid evidence.
+When compatible energy/charge now-or-average and full values exist, reported
+capacity is cross-validated within the established tolerance. A missing status
+renders a bare percentage rather than fabricating "(Unknown)".
 
-**Decision 3 — independent bounded probes run concurrently under dedicated
-budgets.** Profiling showed the Windows full-mode critical path dominated not
-by any query (each <30 ms healthy) but by the BitLocker security-namespace
-probe hanging to the full shared WMI timeout on SKUs without the BitLocker
-provider, serialized after the batch. Independent probes now launch before
-the batch and await after it, each under its own tight cap (BitLocker 2 s,
-ACPI thermal 1 s). Sharing one timeout across differently-hang-prone probes
-was the root defect: one pathological namespace must not define every other
-probe's budget. Registry reads moved from `reg.exe` spawns to native APIs,
-duplicate queries (`Win32_ComputerSystem`, `Win32_NetworkAdapterConfiguration`,
-process-table snapshots) collapsed to one each, and post-batch PowerShell
-rescues no longer stack on top of the single batched fallback.
+These checks address plausible peripheral, absent-pack, and stale-gauge
+misattribution paths; they do **not** establish which node produced the
+historical Raspberry Pi "30%" row. That causal claim remains open until physical
+Pi sysfs diagnostics are captured. On macOS, the `pmset` fallback requires a
+recognized `-InternalBattery-N` record and never substitutes a generic stray
+percentage. macOS still has no thermal collection.
+
+**Decision 3 — independent bounded probes overlap under launch-relative
+deadlines.** Profiling identified the Windows full-mode critical path as a
+BitLocker security-namespace probe that could consume the shared WMI timeout
+after the main batch. The BitLocker worker now launches before independent work
+and is awaited only for the remainder of its dedicated two-second deadline;
+elapsed time elsewhere cannot start a fresh full wait. Registry reads moved
+from `reg.exe` spawns to native APIs, duplicate
+`Win32_ComputerSystem`/`Win32_NetworkAdapterConfiguration` queries and process-
+table snapshots collapsed, and post-batch fallbacks no longer stack redundant
+work. The separate NVIDIA subprocess follows Fast/Normal command budgets rather
+than an unbounded or one-size-fits-all wait.
+
+On the controlled Alienware m16 R2 benchmark, seven alternating full-mode runs
+produced medians of 5138.6 ms for the v4.2.2 baseline and 2092.3 ms for the
+candidate: about 3046.3 ms (59.3%) less, a 2.46× runtime ratio. Eleven
+alternating fast-mode runs produced medians of 247.0 ms and 238.9 ms; the
+apparent -3.3% is background-level, so this decision makes no fast-mode
+performance-gain claim. The full repaired-code local gate is recorded in
+`TESTING.md`; exact-head hosted checks remain pending. Passing them will validate
+the candidate but will not authorize merge, publication, or independent AMD64
+Linux/Raspberry Pi physical acceptance.

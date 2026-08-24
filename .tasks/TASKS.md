@@ -2,6 +2,8 @@
 
 ## Backlog
 
+- [ ] **Review, merge, and release TR-300 v4.3.0** - after corrected PR acceptance, merge and run exact-SHA crates/tag/release/physical gates (needs #v430) (ms #v43) #r43
+
 ## To-Do
 
 - [ ] **Validate TR-300 on the AMD64 Linux laptop** - full/fast reports, shell/Cargo update preservation, permissions, networking, and graceful optional probes (ms #hw4) #amd
@@ -10,14 +12,14 @@
 
 ## Active
 
-- [ ] **Ship v4.3.0 - battery hardening, Windows latency, thermals** - stacked work on `feature/v4.3.0-battery-perf-thermals`, PR open for review, then tag and publish through exact-SHA gates (ms #v43) #v430
-  - [x] Harden Linux battery selection against phantom supplies (scope/present/measurement/cross-validation, deterministic order)
-  - [x] Cut Windows full-mode latency ~2.5x on the Alienware (BitLocker concurrency + dedicated budget, WMI/registry dedupe)
-  - [x] Add CPU/GPU temperature rows on Linux + Windows with additive schema-v1 JSON keys
+- [ ] **Repair and revalidate v4.3.0 PR #14** - correct platform accuracy, preserve the measurable Windows full-mode gain, prove exact-head CI, and leave the PR open (ms #v43) (owner codex) #v430
+  - [x] Repair Windows launch-relative deadlines and trustworthy NVIDIA-only thermals
+  - [x] Repair Linux battery compatibility and deterministic fault-aware thermals
+  - [x] Tighten macOS battery parsing and cross-format thermal rendering tests
   - [x] Add `-f/--full` explicit flag
-  - [x] Update the documentation set (changelogs in lockstep, README, AGENTS/CLAUDE, MASTER_PLAN, TESTING, ADR)
-  - [ ] Pass hosted CI on all platforms; merge after user review
-  - [ ] Tag v4.3.0 and watch CI/crates/release workflows
+  - [x] Reconcile unreleased docs, task state, and PR claims with measured evidence
+  - [x] Pass the full local gate and controlled v4.2.2 comparison
+  - [ ] Push the corrected exact head and pass hosted CI/review without merging
 
 ## Done
 

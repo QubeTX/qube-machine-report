@@ -7,46 +7,58 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.0 — 2026-08-21 (pending review — branch `feature/v4.3.0-battery-perf-thermals`)
+### v4.3.0 — Unreleased candidate (as of 2026-08-23; open PR #14)
 
-Verified on Windows 11 25H2 (build 26200.9168), unelevated session,
-Alienware m16 R2 (Core Ultra 7 155H + RTX 4070 Laptop GPU), full local gate
-(`cargo fmt --check`, `clippy --all-targets --workspace -- -D warnings`,
-`cargo test --workspace --all-targets` = 167 lib + 22 integration green,
-`cargo build --release`):
+Release status: v4.2.2 is the last published GitHub/crates.io version. The
+working `4.3.0` manifest is on
+`feature/v4.3.0-battery-perf-thermals`. Repairs and the repaired-code local gate
+pass; exact-head hosted revalidation remains pending. The operator requires PR
+#14 to remain open after validation. Earlier branch runs do not certify the
+repaired tree.
 
-- **Thermal reporting (Windows):** `GPU TEMP` renders live in fast mode
-  (68–69 °C via `nvidia-smi`) and full mode; ASCII renders `68 C`; JSON emits
-  `cpu.gpu_temperature_c` as a number with `cpu.temperature_c` null.
-  `MSAcpi_ThermalZoneTemperature` verified **unsupported** on this consumer
-  Dell/Alienware board (`Get-CimInstance root/wmi ... → "Not supported"`), so
-  the CPU row omits itself by design here — matching the accuracy contract.
-  Linux paths are covered by tempdir unit tests (hwmon package-label
-  preference, Pi-style `cpu_thermal` zone fallback, amdgpu hwmon, garbage
-  rejection); execution lands with CI's Ubuntu job because the linux module is
-  cfg-gated off on Windows dev hosts.
-- **Full-mode latency:** measured 5206 ms before the change (v4.2.2 baseline)
-  → 2094–2113 ms after (three consecutive runs). Root cause identified by
-  env-gated instrumentation: the BitLocker security-namespace probe hung to
-  its full 5 s shared timeout on this Win11 Home SKU; every individual WMI
-  class in the batch answers in <30 ms. Fast mode: 236 ms → ~300 ms
-  (+64 ms nvidia-smi spawn, accepted per product decision to show GPU temp in
-  auto-run).
-- **Battery hardening (Linux):** selection rules unit-tested via tempdir
-  fixtures — device-scope rejection (wireless mouse battery), capacity-only
-  ghost rejection, energy/charge cross-validation mismatch rejection,
-  deterministic BAT* priority across directory-order variation, absent-pack
-  skip, bare-percentage output when status is missing. Execution on real
-  sysfs lands with CI's Ubuntu job.
-- **macOS pmset anchor:** covered by existing parser tests plus the new
-  stray-percentage fixture; macOS execution lands with hosted CI.
-- **CLI:** `-f/--full` accepted alone, rejected combined with `--fast`
-  (integration-tested).
-- **Pi diagnostics still open (maintainer action):** run
-  `tr300 --version` plus a `/sys/class/power_supply/*` type/scope/capacity
-  dump on the Raspberry Pi to confirm which node produced the historical
-  "30%" reading (leading hypotheses: `scope=Device` peripheral battery or a
-  pre-v3.14 install reading BAT nodes blindly).
+- **Repaired-code local gates — pass at `d22c438`:** locked fmt; warnings-denied
+  all-target/workspace Clippy; 173 library and 22 integration tests; release
+  build; 39-file package list; publish dry-run (no upload); audit of 221 locked
+  dependencies; cargo-dist plan; actionlint and shellcheck; Linux/macOS cross-
+  target check/Clippy; and full/fast table, ASCII, JSON, and thermal runtime
+  smokes all passed. Hosted PR CI on the exact pushed head remains pending.
+- **Windows thermal contract:** only an already-detected NVIDIA adapter may
+  trigger `nvidia-smi`, and its timeout follows the active collection mode.
+  A trusted answer renders `GPU TEMP` and a numeric
+  `cpu.gpu_temperature_c`; failure remains absent/`null`. Windows CPU
+  temperature is deliberately always absent/`null`: ACPI thermal-zone identity
+  cannot establish that a zone belongs to the CPU. No ACPI CPU probe is part of
+  the candidate acceptance surface. A targeted post-repair Alienware smoke
+  recorded `GPU TEMP` at 54 °C in both full and fast modes, with CPU temperature
+  `null`; one ASCII invocation had 49 nonempty lines and every line was exactly
+  51 display columns.
+- **Recorded Windows latency benchmark:** seven alternating Alienware m16 R2
+  full-mode runs produced medians of 5138.6 ms for the v4.2.2 baseline and
+  2092.3 ms for the candidate, a reduction of about 3046.3 ms (59.3%) and a
+  2.46× runtime ratio. Eleven alternating fast-mode runs produced medians of
+  247.0 ms and 238.9 ms; the apparent -3.3% difference is background-level, so
+  make no fast-mode gain claim. These controlled post-repair measurements and
+  the full local gate are complete; exact-head hosted checks remain pending.
+- **Linux thermal contract:** both modes use pure sysfs. CPU/GPU selection is
+  deterministic, chooses the hottest plausible healthy sensor within the
+  preferred class, rejects faulted/unreadable/malformed channels, recognizes
+  `soc_thermal`, and falls back only to CPU/SoC-labeled thermal zones. Fixtures,
+  output parity, and Linux cross-target check/Clippy pass locally; hosted-native
+  runtime remains pending.
+- **Linux battery contract:** reject explicit `scope=Device` and `present=0`
+  evidence; accept well-formed `*_now` or `*_avg` corroboration, including
+  valid signed current/power readings; cross-validate compatible energy/charge
+  pairs; and choose deterministically. These rules harden plausible
+  misattribution paths but do not prove which sysfs node produced the historical
+  Raspberry Pi "30%" report.
+- **macOS contract:** the `pmset` fallback requires a recognized
+  `-InternalBattery-N` record and cannot use an unrelated percentage. macOS
+  reports no thermal values in v4.3. Cross-target check/Clippy passes locally;
+  hosted-native Intel/Apple Silicon candidate gates remain pending.
+- **Physical gates still open:** capture the Raspberry Pi's real
+  `/sys/class/power_supply/*` and thermal layout, then run the full
+  thermal/battery/output matrix there; run the corresponding matrix on the
+  AMD64 Linux laptop. Hosted Linux fixtures do not close either physical gate.
 
 ### v4.2.2 — 2026-07-18 (published package-transaction fix-forward)
 

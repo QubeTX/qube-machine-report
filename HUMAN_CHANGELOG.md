@@ -13,32 +13,40 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [4.3.0] - 2026-08-21
+## [4.3.0] - Unreleased
 
 ### Added
 - **Temperature readings are now part of the report.** On Linux the report
-  shows CPU and GPU temperatures, including the processor temperature on
-  Raspberry Pis — useful when you SSH into a headless board. On Windows,
-  machines with an NVIDIA graphics card show the GPU temperature. If a
-  computer has no readable sensor, the rows simply don't appear instead of
-  showing made-up numbers. Temperatures also show in the quick startup view.
+  chooses the hottest trustworthy CPU and GPU readings in a repeatable way,
+  ignores sensors that report faults or nonsense, and recognizes the SoC
+  sensor names used by systems such as Raspberry Pi. On Windows, machines with
+  an NVIDIA graphics card can show GPU temperature; Windows CPU temperature is
+  left blank because the available system zones cannot reliably prove they are
+  the CPU. Macs report no temperature this release. If no trusted sensor
+  answers, the row simply stays hidden. Linux and Windows NVIDIA readings are
+  available in the quick startup view under their respective time budgets.
 - **A new `--full` flag** does what it says: runs the complete report. It's
   the opposite of `--fast` and matches the default behavior.
 
 ### Changed
-- **The full report on Windows is now about twice as fast.** A slow security
-  check that doesn't apply to most home editions of Windows was holding
-  everything up; it now runs in the background with its own short time limit.
-  Several other lookups were streamlined so they run once instead of twice.
+- **The full report on the Windows benchmark machine is substantially faster.**
+  Controlled alternating runs put the median at 5138.6 ms before and 2092.3 ms
+  after — about 3046.3 ms or 59.3% less time, a 2.46× speedup. A slow security
+  check now overlaps other work under its own deadline, and repeated lookups
+  were consolidated. Quick-report medians were 247.0 ms before and 238.9 ms
+  after; that small -3.3% difference is background-level, so there is no
+  quick-mode speedup claim.
 
 ### Fixed
-- **Computers without batteries no longer show a fake battery percentage.**
-  Some machines — notably Raspberry Pis with a wireless mouse or gamepad
-  plugged in — reported a mysterious battery level that actually belonged to
-  the mouse or controller. The report now only shows battery information it
-  can prove belongs to the machine itself.
-- The same care now applies on Mac: the battery reading is taken only from
-  the laptop's real battery line.
+- **Linux is more careful about which battery belongs to the computer.** It
+  rejects supplies explicitly marked as devices or absent, accepts both
+  current and averaged live readings (including normal signed current/power
+  discharge values), and chooses consistently when several supplies exist. This closes
+  plausible paths to a fake percentage, but the source of the historical
+  Raspberry Pi "30%" report has not been proven; physical diagnostics remain
+  open.
+- The same care now applies to the Mac fallback: it accepts only the named
+  internal-battery line, not an unrelated percentage elsewhere in the output.
 
 ## [4.2.2] - 2026-07-18
 

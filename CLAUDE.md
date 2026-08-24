@@ -2,11 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Companion file:** The canonical architecture decision ledger through
-> 2026-07-18 (single-Rust/product/output semantics, v4 manual-save and
-> origin-preserving update behavior, reusable installer contract, enforced Mac trust, `main` and Actions
-> runtime, toolchain/release policy, Windows accuracy/distribution/
-> consolidation, and install safety) lives in
+> **Companion file:** The canonical architecture decision ledger reconciled
+> through 2026-08-23, including the unreleased v4.3 candidate (single-Rust/
+> product/output semantics, v4 manual-save and origin-preserving update behavior,
+> reusable installer contract, enforced Mac trust, `main` and Actions runtime,
+> toolchain/release policy, Windows accuracy/distribution/
+> consolidation, thermal/battery/probe budgets, and install safety) lives in
 > [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — the
 > **why**: context, rejected alternatives, consequences, evidence, revalidation
 > triggers, prior failure modes, and historical context.
@@ -51,8 +52,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete GitHub distribution, crates.io package, and working manifest:
-**4.2.2**. Exact source `db0f538c82961569a7118b105a20e967b15476f0`
+Complete GitHub distribution and crates.io package: **4.2.2**. The working
+manifest is **4.3.0** only on the unreleased `feature/v4.3.0-battery-perf-thermals`
+candidate in open PR #14. Repaired-code local gates pass; exact-head hosted
+checks remain pending, and the operator requires the PR to remain open after
+validation unless separately authorizing a merge. Exact v4.2.2 source
+`db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
 all Windows package/transition jobs, and the fresh 34-asset public audit.
@@ -211,9 +216,33 @@ Windows-specific accuracy rules are extensive — load the **`windows-accuracy`*
 
 ### Fast Mode (`CollectMode::Fast`)
 
-`--fast` skips slow subprocess calls for sub-second startup. Auto-run uses `tr300 --fast`; the `report` alias runs full mode. What gets skipped varies by platform — see the table in each platform collector. `-f/--full` is the explicit counterpart to `--fast` (full collection is already the default; the two flags conflict).
+`--fast` skips many slow optional probes for sub-second startup. Auto-run uses `tr300 --fast`; the `report` alias runs full mode. What gets skipped varies by platform — see the table in each platform collector. `-f/--full` is the explicit counterpart to `--fast` (full collection is already the default; the two flags conflict).
 
-Thermal rows (`CPU TEMP` / `GPU TEMP`) render in BOTH modes by product decision: Linux reads are pure sysfs (hwmon package sensors → cpu/soc thermal-zone fallback, Raspberry Pi included); Windows probes `nvidia-smi` only when an NVIDIA adapter was detected, and the ACPI thermal-zone query runs on its own bounded worker thread. Absence omits the row — never fabricate. macOS reports no thermals this release. JSON keys: additive schema-v1 `cpu.temperature_c` / `cpu.gpu_temperature_c`. Linux battery selection requires positive proof of a system pack (scope ≠ Device, live measurement attribute, capacity cross-validation, deterministic BAT*-first ordering) — see the v4.3.0 ADR before loosening any rule.
+Thermal rows (`CPU TEMP` / `GPU TEMP`) render in both modes when trusted data
+exists. Linux uses pure sysfs, chooses the hottest valid sensor deterministically
+within the preferred class, honors hwmon fault state (unreadable/malformed fault
+state rejects the channel), recognizes `soc_thermal`, and falls back to a
+cpu/soc-labeled thermal zone. Windows probes `nvidia-smi` only after NVIDIA
+adapter detection and uses `CommandTimeout::Fast` or `Normal` with the
+collection mode; Windows CPU temperature stays `None`/JSON `null` because ACPI
+zone identity does not prove CPU ownership. macOS reports no thermals. Absence
+omits the table/Markdown row; additive schema-v1 JSON keys are
+`cpu.temperature_c` / `cpu.gpu_temperature_c`.
+
+Linux battery selection rejects contradictory `scope=Device`/`present=0`
+evidence, accepts well-formed `*_now` or `*_avg` measurements including valid
+signed current/power values, cross-validates compatible capacity pairs, and is
+deterministic. The historical Raspberry Pi "30%" source is not proven until
+physical sysfs diagnostics are captured. The macOS `pmset` fallback requires
+an `-InternalBattery-N` record and cannot fall back to a stray percentage.
+
+Candidate benchmark contract: seven alternating Windows full-mode runs yielded
+medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
+Eleven alternating fast-mode runs yielded 247.0 ms and 238.9 ms medians; the
+apparent -3.3% is background-level, so never claim a fast-mode gain from this
+change. The full repaired-code local gate passes at `d22c438`; exact-head hosted
+PR #14 checks remain pending. A green PR is not merge, release, or physical-
+hardware acceptance.
 
 ### Build Script (`build.rs`)
 
@@ -518,7 +547,8 @@ and release-asset gates.
   must sign and receive Notary `Accepted` before hosting; then
   `windows-installers.yml` and `macos-installer.yml` must finish. The latter
   requires native Intel and Apple Silicon direct-PKG/DMG-bridge validation.
-  Verify all 34 assets before updating the homepage for v4.2.2.
+  Verify all 34 expected assets before updating the homepage. For v4.3.0 this
+  remains future release work; PR #14 and its post-repair gates are still open.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
 workflow use `cargo publish --locked`. `allow-dirty = ["ci", "msi"]` is

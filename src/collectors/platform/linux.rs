@@ -495,9 +495,9 @@ fn get_battery() -> Option<String> {
 /// Hardening over the v3.14.0 type-only walk, which admitted phantom
 /// supplies:
 /// - `scope == "Device"` nodes are per-device batteries (wireless mice,
-///   gamepads, HID peripherals), never the system pack — a Logitech dongle
-///   reporting ~30% was user-visible as a bogus laptop-style BATTERY row on
-///   headless SBCs.
+///   gamepads, HID peripherals), never the system pack. The old type-only walk
+///   could admit this class of supply as a bogus laptop-style BATTERY row on a
+///   headless SBC; the exact source of the historical report remains unproven.
 /// - Capacity-only gauges with no measurement file (voltage/current/power)
 ///   report floating register junk; real packs and UPS HATs always expose at
 ///   least one live `*_now` or `*_avg` measurement attribute.
