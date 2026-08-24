@@ -196,7 +196,8 @@ begin
     ProductCode := ProductCodes[Index];
     Args := '/x "' + ProductCode + '" /qn /norestart';
     Log('Removing same-edition MSI before changing the install channel: ' + ProductCode);
-    if not Exec(ExpandConstant('{sys}\msiexec.exe'), Args, '', SW_HIDE,
+    if not Exec(ExpandConstant('{sys}\msiexec.exe'), Args,
+        ExpandConstant('{sys}'), SW_HIDE,
         ewWaitUntilTerminated, ExitCode) then
     begin
       Result := 'Could not launch Windows Installer to remove the previous MSI. ' +

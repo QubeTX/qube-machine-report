@@ -7,14 +7,13 @@ machine reports on macOS, Linux, and Windows. The v4 release line hardens
 cross-platform facts, makes report persistence explicit-only, fails updates
 gracefully under endpoint policy, and enforces Developer ID signing plus Apple
 notarization. v4.1 added origin-preserving updates and a native universal
-package verified on hosted Apple Silicon and Intel. v4.2.2 is the completed
-MIC-1 release: managed CLI installers are the recommended default, fresh
-installer intent is authoritative, and the Mac native artifact is a direct PKG
-with a compatibility-only DMG bridge. v4.3.0 is an unreleased candidate in open
-PR #14. Repairs plus repaired-code local/hosted PR gates and review pass, and
-the operator requires the PR to remain open after validation.
-Alienware Windows evidence is captured; AMD64 Linux laptop and Raspberry Pi 4
-checks remain separate and open.
+package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
+MIC-1 baseline: managed CLI installers are the recommended default, fresh
+installer intent is authoritative only within a proven platform transaction,
+and the Mac native artifact is a direct PKG with a compatibility-only DMG
+bridge. v4.3.0 is an unreleased performance/battery/thermal and release-custody
+candidate developed through PR #14. Alienware Windows evidence is captured;
+AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
 [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md),
@@ -23,28 +22,23 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 ## Current Status
 
 - Cargo package / binary / library import: `tr300`
-- Complete GitHub distribution and crates.io package: `4.2.2` (2026-07-18).
-  Exact source `db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA
-  CI/crates, all six release targets, signed Apple archives, every Windows
-  package/transition job, native Intel/ARM direct-PKG and compatibility-DMG
-  lifecycles, and the fresh 34-asset public-byte audit.
-- Working manifest / candidate: `4.3.0` on
-  `feature/v4.3.0-battery-perf-thermals`, open PR #14. It is unreleased and
-  repaired-code local gates pass; head `56b92d7` passed CI 32680492930 and
-  PR-mode Release plan 32680492910 with all four review threads resolved. The
-  operator has withheld merge authority even after validation.
-- The v4.3 candidate adds deterministic, fault-aware hottest-valid Linux
-  CPU/GPU thermals (including `soc_thermal`), mode-bounded NVIDIA GPU thermals
-  on Windows while Windows CPU stays absent/JSON `null`, no macOS thermals, and
-  stricter Linux/macOS battery identity. Linux battery corroboration includes
-  `*_avg` and valid signed current/power readings; the historical Raspberry Pi
-  "30%" source is still unproven. Seven alternating Windows full runs produced
-  medians of 5138.6 ms versus 2092.3 ms (~3046.3 ms, 59.3%, 2.46×); 11
-  alternating fast runs at 247.0 ms versus 238.9 ms (-3.3%) are background-
-  level and carry no performance-gain claim.
+- Last fully published distribution: `4.2.2` (2026-07-18), source
+  `db0f538c82961569a7118b105a20e967b15476f0`. Exact-SHA CI/crates, both signed
+  Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
+  direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
+  stable-`latest` audit passed.
+- Working manifest / unreleased candidate: `4.3.0` on
+  `feature/v4.3.0-battery-perf-thermals`, developed through PR #14. It adds
+  deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
+  `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
+  recognizable-`InternalBattery`-only macOS fallback, mode-bounded NVIDIA GPU
+  thermals on Windows while CPU stays absent/JSON `null`, and `-f/--full`.
+  Seven alternating full runs measured 5138.6 ms versus 2092.3 ms (~59.3%,
+  2.46×); 11 fast runs measured 247.0 ms versus 238.9 ms (-3.3%), so no
+  fast-mode gain is claimed. It remains unreleased; AMD64 Linux laptop and
+  Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
-  `https://reports.qubetx.com/` for the published v4.2.2 distribution. Do not
-  advertise v4.3.0 before its release gates and publication complete.
+  `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
 - Personal-fleet evidence: the Alienware Global MSI update and report/hardware
   facts now have real evidence; never claim the AMD laptop or Pi 4 is verified
   until its board task contains real evidence
@@ -66,40 +60,52 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   29559148638 with zero annotations; exact-SHA crates run 29559305341 safely
   skipped already-published 4.0.1 without token or publish access.
 - Architecture ledger: `docs/architecture-decisions.md` is reconciled through
-  2026-08-23. It distinguishes the accepted, published v4.2.2 decisions from
-  the unreleased v4.3 candidate's thermal, battery, and bounded-probe rationale,
-  and retains the one-product/mode/output, MIC-1, `main`, checkout-v6, and
-  evidence-boundary contracts.
+  2026-08-24. It includes the v4.3 collector candidate, preinstall-only Mac
+  managed-conflict refusal and receipt-aware transition, trusted executable/CWD rules, exact stable release provenance,
+  protected environments/rulesets, explicit OIDC crates publishing, and the
+  private 24→30→validated→34 publication chain.
 - Release tooling: cargo-dist `0.31.0`
 - Last physical-Mac source verification: 2026-07-15 on a MacBook Pro M2,
-  macOS 26.3.1 build 25D2128. Published v4.2.2 hosted Installer-identity and
-  workflow evidence was reconciled 2026-07-18; v4.3 native Mac gates remain
-  pending and the candidate has no thermal collection.
+  macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
+  documentation/workflow state reconciled 2026-08-24.
 
-### v4.3.0 open thermal/battery/latency candidate
+### v4.2.2 published baseline and v4.3.0 candidate
 
-- Linux thermal collection is pure sysfs in both modes. It deterministically
-  chooses the hottest plausible healthy reading within the preferred sensor
-  class, rejects faulted/malformed channels, recognizes `soc_thermal`, and
-  preserves absence when no trusted CPU/GPU sensor answers.
-- Windows thermal collection is NVIDIA GPU-only through `nvidia-smi`, gated on
-  detected NVIDIA hardware and bounded by the active collection mode. Windows
-  CPU temperature remains absent/JSON `null`; ACPI thermal zones are rejected
-  because their instance identity cannot prove a CPU sensor. macOS reports no
-  thermals.
-- Linux battery selection recognizes `*_avg` attributes and signed current or
-  power readings while rejecting contradictory device/absence evidence. The
-  macOS `pmset` fallback requires `-InternalBattery-N`. These are hardening
-  decisions, not proof of the historical Raspberry Pi symptom's source.
+- v4.3 Linux battery corroboration accepts standard `_now`/`_avg` voltage,
+  current, power, charge, and energy signals, including signed discharge and
+  valid zero readings. Thermal selection is fault-aware, deterministic, and
+  picks the hottest plausible CPU/GPU candidate including `soc_thermal`.
+- v4.3 Windows consolidates WMI/registry/network/process work and applies
+  launch-relative probe deadlines. NVIDIA temperature uses bounded
+  `nvidia-smi`; Windows CPU temperature remains absent/null because ACPI zones
+  cannot be mapped reliably. macOS accepts only a real `InternalBattery` record.
 - Seven alternating Windows full-mode runs produced medians of 5138.6 ms before
   and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×). Eleven alternating fast runs
   produced 247.0 ms and 238.9 ms medians; the apparent -3.3% is background-level
   and supports no fast-mode performance claim.
-- PR #14 is open and must remain unmerged by direct operator instruction. The
-  repaired candidate's local/hosted gates and review pass. Physical AMD64 Linux
-  and Raspberry Pi checks are independent evidence debts.
-
-### v4.2.2 managed-install/direct-PKG release closure
+- The release-security candidate keeps every stable release private at 24 base
+  assets, extends it to 30 Windows assets, proves those exact bytes through
+  private fresh-install plus authenticated direct prior-to-candidate transition
+  checks while public `latest` stays unchanged, and lets only the fresh macOS
+  finalizer expose the exact 34-asset result. The real updater-to-candidate
+  matrix runs post-public; crates publication is an explicit protected OIDC
+  gate.
+- Native Apple runners disproved automatic managed-to-PKG takeover: a failing
+  `postinstall` can leave the native payload behind even when prior managed
+  state restores exactly. v4.3 removes the helper and postinstall, checks
+  standard managed binary/receipt paths in every `/Users` home, including
+  dot-prefixed unregistered residue, plus all eligible local Directory Service
+  homes non-mutatingly in `preinstall`, independent of console or launch
+  environment. It enumerates only the fixed parent levels and rejects abnormal
+  or unlistable intermediates rather than treating them as absent, with
+  pre-macOS-12-compatible plist parsing and a `/`-only PackageKit target. It
+  requires managed-installer refresh -> receipt-aware Complete uninstall ->
+  PKG. Clean/native upgrades and exact PKG-to-managed takeover remain supported.
+- Release-chain hardening head `8ea060f` passed its complete local gate, five
+  zero-finding security scans, exact-head CI/release-plan runs, and native Intel
+  and Apple Silicon PackageKit fixtures before PR #15 merged as `1ffb0cc`.
+  Exact-main CI then passed. The earlier collector-only head passed its recorded
+  gates; the integrated PR #14 result requires fresh exact-head proof.
 
 - `tr300 update` preserves MSI/EXE edition and scope, Cargo, cargo-dist
   shell/PowerShell, or macOS PKG origin. Unknown/conflicting origins do not
@@ -122,8 +128,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   and use the new binary for delayed backup cleanup. Legacy updater failure is
   valid only when it retains the old binary and returns recovery; a fresh exact
   same-channel install must then converge to one current registration.
-- A deliberately launched fresh installer is the user's newest channel intent,
-  including same-version or downgrade repair; automatic updates remain latest-
+- A deliberately launched fresh installer is the user's newest channel intent
+  only inside a safe platform transaction; automatic updates remain latest-
   only. Same-edition MSI/Inno format changes remove the exact competing product.
   Opposite-edition native packages stop before mutation and point to the managed
   PowerShell path, which can request UAC for exact cross-scope convergence.
@@ -131,7 +137,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   `tr300-universal-apple-darwin.pkg`. It owns `/usr/local/bin/tr300` and the
   `com.qubetx.tr300.pkg` receipt. The DMG remains only for immutable v4.1.x
   clients and contains a byte-identical PKG. Current updaters download the
-  direct exact-tag PKG/sidecar and wait for Apple Installer.
+  direct exact-tag PKG/sidecar and wait for Apple Installer. The package ships
+  only `preinstall`; standard-path managed binary or receipt evidence stops it
+  before payload placement.
 - Native GitHub `macos-15` and `macos-15-intel` runners are release gates; a
   physical Mac is optional visual smoke testing unless CI exposes a GUI-only
   defect. Installer-identity preflight run 29637224793 signed and verified a
@@ -143,6 +151,11 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   set, exact-SHA CI/crates, disposable Windows managed/native matrices, both
   Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
   update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
+- The v4.3.0 release target remains 34 stable-name assets. Required pending
+  evidence is the clean exact-commit local/hosted gate, explicit trusted-OIDC
+  crates publication, private Windows byte/matrix proof, both Apple-native
+  lifecycles/finalization, post-public smokes, public-byte audit, and homepage
+  update. Physical AMD64 Linux and Pi qualification stay separately open.
 
 ### v4.0.0 feature set, released through the v4.0.1 fix-forward
 
@@ -208,37 +221,37 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Preserve `4.2.2` as the last published boundary. Keep `Cargo.toml`,
-   `Cargo.lock`, generated man page, and the approved docs synchronized at
-   `4.3.0`, with both changelogs explicitly labeled `Unreleased` until the
-   release date is real.
-2. Preserve the completed review repairs on the feature branch. PR #14 must
-   remain unmerged by operator instruction; an earlier green run is not evidence
-   for the repaired head.
-3. Keep the complete locked local gate set green on the repaired tree: fmt, warnings-
-   denied Clippy, all-target tests, package list, publish dry-run, release build,
-   audit, cargo-dist plan, workflow/script checks, and required runtime smokes.
-   These gates passed on exact repaired source/docs head `56b92d7`.
-4. Exact repaired-head CI 32680492930 and PR-mode Release plan 32680492910 pass,
-   and all four review threads are resolved. Leave the PR open. Merge/default-
-   branch/release work requires separate operator authorization and remains in
-   task `#r43`.
-5. Create and push only tag `v4.3.0` after main CI and crates publication settle.
-   Existing immutable v4 tags must not move.
-6. Require both hosted Apple jobs to sign and receive Notary `Accepted`; verify
-   extracted signatures/checksums, then require supplemental native Mac and
-   Windows installer/transition workflows.
-7. Audit the final public assets, stable `latest` entrypoints, rendered wrappers,
-   and release metadata. Only then update, test, commit, and push the homepage.
-8. Keep AMD64 Linux/Pi physical tasks open and report them as open evidence
-   rather than inferring hardware success from fixtures or hosted runners.
+   `Cargo.lock`, generated man page, and the full docs set synchronized at
+   `4.3.0`, clearly labeled `Unreleased` until publication.
+2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
+   package list, publish dry-run, security audit, cargo-dist plan, actionlint,
+   shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
+   sign/notary/staple/install proof.
+3. Resolve PR #14 on the current merge-result SHA, rerun the complete local
+   gate, and merge only through protected `main` after every strict required
+   check and review thread passes. Earlier-head checks are not evidence for the
+   merge result; never push release work directly to `main`.
+4. Explicitly dispatch the owner-only `crates-publish.yml operation=publish` and
+   require exact package bytes plus trusted OIDC/public provenance. No push or
+   `workflow_run` automatically publishes a crate.
+5. Create and push only tag `v4.3.0` after exact-main CI/crates proof. Existing
+   immutable `v*` tags must not move.
+6. Require `release.yml` to create the private 24-asset draft, Windows Installers
+   to produce 30, and private Windows Installer Validation to attest those exact
+   bytes and pass every channel/transition gate.
+7. Require both native Apple jobs and exact proof custody before the macOS
+   finalizer adds four assets and solely publishes 34. Then require public
+   Windows updater and published Linux/macOS smokes plus the public-byte audit.
+8. Only then update/test/push the homepage through its own protected workflow;
+   keep AMD/Pi physical tasks open and patch forward from real findings.
 
 Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,
 native macOS 29664824418, Windows packaging 29664824432, and Windows transition
 validation 29664948031. The current v4.3.0 candidate has no publication run or
 release evidence yet.
 
-Never publish locally merely because a token exists. Never tag before the
-default-branch CI and crates workflow settle.
+Never publish locally merely because a credential exists. Never tag before
+exact-current-main CI and the explicit trusted-OIDC crates operation settle.
 
 The v4 release notes must include a concise Rust migration section: downstream
 code should obtain `SystemInfo`/`Config` through collection/default APIs rather
@@ -284,6 +297,7 @@ excluded. The tracked project tree is:
 ├── .codex/config.toml
 ├── .firecrawl/polyform-nc-1.0.0.md
 ├── .github/workflows
+│   ├── apple-secret-migration.yml
 │   ├── ci.yml
 │   ├── crates-publish.yml
 │   ├── macos-installer.yml
@@ -318,10 +332,15 @@ excluded. The tracked project tree is:
 ├── rust-toolchain.toml
 ├── scripts
 │   ├── build-sign-notarize-macos-installer.sh
+│   ├── install-pinned-inno-setup.ps1
 │   ├── managed-installers
 │   │   ├── tr300-installer.ps1
 │   │   └── tr300-installer.sh
-│   └── sign-notarize-macos.sh
+│   ├── sign-notarize-macos.sh
+│   ├── test-managed-installer-transaction.ps1
+│   ├── test-managed-installer-transaction.sh
+│   ├── test-release-workflow-provenance.py
+│   └── verify-apple-installer-identity.sh
 ├── src
 │   ├── cli.rs
 │   ├── collectors

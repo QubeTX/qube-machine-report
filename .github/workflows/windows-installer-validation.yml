@@ -2,63 +2,251 @@ name: Windows Installer Validation
 
 on:
   workflow_run:
-    workflows: ["Windows Installers"]
+    workflows: ["Windows Installers", "macOS Universal Package"]
     types: [completed]
   workflow_dispatch:
     inputs:
+      validation_mode:
+        description: "Private draft acceptance or post-public updater smoke"
+        required: true
+        default: private
+        type: choice
+        options:
+          - private
+          - public
       tag:
         description: "Release tag to validate (for example vX.Y.Z)"
         required: true
         type: string
+      upstream_run_id:
+        description: "Exact successful Windows Installers or macOS finalizer run ID"
+        required: true
+        type: string
+
+concurrency:
+  group: windows-installer-validation-${{ github.event.workflow_run.head_sha || inputs.tag || github.sha }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   resolve:
-    name: Resolve complete release
+    name: Resolve exact release state
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main' &&
+       github.repository == 'QubeTX/qube-machine-report' &&
+       github.actor_id == '30877743') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'workflow_run' ||
+        github.event.workflow_run.event == 'workflow_dispatch') &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       previous_tag: ${{ steps.release.outputs.previous_tag }}
       previous_version: ${{ steps.release.outputs.previous_version }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      validation_mode: ${{ steps.release.outputs.validation_mode }}
+      upstream_run_id: ${{ steps.release.outputs.upstream_run_id }}
+      upstream_run_attempt: ${{ steps.release.outputs.upstream_run_attempt }}
     steps:
       - name: Resolve tag and require every Windows family
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_MODE: ${{ inputs.validation_mode }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_UPSTREAM_RUN_ID: ${{ inputs.upstream_run_id }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          ACTOR_ID: ${{ github.actor_id }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          UPSTREAM_EVENT: ${{ github.event.workflow_run.event }}
+          UPSTREAM_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          UPSTREAM_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+          UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          repo='${{ github.repository }}'
-          if [[ '${{ github.event_name }}' == workflow_dispatch ]]; then
-            tag='${{ inputs.tag }}'
+
+          validate_upstream_run() {
+            local run_id=$1
+            local expected_attempt=$2
+            local workflow_file=$3
+            local expected_name=$4
+            local trusted_workflow_id actual_id workflow_id run_name run_path event
+            local status conclusion repository head_repository head_branch head_sha actual_attempt
+            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+            [[ -z "$expected_attempt" || "$expected_attempt" =~ ^[1-9][0-9]*$ ]]
+            trusted_workflow_id=$(gh api \
+              "repos/$EXPECTED_REPOSITORY/actions/workflows/$workflow_file" --jq .id)
+            [[ "$trusted_workflow_id" =~ ^[1-9][0-9]*$ ]]
+            IFS=$'\t' read -r actual_id workflow_id run_name run_path event status conclusion \
+              repository head_repository head_branch head_sha actual_attempt < <(
+                gh api "repos/$EXPECTED_REPOSITORY/actions/runs/$run_id" \
+                  --jq '[.id, .workflow_id, .name, .path, .event, .status, .conclusion, .repository.full_name, .head_repository.full_name, .head_branch, .head_sha, .run_attempt] | @tsv'
+              )
+            [[ "$actual_id" == "$run_id" && "$workflow_id" == "$trusted_workflow_id" &&
+               "$run_name" == "$expected_name" &&
+               "$run_path" == ".github/workflows/$workflow_file" &&
+               ("$event" == workflow_run || "$event" == workflow_dispatch) &&
+               "$status" == completed && "$conclusion" == success &&
+               "$repository" == "$EXPECTED_REPOSITORY" &&
+               "$head_repository" == "$EXPECTED_REPOSITORY" && "$head_branch" == main &&
+               "$head_sha" =~ ^[0-9a-f]{40}$ && "$actual_attempt" =~ ^[1-9][0-9]*$ ]]
+            [[ -z "$expected_attempt" || "$actual_attempt" == "$expected_attempt" ]]
+            validated_head_sha=$head_sha
+            validated_run_attempt=$actual_attempt
+          }
+
+          resolve_tag_commit() {
+            local tag=$1
+            local object_type source_sha
+            IFS=$'\t' read -r object_type source_sha < <(
+              gh api "repos/$EXPECTED_REPOSITORY/git/ref/tags/$tag" \
+                --jq '.object | [.type, .sha] | @tsv'
+            )
+            for _ in 1 2 3 4 5; do
+              case "$object_type" in
+                commit)
+                  printf '%s\n' "$source_sha"
+                  return 0
+                  ;;
+                tag)
+                  IFS=$'\t' read -r object_type source_sha < <(
+                    gh api "repos/$EXPECTED_REPOSITORY/git/tags/$source_sha" \
+                      --jq '.object | [.type, .sha] | @tsv'
+                  )
+                  ;;
+                *)
+                  echo "release tag resolves to unsupported object type: $object_type" >&2
+                  return 65
+                  ;;
+              esac
+            done
+            echo 'release tag did not resolve to a commit' >&2
+            return 65
+          }
+
+          require_release_target() {
+            local tag=$1
+            local source_sha=$2
+            local release_target
+            release_target=$(
+              gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$tag" \
+                --jq .target_commitish
+            )
+            [[ "$release_target" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "release $tag does not record an immutable target commit" >&2
+              return 65
+            }
+            [[ "$release_target" == "$source_sha" ]] || {
+              echo "release $tag targets $release_target, not tag commit $source_sha" >&2
+              return 65
+            }
+          }
+
+          repo=$EXPECTED_REPOSITORY
+          expected_sha=''
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
+               "$ACTOR_ID" == 30877743 && "$WORKFLOW_REF" == refs/heads/main ]]
+            main_sha=$(gh api "repos/$repo/git/ref/heads/main" --jq .object.sha)
+            [[ "$main_sha" =~ ^[0-9a-f]{40}$ && "$WORKFLOW_SHA" == "$main_sha" ]]
+            validation_mode=$DISPATCH_MODE
+            [[ "$validation_mode" == private || "$validation_mode" == public ]]
+            tag=$DISPATCH_TAG
+            upstream_run_id=$DISPATCH_UPSTREAM_RUN_ID
+            if [[ "$validation_mode" == private ]]; then
+              validate_upstream_run "$upstream_run_id" '' windows-installers.yml "Windows Installers"
+            else
+              validate_upstream_run "$upstream_run_id" '' macos-installer.yml "macOS Universal Package"
+            fi
+            upstream_run_attempt=$validated_run_attempt
+            expected_sha=$validated_head_sha
           else
-            # A workflow_run chained from another workflow_run executes from
-            # the default branch, so head_branch is "main", not the original
-            # release tag. Resolve exactly one immutable release from the
-            # successful upstream packaging run's source SHA instead.
-            sha='${{ github.event.workflow_run.head_sha }}'
+            [[ "$UPSTREAM_CONCLUSION" == success ]] || {
+              echo 'upstream release-chain workflow did not succeed' >&2
+              exit 65
+            }
+            [[ "$UPSTREAM_EVENT" == workflow_run || "$UPSTREAM_EVENT" == workflow_dispatch ]] || {
+              echo "refusing upstream event: $UPSTREAM_EVENT" >&2
+              exit 65
+            }
+            [[ "$UPSTREAM_REPOSITORY" == "$EXPECTED_REPOSITORY" ]] || {
+              echo "refusing upstream repository: $UPSTREAM_REPOSITORY" >&2
+              exit 65
+            }
+            [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo 'upstream workflow SHA is malformed' >&2
+              exit 65
+            }
+            case "$UPSTREAM_WORKFLOW_NAME" in
+              "Windows Installers")
+                validation_mode=private
+                validate_upstream_run "$UPSTREAM_RUN_ID" "$UPSTREAM_RUN_ATTEMPT" \
+                  windows-installers.yml "Windows Installers"
+                ;;
+              "macOS Universal Package")
+                validation_mode=public
+                validate_upstream_run "$UPSTREAM_RUN_ID" "$UPSTREAM_RUN_ATTEMPT" \
+                  macos-installer.yml "macOS Universal Package"
+                ;;
+              *)
+                echo "refusing upstream workflow: $UPSTREAM_WORKFLOW_NAME" >&2
+                exit 65
+                ;;
+            esac
+            [[ "$validated_head_sha" == "$UPSTREAM_SHA" ]]
+            upstream_run_id=$UPSTREAM_RUN_ID
+            upstream_run_attempt=$validated_run_attempt
+            expected_sha=$UPSTREAM_SHA
             mapfile -t tags < <(
               gh api "repos/$repo/releases?per_page=100" \
-                --jq ".[] | select(.target_commitish == \"$sha\") | .tag_name"
+                --jq ".[] | select(.target_commitish == \"$expected_sha\") | .tag_name"
             )
             if [[ ${#tags[@]} -ne 1 ]]; then
-              echo "expected one release targeting upstream SHA $sha; found ${#tags[@]}" >&2
+              echo "expected one release targeting upstream SHA $expected_sha; found ${#tags[@]}" >&2
               exit 65
             fi
             tag=${tags[0]}
           fi
-          [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-].*)?$ ]] || {
-            echo "invalid release tag: $tag" >&2
+          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "invalid stable release tag: $tag" >&2
             exit 64
           }
+          source_sha=$(resolve_tag_commit "$tag")
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'release tag did not resolve to a commit' >&2
+            exit 65
+          }
+          require_release_target "$tag" "$source_sha"
+          main_sha=$(gh api "repos/$repo/git/ref/heads/main" --jq .object.sha)
+          [[ "$main_sha" == "$source_sha" ]]
+          if [[ -n "$expected_sha" && "$source_sha" != "$expected_sha" ]]; then
+            echo "release tag $tag targets $source_sha, not upstream SHA $expected_sha" >&2
+            exit 65
+          fi
           assets=$(gh release view "$tag" --repo "$repo" \
             --json assets --jq '.assets[].name')
+          IFS=$'\t' read -r release_draft release_prerelease asset_count < <(
+            gh api "repos/$repo/releases/tags/$tag" \
+              --jq '[.draft, .prerelease, (.assets | length)] | @tsv'
+          )
+          if [[ "$validation_mode" == private ]]; then
+            [[ "$release_draft" == true && "$release_prerelease" == false && "$asset_count" == 30 ]]
+          else
+            [[ "$release_draft" == false && "$release_prerelease" == false && "$asset_count" == 34 ]]
+            [[ "$(gh api "repos/$repo/releases/latest" --jq .tag_name)" == "$tag" ]]
+          fi
           current_required=(
             tr300-x86_64-pc-windows-msvc.msi
             tr300-x86_64-pc-windows-msvc-corporate.msi
@@ -82,43 +270,285 @@ jobs:
               exit 1
             }
           done
-          previous_tag=''
-          mapfile -t candidates < <(
-            gh api "repos/$repo/releases?per_page=100" --jq \
-              ".[] | select(.draft == false and .prerelease == false and .tag_name != \"$tag\") | .tag_name"
-          )
-          for candidate in "${candidates[@]}"; do
-            [[ $candidate =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-            highest=$(printf '%s\n%s\n' "${candidate#v}" "${tag#v}" | sort -V | tail -n 1)
-            [[ $highest == "${tag#v}" ]] || continue
-            candidate_assets=$(gh release view "$candidate" --repo "$repo" \
-              --json assets --jq '.assets[].name')
-            complete=true
-            for asset in "${previous_required[@]}"; do
-              if ! grep -Fqx "$asset" <<< "$candidate_assets"; then
-                complete=false
+          if [[ "$validation_mode" == private ]]; then
+            previous_tag=$(gh api "repos/$repo/releases/latest" --jq .tag_name)
+            [[ "$previous_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ &&
+               "$previous_tag" != "$tag" ]]
+          else
+            mapfile -t candidates < <(
+              gh api "repos/$repo/releases?per_page=100" --jq \
+                ".[] | select(.draft == false and .prerelease == false and .tag_name != \"$tag\") | .tag_name" |
+                sort -Vr
+            )
+            previous_tag=''
+            for candidate in "${candidates[@]}"; do
+              [[ "$candidate" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
+              candidate_assets=$(gh release view "$candidate" --repo "$repo" \
+                --json assets --jq '.assets[].name')
+              complete=true
+              for asset in "${previous_required[@]}"; do
+                grep -Fqx "$asset" <<< "$candidate_assets" || complete=false
+              done
+              if [[ "$complete" == true ]]; then
+                previous_tag=$candidate
                 break
               fi
             done
-            if [[ $complete == true ]]; then
-              previous_tag=$candidate
-              break
-            fi
-          done
-          if [[ -z $previous_tag ]]; then
-            echo "no earlier complete Windows release is available for update testing" >&2
-            exit 1
+            [[ -n "$previous_tag" ]]
           fi
+          highest=$(printf '%s\n%s\n' "${previous_tag#v}" "${tag#v}" | sort -V | tail -n 1)
+          [[ "$highest" == "${tag#v}" ]]
+          previous_assets=$(gh release view "$previous_tag" --repo "$repo" \
+            --json assets --jq '.assets[].name')
+          for asset in "${previous_required[@]}"; do
+            grep -Fqx "$asset" <<< "$previous_assets" || {
+              echo "previous public release is incomplete; missing $asset" >&2
+              exit 1
+            }
+          done
           {
             echo "tag=$tag"
             echo "version=${tag#v}"
             echo "previous_tag=$previous_tag"
             echo "previous_version=${previous_tag#v}"
+            echo "source_sha=$source_sha"
+            echo "validation_mode=$validation_mode"
+            echo "upstream_run_id=$upstream_run_id"
+            echo "upstream_run_attempt=$upstream_run_attempt"
           } >> "$GITHUB_OUTPUT"
+
+  prepare-validation-inputs:
+    name: Freeze exact release bytes for Windows validation
+    needs: resolve
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      windows_artifact_id: ${{ steps.freeze.outputs.windows_artifact_id }}
+      windows_artifact_digest: ${{ steps.freeze.outputs.windows_artifact_digest }}
+    steps:
+      - name: Download, verify, and bind the exact release inventory
+        id: freeze
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+          VALIDATION_MODE: ${{ needs.resolve.outputs.validation_mode }}
+          UPSTREAM_RUN_ID: ${{ needs.resolve.outputs.upstream_run_id }}
+          UPSTREAM_RUN_ATTEMPT: ${{ needs.resolve.outputs.upstream_run_attempt }}
+          OUTPUT_DIRECTORY: ${{ runner.temp }}/windows-validation-inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$REPOSITORY" == QubeTX/qube-machine-report ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$UPSTREAM_RUN_ID" =~ ^[1-9][0-9]*$ &&
+             "$UPSTREAM_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VALIDATION_MODE" == private || "$VALIDATION_MODE" == public ]]
+
+          initial_names=(
+            dist-manifest.json sha256.sum source.tar.gz source.tar.gz.sha256
+            tr-300-installer.ps1 tr-300-installer.sh
+            tr300-aarch64-apple-darwin.tar.xz tr300-aarch64-apple-darwin.tar.xz.sha256
+            tr300-aarch64-unknown-linux-gnu.tar.xz tr300-aarch64-unknown-linux-gnu.tar.xz.sha256
+            tr300-dist-installer.ps1 tr300-dist-installer.sh tr300-installer.ps1 tr300-installer.sh
+            tr300-x86_64-apple-darwin.tar.xz tr300-x86_64-apple-darwin.tar.xz.sha256
+            tr300-x86_64-pc-windows-msvc.msi tr300-x86_64-pc-windows-msvc.msi.sha256
+            tr300-x86_64-pc-windows-msvc.zip tr300-x86_64-pc-windows-msvc.zip.sha256
+            tr300-x86_64-unknown-linux-gnu.tar.xz tr300-x86_64-unknown-linux-gnu.tar.xz.sha256
+            tr300-x86_64-unknown-linux-musl.tar.xz tr300-x86_64-unknown-linux-musl.tar.xz.sha256
+          )
+          windows_names=(
+            tr300-x86_64-pc-windows-msvc-corporate.msi
+            tr300-x86_64-pc-windows-msvc-corporate.msi.sha256
+            tr300-x86_64-pc-windows-msvc-setup.exe
+            tr300-x86_64-pc-windows-msvc-setup.exe.sha256
+            tr300-x86_64-pc-windows-msvc-corporate-setup.exe
+            tr300-x86_64-pc-windows-msvc-corporate-setup.exe.sha256
+          )
+          macos_names=(
+            tr300-universal-apple-darwin.pkg
+            tr300-universal-apple-darwin.pkg.sha256
+            tr300-universal-apple-darwin.dmg
+            tr300-universal-apple-darwin.dmg.sha256
+          )
+          expected_names=("${initial_names[@]}" "${windows_names[@]}")
+          expected_draft=true
+          if [[ "$VALIDATION_MODE" == public ]]; then
+            expected_names+=("${macos_names[@]}")
+            expected_draft=false
+          fi
+          expected_count=${#expected_names[@]}
+          expected_names_json=$(printf '%s\n' "${expected_names[@]}" | jq -R . | jq -s 'sort')
+
+          work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-windows-validation-prep.XXXXXXXX")
+          trap 'rm -rf "$work_directory"' EXIT
+          mkdir -m 700 "$OUTPUT_DIRECTORY"
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$work_directory/release-before.json"
+          jq -e --arg sha "$SOURCE_SHA" --argjson draft "$expected_draft" \
+            --argjson names "$expected_names_json" '
+              .target_commitish == $sha and .draft == $draft and .prerelease == false and
+              ([.assets[].name] | sort) == $names and
+              ([.assets[] | (.id | type == "number") and (.size > 0) and
+                (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
+            ' "$work_directory/release-before.json" >/dev/null
+
+          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" --dir "$OUTPUT_DIRECTORY"
+          mapfile -d '' -t downloaded < <(find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
+          [[ ${#downloaded[@]} -eq "$expected_count" ]]
+          declare -A expected_by_name=()
+          for name in "${expected_names[@]}"; do expected_by_name["$name"]=1; done
+          for path in "${downloaded[@]}"; do
+            name=${path##*/}
+            [[ -n ${expected_by_name[$name]+present} && -f "$path" && ! -L "$path" && -s "$path" ]]
+            unset 'expected_by_name[$name]'
+          done
+          [[ ${#expected_by_name[@]} -eq 0 ]]
+          while IFS=$'\t' read -r name digest size; do
+            [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]
+            downloaded_digest=${BASH_REMATCH[1]}
+            [[ "$size" =~ ^[1-9][0-9]*$ ]]
+            path="$OUTPUT_DIRECTORY/$name"
+            [[ "$(stat -c %s "$path")" == "$size" ]]
+            actual=$(sha256sum "$path"); actual=${actual%% *}
+            [[ "$actual" == "$downloaded_digest" ]]
+          done < <(jq -r '.assets[] | [.name, .digest, .size] | @tsv' "$work_directory/release-before.json")
+          shell_dist_sha256=$(jq -er '
+            [.assets[] | select(.name == "tr300-dist-installer.sh")] as $records |
+            if ($records | length) == 1 then
+              $records[0].digest | sub("^sha256:"; "")
+            else error("unexpected shell cargo-dist asset count") end
+          ' "$work_directory/release-before.json")
+          powershell_dist_sha256=$(jq -er '
+            [.assets[] | select(.name == "tr300-dist-installer.ps1")] as $records |
+            if ($records | length) == 1 then
+              $records[0].digest | sub("^sha256:"; "")
+            else error("unexpected PowerShell cargo-dist asset count") end
+          ' "$work_directory/release-before.json")
+          [[ "$shell_dist_sha256" =~ ^[0-9a-f]{64}$ &&
+             "$powershell_dist_sha256" =~ ^[0-9a-f]{64}$ ]]
+          grep -Fqx "tr300_dist_installer_sha256='${shell_dist_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          grep -Fqx \
+            "\$Tr300DistInstallerSha256 = '${powershell_dist_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          if grep -Fq '@TR300_' "$OUTPUT_DIRECTORY/tr300-installer.sh" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"; then
+            echo 'managed wrapper placeholder survived release rendering' >&2
+            exit 65
+          fi
+          (
+            cd "$OUTPUT_DIRECTORY"
+            sha256sum -c sha256.sum
+            for sidecar in ./*.sha256; do sha256sum -c "${sidecar#./}"; done
+          )
+
+          windows_artifact_id=''
+          windows_artifact_digest=''
+          if [[ "$VALIDATION_MODE" == private ]]; then
+            gh api "repos/$REPOSITORY/actions/runs/$UPSTREAM_RUN_ID/artifacts?per_page=100" \
+              > "$work_directory/windows-artifacts.json"
+            mapfile -t records < <(
+              jq -r '.artifacts[] | select(.name == "windows-release-assets" and .expired == false) |
+                [.id, .digest] | @tsv' "$work_directory/windows-artifacts.json"
+            )
+            [[ ${#records[@]} -eq 1 ]]
+            IFS=$'\t' read -r windows_artifact_id windows_artifact_digest <<< "${records[0]}"
+            [[ "$windows_artifact_id" =~ ^[1-9][0-9]*$ &&
+               "$windows_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            gh api "repos/$REPOSITORY/actions/artifacts/$windows_artifact_id" \
+              > "$work_directory/windows-artifact-before.json"
+            repository_id=$(gh api "repos/$REPOSITORY" --jq .id)
+            jq -e --argjson id "$windows_artifact_id" --argjson run "$UPSTREAM_RUN_ID" \
+              --argjson repository "$repository_id" --arg digest "$windows_artifact_digest" \
+              --arg sha "$SOURCE_SHA" '
+                .id == $id and .name == "windows-release-assets" and .expired == false and
+                (.size_in_bytes > 0 and .size_in_bytes <= 268435456) and .digest == $digest and
+                .workflow_run.id == $run and .workflow_run.repository_id == $repository and
+                .workflow_run.head_repository_id == $repository and .workflow_run.head_sha == $sha
+              ' "$work_directory/windows-artifact-before.json" >/dev/null
+            gh api "repos/$REPOSITORY/actions/artifacts/$windows_artifact_id/zip" \
+              > "$work_directory/windows-assets.zip"
+            zip_hash=$(sha256sum "$work_directory/windows-assets.zip"); zip_hash=${zip_hash%% *}
+            [[ "sha256:$zip_hash" == "$windows_artifact_digest" ]]
+            mkdir -m 700 "$work_directory/windows-assets"
+            python3 - "$work_directory/windows-assets.zip" "$work_directory/windows-assets" \
+              "${windows_names[@]}" <<'PY'
+          import os, shutil, stat, sys, zipfile
+          from pathlib import Path, PurePosixPath
+          archive, output, *expected = sys.argv[1:]
+          with zipfile.ZipFile(archive) as source:
+              members = source.infolist()
+              if len(members) != len(expected) or {m.filename for m in members} != set(expected):
+                  raise SystemExit("unexpected Windows builder artifact inventory")
+              for member in members:
+                  pure = PurePosixPath(member.filename)
+                  mode = member.external_attr >> 16
+                  if (pure.name != member.filename or pure.is_absolute() or ".." in pure.parts or
+                      member.is_dir() or member.file_size <= 0 or member.file_size > 268435456 or
+                      stat.S_ISLNK(mode)):
+                      raise SystemExit("unsafe Windows builder artifact member")
+                  destination = Path(output) / member.filename
+                  flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                  if hasattr(os, "O_NOFOLLOW"): flags |= os.O_NOFOLLOW
+                  descriptor = os.open(destination, flags, 0o600)
+                  with source.open(member) as src, os.fdopen(descriptor, "wb") as dst:
+                      shutil.copyfileobj(src, dst, length=1024 * 1024)
+          PY
+            for name in "${windows_names[@]}"; do
+              cmp "$work_directory/windows-assets/$name" "$OUTPUT_DIRECTORY/$name"
+            done
+            gh api "repos/$REPOSITORY/actions/artifacts/$windows_artifact_id" \
+              > "$work_directory/windows-artifact-after.json"
+            cmp "$work_directory/windows-artifact-before.json" "$work_directory/windows-artifact-after.json"
+          fi
+
+          jq --arg tag "$RELEASE_TAG" --arg sha "$SOURCE_SHA" --arg mode "$VALIDATION_MODE" \
+            --argjson upstream_run_id "$UPSTREAM_RUN_ID" \
+            --argjson upstream_run_attempt "$UPSTREAM_RUN_ATTEMPT" \
+            --arg windows_artifact_id "$windows_artifact_id" \
+            --arg windows_artifact_digest "$windows_artifact_digest" '
+              {
+                schema_version: 1,
+                tag: $tag,
+                source_sha: $sha,
+                validation_mode: $mode,
+                upstream_run_id: $upstream_run_id,
+                upstream_run_attempt: $upstream_run_attempt,
+                windows_artifact_id: (if $windows_artifact_id == "" then null else ($windows_artifact_id | tonumber) end),
+                windows_artifact_digest: (if $windows_artifact_digest == "" then null else $windows_artifact_digest end),
+                release_assets: ([.assets[] | {id, name, size, digest}] | sort_by(.name))
+              }
+            ' "$work_directory/release-before.json" > "$OUTPUT_DIRECTORY/validation-input-manifest.json"
+
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$work_directory/release-after.json"
+          jq -S '{id, tag_name, target_commitish, draft, prerelease,
+            assets: ([.assets[] | {id, name, size, digest}] | sort_by(.name))}' \
+            "$work_directory/release-before.json" > "$work_directory/release-before.normalized.json"
+          jq -S '{id, tag_name, target_commitish, draft, prerelease,
+            assets: ([.assets[] | {id, name, size, digest}] | sort_by(.name))}' \
+            "$work_directory/release-after.json" > "$work_directory/release-after.normalized.json"
+          cmp "$work_directory/release-before.normalized.json" "$work_directory/release-after.normalized.json"
+          {
+            echo "windows_artifact_id=$windows_artifact_id"
+            echo "windows_artifact_digest=$windows_artifact_digest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable Windows validation inputs
+        id: upload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-validation-inputs
+          path: ${{ runner.temp }}/windows-validation-inputs/
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 7
 
   channels:
     name: ${{ matrix.name }} install / update / uninstall
-    needs: resolve
+    needs: [resolve, prepare-validation-inputs]
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -154,16 +584,67 @@ jobs:
             asset: tr300-x86_64-pc-windows-msvc.zip
             channel: unknown
     steps:
+      - name: Download the immutable validation inputs
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          artifact-ids: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}
+          path: candidate
+
+      - name: Rebind candidate files to the frozen draft manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.prepare-validation-inputs.outputs.artifact_digest }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_TAG: ${{ needs.resolve.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.resolve.outputs.source_sha }}
+          VALIDATION_MODE: ${{ needs.resolve.outputs.validation_mode }}
+          REPOSITORY: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          if ($env:ARTIFACT_ID -notmatch '^[1-9][0-9]*$' -or
+              $env:ARTIFACT_DIGEST -notmatch '^[0-9a-f]{64}$') {
+            throw 'validation input artifact identity is malformed'
+          }
+          $artifact = gh api "repos/$env:REPOSITORY/actions/artifacts/$env:ARTIFACT_ID" |
+            ConvertFrom-Json
+          if ($artifact.id -ne [long]$env:ARTIFACT_ID -or
+              $artifact.name -ne 'windows-validation-inputs' -or $artifact.expired -or
+              $artifact.digest -ne "sha256:$env:ARTIFACT_DIGEST" -or
+              $artifact.workflow_run.id -ne [long]$env:EXPECTED_RUN_ID -or
+              $artifact.workflow_run.head_sha -ne $env:EXPECTED_SHA) {
+            throw 'validation input artifact no longer has the trusted identity'
+          }
+          $manifest = Get-Content candidate\validation-input-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.schema_version -ne 1 -or $manifest.tag -ne $env:EXPECTED_TAG -or
+              $manifest.source_sha -ne $env:EXPECTED_SHA -or
+              $manifest.validation_mode -ne $env:VALIDATION_MODE) {
+            throw 'validation input manifest provenance mismatch'
+          }
+          foreach ($asset in $manifest.release_assets) {
+            $path = Join-Path candidate $asset.name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+                (Get-Item -LiteralPath $path).Length -ne [long]$asset.size) {
+              throw "missing or size-mismatched frozen asset: $($asset.name)"
+            }
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($asset.digest -ne "sha256:$actual") {
+              throw "frozen asset digest mismatch: $($asset.name)"
+            }
+          }
+
       - name: Download prior same-channel input
         if: matrix.asset != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ${{ matrix.asset }}
+          VALIDATION_MODE: ${{ needs.resolve.outputs.validation_mode }}
           TAG: ${{ needs.resolve.outputs.previous_tag }}
+          REPOSITORY: ${{ github.repository }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force assets | Out-Null
-          gh release download $env:TAG --repo '${{ github.repository }}' `
+          gh release download $env:TAG --repo $env:REPOSITORY `
             --dir assets --pattern $env:ASSET --clobber
           if (-not (Test-Path (Join-Path assets $env:ASSET))) {
             throw "missing downloaded asset $env:ASSET"
@@ -175,40 +656,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ${{ matrix.asset }}
           TAG: ${{ needs.resolve.outputs.previous_tag }}
+          REPOSITORY: ${{ github.repository }}
         shell: pwsh
         run: |
-          gh release download $env:TAG --repo '${{ github.repository }}' `
+          gh release download $env:TAG --repo $env:REPOSITORY `
             --dir assets --pattern "$env:ASSET.sha256" --clobber
           $line = (Get-Content "assets\$env:ASSET.sha256" -Raw).Trim()
           $expected = ($line -split '\s+')[0].ToLowerInvariant()
           $actual = (Get-FileHash "assets\$env:ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "checksum mismatch for $env:ASSET" }
 
-      - name: Download exact candidate recovery input
-        if: matrix.asset != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ASSET: ${{ matrix.asset }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force candidate | Out-Null
-          gh release download $env:TAG --repo '${{ github.repository }}' `
-            --dir candidate --pattern $env:ASSET --clobber
-          if (-not (Test-Path (Join-Path candidate $env:ASSET))) {
-            throw "missing candidate asset $env:ASSET"
-          }
-
-      - name: Verify candidate recovery checksum when published
+      - name: Verify frozen candidate recovery checksum
         if: matrix.asset != '' && matrix.kind != 'powershell'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ${{ matrix.asset }}
-          TAG: ${{ needs.resolve.outputs.tag }}
         shell: pwsh
         run: |
-          gh release download $env:TAG --repo '${{ github.repository }}' `
-            --dir candidate --pattern "$env:ASSET.sha256" --clobber
           $line = (Get-Content "candidate\$env:ASSET.sha256" -Raw).Trim()
           $expected = ($line -split '\s+')[0].ToLowerInvariant()
           $actual = (Get-FileHash "candidate\$env:ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -223,14 +686,18 @@ jobs:
         shell: pwsh
         run: |
           $asset = if ($env:ASSET) { Join-Path $PWD "assets\$env:ASSET" } else { $null }
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           switch ($env:KIND) {
             'msi-global' {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/i', $asset, '/qn', '/norestart')
               if ($p.ExitCode -ne 0) { throw "Global MSI failed: $($p.ExitCode)" }
               $exe = "$env:ProgramFiles\tr300\bin\tr300.exe"
             }
             'msi-corporate' {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/i', $asset, '/qn', '/norestart')
               if ($p.ExitCode -ne 0) { throw "Corporate MSI failed: $($p.ExitCode)" }
               $exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
             }
@@ -277,6 +744,7 @@ jobs:
       - name: Verify reports, channel, registration, PATH, and safe update result
         env:
           KIND: ${{ matrix.kind }}
+          VALIDATION_MODE: ${{ needs.resolve.outputs.validation_mode }}
           EXPECTED_CHANNEL: ${{ matrix.channel }}
           INSTALLED_VERSION: ${{ needs.resolve.outputs.previous_version }}
           EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
@@ -291,6 +759,8 @@ jobs:
           # native exit codes explicitly instead of terminating before the
           # contract assertions below can inspect stdout/stderr.
           $PSNativeCommandUseErrorActionPreference = $false
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
 
           function Invoke-Updater([string] $label) {
             $stdoutPath = Join-Path $env:RUNNER_TEMP "update-$label-stdout.txt"
@@ -311,7 +781,8 @@ jobs:
             switch ($env:KIND) {
               'msi-global' {
                 for ($attempt = 1; $attempt -le 18; $attempt++) {
-                  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                  $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                    -ArgumentList @('/i', $asset, '/qn', '/norestart')
                   if ($p.ExitCode -eq 0) { break }
                   if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
                     throw "candidate Global MSI failed: $($p.ExitCode)"
@@ -321,7 +792,8 @@ jobs:
               }
               'msi-corporate' {
                 for ($attempt = 1; $attempt -le 18; $attempt++) {
-                  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                  $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                    -ArgumentList @('/i', $asset, '/qn', '/norestart')
                   if ($p.ExitCode -eq 0) { break }
                   if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
                     throw "candidate Corporate MSI failed: $($p.ExitCode)"
@@ -397,6 +869,68 @@ jobs:
           (& $env:EXE --fast --json | ConvertFrom-Json) | Out-Null
           & $env:EXE --fast --ascii | Out-Null
 
+          if ($env:VALIDATION_MODE -eq 'private') {
+            # The candidate is still a private draft, so /releases/latest must
+            # remain the prior public version. Prove that an installed public
+            # client does not discover or mutate to unpublished bytes.
+            $priorRun = Invoke-Updater 'private-prior'
+            $priorLines = $priorRun.Lines
+            if ($priorRun.ExitCode -ne 0 -or $priorLines.Count -ne 1) {
+              throw 'pre-public updater did not return one successful JSON object'
+            }
+            $prior = $priorLines[0] | ConvertFrom-Json
+            if ($prior.success -ne $true -or $prior.update_available -ne $false -or
+                $prior.latest_version -ne $env:INSTALLED_VERSION -or
+                $prior.install_channel -ne $env:EXPECTED_CHANNEL -or
+                $prior.requires_user_action -ne $false) {
+              throw 'private draft leaked into public updater discovery or lost channel identity'
+            }
+            if ((& $env:EXE --version).Trim() -ne "tr300 $env:INSTALLED_VERSION") {
+              throw 'pre-public updater mutated the installed public version'
+            }
+
+            if ($env:KIND -eq 'portable') {
+              $candidateDirectory = Join-Path $env:RUNNER_TEMP 'candidate-portable'
+              Expand-Archive -LiteralPath (Join-Path $PWD "candidate\$env:ASSET") `
+                -DestinationPath $candidateDirectory
+              $candidateExecutables = @(Get-ChildItem $candidateDirectory -Recurse -Filter tr300.exe)
+              if ($candidateExecutables.Count -ne 1) {
+                throw 'frozen candidate portable archive did not contain exactly one binary'
+              }
+              $candidateExecutable = $candidateExecutables[0].FullName
+              if ((& $candidateExecutable --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
+                throw 'frozen candidate portable version mismatch'
+              }
+              (& $candidateExecutable --fast --json | ConvertFrom-Json) | Out-Null
+              & $candidateExecutable --fast --ascii | Out-Null
+            } else {
+              # Exercise the exact authenticated draft installer directly. Do
+              # not route through /releases/latest before publication.
+              Install-Candidate
+              if (-not (Test-TargetVersion)) {
+                throw 'direct authenticated candidate transition did not install the target version'
+              }
+              $candidateRun = Invoke-Updater 'private-candidate'
+              $candidateLines = $candidateRun.Lines
+              if ($candidateRun.ExitCode -ne 0 -or $candidateLines.Count -ne 1) {
+                throw 'candidate updater did not no-op safely against public latest'
+              }
+              $candidate = $candidateLines[0] | ConvertFrom-Json
+              if ($candidate.success -ne $true -or $candidate.update_available -ne $false -or
+                  $candidate.latest_version -ne $env:INSTALLED_VERSION -or
+                  $candidate.install_channel -ne $env:EXPECTED_CHANNEL -or
+                  $candidate.requires_user_action -ne $false) {
+                throw 'candidate attempted a downgrade or lost its install channel before publication'
+              }
+              if ($env:KIND -eq 'cargo') {
+                $registrations = @(cargo install --list | Select-String '^tr300 v([^:]+):$')
+                if ($registrations.Count -ne 1 -or
+                    $registrations[0].Matches[0].Groups[1].Value -ne $env:EXPECTED_VERSION) {
+                  throw "Cargo candidate did not converge to one target registration: $registrations"
+                }
+              }
+            }
+          } else {
           $updateRun = Invoke-Updater 'prior'
           $exit = $updateRun.ExitCode
           $lines = $updateRun.Lines
@@ -503,6 +1037,7 @@ jobs:
               }
             }
           }
+          }
 
           $global = "$env:ProgramFiles\tr300\bin\tr300.exe"
           $corporate = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
@@ -595,7 +1130,10 @@ jobs:
               Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
             ) | Where-Object { $_.DisplayName -eq $display -and $_.WindowsInstaller -eq 1 } | Select-Object -First 1
             if (-not $entry) { throw "MSI registration missing before uninstall" }
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+            $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+            $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
             if ($p.ExitCode -ne 0) { throw "MSI uninstall failed: $($p.ExitCode)" }
           } elseif ($env:KIND -like 'exe-*') {
             $root = Split-Path (Split-Path $env:EXE -Parent) -Parent
@@ -629,7 +1167,8 @@ jobs:
 
   fresh-format-choice:
     name: Fresh ${{ matrix.name }} format choice
-    needs: resolve
+    if: needs.resolve.outputs.validation_mode == 'private'
+    needs: [resolve, prepare-validation-inputs]
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -646,18 +1185,29 @@ jobs:
             display: tr300 (Corporate Edition)
             marker: InstallSourceCorporate
     steps:
-      - name: Download both exact tagged formats
+      - name: Download immutable validation inputs
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          artifact-ids: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}
+          path: assets
+
+      - name: Verify selected format bytes against the frozen manifest
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.resolve.outputs.tag }}
           MSI: ${{ matrix.msi }}
           EXE: ${{ matrix.exe }}
+          EXPECTED_TAG: ${{ needs.resolve.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.resolve.outputs.source_sha }}
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force assets | Out-Null
-          gh release download $env:TAG --repo '${{ github.repository }}' --dir assets `
-            --pattern $env:MSI --pattern "$env:MSI.sha256" `
-            --pattern $env:EXE --pattern "$env:EXE.sha256"
+          $manifest = Get-Content assets\validation-input-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.tag -ne $env:EXPECTED_TAG -or $manifest.source_sha -ne $env:EXPECTED_SHA -or
+              $manifest.validation_mode -ne 'private') { throw 'frozen format manifest mismatch' }
+          foreach ($name in @($env:MSI, $env:EXE)) {
+            $record = @($manifest.release_assets | Where-Object name -EQ $name)
+            if ($record.Count -ne 1) { throw "manifest does not bind $name" }
+            $actual = (Get-FileHash "assets\$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($record[0].digest -ne "sha256:$actual") { throw "frozen format digest mismatch: $name" }
+          }
 
       - name: Verify newest explicit format owns the edition
         env:
@@ -667,6 +1217,8 @@ jobs:
           MARKER: ${{ matrix.marker }}
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           function Entries {
             @(
               Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
@@ -674,7 +1226,8 @@ jobs:
             ) | Where-Object DisplayName -EQ $env:DISPLAY
           }
           function Install-Msi {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', (Join-Path $PWD "assets\$env:MSI"), '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', (Join-Path $PWD "assets\$env:MSI"), '/qn', '/norestart')
             if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
           }
           function Install-Exe {
@@ -688,7 +1241,8 @@ jobs:
           function Remove-Current {
             $entry = @(Entries)[0]
             if ($entry.WindowsInstaller -eq 1) {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
             } else {
               if ($entry.UninstallString -notmatch '^"([^"]+)"$') {
                 throw "unexpected Inno uninstall command: $($entry.UninstallString)"
@@ -726,7 +1280,8 @@ jobs:
 
   managed-cli-choice:
     name: Fresh PowerShell supersedes ${{ matrix.name }}
-    needs: resolve
+    if: needs.resolve.outputs.validation_mode == 'private'
+    needs: [resolve, prepare-validation-inputs]
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -745,16 +1300,28 @@ jobs:
             kind: exe
             asset: tr300-x86_64-pc-windows-msvc-corporate-setup.exe
     steps:
-      - name: Download exact native and managed installers
+      - name: Download immutable validation inputs
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          artifact-ids: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}
+          path: assets
+
+      - name: Verify native and managed bytes against the frozen manifest
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.resolve.outputs.tag }}
           NATIVE_ASSET: ${{ matrix.asset }}
+          EXPECTED_TAG: ${{ needs.resolve.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.resolve.outputs.source_sha }}
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force assets | Out-Null
-          gh release download $env:TAG --repo '${{ github.repository }}' --dir assets `
-            --pattern $env:NATIVE_ASSET --pattern tr300-installer.ps1
+          $manifest = Get-Content assets\validation-input-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.tag -ne $env:EXPECTED_TAG -or $manifest.source_sha -ne $env:EXPECTED_SHA -or
+              $manifest.validation_mode -ne 'private') { throw 'frozen managed manifest mismatch' }
+          foreach ($name in @($env:NATIVE_ASSET, 'tr300-installer.ps1')) {
+            $record = @($manifest.release_assets | Where-Object name -EQ $name)
+            if ($record.Count -ne 1) { throw "manifest does not bind $name" }
+            $actual = (Get-FileHash "assets\$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($record[0].digest -ne "sha256:$actual") { throw "frozen managed digest mismatch: $name" }
+          }
 
       - name: Install native channel, then make fresh PowerShell intent authoritative
         env:
@@ -766,7 +1333,10 @@ jobs:
         run: |
           $native = Join-Path $PWD "assets\$env:NATIVE_ASSET"
           if ($env:KIND -eq 'msi') {
-            $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $native, '/qn', '/norestart')
+            $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+            $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
+            $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', $native, '/qn', '/norestart')
           } else {
             $process = Start-Process $native -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
           }
@@ -816,3 +1386,95 @@ jobs:
 
           Remove-Item -LiteralPath $managed -Force
           Remove-Item -LiteralPath "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Force
+
+  attest-private-validation:
+    name: Attest exact private-draft Windows acceptance
+    if: needs.resolve.outputs.validation_mode == 'private'
+    needs:
+      - resolve
+      - prepare-validation-inputs
+      - channels
+      - fresh-format-choice
+      - managed-cli-choice
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the exact validated input artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          artifact-ids: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}
+          path: ${{ runner.temp }}/validated-inputs
+
+      - name: Create the fixed validation proof
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+          WINDOWS_RUN_ID: ${{ needs.resolve.outputs.upstream_run_id }}
+          WINDOWS_RUN_ATTEMPT: ${{ needs.resolve.outputs.upstream_run_attempt }}
+          WINDOWS_ARTIFACT_ID: ${{ needs.prepare-validation-inputs.outputs.windows_artifact_id }}
+          WINDOWS_ARTIFACT_DIGEST: ${{ needs.prepare-validation-inputs.outputs.windows_artifact_digest }}
+          VALIDATION_INPUT_ARTIFACT_ID: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}
+          VALIDATION_INPUT_ARTIFACT_DIGEST: ${{ needs.prepare-validation-inputs.outputs.artifact_digest }}
+          VALIDATION_RUN_ID: ${{ github.run_id }}
+          VALIDATION_RUN_ATTEMPT: ${{ github.run_attempt }}
+          INPUT_DIRECTORY: ${{ runner.temp }}/validated-inputs
+          PROOF_DIRECTORY: ${{ runner.temp }}/windows-validation-proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in "$WINDOWS_RUN_ID" "$WINDOWS_RUN_ATTEMPT" "$WINDOWS_ARTIFACT_ID" \
+            "$VALIDATION_INPUT_ARTIFACT_ID" "$VALIDATION_RUN_ID" "$VALIDATION_RUN_ATTEMPT"; do
+            [[ "$value" =~ ^[1-9][0-9]*$ ]]
+          done
+          [[ "$WINDOWS_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ &&
+             "$VALIDATION_INPUT_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          manifest="$INPUT_DIRECTORY/validation-input-manifest.json"
+          jq -e --arg tag "$RELEASE_TAG" --arg sha "$SOURCE_SHA" \
+            --argjson windows_run "$WINDOWS_RUN_ID" \
+            --argjson windows_attempt "$WINDOWS_RUN_ATTEMPT" \
+            --argjson windows_artifact "$WINDOWS_ARTIFACT_ID" \
+            --arg windows_digest "$WINDOWS_ARTIFACT_DIGEST" '
+              .schema_version == 1 and .tag == $tag and .source_sha == $sha and
+              .validation_mode == "private" and .upstream_run_id == $windows_run and
+              .upstream_run_attempt == $windows_attempt and
+              .windows_artifact_id == $windows_artifact and
+              .windows_artifact_digest == $windows_digest and
+              (.release_assets | length) == 30
+            ' "$manifest" >/dev/null
+          mkdir -m 700 "$PROOF_DIRECTORY"
+          cp "$manifest" "$PROOF_DIRECTORY/validation-input-manifest.json"
+          jq -n --arg tag "$RELEASE_TAG" --arg sha "$SOURCE_SHA" \
+            --argjson windows_run_id "$WINDOWS_RUN_ID" \
+            --argjson windows_run_attempt "$WINDOWS_RUN_ATTEMPT" \
+            --argjson windows_artifact_id "$WINDOWS_ARTIFACT_ID" \
+            --arg windows_artifact_digest "$WINDOWS_ARTIFACT_DIGEST" \
+            --argjson validation_input_artifact_id "$VALIDATION_INPUT_ARTIFACT_ID" \
+            --arg validation_input_artifact_digest "sha256:$VALIDATION_INPUT_ARTIFACT_DIGEST" \
+            --argjson validation_run_id "$VALIDATION_RUN_ID" \
+            --argjson validation_run_attempt "$VALIDATION_RUN_ATTEMPT" '
+              {
+                schema_version: 1,
+                tag: $tag,
+                source_sha: $sha,
+                windows_run_id: $windows_run_id,
+                windows_run_attempt: $windows_run_attempt,
+                windows_artifact_id: $windows_artifact_id,
+                windows_artifact_digest: $windows_artifact_digest,
+                validation_input_artifact_id: $validation_input_artifact_id,
+                validation_input_artifact_digest: $validation_input_artifact_digest,
+                validation_run_id: $validation_run_id,
+                validation_run_attempt: $validation_run_attempt,
+                result: "success"
+              }
+            ' > "$PROOF_DIRECTORY/windows-installer-validation.json"
+
+      - name: Upload immutable Windows validation proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-installer-validation-proof
+          path: ${{ runner.temp }}/windows-validation-proof/
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 7

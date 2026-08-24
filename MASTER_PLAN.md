@@ -4,17 +4,16 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-08-23
-**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.3.0
-(working manifest `4.3.0` is the unreleased candidate in open PR #14 on branch
-`feature/v4.3.0-battery-perf-thermals`; repaired-code local/hosted PR gates and
-review pass. The operator requires the PR to
-stay open after validation. v4.2.2 remains the last fully published state.)
-**Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
-takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
+**Last updated:** 2026-08-24
+**Complete GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.2.2 / 4.3.0
+(v4.2.2 remains the last fully published state. Release-chain hardening merged
+to `main` as `1ffb0cc`; the unreleased PR #14 candidate is being reconciled and
+must pass fresh exact-head qualification before merge or publication.)
+**Release scope:** MIC-1 managed-install defaults, safe platform-specific
+fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.0, open PR #14):** Linux battery-selection hardening accepts
+**In flight (v4.3.0 candidate; PR #14):** Linux battery-selection hardening accepts
 well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
 contradictory device/absence evidence; the historical Pi "30%" source remains
 unproven. Linux thermals choose the hottest valid sensor deterministically,
@@ -25,11 +24,37 @@ stays absent/JSON `null`. macOS requires an InternalBattery record for the
 produced medians of 5138.6 ms and 2092.3 ms (~3046.3 ms, 59.3%, 2.46×), while
 11 alternating fast runs at 247.0 ms and 238.9 ms (-3.3%) are background-level
 and support no gain claim. The explicit `-f/--full` flag is also included.
-The full repaired-code local gate passes; head `56b92d7` passed CI 32680492930
-and PR-mode Release plan 32680492910 with all four review threads resolved.
+The earlier repaired collector head `56b92d7` passed CI 32680492930 and PR-mode
+Release plan 32680492910 with all four review threads resolved. The integrated
+result requires fresh local/exact-head hosted gates and review resolution.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
+
+The active v4.3 campaign remains unreleased. Its code candidate adds battery,
+thermal, and Windows full-mode improvements; its release hardening moves crate
+publication to owner-only protected OIDC and makes GitHub publication a private
+24-asset draft → private 30-asset Windows candidate → exact private Windows
+acceptance proof → macOS-only 34-asset finalization chain. Before release, the
+exact committed SHA still needs hosted CI, the one-time Apple environment-secret
+migration plus native ARM/Intel environment-only preflight and cleanup, and the
+crates.io publisher bootstrap/`trustpub_only` cutover, legacy-token removal,
+bootstrap-code removal, and OIDC-only probe. AMD64 Linux laptop and Raspberry Pi
+physical qualification remain separate open acceptance gates.
+
+Native Intel and Apple Silicon hardening runs exposed a further release
+blocker: Apple Installer retained the new system payload after a deliberate
+`postinstall` failure even though the managed binary/receipt restored exactly.
+The v4.3 candidate therefore supersedes automatic managed-to-PKG takeover with
+a non-mutating `preinstall` refusal of standard-path managed evidence across
+ordinary and dot-prefixed `/Users` homes plus all eligible local Directory
+Service homes, with fixed-depth parent enumeration that fails closed on
+abnormal or unlistable intermediates, independent of
+console or launch environment, with
+pre-macOS-12 plist parsing, a `/`-only target-volume gate, and no
+helper/postinstall. The supported switch is a refresh through the managed v4.3
+installer, receipt-aware Complete uninstall, then PKG; native upgrade/repair
+and PKG-to-managed remain supported.
 
 The v4.0.1 branch migration/release baseline remains complete: commit
 `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed all 13 hosted CI jobs on
@@ -96,15 +121,16 @@ as sufficient.
 - macOS and Linux recommend the versionless `tr300-installer.sh` command. On
   macOS it validates an exact TR-300 package receipt, payload owner, install
   path, and Developer ID identity before removing that native owner and
-  retaining the verified managed-shell install. The reciprocal PKG
-  `postinstall` invokes the bounded migration helper to remove an exact managed
-  shell/Cargo copy and matching receipt. Linux retains the managed-shell
+  retaining the verified managed-shell install. This describes the shipped
+  v4.2.2 baseline. v4.3 supersedes the reciprocal direction: the PKG refuses
+  any standard managed binary/receipt before payload placement and users run
+  receipt-aware Complete uninstall first. Linux retains the managed-shell
   channel without inventing a native package owner.
 - A fresh Windows MSI/EXE still authoritatively changes format within the same
   edition. Opposite-edition or cross-scope native installers now detect the
   conflict before mutation and direct the user to the managed PowerShell path;
   that path is allowed to perform the exact elevated convergence. Automatic
-  updates never cross a channel. Current native MSI/EXE/PKG packages expose no
+  updates never cross a channel. Current native MSI/EXE packages expose no
   cleanup opt-out: their mandatory strict helper validates an exact managed
   receipt before quarantining its binary and restores the pair if convergence
   cannot commit. Legacy direct helper calls remain advisory for compatibility.
@@ -517,15 +543,18 @@ patch fix-forward.
 - Table output remains 51 display columns unless explicitly redesigned.
 - Do not surface unique device identifiers.
 - Keep `Cargo.toml` `rust-version` and `rust-toolchain.toml` channel in lockstep.
-- Never tag before exact-SHA CI and crates publication settle.
+- Never tag before exact-current-main CI and the explicit owner-only trusted-
+  OIDC crates publication settle.
 - Never publish locally just because registry credentials are available.
 - Windows installer GUIDs and `InstallSource` marker strings are permanent and
   must remain in lockstep across WiX, Inno, updater, and migration code.
 - Shared/macOS/release changes require native Apple Silicon and native Intel
   hosted validation. Direct-PKG or compatibility-DMG changes also require
-  sign/notary/staple/Gatekeeper/install/update/uninstall proof on both
-  architectures. A physical Mac is optional unless those runners expose a
-  GUI-only defect.
+  sign/notary/staple/Gatekeeper, scoped-home managed refusal without payload or
+  receipt mutation, clean/native install/update/uninstall, checksum-bound public
+  v4.2.2 managed -> candidate refresh -> receipt-aware Complete -> PKG, and
+  PKG-to-managed proof on both architectures.
+  A physical Mac is optional unless those runners expose a GUI-only defect.
 
 ## 10. Completion state
 
@@ -542,3 +571,10 @@ The v4.2.2 release is complete. The v4.2.0 crate/tag and v4.2.1 30-asset
 incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
+
+The v4.3 candidate and release-security campaign are **not complete**. Do not
+tag, publish, update the homepage, or close the release milestone until the
+protected OIDC/Apple cutovers above are complete, the exact source SHA passes
+all hosted gates, the private 30-asset Windows proof succeeds, macOS solely
+publishes the exact 34-asset release, and every post-public smoke/public-byte
+audit is green.

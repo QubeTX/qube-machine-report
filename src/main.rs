@@ -162,10 +162,7 @@ fn run_install() -> Result<()> {
 
 /// Uninstall tr300 from shell profile (interactive)
 fn run_uninstall() -> Result<()> {
-    use install::{
-        confirm_complete_uninstall, find_binary_location, get_binary_parent_dir,
-        prompt_uninstall_option, UninstallOption,
-    };
+    use install::{prompt_uninstall_option, UninstallOption};
 
     let option = prompt_uninstall_option();
 
@@ -185,26 +182,50 @@ fn run_uninstall() -> Result<()> {
             Ok(())
         }
         UninstallOption::Complete => {
-            // Get binary location for confirmation prompt
-            let binary_path = find_binary_location();
-            let parent_dir = binary_path
-                .as_ref()
-                .and_then(|p| get_binary_parent_dir(p.as_path()));
-
-            if let Some(ref path) = binary_path {
-                if !confirm_complete_uninstall(path, parent_dir.as_deref()) {
+            #[cfg(unix)]
+            {
+                let preview = install::prepare_complete_uninstall()?;
+                if !install::confirm_complete_uninstall_paths(
+                    preview.binary_path(),
+                    None,
+                    preview.receipt_path(),
+                ) {
                     println!();
                     println!("Uninstall cancelled.");
                     return Ok(());
                 }
+
+                println!();
+                println!("Performing complete uninstall...");
+                install::uninstall_complete_prepared(preview)?;
+                println!();
+                println!("TR-300 has been completely removed from your system.");
+                Ok(())
             }
 
-            println!();
-            println!("Performing complete uninstall...");
-            install::uninstall_complete()?;
-            println!();
-            println!("TR-300 has been completely removed from your system.");
-            Ok(())
+            #[cfg(not(unix))]
+            {
+                // Get binary location for confirmation prompt
+                let binary_path = install::find_binary_location();
+                let parent_dir = binary_path
+                    .as_ref()
+                    .and_then(|p| install::get_binary_parent_dir(p.as_path()));
+
+                if let Some(ref path) = binary_path {
+                    if !install::confirm_complete_uninstall(path, parent_dir.as_deref()) {
+                        println!();
+                        println!("Uninstall cancelled.");
+                        return Ok(());
+                    }
+                }
+
+                println!();
+                println!("Performing complete uninstall...");
+                install::uninstall_complete()?;
+                println!();
+                println!("TR-300 has been completely removed from your system.");
+                Ok(())
+            }
         }
         _ => {
             println!();

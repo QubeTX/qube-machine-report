@@ -1,99 +1,892 @@
 name: Crates.io Publish
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Publish exact main or perform the one-time trusted-publisher bootstrap"
+        required: true
+        default: publish
+        type: choice
+        options: [publish, configure_trusted_publisher, probe_trusted_publisher]
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
 concurrency:
-  group: crates-publish-${{ github.event.workflow_run.head_sha }}
+  group: crates-publish-${{ inputs.operation }}
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish tr300
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
+  configure-trusted-publisher:
+    name: Configure the one-time crates.io OIDC publisher
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'configure_trusted_publisher' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report' && github.actor_id == '30877743'
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    permissions: {}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Read package version
-        id: package
+      - name: Create the exact trusted-publisher configuration
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_ACTOR_ID: ${{ github.actor_id }}
+          EXPECTED_REF: ${{ github.ref }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+          RESPONSE_PATH: ${{ runner.temp }}/trusted-publisher-response.json
+          LIST_PATH: ${{ runner.temp }}/trusted-publisher-list.json
+        shell: bash
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tr300") | .version')"
-          if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "::error::Could not read tr300 package version"
-            exit 1
+          set -euo pipefail
+          [[ -n ${CARGO_REGISTRY_TOKEN:-} ]] || exit 78
+          [[ "$EVENT_NAME" == workflow_dispatch &&
+             "$EXPECTED_ACTOR_ID" == 30877743 &&
+             "$EXPECTED_REF" == refs/heads/main &&
+             "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
+             "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          remote_main=$(/usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
+            https://api.github.com/repos/QubeTX/qube-machine-report/commits/main \
+            | /usr/bin/jq -r .sha)
+          [[ "$remote_main" == "$EXPECTED_SHA" ]]
+          payload='{"github_config":{"crate":"tr300","repository_owner":"QubeTX","repository_name":"qube-machine-report","workflow_filename":"crates-publish.yml","environment":"crates-io"}}'
+          list_configurations() {
+            /usr/bin/curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
+              --header "Authorization: Bearer $CARGO_REGISTRY_TOKEN" \
+              --header 'Accept: application/json' \
+              --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
+              --output "$LIST_PATH" \
+              'https://crates.io/api/v1/trusted_publishing/github_configs?crate=tr300'
+          }
+          require_exact_configuration() {
+            /usr/bin/jq -e '
+              .meta.total == 1 and
+              (.github_configs | length) == 1 and
+              .github_configs[0].crate == "tr300" and
+              .github_configs[0].repository_owner == "QubeTX" and
+              .github_configs[0].repository_name == "qube-machine-report" and
+              .github_configs[0].workflow_filename == "crates-publish.yml" and
+              .github_configs[0].environment == "crates-io" and
+              (.github_configs[0].id | type == "number") and
+              .github_configs[0].repository_owner_id == 230946269
+            ' "$LIST_PATH" >/dev/null
+          }
+
+          list_configurations
+          configuration_count=$(/usr/bin/jq -r '.meta.total' "$LIST_PATH")
+          returned_count=$(/usr/bin/jq -r '.github_configs | length' "$LIST_PATH")
+          [[ "$configuration_count" =~ ^[0-9]+$ && "$returned_count" =~ ^[0-9]+$ &&
+             "$configuration_count" == "$returned_count" ]]
+          if [[ "$configuration_count" == 0 ]]; then
+            /usr/bin/curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
+              --request POST --header "Authorization: Bearer $CARGO_REGISTRY_TOKEN" \
+              --header 'Content-Type: application/json' --header 'Accept: application/json' \
+              --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
+              --data-binary "$payload" --output "$RESPONSE_PATH" \
+              https://crates.io/api/v1/trusted_publishing/github_configs
+            /usr/bin/jq -e '
+              .github_config.crate == "tr300" and
+              .github_config.repository_owner == "QubeTX" and
+              .github_config.repository_name == "qube-machine-report" and
+              .github_config.workflow_filename == "crates-publish.yml" and
+              .github_config.environment == "crates-io" and
+              (.github_config.id | type == "number") and
+              .github_config.repository_owner_id == 230946269
+            ' "$RESPONSE_PATH" >/dev/null
+          elif [[ "$configuration_count" == 1 ]]; then
+            require_exact_configuration
+          else
+            echo "refusing duplicate or ambiguous crates.io trusted-publisher state" >&2
+            exit 65
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Package version: $version"
 
-      - name: Check crates.io version
-        id: crates
+          list_configurations
+          require_exact_configuration
+
+  probe-trusted-publisher:
+    name: Prove the new crates.io OIDC exchange
+    needs: configure-trusted-publisher
+    if: |
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'QubeTX/qube-machine-report' &&
+      github.actor_id == '30877743' &&
+      ((inputs.operation == 'configure_trusted_publisher' &&
+        needs.configure-trusted-publisher.result == 'success') ||
+       inputs.operation == 'probe_trusted_publisher')
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    permissions:
+      id-token: write
+      contents: none
+    steps:
+      - name: Mint and automatically revoke a short-lived crates.io token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+      - name: Require a successful nonempty OIDC exchange
+        env:
+          OIDC_CRATES_TOKEN: ${{ steps.auth.outputs.token }}
+        shell: bash
+        run: test -n "$OIDC_CRATES_TOKEN"
+
+  enable-trusted-publishing-only:
+    name: Require OIDC for all future tr300 publication
+    needs: [configure-trusted-publisher, probe-trusted-publisher]
+    if: |
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'configure_trusted_publisher' &&
+      needs.configure-trusted-publisher.result == 'success' &&
+      needs.probe-trusted-publisher.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'QubeTX/qube-machine-report' &&
+      github.actor_id == '30877743'
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    permissions: {}
+    steps:
+      - name: Disable legacy publication after the successful OIDC probe
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          EXPECTED_SHA: ${{ github.sha }}
+        shell: bash
         run: |
-          status="$(curl -sS -o "$RUNNER_TEMP/crate-version.json" -w '%{http_code}' \
-            -H "User-Agent: QubeTX/qube-machine-report crates-publish (https://github.com/QubeTX/qube-machine-report)" \
-            "https://crates.io/api/v1/crates/tr300/${{ steps.package.outputs.version }}")"
-          case "$status" in
+          set -euo pipefail
+          [[ -n ${CARGO_REGISTRY_TOKEN:-} && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          remote_main=$(/usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
+            https://api.github.com/repos/QubeTX/qube-machine-report/commits/main \
+            | /usr/bin/jq -r .sha)
+          [[ "$remote_main" == "$EXPECTED_SHA" ]]
+          /usr/bin/curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
+            --request PATCH --header "Authorization: Bearer $CARGO_REGISTRY_TOKEN" \
+            --header 'Content-Type: application/json' --header 'Accept: application/json' \
+            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
+            --data-binary '{"crate":{"trustpub_only":true}}' \
+            --output "$RUNNER_TEMP/trusted-only-response.json" \
+            https://crates.io/api/v1/crates/tr300
+          /usr/bin/jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
+            "$RUNNER_TEMP/trusted-only-response.json" >/dev/null
+          /usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --header 'Accept: application/json' \
+            --header 'User-Agent: QubeTX/qube-machine-report trusted-publisher-bootstrap' \
+            --output "$RUNNER_TEMP/trusted-only-public.json" \
+            https://crates.io/api/v1/crates/tr300
+          /usr/bin/jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
+            "$RUNNER_TEMP/trusted-only-public.json" >/dev/null
+
+  validate-package:
+    name: Validate and package the exact CI-tested source
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'publish' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report' && github.actor_id == '30877743'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      run_id: ${{ steps.source.outputs.workflow_run_id }}
+      crate_name: ${{ steps.package.outputs.crate_name }}
+      crate_sha256: ${{ steps.package.outputs.crate_sha256 }}
+    steps:
+      - name: Require successful CI for this exact main commit
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          OPERATION: ${{ inputs.operation }}
+          ACTOR_ID: ${{ github.actor_id }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          CI_STATE_PATH: ${{ runner.temp }}/ci-runs.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EVENT_NAME" == workflow_dispatch && "$OPERATION" == publish &&
+             "$ACTOR_ID" == 30877743 &&
+             "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
+             "$SOURCE_REF" == refs/heads/main && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ &&
+             "$WORKFLOW_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$remote_main" == "$SOURCE_SHA" ]]
+          workflow_id=$(gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
+          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+          endpoint="repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$SOURCE_SHA&per_page=100"
+          # The counter intentionally bounds retries.
+          # shellcheck disable=SC2034
+          for attempt in {1..120}; do
+            gh api "$endpoint" > "$CI_STATE_PATH"
+            mapfile -t rows < <(
+              jq -r --argjson workflow_id "$workflow_id" --arg repo "$EXPECTED_REPOSITORY" --arg sha "$SOURCE_SHA" '
+                .workflow_runs[] |
+                select(.workflow_id == $workflow_id and .name == "CI" and
+                       .path == ".github/workflows/ci.yml" and .event == "push" and
+                       .repository.full_name == $repo and .head_repository.full_name == $repo and
+                       .head_branch == "main" and .head_sha == $sha) |
+                [.id, .status, (.conclusion // ""), .run_attempt] | @tsv
+              ' "$CI_STATE_PATH"
+            )
+            [[ ${#rows[@]} -le 1 ]] || exit 65
+            if [[ ${#rows[@]} -eq 1 ]]; then
+              IFS=$'\t' read -r run_id status conclusion run_attempt <<< "${rows[0]}"
+              [[ "$run_id" =~ ^[1-9][0-9]*$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]]
+              if [[ "$status" == completed ]]; then
+                [[ "$conclusion" == success ]] || exit 65
+                remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+                [[ "$remote_main" == "$SOURCE_SHA" ]]
+                {
+                  echo "source_sha=$SOURCE_SHA"
+                  echo "workflow_run_id=$WORKFLOW_RUN_ID"
+                  echo "ci_run_id=$run_id"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+            sleep 15
+          done
+          exit 1
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ steps.source.outputs.source_sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Resolve the exact Cargo 1.95 validation toolchain
+        id: cargo
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.95 --profile minimal --component rustfmt --component clippy
+          cargo_bin=$(rustup which --toolchain 1.95 cargo)
+          toolchain_directory=${cargo_bin%/*}
+          rustup_home=$(rustup show home)
+          [[ "$cargo_bin" == /* && -f "$cargo_bin" && ! -L "$cargo_bin" && -x "$cargo_bin" ]]
+          [[ "$rustup_home" == /* && -d "$rustup_home" && ! -L "$rustup_home" ]]
+          case "$cargo_bin" in "$rustup_home"/*) ;; *) exit 65 ;; esac
+          [[ "$("$cargo_bin" --version)" =~ ^cargo\ 1\.95\.[0-9]+\  ]]
+          echo "cargo_bin=$cargo_bin" >> "$GITHUB_OUTPUT"
+          echo "toolchain_directory=$toolchain_directory" >> "$GITHUB_OUTPUT"
+      - name: Read package version
+        id: package-version
+        env:
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+        run: |
+          version="$(RUSTUP_TOOLCHAIN=1.95 "$CARGO_BIN" metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tr300") | .version')"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Format
+        env:
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+        run: RUSTUP_TOOLCHAIN=1.95 "$CARGO_BIN" fmt --all -- --check
+      - name: Clippy
+        env:
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+        run: RUSTUP_TOOLCHAIN=1.95 "$CARGO_BIN" clippy --all-targets --workspace -- -D warnings
+      - name: Test
+        env:
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+        run: RUSTUP_TOOLCHAIN=1.95 "$CARGO_BIN" test --workspace --all-targets
+      - name: Package and registry-credential-free dry-run
+        id: package
+        env:
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+          TOOLCHAIN_DIRECTORY: ${{ steps.cargo.outputs.toolchain_directory }}
+          VERSION: ${{ steps.package-version.outputs.version }}
+          SOURCE_DIRECTORY: ${{ github.workspace }}
+          CLEAN_HOME: ${{ runner.temp }}/validator-home
+          CLEAN_CARGO_HOME: ${{ runner.temp }}/validator-cargo-home
+          CLEAN_CWD: ${{ runner.temp }}/validator-cwd
+          CLEAN_TARGET: ${{ runner.temp }}/validator-target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$("$CARGO_BIN" --version)" =~ ^cargo\ 1\.95\.[0-9]+\  ]]
+          mkdir -m 700 "$CLEAN_HOME" "$CLEAN_CARGO_HOME" "$CLEAN_CWD" "$CLEAN_TARGET"
+          minimal_path="$TOOLCHAIN_DIRECTORY:/usr/bin:/bin"
+          (
+            cd "$CLEAN_CWD"
+            /usr/bin/env -i HOME="$CLEAN_HOME" CARGO_HOME="$CLEAN_CARGO_HOME" \
+              CARGO_TARGET_DIR="$CLEAN_TARGET" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+              PATH="$minimal_path" \
+              "$CARGO_BIN" package --manifest-path "$SOURCE_DIRECTORY/Cargo.toml" --locked --list
+            /usr/bin/env -i HOME="$CLEAN_HOME" CARGO_HOME="$CLEAN_CARGO_HOME" \
+              CARGO_TARGET_DIR="$CLEAN_TARGET" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+              PATH="$minimal_path" \
+              "$CARGO_BIN" package --manifest-path "$SOURCE_DIRECTORY/Cargo.toml" --locked
+            /usr/bin/env -i HOME="$CLEAN_HOME" CARGO_HOME="$CLEAN_CARGO_HOME" \
+              CARGO_TARGET_DIR="$CLEAN_TARGET" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+              PATH="$minimal_path" \
+              "$CARGO_BIN" publish --registry crates-io \
+                --manifest-path "$SOURCE_DIRECTORY/Cargo.toml" --dry-run --locked
+          )
+          crate_name="tr300-$VERSION.crate"
+          crate_path="$CLEAN_TARGET/package/$crate_name"
+          [[ -f "$crate_path" && ! -L "$crate_path" && -s "$crate_path" ]]
+          crate_sha256=$(sha256sum -- "$crate_path")
+          crate_sha256=${crate_sha256%% *}
+          [[ "$crate_sha256" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s *%s\n' "$crate_sha256" "$crate_name" > "$crate_path.sha256"
+          {
+            echo "version=$VERSION"
+            echo "crate_name=$crate_name"
+            echo "crate_sha256=$crate_sha256"
+            echo "crate_path=$crate_path"
+          } >> "$GITHUB_OUTPUT"
+  publish:
+    name: Publish from a fresh no-execution runner
+    needs: validate-package
+    if: needs.validate-package.result == 'success'
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Resolve the runner-owned Cargo 1.95 executable
+        id: cargo
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.95 --profile minimal
+          cargo_bin=$(rustup which --toolchain 1.95 cargo)
+          toolchain_directory=${cargo_bin%/*}
+          rustup_home=$(rustup show home)
+          [[ "$cargo_bin" == /* && -f "$cargo_bin" && ! -L "$cargo_bin" && -x "$cargo_bin" ]]
+          [[ "$rustup_home" == /* && -d "$rustup_home" && ! -L "$rustup_home" ]]
+          case "$cargo_bin" in "$rustup_home"/*) ;; *) exit 65 ;; esac
+          [[ "$("$cargo_bin" --version)" =~ ^cargo\ 1\.95\.[0-9]+\  ]]
+          echo "cargo_bin=$cargo_bin" >> "$GITHUB_OUTPUT"
+          echo "toolchain_directory=$toolchain_directory" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: exact-source
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Repackage without execution and prove exact candidate bytes
+        id: candidate
+        env:
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+          TOOLCHAIN_DIRECTORY: ${{ steps.cargo.outputs.toolchain_directory }}
+          EXPECTED_CRATE: ${{ needs.validate-package.outputs.crate_name }}
+          EXPECTED_SHA256: ${{ needs.validate-package.outputs.crate_sha256 }}
+          SOURCE_SHA: ${{ needs.validate-package.outputs.source_sha }}
+          SOURCE_DIRECTORY: ${{ github.workspace }}/exact-source
+          CLEAN_HOME: ${{ runner.temp }}/publish-home
+          CLEAN_CARGO_HOME: ${{ runner.temp }}/cargo-home
+          CLEAN_CWD: ${{ runner.temp }}/publish-cwd
+          CLEAN_TARGET: ${{ runner.temp }}/cargo-target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_CRATE" =~ ^tr300-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.crate$ ]]
+          [[ -x "$CARGO_BIN" && "$CARGO_BIN" == /* ]]
+          [[ "$("$CARGO_BIN" --version)" =~ ^cargo\ 1\.95\.[0-9]+\  ]]
+          [[ "$SOURCE_SHA" == "${GITHUB_SHA}" ]]
+          test "$(git -C "$SOURCE_DIRECTORY" rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git -C "$SOURCE_DIRECTORY" status --porcelain --untracked-files=all)"
+          while IFS= read -r -d '' entry; do
+            mode=${entry%% *}
+            case "$mode" in 100644|100755) ;; *) echo "forbidden git entry mode: $mode" >&2; exit 65 ;; esac
+          done < <(git -C "$SOURCE_DIRECTORY" ls-files -s -z)
+          python3 - "$SOURCE_DIRECTORY" "$EXPECTED_CRATE" <<'PY'
+          import os
+          import stat
+          import sys
+          import tomllib
+          from pathlib import Path, PurePosixPath
+
+          root = Path(sys.argv[1])
+          crate_name = sys.argv[2]
+          expected_version = crate_name.removeprefix("tr300-").removesuffix(".crate")
+          expected_include = [
+              "/Cargo.lock", "/Cargo.toml", "/LICENSE", "/README.md", "/build.rs",
+              "/man/**", "/src/**", "/tests/**", "/wix/**", "/wix-corporate/**",
+          ]
+          with (root / "Cargo.toml").open("rb") as handle:
+              manifest = tomllib.load(handle)
+          package = manifest.get("package", {})
+          if package.get("name") != "tr300" or package.get("version") != expected_version:
+              raise SystemExit("Cargo package identity changed")
+          if package.get("include") != expected_include:
+              raise SystemExit("Cargo package include policy changed")
+          if package.get("readme") != "README.md" or "license-file" in package:
+              raise SystemExit("Cargo readme or license-file policy changed")
+          if package.get("build") not in (None, "build.rs"):
+              raise SystemExit("Cargo build script path escapes the fixed package root")
+          if manifest.get("bin") != [{"name": "tr300", "path": "src/main.rs"}]:
+              raise SystemExit("Cargo binary target policy changed")
+          if manifest.get("test") or manifest.get("example") or manifest.get("bench"):
+              raise SystemExit("explicit Cargo test/example/bench targets are not allowed")
+          lib_path = manifest.get("lib", {}).get("path")
+          if lib_path not in (None, "src/lib.rs"):
+              raise SystemExit("Cargo library target path changed")
+          for table_name in ("lib", "bin", "test", "example", "bench"):
+              value = manifest.get(table_name, [])
+              tables = value if isinstance(value, list) else [value]
+              for table in tables:
+                  path_value = table.get("path") if isinstance(table, dict) else None
+                  if path_value is None:
+                      continue
+                  pure = PurePosixPath(path_value)
+                  if pure.is_absolute() or ".." in pure.parts:
+                      raise SystemExit(f"external Cargo target path: {path_value!r}")
+          if (root / "src" / "bin").exists():
+              raise SystemExit("automatic src/bin targets are not part of the publish policy")
+          for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+              directories[:] = [name for name in directories if name not in {".git", "target"}]
+              for name in [*directories, *files]:
+                  path = Path(current) / name
+                  metadata = path.lstat()
+                  if stat.S_ISLNK(metadata.st_mode):
+                      raise SystemExit(f"symlink forbidden at publish boundary: {path}")
+                  if name in files:
+                      if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                          raise SystemExit(f"special or hardlinked file forbidden: {path}")
+                  elif not stat.S_ISDIR(metadata.st_mode):
+                      raise SystemExit(f"special directory entry forbidden: {path}")
+          PY
+          for config in \
+            "$SOURCE_DIRECTORY/.cargo/config" "$SOURCE_DIRECTORY/.cargo/config.toml"; do
+            [[ ! -e "$config" && ! -L "$config" ]]
+          done
+          mkdir -m 700 "$CLEAN_HOME" "$CLEAN_CARGO_HOME" "$CLEAN_CWD" "$CLEAN_TARGET"
+          [[ -z "$(find "$CLEAN_HOME" -mindepth 1 -print -quit)" ]]
+          [[ -z "$(find "$CLEAN_CARGO_HOME" -mindepth 1 -print -quit)" ]]
+          ancestor=$CLEAN_CWD
+          while :; do
+            [[ ! -e "$ancestor/.cargo/config" && ! -L "$ancestor/.cargo/config" ]]
+            [[ ! -e "$ancestor/.cargo/config.toml" && ! -L "$ancestor/.cargo/config.toml" ]]
+            [[ "$ancestor" == / ]] && break
+            ancestor=${ancestor%/*}
+            [[ -n "$ancestor" ]] || ancestor=/
+          done
+          minimal_path="$TOOLCHAIN_DIRECTORY:/usr/bin:/bin"
+          (
+            cd "$CLEAN_CWD"
+            /usr/bin/env -i HOME="$CLEAN_HOME" CARGO_HOME="$CLEAN_CARGO_HOME" \
+              CARGO_TARGET_DIR="$CLEAN_TARGET" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+              PATH="$minimal_path" \
+              "$CARGO_BIN" package --manifest-path "$SOURCE_DIRECTORY/Cargo.toml" \
+                --locked --no-verify
+          )
+          repackaged="$CLEAN_TARGET/package/$EXPECTED_CRATE"
+          [[ -f "$repackaged" && ! -L "$repackaged" && -s "$repackaged" ]]
+          repackaged_sha=$(sha256sum -- "$repackaged")
+          repackaged_sha=${repackaged_sha%% *}
+          [[ "$repackaged_sha" == "$EXPECTED_SHA256" ]]
+          python3 - "$repackaged" "$EXPECTED_CRATE" "$SOURCE_SHA" <<'PY'
+          import json
+          import sys
+          import tarfile
+          from pathlib import Path
+          from pathlib import PurePosixPath
+
+          archive, crate_name, source_sha = sys.argv[1:]
+          root = crate_name.removesuffix(".crate")
+          allowed_roots = {
+              ".cargo_vcs_info.json", "Cargo.lock", "Cargo.toml", "Cargo.toml.orig",
+              "LICENSE", "README.md", "build.rs", "man", "src", "tests", "wix", "wix-corporate",
+          }
+          if Path(archive).stat().st_size > 32 * 1024 * 1024:
+              raise SystemExit("compressed crate exceeds the publish limit")
+          with tarfile.open(archive, "r:gz") as package:
+              members = package.getmembers()
+              names = [member.name for member in members]
+              if len(names) != len(set(names)):
+                  raise SystemExit("duplicate crate archive entries")
+              if sum(member.size for member in members) > 64 * 1024 * 1024:
+                  raise SystemExit("crate expands beyond the publish limit")
+              for member in members:
+                  path = PurePosixPath(member.name)
+                  if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != root:
+                      raise SystemExit(f"crate archive traversal: {member.name!r}")
+                  if ".cargo" in path.parts or member.size > 32 * 1024 * 1024:
+                      raise SystemExit(f"forbidden crate archive path or size: {member.name!r}")
+                  if member.issym() or member.islnk() or not (member.isfile() or member.isdir()):
+                      raise SystemExit(f"unsafe crate archive entry: {member.name!r}")
+                  if len(path.parts) > 1 and path.parts[1] not in allowed_roots:
+                      raise SystemExit(f"crate archive path outside include policy: {member.name!r}")
+              required = {
+                  f"{root}/.cargo_vcs_info.json",
+                  f"{root}/Cargo.toml",
+                  f"{root}/Cargo.toml.orig",
+              }
+              if not required.issubset(names):
+                  raise SystemExit("crate is missing generated Cargo or VCS provenance")
+              for required_name in required:
+                  required_member = package.getmember(required_name)
+                  if not required_member.isfile() or required_member.size <= 0:
+                      raise SystemExit(f"invalid required crate entry: {required_name}")
+              vcs_member = package.getmember(f"{root}/.cargo_vcs_info.json")
+              vcs_file = package.extractfile(vcs_member)
+              if vcs_file is None:
+                  raise SystemExit("could not read crate VCS provenance")
+              with vcs_file:
+                  vcs = json.load(vcs_file)
+              if vcs.get("git", {}).get("sha1") != source_sha or vcs.get("path_in_vcs") != "":
+                  raise SystemExit("crate VCS provenance does not bind the exact source SHA")
+          PY
+          chmod -R a-w "$SOURCE_DIRECTORY"
+          {
+            echo "manifest=$SOURCE_DIRECTORY/Cargo.toml"
+            echo "home=$CLEAN_HOME"
+            echo "cargo_home=$CLEAN_CARGO_HOME"
+            echo "cwd=$CLEAN_CWD"
+            echo "target=$CLEAN_TARGET"
+            echo "toolchain_directory=$TOOLCHAIN_DIRECTORY"
+          } >> "$GITHUB_OUTPUT"
+      - name: Rebind the candidate to current main before registry adjudication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.validate-package.outputs.source_sha }}
+          SOURCE_DIRECTORY: ${{ github.workspace }}/exact-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$remote_main" == "$SOURCE_SHA" ]]
+          [[ "$(git -C "$SOURCE_DIRECTORY" rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ -z "$(git -C "$SOURCE_DIRECTORY" status --porcelain=v1 --untracked-files=all)" ]]
+
+      - name: Recheck immutable crates.io state
+        id: registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA256: ${{ needs.validate-package.outputs.crate_sha256 }}
+          SOURCE_SHA: ${{ needs.validate-package.outputs.source_sha }}
+          VERSION: ${{ needs.validate-package.outputs.version }}
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+          TOOLCHAIN_DIRECTORY: ${{ steps.cargo.outputs.toolchain_directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          resolve_tag_commit() {
+            local tag=$1
+            local object_type source_sha row
+            row=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/tags/$tag" \
+              --jq '.object | [.type, .sha] | @tsv' 2>/dev/null) || return 1
+            IFS=$'\t' read -r object_type source_sha <<< "$row"
+            for _ in 1 2 3 4 5; do
+              case "$object_type" in
+                commit) printf '%s\n' "$source_sha"; return 0 ;;
+                tag)
+                  IFS=$'\t' read -r object_type source_sha < <(
+                    gh api "repos/$EXPECTED_REPOSITORY/git/tags/$source_sha" \
+                      --jq '.object | [.type, .sha] | @tsv'
+                  )
+                  ;;
+                *) return 65 ;;
+              esac
+            done
+            return 65
+          }
+          prove_public_bytes_match_published_tag() {
+            local tag_sha=$1
+            local public_sha=$2
+            local source_directory="$RUNNER_TEMP/published-tag-source"
+            local clean_home="$RUNNER_TEMP/published-tag-home"
+            local clean_cargo_home="$RUNNER_TEMP/published-tag-cargo-home"
+            local clean_cwd="$RUNNER_TEMP/published-tag-cwd"
+            local clean_target="$RUNNER_TEMP/published-tag-target"
+            local expected_crate="tr300-$VERSION.crate"
+            local package_path
+
+            [[ "$tag_sha" =~ ^[0-9a-f]{40}$ && "$public_sha" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$("$CARGO_BIN" --version)" =~ ^cargo\ 1\.95\.[0-9]+\  ]]
+            mkdir -m 700 "$source_directory" "$clean_home" "$clean_cargo_home" \
+              "$clean_cwd" "$clean_target"
+            /usr/bin/git -C "$source_directory" init --quiet
+            /usr/bin/git -C "$source_directory" remote add origin \
+              "https://github.com/$EXPECTED_REPOSITORY.git"
+            /usr/bin/git -C "$source_directory" fetch --quiet --depth=1 origin \
+              "refs/tags/v$VERSION:refs/tags/v$VERSION"
+            /usr/bin/git -C "$source_directory" checkout --quiet --detach "$tag_sha"
+            [[ "$(/usr/bin/git -C "$source_directory" rev-parse HEAD)" == "$tag_sha" ]]
+            [[ -z "$(/usr/bin/git -C "$source_directory" status --porcelain=v1 --untracked-files=all)" ]]
+            while IFS= read -r -d '' entry; do
+              mode=${entry%% *}
+              case "$mode" in 100644|100755) ;; *) exit 65 ;; esac
+            done < <(/usr/bin/git -C "$source_directory" ls-files -s -z)
+            python3 - "$source_directory" "$VERSION" <<'PY'
+          import os
+          import stat
+          import sys
+          import tomllib
+          from pathlib import Path, PurePosixPath
+
+          root = Path(sys.argv[1])
+          expected_version = sys.argv[2]
+          expected_include = [
+              "/Cargo.lock", "/Cargo.toml", "/LICENSE", "/README.md", "/build.rs",
+              "/man/**", "/src/**", "/tests/**", "/wix/**", "/wix-corporate/**",
+          ]
+          with (root / "Cargo.toml").open("rb") as handle:
+              manifest = tomllib.load(handle)
+          package = manifest.get("package", {})
+          if package.get("name") != "tr300" or package.get("version") != expected_version:
+              raise SystemExit("published tag package identity changed")
+          if package.get("include") != expected_include:
+              raise SystemExit("published tag include policy changed")
+          if package.get("readme") != "README.md" or "license-file" in package:
+              raise SystemExit("published tag readme or license-file policy changed")
+          if package.get("build") not in (None, "build.rs"):
+              raise SystemExit("published tag build script path changed")
+          if manifest.get("bin") != [{"name": "tr300", "path": "src/main.rs"}]:
+              raise SystemExit("published tag binary target policy changed")
+          if manifest.get("test") or manifest.get("example") or manifest.get("bench"):
+              raise SystemExit("published tag explicit target policy changed")
+          lib_path = manifest.get("lib", {}).get("path")
+          if lib_path not in (None, "src/lib.rs"):
+              raise SystemExit("published tag library target path changed")
+          for table_name in ("lib", "bin", "test", "example", "bench"):
+              value = manifest.get(table_name, [])
+              tables = value if isinstance(value, list) else [value]
+              for table in tables:
+                  path_value = table.get("path") if isinstance(table, dict) else None
+                  if path_value is None:
+                      continue
+                  pure = PurePosixPath(path_value)
+                  if pure.is_absolute() or ".." in pure.parts:
+                      raise SystemExit(f"published tag external target path: {path_value!r}")
+          if (root / "src" / "bin").exists():
+              raise SystemExit("published tag automatic src/bin targets are forbidden")
+          for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+              directories[:] = [name for name in directories if name not in {".git", "target"}]
+              for name in [*directories, *files]:
+                  path = Path(current) / name
+                  metadata = path.lstat()
+                  if stat.S_ISLNK(metadata.st_mode):
+                      raise SystemExit(f"published tag symlink is forbidden: {path}")
+                  if name in files:
+                      if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                          raise SystemExit(f"published tag special or hardlinked file: {path}")
+                  elif not stat.S_ISDIR(metadata.st_mode):
+                      raise SystemExit(f"published tag special directory entry: {path}")
+          PY
+            [[ ! -e "$source_directory/.cargo/config" &&
+               ! -L "$source_directory/.cargo/config" &&
+               ! -e "$source_directory/.cargo/config.toml" &&
+               ! -L "$source_directory/.cargo/config.toml" ]]
+            ancestor=$clean_cwd
+            while :; do
+              [[ ! -e "$ancestor/.cargo/config" && ! -L "$ancestor/.cargo/config" ]]
+              [[ ! -e "$ancestor/.cargo/config.toml" && ! -L "$ancestor/.cargo/config.toml" ]]
+              [[ "$ancestor" == / ]] && break
+              ancestor=${ancestor%/*}
+              [[ -n "$ancestor" ]] || ancestor=/
+            done
+            (
+              cd "$clean_cwd"
+              /usr/bin/env -i HOME="$clean_home" CARGO_HOME="$clean_cargo_home" \
+                CARGO_TARGET_DIR="$clean_target" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+                PATH="$TOOLCHAIN_DIRECTORY:/usr/bin:/bin" \
+                "$CARGO_BIN" package --manifest-path "$source_directory/Cargo.toml" \
+                  --locked --no-verify
+            )
+            package_path="$clean_target/package/$expected_crate"
+            [[ -f "$package_path" && ! -L "$package_path" && -s "$package_path" ]]
+            packaged_sha=$(sha256sum -- "$package_path"); packaged_sha=${packaged_sha%% *}
+            [[ "$packaged_sha" == "$public_sha" ]]
+            python3 - "$package_path" "$tag_sha" "$expected_crate" <<'PY'
+          import json
+          import sys
+          import tarfile
+
+          archive, tag_sha, crate_name = sys.argv[1:]
+          root = crate_name.removesuffix(".crate")
+          with tarfile.open(archive, "r:gz") as package:
+              vcs_member = package.getmember(f"{root}/.cargo_vcs_info.json")
+              vcs_file = package.extractfile(vcs_member)
+              if vcs_file is None:
+                  raise SystemExit("published tag crate lacks VCS provenance")
+              with vcs_file:
+                  vcs = json.load(vcs_file)
+          if vcs.get("git", {}).get("sha1") != tag_sha or vcs.get("path_in_vcs") != "":
+              raise SystemExit("published tag crate does not bind its resolved commit")
+          PY
+          }
+
+          crate_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
+            --output "$RUNNER_TEMP/crate-policy.json" --write-out '%{http_code}' \
+            --header 'User-Agent: QubeTX/qube-machine-report crates-publish' \
+            https://crates.io/api/v1/crates/tr300)
+          [[ "$crate_status" == 200 ]]
+          jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
+            "$RUNNER_TEMP/crate-policy.json" >/dev/null
+
+          metadata_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
+            --output "$RUNNER_TEMP/crate-version.json" --write-out '%{http_code}' \
+            --header 'User-Agent: QubeTX/qube-machine-report crates-publish' \
+            "https://crates.io/api/v1/crates/tr300/$VERSION")
+          case "$metadata_status" in
             200)
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-              echo "tr300 ${{ steps.package.outputs.version }} is already published; skipping."
+              jq -e --arg version "$VERSION" \
+                '.version.crate == "tr300" and .version.num == $version' \
+                "$RUNNER_TEMP/crate-version.json" >/dev/null
+              download_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error --location \
+                --output "$RUNNER_TEMP/public.crate" --write-out '%{http_code}' \
+                --header 'User-Agent: QubeTX/qube-machine-report crates-publish' \
+                "https://crates.io/api/v1/crates/tr300/$VERSION/download")
+              [[ "$download_status" == 200 ]]
+              public_sha=$(sha256sum -- "$RUNNER_TEMP/public.crate"); public_sha=${public_sha%% *}
+              metadata_checksum=$(jq -r .version.checksum "$RUNNER_TEMP/crate-version.json")
+              [[ "$metadata_checksum" =~ ^[0-9a-f]{64}$ && "$metadata_checksum" == "$public_sha" ]]
+              if [[ "$public_sha" != "$EXPECTED_SHA256" ]]; then
+                published_tag_sha=$(resolve_tag_commit "v$VERSION") || {
+                  echo "public tr300 $VERSION bytes differ and no immutable published tag explains source drift" >&2
+                  exit 65
+                }
+                release_target=$(gh api "repos/$EXPECTED_REPOSITORY/releases/tags/v$VERSION" \
+                  --jq .target_commitish)
+                [[ "$release_target" =~ ^[0-9a-f]{40}$ &&
+                   "$release_target" == "$published_tag_sha" &&
+                   "$published_tag_sha" != "$SOURCE_SHA" ]] || {
+                  echo "public tr300 $VERSION bytes differ from the candidate without proven post-release source drift" >&2
+                  exit 65
+                }
+                prove_public_bytes_match_published_tag "$published_tag_sha" "$public_sha"
+                tag_after=$(resolve_tag_commit "v$VERSION")
+                release_after=$(gh api "repos/$EXPECTED_REPOSITORY/releases/tags/v$VERSION" \
+                  --jq .target_commitish)
+                [[ "$tag_after" == "$published_tag_sha" &&
+                   "$release_after" == "$published_tag_sha" ]]
+                echo 'reason=post-release-source-drift' >> "$GITHUB_OUTPUT"
+              else
+                echo 'reason=exact-public-bytes' >> "$GITHUB_OUTPUT"
+              fi
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
               ;;
             404)
-              echo "publish=true" >> "$GITHUB_OUTPUT"
-              echo "tr300 ${{ steps.package.outputs.version }} is not on crates.io yet; publishing after checks."
+              echo 'publish=true' >> "$GITHUB_OUTPUT"
+              echo 'reason=version-absent' >> "$GITHUB_OUTPUT"
               ;;
             *)
-              echo "::error::Unexpected crates.io API status: $status"
-              cat "$RUNNER_TEMP/crate-version.json"
+              cat "$RUNNER_TEMP/crate-version.json" >&2
               exit 1
               ;;
           esac
 
-      - name: Check crates.io token
-        if: steps.crates.outputs.publish == 'true'
+      - name: Rebind current main immediately before OIDC
+        if: steps.registry.outputs.publish == 'true'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.validate-package.outputs.source_sha }}
+        shell: bash
         run: |
-          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-            echo "::error::CARGO_REGISTRY_TOKEN is not configured; cannot publish tr300 ${{ steps.package.outputs.version }}"
-            exit 1
-          fi
+          set -euo pipefail
+          remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$remote_main" == "$SOURCE_SHA" ]]
 
-      - name: Format
-        if: steps.crates.outputs.publish == 'true'
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        if: steps.crates.outputs.publish == 'true'
-        run: cargo clippy --all-targets --workspace -- -D warnings
-
-      - name: Test
-        if: steps.crates.outputs.publish == 'true'
-        run: cargo test --workspace --all-targets
-
-      - name: Package
-        if: steps.crates.outputs.publish == 'true'
-        run: |
-          cargo package --locked --list
-          cargo publish --dry-run --locked
-
-      - name: Publish
-        if: steps.crates.outputs.publish == 'true'
+      - name: Mint the short-lived crates.io publish token
+        if: steps.registry.outputs.publish == 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+      - name: Publish without executing package code
+        id: cargo-publish
+        if: steps.registry.outputs.publish == 'true'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_BIN: ${{ steps.cargo.outputs.cargo_bin }}
+          TOOLCHAIN_DIRECTORY: ${{ steps.candidate.outputs.toolchain_directory }}
+          CLEAN_HOME: ${{ steps.candidate.outputs.home }}
+          CARGO_HOME: ${{ steps.candidate.outputs.cargo_home }}
+          CARGO_TARGET_DIR: ${{ steps.candidate.outputs.target }}
+          PUBLISH_CWD: ${{ steps.candidate.outputs.cwd }}
+          PUBLISH_MANIFEST: ${{ steps.candidate.outputs.manifest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$CARGO_REGISTRY_TOKEN" && -x "$CARGO_BIN" ]]
+          minimal_path="$TOOLCHAIN_DIRECTORY:/usr/bin:/bin"
+          [[ -d "$PUBLISH_CWD" && ! -L "$PUBLISH_CWD" ]]
+          cd "$PUBLISH_CWD" || exit 65
+          [[ "$PWD" == "$PUBLISH_CWD" ]]
+          set +e
+          /usr/bin/env -i HOME="$CLEAN_HOME" CARGO_HOME="$CARGO_HOME" \
+            CARGO_TARGET_DIR="$CARGO_TARGET_DIR" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            PATH="$minimal_path" CARGO_REGISTRY_TOKEN="$CARGO_REGISTRY_TOKEN" \
+            "$CARGO_BIN" publish --registry crates-io \
+              --manifest-path "$PUBLISH_MANIFEST" --locked --no-verify
+          cargo_status=$?
+          set -e
+          echo "status=$cargo_status" >> "$GITHUB_OUTPUT"
+
+      - name: Adjudicate public bytes without the publish token
+        if: always() && steps.registry.outputs.publish == 'true'
+        env:
+          AUTH_OUTCOME: ${{ steps.auth.outcome }}
+          CARGO_PUBLISH_OUTCOME: ${{ steps.cargo-publish.outcome }}
+          CARGO_STATUS: ${{ steps.cargo-publish.outputs.status }}
+          EXPECTED_SHA256: ${{ needs.validate-package.outputs.crate_sha256 }}
+          SOURCE_SHA: ${{ needs.validate-package.outputs.source_sha }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          VERSION: ${{ needs.validate-package.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$AUTH_OUTCOME" == success && "$CARGO_PUBLISH_OUTCOME" == success ]]
+          [[ "$CARGO_STATUS" =~ ^[0-9]+$ && "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          crate_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
+            --output "$RUNNER_TEMP/published-crate-policy.json" --write-out '%{http_code}' \
+            --header 'User-Agent: QubeTX/qube-machine-report crates-publish' \
+            https://crates.io/api/v1/crates/tr300)
+          [[ "$crate_status" == 200 ]]
+          jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
+            "$RUNNER_TEMP/published-crate-policy.json" >/dev/null
+          # The counter intentionally bounds retries.
+          # shellcheck disable=SC2034
+          for attempt in {1..24}; do
+            metadata_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
+              --output "$RUNNER_TEMP/published-version.json" --write-out '%{http_code}' \
+              --header 'User-Agent: QubeTX/qube-machine-report crates-publish' \
+              "https://crates.io/api/v1/crates/tr300/$VERSION")
+            if [[ "$metadata_status" == 200 ]]; then
+              jq -e --arg version "$VERSION" --arg expected "$EXPECTED_SHA256" \
+                --arg sha "$SOURCE_SHA" --arg run_id "$CURRENT_RUN_ID" '
+                  .version.crate == "tr300" and
+                  .version.num == $version and
+                  .version.checksum == $expected and
+                  .version.trustpub_data.provider == "github" and
+                  .version.trustpub_data.repository == "QubeTX/qube-machine-report" and
+                  .version.trustpub_data.sha == $sha and
+                  (.version.trustpub_data.run_id | tostring) == $run_id
+                ' \
+                "$RUNNER_TEMP/published-version.json" >/dev/null
+              download_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error --location \
+                --output "$RUNNER_TEMP/published.crate" --write-out '%{http_code}' \
+                --header 'User-Agent: QubeTX/qube-machine-report crates-publish' \
+                "https://crates.io/api/v1/crates/tr300/$VERSION/download")
+              if [[ "$download_status" != 200 ]]; then
+                sleep 5
+                continue
+              fi
+              published_sha=$(sha256sum -- "$RUNNER_TEMP/published.crate"); published_sha=${published_sha%% *}
+              [[ "$published_sha" == "$EXPECTED_SHA256" ]] || exit 65
+              exit 0
+            fi
+            [[ "$metadata_status" == 404 ]] || exit 1
+            sleep 5
+          done
+          echo "cargo publish exited $CARGO_STATUS and exact public bytes never appeared" >&2
+          exit 1

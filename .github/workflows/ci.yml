@@ -32,8 +32,10 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
@@ -42,11 +44,13 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo clippy --locked --all-targets --workspace -- -D warnings
 
   test:
@@ -67,10 +71,833 @@ jobs:
           - os: windows-latest
             name: "Windows x86_64"
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --locked --workspace --all-targets
+      - name: Validate managed shell checksum enforcement on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: scripts/test-managed-installer-transaction.sh
+      - name: Validate direct-PKG preinstall behavior
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          builder=scripts/build-sign-notarize-macos-installer.sh
+          preinstall="$RUNNER_TEMP/tr300-pkg-preinstall"
+          sed -n "/<<'PREINSTALL'/,/^PREINSTALL$/p" "$builder" |
+            sed '1d;$d' > "$preinstall"
+          test -s "$preinstall"
+          chmod 0500 "$preinstall"
+          # The project supports systems older than macOS 12. Execute only the
+          # long-standing plist contract: validation plus escaped-key array
+          # reads, never the newer typed extraction flags.
+          test -x /usr/libexec/PlistBuddy
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/bin/plutil -lint "$plist_path"' "$preinstall"
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/libexec/PlistBuddy -c "Print ${plist_entry}:0"' "$preinstall"
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/libexec/PlistBuddy -c "Print ${plist_entry}:1"' "$preinstall"
+          if grep -Eq 'plutil[[:space:]]+-extract([[:space:]]|$)|[[:space:]]-expect([[:space:]]|$)' \
+            "$preinstall"; then
+            echo 'preinstall uses plist flags unavailable before macOS 12' >&2
+            exit 1
+          fi
+
+          active_binary="$HOME/.cargo/bin/tr300"
+          active_receipt="$HOME/.config/tr300/tr300-receipt.json"
+          missing_binary="$RUNNER_TEMP/tr300-missing-managed-binary"
+          missing_receipt="$RUNNER_TEMP/tr300-missing-managed-receipt"
+          second_home="/Users/tr300-pkg-preinstall-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          second_receipt="$second_home/.config/tr300/tr300-receipt.json"
+          hidden_home="/Users/.tr300-pkg-preinstall-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          hidden_receipt="$hidden_home/.config/tr300/tr300-receipt.json"
+          double_dot_home="/Users/..tr300-pkg-preinstall-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          double_dot_receipt="$double_dot_home/.config/tr300/tr300-receipt.json"
+          broken_parent_home="/Users/tr300-pkg-broken-parent-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          broken_parent="$broken_parent_home/.config"
+          broken_parent_target="$RUNNER_TEMP/tr300-missing-managed-parent"
+          inaccessible_home="/Users/tr300-pkg-inaccessible-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          inaccessible_parent="$inaccessible_home/.config"
+          case_home="/Users/tr300-pkg-case-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          case_binary="$case_home/.CARGO/BIN/TR300"
+          case_receipt="$case_home/.CONFIG/TR300/TR300-RECEIPT.JSON"
+          casefold_home="/Users/tr300-pkg-casefold-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+          casefold_image="$RUNNER_TEMP/tr300-pkg-casefold.sparseimage"
+          casefold_binary="$casefold_home/.CARGO/BIN/TR300"
+          casefold_attached=0
+          active_log="$RUNNER_TEMP/tr300-pkg-preinstall-active.log"
+          second_log="$RUNNER_TEMP/tr300-pkg-preinstall-second.log"
+          hidden_log="$RUNNER_TEMP/tr300-pkg-preinstall-hidden.log"
+          double_dot_log="$RUNNER_TEMP/tr300-pkg-preinstall-double-dot.log"
+          broken_parent_log="$RUNNER_TEMP/tr300-pkg-preinstall-broken-parent.log"
+          inaccessible_log="$RUNNER_TEMP/tr300-pkg-preinstall-inaccessible.log"
+          users_root_log="$RUNNER_TEMP/tr300-pkg-preinstall-users-root.log"
+          case_binary_log="$RUNNER_TEMP/tr300-pkg-preinstall-case-binary.log"
+          case_receipt_log="$RUNNER_TEMP/tr300-pkg-preinstall-case-receipt.log"
+          casefold_log="$RUNNER_TEMP/tr300-pkg-preinstall-casefold.log"
+          broken_log="$RUNNER_TEMP/tr300-pkg-preinstall-broken.log"
+          custom_fixture_user=tr300pkgcustom
+          custom_fixture_uid=3000000000
+          custom_fixture_created=0
+          custom_fixture_home=''
+          custom_fixture_receipt=''
+          custom_fixture_plist="$RUNNER_TEMP/tr300-pkg-custom-user.plist"
+          custom_fixture_log="$RUNNER_TEMP/tr300-pkg-preinstall-custom-user.log"
+          custom_fixture_newline_log="$RUNNER_TEMP/tr300-pkg-preinstall-newline-home.log"
+          custom_fixture_missing_home_log="$RUNNER_TEMP/tr300-pkg-preinstall-missing-home.log"
+          custom_fixture_out_of_range_log="$RUNNER_TEMP/tr300-pkg-preinstall-out-of-range-uid.log"
+          custom_fixture_too_wide_uid_log="$RUNNER_TEMP/tr300-pkg-preinstall-too-wide-uid.log"
+          runner_uid_inventory="$RUNNER_TEMP/tr300-pkg-local-user-uids"
+          fixture_identifier=com.qubetx.tr300.preinstall-ci
+          fixture_install_root=''
+          fixture_payload="$RUNNER_TEMP/tr300-preinstall-pkg-payload"
+          fixture_scripts="$RUNNER_TEMP/tr300-preinstall-pkg-scripts"
+          fixture_pkg="$RUNNER_TEMP/tr300-preinstall-fixture.pkg"
+          fixture_expanded="$RUNNER_TEMP/tr300-preinstall-pkg-expanded"
+          fixture_alt_image="$RUNNER_TEMP/tr300-preinstall-alt-target.sparseimage"
+          fixture_alt_mount="$RUNNER_TEMP/tr300-preinstall-alt-target"
+          fixture_alt_log="$RUNNER_TEMP/tr300-preinstall-alt-target.log"
+          fixture_alt_attached=0
+          fixture_phase='initial fixture setup'
+          fixture_phase_log=''
+
+          test ! -e "$active_binary"
+          test ! -L "$active_binary"
+          test ! -e "$active_receipt"
+          test ! -L "$active_receipt"
+          test ! -e "$second_home"
+          test ! -L "$second_home"
+          test ! -e "$hidden_home"
+          test ! -L "$hidden_home"
+          test ! -e "$double_dot_home"
+          test ! -L "$double_dot_home"
+          test ! -e "$broken_parent_home"
+          test ! -L "$broken_parent_home"
+          test ! -e "$broken_parent_target"
+          test ! -L "$broken_parent_target"
+          test ! -e "$inaccessible_home"
+          test ! -L "$inaccessible_home"
+          test ! -e "$case_home"
+          test ! -L "$case_home"
+          test ! -e "$casefold_home"
+          test ! -L "$casefold_home"
+          test ! -e "$casefold_image"
+          test ! -L "$casefold_image"
+          test ! -e "$missing_binary"
+          test ! -L "$missing_binary"
+          test ! -e "$missing_receipt"
+          test ! -L "$missing_receipt"
+          test ! -e "$fixture_payload"
+          test ! -L "$fixture_payload"
+          test ! -e "$fixture_scripts"
+          test ! -L "$fixture_scripts"
+          test ! -e "$fixture_pkg"
+          test ! -L "$fixture_pkg"
+          test ! -e "$fixture_expanded"
+          test ! -L "$fixture_expanded"
+          test ! -e "$fixture_alt_image"
+          test ! -L "$fixture_alt_image"
+          test ! -e "$fixture_alt_mount"
+          test ! -L "$fixture_alt_mount"
+          if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+            echo "fixture package receipt already exists: $fixture_identifier" >&2
+            exit 1
+          fi
+          if /usr/bin/dscl . -read "/Users/$custom_fixture_user" >/dev/null 2>&1; then
+            echo "Directory Service fixture user already exists: $custom_fixture_user" >&2
+            exit 1
+          fi
+          if /usr/bin/dscl . -search /Users UniqueID "$custom_fixture_uid" 2>/dev/null |
+            grep -q .; then
+            echo "Directory Service fixture uid already exists: $custom_fixture_uid" >&2
+            exit 1
+          fi
+
+          cleanup() {
+            rm -f "$active_binary" "$active_receipt"
+            rm -f "$missing_binary" "$missing_receipt"
+            rm -f "$custom_fixture_plist" "$runner_uid_inventory" "$fixture_pkg" \
+              "$fixture_alt_log" "$custom_fixture_log" \
+              "$custom_fixture_newline_log" "$custom_fixture_missing_home_log" \
+              "$custom_fixture_out_of_range_log" "$custom_fixture_too_wide_uid_log" \
+              "$hidden_log" "$double_dot_log" "$broken_parent_log" \
+              "$inaccessible_log" "$users_root_log" "$case_binary_log" \
+              "$case_receipt_log" "$casefold_log"
+            if [ -d "$second_home" ]; then
+              rm -f "$second_receipt"
+              rmdir "$second_home/.config/tr300" 2>/dev/null || true
+              rmdir "$second_home/.config" 2>/dev/null || true
+              sudo /bin/rmdir "$second_home" 2>/dev/null || true
+            fi
+            for residue_home in "$hidden_home" "$double_dot_home"; do
+              if [ -d "$residue_home" ]; then
+                rm -f "$residue_home/.config/tr300/tr300-receipt.json"
+                rmdir "$residue_home/.config/tr300" 2>/dev/null || true
+                rmdir "$residue_home/.config" 2>/dev/null || true
+                sudo /bin/rmdir "$residue_home" 2>/dev/null || true
+              fi
+            done
+            if [ -L "$broken_parent" ]; then
+              rm -f "$broken_parent"
+            fi
+            sudo /bin/rmdir "$broken_parent_home" 2>/dev/null || true
+            if [ -d "$inaccessible_parent" ]; then
+              chmod 0700 "$inaccessible_parent" 2>/dev/null || true
+              rmdir "$inaccessible_parent" 2>/dev/null || true
+            fi
+            sudo /bin/rmdir "$inaccessible_home" 2>/dev/null || true
+            if [ -d "$case_home" ]; then
+              rm -f "$case_binary" "$case_receipt"
+              rmdir "$case_home/.CARGO/BIN" 2>/dev/null || true
+              rmdir "$case_home/.CARGO" 2>/dev/null || true
+              rmdir "$case_home/.CONFIG/TR300" 2>/dev/null || true
+              rmdir "$case_home/.CONFIG" 2>/dev/null || true
+              sudo /bin/rmdir "$case_home" 2>/dev/null || true
+            fi
+            if [ "$casefold_attached" -eq 1 ]; then
+              hdiutil detach "$casefold_home" >/dev/null 2>&1 || true
+            fi
+            sudo /bin/rmdir "$casefold_home" 2>/dev/null || true
+            rm -f "$casefold_image"
+            if [ "$custom_fixture_created" -eq 1 ]; then
+              sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user" \
+                >/dev/null 2>&1 || true
+            fi
+            if [ -n "$custom_fixture_home" ]; then
+              case "$custom_fixture_home" in
+                "/private/tmp/tr300 pkg custom home."*)
+                  rm -f "$custom_fixture_receipt"
+                  rmdir "$custom_fixture_home/.config/tr300" 2>/dev/null || true
+                  rmdir "$custom_fixture_home/.config" 2>/dev/null || true
+                  rmdir "$custom_fixture_home" 2>/dev/null || true
+                  ;;
+                *)
+                  echo "refusing unsafe custom-home fixture cleanup: $custom_fixture_home" >&2
+                  ;;
+              esac
+            fi
+            if [ -n "$fixture_install_root" ]; then
+              case "$fixture_install_root" in
+                "/private/tmp/tr300 pkg payload root."*)
+                  sudo rm -f "$fixture_install_root/payload-marker"
+                  rmdir "$fixture_install_root" 2>/dev/null || true
+                  ;;
+                *)
+                  echo "refusing unsafe payload-root cleanup: $fixture_install_root" >&2
+                  ;;
+              esac
+            fi
+            if [ "$fixture_alt_attached" -eq 1 ]; then
+              hdiutil detach "$fixture_alt_mount" >/dev/null 2>&1 || true
+            fi
+            rmdir "$fixture_alt_mount" 2>/dev/null || true
+            rm -f "$fixture_alt_image"
+            rm -f "$fixture_payload/payload-marker" "$fixture_scripts/preinstall"
+            rmdir "$fixture_payload" 2>/dev/null || true
+            rmdir "$fixture_scripts" 2>/dev/null || true
+            if [ -e "$fixture_expanded" ] || [ -L "$fixture_expanded" ]; then
+              case "$fixture_expanded" in
+                "$RUNNER_TEMP"/tr300-preinstall-pkg-expanded)
+                  rm -rf "$fixture_expanded"
+                  ;;
+                *)
+                  echo "refusing unsafe expanded-package cleanup: $fixture_expanded" >&2
+                  ;;
+              esac
+            fi
+            if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+              sudo pkgutil --forget "$fixture_identifier" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          # Preserve the exact failing command and current fixture log before
+          # EXIT cleanup removes diagnostic files. Avoid xtrace so environment
+          # values and unrelated command expansions are never emitted.
+          # shellcheck disable=SC2317,SC2329
+          diagnose_direct_pkg_failure() {
+            local failure_status=$1
+            local failure_line=$2
+            local failure_command=$3
+            set +e
+            trap - ERR
+            printf 'direct-PKG fixture failure: phase=%s status=%s generated_line=%s\n' \
+              "$fixture_phase" "$failure_status" "$failure_line" >&2
+            printf 'failing command: %s\n' "$failure_command" >&2
+            if [ -n "$fixture_phase_log" ]; then
+              case "$fixture_phase_log" in
+                "$custom_fixture_log"|"$custom_fixture_newline_log"|\
+                  "$custom_fixture_missing_home_log"|\
+                  "$custom_fixture_out_of_range_log"|\
+                  "$custom_fixture_too_wide_uid_log"|"$fixture_alt_log"|\
+                  "$broken_log")
+                  ;;
+                *)
+                  printf 'refusing unexpected diagnostic log path: %s\n' \
+                    "$fixture_phase_log" >&2
+                  exit "$failure_status"
+                  ;;
+              esac
+              if [ -s "$fixture_phase_log" ]; then
+                printf '%s\n' "last 200 lines of $fixture_phase_log:" >&2
+                /usr/bin/tail -n 200 "$fixture_phase_log" |
+                  /usr/bin/sed 's/^/[installer] /' >&2
+              else
+                printf 'diagnostic log is absent or empty: %s\n' \
+                  "$fixture_phase_log" >&2
+              fi
+            fi
+            exit "$failure_status"
+          }
+          trap 'diagnose_direct_pkg_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
+          # Exercise the runner's real signed UID records, including macOS's
+          # negative nobody sentinel, before the exact preinstall clean-pass.
+          /usr/bin/dscl . -list /Users UniqueID | tee "$runner_uid_inventory"
+          grep -Eq '^root[[:space:]]+0$' "$runner_uid_inventory"
+          grep -Eq '^nobody[[:space:]]+-2$' "$runner_uid_inventory"
+
+          # Apply a process-local Seatbelt denial instead of mutating the
+          # runner's real /Users permissions. The exact shipped script must
+          # reject before its globs or Directory Service fallback can hide the
+          # inaccessible conventional-home inventory.
+          test -x /usr/bin/sandbox-exec
+          if /usr/bin/sandbox-exec -p \
+            '(version 1) (allow default) (deny file-read-data (literal "/Users"))' \
+            /bin/sh "$preinstall" package-path / / > "$users_root_log" 2>&1; then
+            echo 'unlistable /Users root was incorrectly accepted by preinstall' >&2
+            exit 1
+          fi
+          grep -Eq 'could not (safely inspect|list) the local /Users directory' \
+            "$users_root_log"
+
+          # A genuinely clean native runner must pass the exact package script.
+          sudo /bin/sh "$preinstall" package-path / /
+
+          # The active console user's regular runnable managed binary rejects
+          # with its exact recovery command and remains byte-for-byte unchanged.
+          mkdir -p "$(dirname "$active_binary")"
+          printf '%s\n' 'active-home-managed-fixture' > "$active_binary"
+          chmod 0700 "$active_binary"
+          active_hash=$(shasum -a 256 "$active_binary" | awk '{print $1}')
+          # The unprivileged shell intentionally owns this diagnostic log.
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / > "$active_log" 2>&1; then
+            echo 'active-home managed file was incorrectly accepted by preinstall' >&2
+            exit 1
+          fi
+          grep -Fq 'Rerun the managed installer to refresh this copy to a receipt-aware version' \
+            "$active_log"
+          grep -Fq "then run \"${active_binary}\" uninstall and choose Complete" "$active_log"
+          test "$(shasum -a 256 "$active_binary" | awk '{print $1}')" = "$active_hash"
+          rm -f "$active_binary"
+
+          # With that same console user still active, receipt-only evidence in
+          # a second /Users home must also reject without being rewritten.
+          sudo install -d -m 0755 "$second_home"
+          sudo chown "$(id -u):$(id -g)" "$second_home"
+          mkdir -p "$(dirname "$second_receipt")"
+          printf '%s\n' '{"second_user_fixture":true}' > "$second_receipt"
+          second_hash=$(shasum -a 256 "$second_receipt" | awk '{print $1}')
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / > "$second_log" 2>&1; then
+            echo 'second-home managed evidence was incorrectly accepted by preinstall' >&2
+            exit 1
+          fi
+          grep -Fq 'Rerun the managed installer to restore a verifiable managed owner' \
+            "$second_log"
+          grep -Fq "then run \"${second_home}/.cargo/bin/tr300\" uninstall and choose Complete" \
+            "$second_log"
+          test "$(shasum -a 256 "$second_receipt" | awk '{print $1}')" = "$second_hash"
+          rm -f "$second_receipt"
+          rmdir "$second_home/.config/tr300" "$second_home/.config"
+          sudo /bin/rmdir "$second_home"
+
+          # Both safe dot-entry globs are load-bearing: one covers ordinary
+          # hidden homes, and the other covers names beginning with two dots
+          # without ever expanding /Users/. or /Users/...
+          for residue_spec in \
+            "$hidden_home|$hidden_receipt|$hidden_log" \
+            "$double_dot_home|$double_dot_receipt|$double_dot_log"; do
+            IFS='|' read -r residue_home residue_receipt residue_log <<< "$residue_spec"
+            sudo install -d -m 0755 "$residue_home"
+            sudo chown "$(id -u):$(id -g)" "$residue_home"
+            mkdir -p "$(dirname "$residue_receipt")"
+            printf '%s\n' '{"dot_home_fixture":true}' > "$residue_receipt"
+            residue_hash=$(shasum -a 256 "$residue_receipt" | awk '{print $1}')
+            # shellcheck disable=SC2024
+            if sudo /bin/sh "$preinstall" package-path / / > "$residue_log" 2>&1; then
+              echo "dot-prefixed home was incorrectly accepted: $residue_home" >&2
+              exit 1
+            fi
+            grep -Fq "managed receipt or link evidence at \"${residue_home}\"" \
+              "$residue_log"
+            test "$(shasum -a 256 "$residue_receipt" | awk '{print $1}')" = \
+              "$residue_hash"
+            rm -f "$residue_receipt"
+            rmdir "$residue_home/.config/tr300" "$residue_home/.config"
+            sudo /bin/rmdir "$residue_home"
+          done
+
+          # ASCII case variants resolve to the same owner on default macOS
+          # filesystems. Both the binary and receipt paths must also over-block
+          # conservatively when a case-sensitive volume keeps them distinct.
+          sudo install -d -m 0755 "$case_home"
+          sudo chown "$(id -u):$(id -g)" "$case_home"
+          mkdir -p "$(dirname "$case_binary")" "$(dirname "$case_receipt")"
+          printf '%s\n' 'case-variant-managed-binary' > "$case_binary"
+          chmod 0700 "$case_binary"
+          printf '%s\n' '{"case_variant_receipt":true}' > "$case_receipt"
+          case_binary_hash=$(shasum -a 256 "$case_binary" | awk '{print $1}')
+          case_receipt_hash=$(shasum -a 256 "$case_receipt" | awk '{print $1}')
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / \
+            > "$case_binary_log" 2>&1; then
+            echo 'case-variant managed binary was incorrectly accepted' >&2
+            exit 1
+          fi
+          test "$(shasum -a 256 "$case_binary" | awk '{print $1}')" = \
+            "$case_binary_hash"
+          test "$(shasum -a 256 "$case_receipt" | awk '{print $1}')" = \
+            "$case_receipt_hash"
+          rm -f "$case_binary"
+          rmdir "$case_home/.CARGO/BIN" "$case_home/.CARGO"
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / \
+            > "$case_receipt_log" 2>&1; then
+            echo 'case-variant managed receipt was incorrectly accepted' >&2
+            exit 1
+          fi
+          test "$(shasum -a 256 "$case_receipt" | awk '{print $1}')" = \
+            "$case_receipt_hash"
+          rm -f "$case_receipt"
+          rmdir "$case_home/.CONFIG/TR300" "$case_home/.CONFIG"
+          sudo /bin/rmdir "$case_home"
+
+          # A case-sensitive home can contain both the clean lowercase parent
+          # and a second folded-name owner. Counted matching must reject that
+          # ambiguity before choosing either directory.
+          hdiutil create -size 64m -fs HFSX -volname TR300CaseFold \
+            -type SPARSE -ov "$casefold_image" >/dev/null
+          sudo install -d -m 0755 "$casefold_home"
+          sudo chown "$(id -u):$(id -g)" "$casefold_home"
+          hdiutil attach -nobrowse -mountpoint "$casefold_home" \
+            "$casefold_image" >/dev/null
+          casefold_attached=1
+          mkdir -p "$casefold_home/.cargo/bin" "$casefold_home/.CARGO/BIN"
+          test "$(stat -f '%i' "$casefold_home/.cargo")" != \
+            "$(stat -f '%i' "$casefold_home/.CARGO")"
+          printf '%s\n' 'casefold-shadow-managed-binary' > "$casefold_binary"
+          chmod 0700 "$casefold_binary"
+          casefold_hash=$(shasum -a 256 "$casefold_binary" | awk '{print $1}')
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / > "$casefold_log" 2>&1; then
+            echo 'dual folded-name managed owner was incorrectly accepted' >&2
+            exit 1
+          fi
+          grep -Fq 'found multiple ASCII-case-insensitive entries matching ".cargo"' \
+            "$casefold_log"
+          test "$(shasum -a 256 "$casefold_binary" | awk '{print $1}')" = \
+            "$casefold_hash"
+          rm -f "$casefold_binary"
+          rmdir "$casefold_home/.CARGO/BIN" "$casefold_home/.CARGO" \
+            "$casefold_home/.cargo/bin" "$casefold_home/.cargo"
+          hdiutil detach "$casefold_home" >/dev/null
+          casefold_attached=0
+          sudo /bin/rmdir "$casefold_home"
+          rm -f "$casefold_image"
+
+          # A broken fixed-path parent cannot be mistaken for absent managed
+          # evidence. The exact link and missing target survive the rejection.
+          sudo install -d -m 0755 "$broken_parent_home"
+          sudo chown "$(id -u):$(id -g)" "$broken_parent_home"
+          ln -s "$broken_parent_target" "$broken_parent"
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / \
+            > "$broken_parent_log" 2>&1; then
+            echo 'broken managed parent was incorrectly accepted by preinstall' >&2
+            exit 1
+          fi
+          grep -Fq "found an abnormal managed receipt parent at \"${broken_parent}\"" \
+            "$broken_parent_log"
+          test -L "$broken_parent"
+          test "$(readlink "$broken_parent")" = "$broken_parent_target"
+          test ! -e "$broken_parent_target"
+          rm -f "$broken_parent"
+          sudo /bin/rmdir "$broken_parent_home"
+
+          # Run the exact script without privilege so a permission-denied fixed
+          # parent is deterministic. Production PackageKit runs as root, but
+          # any directory-listing error it actually encounters follows this
+          # same fail-closed branch.
+          sudo install -d -m 0755 "$inaccessible_home"
+          sudo chown "$(id -u):$(id -g)" "$inaccessible_home"
+          mkdir "$inaccessible_parent"
+          chmod 000 "$inaccessible_parent"
+          if /bin/sh "$preinstall" package-path / / \
+            > "$inaccessible_log" 2>&1; then
+            echo 'inaccessible managed parent was incorrectly accepted by preinstall' >&2
+            exit 1
+          fi
+          grep -Fq "could not list managed receipt parent for local home \"${inaccessible_home}\"" \
+            "$inaccessible_log"
+          test "$(stat -f '%Lp' "$inaccessible_parent")" = 0
+          chmod 0700 "$inaccessible_parent"
+          rmdir "$inaccessible_parent"
+          sudo /bin/rmdir "$inaccessible_home"
+
+          # Create a non-console local human account at a valid unsigned UID
+          # above signed-32-bit range whose Directory Service home is outside
+          # /Users and contains spaces. PackageKit does not promise sudo
+          # environment variables, so invoke a real component PKG with them
+          # removed and require account enumeration to reject it.
+          fixture_phase='custom account and package construction'
+          fixture_phase_log=''
+          custom_fixture_home=$(mktemp -d "/private/tmp/tr300 pkg custom home.XXXXXXXX")
+          case "$custom_fixture_home" in
+            "/private/tmp/tr300 pkg custom home."*) ;;
+            *)
+              echo "unsafe custom-home fixture: $custom_fixture_home" >&2
+              exit 1
+              ;;
+          esac
+          test "${custom_fixture_home#/Users/}" = "$custom_fixture_home"
+          test "$custom_fixture_user" != "$(/usr/bin/stat -f '%Su' /dev/console)"
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user"
+          custom_fixture_created=1
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            UniqueID "$custom_fixture_uid"
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" PrimaryGroupID 20
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" UserShell /usr/bin/false
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            RealName 'TR-300 PKG custom-home fixture'
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" IsHidden 1
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            NFSHomeDirectory "$custom_fixture_home"
+          test "$(/usr/bin/id -u "$custom_fixture_user")" = "$custom_fixture_uid"
+          /usr/bin/dscl -plist . -read "/Users/$custom_fixture_user" \
+            NFSHomeDirectory > "$custom_fixture_plist"
+          /usr/bin/plutil -lint "$custom_fixture_plist" >/dev/null
+          resolved_fixture_home=$(/usr/libexec/PlistBuddy -c \
+            'Print :dsAttrTypeStandard\:NFSHomeDirectory:0' \
+            "$custom_fixture_plist")
+          if /usr/libexec/PlistBuddy -c \
+            'Print :dsAttrTypeStandard\:NFSHomeDirectory:1' \
+            "$custom_fixture_plist" >/dev/null 2>&1; then
+            echo 'custom-home fixture unexpectedly has multiple home values' >&2
+            exit 1
+          fi
+          test "$resolved_fixture_home" = "$custom_fixture_home"
+
+          custom_fixture_receipt="$custom_fixture_home/.config/tr300/tr300-receipt.json"
+          mkdir -p "$(dirname "$custom_fixture_receipt")"
+          printf '%s\n' '{"custom_home_fixture":true}' > "$custom_fixture_receipt"
+          custom_fixture_hash=$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')
+
+          fixture_install_root=$(mktemp -d "/private/tmp/tr300 pkg payload root.XXXXXXXX")
+          case "$fixture_install_root" in
+            "/private/tmp/tr300 pkg payload root."*) ;;
+            *)
+              echo "unsafe payload fixture root: $fixture_install_root" >&2
+              exit 1
+              ;;
+          esac
+          mkdir "$fixture_payload" "$fixture_scripts"
+          printf '%s\n' 'must-not-survive-preinstall' > "$fixture_payload/payload-marker"
+          install -m 0755 "$preinstall" "$fixture_scripts/preinstall"
+          cmp "$preinstall" "$fixture_scripts/preinstall"
+          pkgbuild --root "$fixture_payload" --scripts "$fixture_scripts" \
+            --identifier "$fixture_identifier" --version 1 \
+            --install-location "$fixture_install_root" "$fixture_pkg"
+          pkgutil --expand-full "$fixture_pkg" "$fixture_expanded"
+          cmp "$preinstall" "$fixture_expanded/Scripts/preinstall"
+          test "$(lsbom -s -f "$fixture_expanded/Bom" | sed 's#^\./##')" = payload-marker
+          rm -rf "$fixture_expanded"
+          test ! -e "$fixture_expanded"
+
+          fixture_phase='custom-home ownership rejection'
+          fixture_phase_log="$custom_fixture_log"
+          # On hosted runners, PackageKit reduces preinstall stderr to a generic
+          # PKInstallErrorDomain failure in the installer's detailed output. First
+          # execute the byte-identical extracted script under the same stripped
+          # environment to bind the expected fail-closed reason to this state.
+          # Then require the real component package to report script failure and
+          # preserve every payload, receipt, and ownership invariant below.
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /bin/sh "$preinstall" package-path / / \
+            > "$custom_fixture_log" 2>&1; then
+            echo 'custom-home managed evidence was incorrectly accepted by extracted preinstall' >&2
+            exit 1
+          fi
+          grep -Fq "managed receipt or link evidence at \"${custom_fixture_home}\"" \
+            "$custom_fixture_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            >> "$custom_fixture_log" 2>&1; then
+            echo 'custom-home managed evidence was incorrectly accepted by PackageKit' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$custom_fixture_log"
+          grep -Fq 'NSFilePath=./preinstall' "$custom_fixture_log"
+          test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
+            "$custom_fixture_hash"
+          test ! -e "$fixture_install_root/payload-marker"
+          test ! -L "$fixture_install_root/payload-marker"
+          if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+            echo 'failed custom-home package left its fixture receipt behind' >&2
+            exit 1
+          fi
+
+          # Directory Service values are arbitrary plist strings. Prove that a
+          # trailing data newline is not normalized into the existing clean
+          # home by nested command substitution before validation. PackageKit
+          # must reject the malformed home and preserve the evidence there.
+          fixture_phase='trailing-newline home construction'
+          fixture_phase_log=''
+          fixture_newline_framed=$(printf '\nx')
+          fixture_newline=${fixture_newline_framed%x}
+          trailing_fixture_home="${custom_fixture_home}${fixture_newline}"
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            NFSHomeDirectory "$trailing_fixture_home"
+          /usr/bin/dscl -plist . -read "/Users/$custom_fixture_user" \
+            NFSHomeDirectory > "$custom_fixture_plist"
+          /usr/bin/plutil -lint "$custom_fixture_plist" >/dev/null
+          fixture_plist_sentinel='__TR300_CI_PLIST_CAPTURE_END__'
+          fixture_plist_framed=$(
+            /usr/libexec/PlistBuddy -c \
+              'Print :dsAttrTypeStandard\:NFSHomeDirectory:0' \
+              "$custom_fixture_plist"
+            printf '%s' "$fixture_plist_sentinel"
+          )
+          case "$fixture_plist_framed" in
+            *"$fixture_plist_sentinel") ;;
+            *)
+              echo 'custom-home newline fixture lost its capture sentinel' >&2
+              exit 1
+              ;;
+          esac
+          fixture_plist_with_terminator=${fixture_plist_framed%"$fixture_plist_sentinel"}
+          test "$fixture_plist_with_terminator" = \
+            "${trailing_fixture_home}${fixture_newline}"
+          fixture_phase='trailing-newline home rejection'
+          fixture_phase_log="$custom_fixture_newline_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /bin/sh "$preinstall" package-path / / \
+            > "$custom_fixture_newline_log" 2>&1; then
+            echo 'trailing-newline eligible home was incorrectly accepted by extracted preinstall' >&2
+            exit 1
+          fi
+          grep -Fq 'could not inspect eligible local home' \
+            "$custom_fixture_newline_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            >> "$custom_fixture_newline_log" 2>&1; then
+            echo 'trailing-newline eligible home was incorrectly accepted by PackageKit' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$custom_fixture_newline_log"
+          grep -Fq 'NSFilePath=./preinstall' "$custom_fixture_newline_log"
+          test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
+            "$custom_fixture_hash"
+          test ! -e "$fixture_install_root/payload-marker"
+          test ! -L "$fixture_install_root/payload-marker"
+          if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+            echo 'trailing-newline rejection left its fixture receipt behind' >&2
+            exit 1
+          fi
+          sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+            NFSHomeDirectory "$custom_fixture_home"
+
+          # Exact, non-recursive cleanup is also covered by the EXIT trap.
+          fixture_phase='missing declared home rejection'
+          fixture_phase_log="$custom_fixture_missing_home_log"
+          rm -f "$custom_fixture_receipt"
+          rmdir "$custom_fixture_home/.config/tr300" "$custom_fixture_home/.config" \
+            "$custom_fixture_home"
+          # A normal human-range account with a missing/offline declared home
+          # must fail closed rather than becoming an ownership blind spot.
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /bin/sh "$preinstall" package-path / / \
+            > "$custom_fixture_missing_home_log" 2>&1; then
+            echo 'uninspectable eligible home was incorrectly accepted by extracted preinstall' >&2
+            exit 1
+          fi
+          grep -Fq "could not inspect eligible local home \"${custom_fixture_home}\"" \
+            "$custom_fixture_missing_home_log"
+          grep -Fq 'Make the declared home available and inspectable' \
+            "$custom_fixture_missing_home_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+            >> "$custom_fixture_missing_home_log" 2>&1; then
+            echo 'uninspectable eligible home was incorrectly accepted by PackageKit' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$custom_fixture_missing_home_log"
+          grep -Fq 'NSFilePath=./preinstall' "$custom_fixture_missing_home_log"
+          test ! -e "$fixture_install_root/payload-marker"
+          test ! -L "$fixture_install_root/payload-marker"
+          if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+            echo 'uninspectable-home rejection left its fixture receipt behind' >&2
+            exit 1
+          fi
+
+          # Values just above UInt32 and wider than ten decimal digits are not
+          # valid Open Directory UIDs. Neither may be silently skipped: both
+          # must fail closed before PackageKit writes payload or receipt state.
+          for malformed_uid_case in \
+            "4294967296:$custom_fixture_out_of_range_log" \
+            "10000000000:$custom_fixture_too_wide_uid_log"; do
+            malformed_uid=${malformed_uid_case%%:*}
+            malformed_uid_log=${malformed_uid_case#*:}
+            fixture_phase="malformed UID $malformed_uid rejection"
+            fixture_phase_log="$malformed_uid_log"
+            sudo /usr/bin/dscl . -create "/Users/$custom_fixture_user" \
+              UniqueID "$malformed_uid"
+            /usr/bin/dscl -plist . -read "/Users/$custom_fixture_user" \
+              UniqueID > "$custom_fixture_plist"
+            /usr/bin/plutil -lint "$custom_fixture_plist" >/dev/null
+            test "$(/usr/libexec/PlistBuddy -c \
+              'Print :dsAttrTypeStandard\:UniqueID:0' \
+              "$custom_fixture_plist")" = "$malformed_uid"
+            # shellcheck disable=SC2024
+            if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+              /bin/sh "$preinstall" package-path / / \
+              > "$malformed_uid_log" 2>&1; then
+              echo "malformed positive UID $malformed_uid was incorrectly accepted by extracted preinstall" >&2
+              exit 1
+            fi
+            grep -Fq 'UID outside the supported unsigned 32-bit range' \
+              "$malformed_uid_log"
+            # shellcheck disable=SC2024
+            if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+              /usr/sbin/installer -pkg "$fixture_pkg" -target / -dumplog \
+              >> "$malformed_uid_log" 2>&1; then
+              echo "malformed positive UID $malformed_uid was incorrectly accepted by PackageKit" >&2
+              exit 1
+            fi
+            grep -Fq 'PKInstallErrorDomain Code=112' "$malformed_uid_log"
+            grep -Fq 'NSFilePath=./preinstall' "$malformed_uid_log"
+            test ! -e "$fixture_install_root/payload-marker"
+            test ! -L "$fixture_install_root/payload-marker"
+            if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+              echo "malformed UID $malformed_uid left its fixture receipt behind" >&2
+              exit 1
+            fi
+          done
+          fixture_phase='custom fixture account cleanup'
+          fixture_phase_log=''
+          sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user"
+          test ! -e "$custom_fixture_home"
+          if /usr/bin/dscl . -read "/Users/$custom_fixture_user" >/dev/null 2>&1; then
+            echo 'Directory Service fixture user survived exact cleanup' >&2
+            exit 1
+          fi
+          custom_fixture_created=0
+
+          # A component package can be pointed at another mounted macOS volume.
+          # The exact preinstall must reject that target before payload or
+          # receipt placement, because its ownership inventory is for the
+          # running system. The direct invocation binds the expected diagnostic;
+          # PackageKit must then identify its packaged script as the failure.
+          fixture_phase='alternate-volume rejection'
+          fixture_phase_log="$fixture_alt_log"
+          hdiutil create -size 64m -fs HFS+ -volname TR300PkgAltTarget \
+            -type SPARSE -ov "$fixture_alt_image" >/dev/null
+          mkdir "$fixture_alt_mount"
+          hdiutil attach -nobrowse -mountpoint "$fixture_alt_mount" \
+            "$fixture_alt_image" >/dev/null
+          fixture_alt_attached=1
+          alternate_payload="${fixture_alt_mount}${fixture_install_root}/payload-marker"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /bin/sh "$preinstall" package-path / "$fixture_alt_mount" \
+            > "$fixture_alt_log" 2>&1; then
+            echo 'alternate-volume target was incorrectly accepted by extracted preinstall' >&2
+            exit 1
+          fi
+          grep -Fq 'supports only the current system volume (/)' "$fixture_alt_log"
+          # shellcheck disable=SC2024
+          if sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target "$fixture_alt_mount" \
+            -dumplog \
+            >> "$fixture_alt_log" 2>&1; then
+            echo 'alternate-volume package target was incorrectly accepted' >&2
+            exit 1
+          fi
+          grep -Fq 'PKInstallErrorDomain Code=112' "$fixture_alt_log"
+          grep -Fq 'NSFilePath=./preinstall' "$fixture_alt_log"
+          test ! -e "$alternate_payload"
+          test ! -L "$alternate_payload"
+          test ! -e "$fixture_install_root/payload-marker"
+          test ! -L "$fixture_install_root/payload-marker"
+          if pkgutil --volume "$fixture_alt_mount" --pkg-info "$fixture_identifier" \
+            >/dev/null 2>&1; then
+            echo 'alternate-volume rejection left a target receipt behind' >&2
+            exit 1
+          fi
+          if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+            echo 'alternate-volume rejection left a host receipt behind' >&2
+            exit 1
+          fi
+          hdiutil detach "$fixture_alt_mount" >/dev/null
+          fixture_alt_attached=0
+          rmdir "$fixture_alt_mount"
+          rm -f "$fixture_alt_image"
+
+          # The same exact package must be otherwise viable once the sole
+          # conflicting Directory Service owner is gone.
+          fixture_phase='clean component-package installation'
+          fixture_phase_log=''
+          sudo /usr/bin/env -u SUDO_USER -u SUDO_UID \
+            /usr/sbin/installer -pkg "$fixture_pkg" -target /
+          grep -Fqx 'must-not-survive-preinstall' \
+            "$fixture_install_root/payload-marker"
+          pkgutil --pkg-info "$fixture_identifier" >/dev/null
+          sudo rm -f "$fixture_install_root/payload-marker"
+          sudo pkgutil --forget "$fixture_identifier" >/dev/null
+          test ! -e "$fixture_install_root/payload-marker"
+          if pkgutil --pkg-info "$fixture_identifier" >/dev/null 2>&1; then
+            echo 'clean fixture reset left its package receipt behind' >&2
+            exit 1
+          fi
+
+          # Broken final-component links are evidence even when their targets
+          # do not exist. Both links and target absence must survive rejection.
+          fixture_phase='broken managed symlink rejection'
+          fixture_phase_log="$broken_log"
+          mkdir -p "$(dirname "$active_binary")" "$(dirname "$active_receipt")"
+          ln -s "$missing_binary" "$active_binary"
+          ln -s "$missing_receipt" "$active_receipt"
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$preinstall" package-path / / > "$broken_log" 2>&1; then
+            echo 'broken managed symlinks were incorrectly accepted by preinstall' >&2
+            exit 1
+          fi
+          grep -Fq 'Rerun the managed installer to restore a verifiable managed owner' \
+            "$broken_log"
+          test -L "$active_binary"
+          test -L "$active_receipt"
+          test "$(readlink "$active_binary")" = "$missing_binary"
+          test "$(readlink "$active_receipt")" = "$missing_receipt"
+          test ! -e "$missing_binary"
+          test ! -e "$missing_receipt"
+          rm -f "$active_binary" "$active_receipt"
+
+          # Exact fixture cleanup returns the same extracted script to clean pass.
+          fixture_phase='final extracted-preinstall clean pass'
+          fixture_phase_log=''
+          sudo /bin/sh "$preinstall" package-path / /
 
   build:
     name: Release Build (${{ matrix.name }})
@@ -90,9 +917,11 @@ jobs:
           - os: windows-latest
             name: "Windows x86_64"
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo build --locked --release --workspace
       - name: Smoke test (--version)
         shell: bash
@@ -120,9 +949,11 @@ jobs:
             name: "Windows"
             budget_ms: 1500
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo build --locked --release --bin tr300
 
       - name: Time tr300 --fast (Unix)
@@ -191,21 +1022,46 @@ jobs:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       - name: Install cargo-audit
-        run: cargo install --locked cargo-audit
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          test "$(cargo audit --version)" = 'cargo-audit-audit 0.22.2'
       - run: cargo audit
 
   dist-plan:
     name: cargo-dist plan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Install cargo-dist v0.31.0
         run: |
+          set -euo pipefail
+          installer="$RUNNER_TEMP/cargo-dist-installer-v0.31.0.sh"
           curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh \
+            -o "$installer"
+          printf '%s  %s\n' \
+            'e79d87e418b9d2cbe992d014985457c28a5a7c553add3da4ed1047e161c928f4' \
+            "$installer" | sha256sum -c -
+          checksum_bin="$RUNNER_TEMP/cargo-dist-checksum-bin"
+          mkdir "$checksum_bin"
+          cat > "$checksum_bin/sha256sum" <<'SH'
+          #!/bin/sh
+          exec /usr/bin/sha256sum "$@"
+          SH
+          chmod 500 "$checksum_bin/sha256sum"
+          checksum_path=$(PATH="$checksum_bin:$PATH" command -v sha256sum)
+          [[ "$checksum_path" == "$checksum_bin/sha256sum" && -f "$checksum_path" && ! -L "$checksum_path" && -x "$checksum_path" ]]
+          PATH="$checksum_bin:$PATH" sh "$installer"
+          dist_path=$(command -v dist)
+          [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]]
+          [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]]
       - name: Verify dist plan parses
         run: ~/.cargo/bin/dist plan
 
@@ -213,7 +1069,9 @@ jobs:
     name: Workflow and shell validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Validate GitHub Actions workflows
@@ -224,23 +1082,37 @@ jobs:
         run: shellcheck -x scripts/*.sh scripts/managed-installers/*.sh
       - name: Validate managed shell transaction rollback
         run: scripts/test-managed-installer-transaction.sh
+      - name: Validate privileged release workflow provenance
+        run: python3 scripts/test-release-workflow-provenance.py
       - name: Guard supplemental packaging lifecycle invariants
         shell: bash
         run: |
           set -euo pipefail
           workflow=.github/workflows/macos-installer.yml
+          ci_workflow=.github/workflows/ci.yml
           builder=scripts/build-sign-notarize-macos-installer.sh
           release=.github/workflows/release.yml
           shell_wrapper=scripts/managed-installers/tr300-installer.sh
           powershell_wrapper=scripts/managed-installers/tr300-installer.ps1
+          shell_transaction=scripts/test-managed-installer-transaction.sh
           windows_validation=.github/workflows/windows-installer-validation.yml
           updater=src/update.rs
           inno_msi_bridge=inno/remove-conflicting-msi.pas
-          checkout_line=$(grep -nF 'name: Checkout exact release tag' "$workflow" | cut -d: -f1)
-          download_line=$(grep -nF 'name: Verify upstream release and download signed architecture archives' "$workflow" | cut -d: -f1)
-          test -n "$checkout_line"
-          test -n "$download_line"
-          test "$checkout_line" -lt "$download_line"
+          # The executable provenance fixture above owns step-level credential
+          # isolation. Job IDs and needs are the stable lifecycle interface;
+          # display names may change without invalidating this guard.
+          source_custody_line=$(grep -nE '^  source-custody:$' "$workflow" | cut -d: -f1)
+          prepare_line=$(grep -nE '^  prepare-installer-inputs:$' "$workflow" | cut -d: -f1)
+          preflight_line=$(grep -nE '^  credential-preflight:$' "$workflow" | cut -d: -f1)
+          build_line=$(grep -nE '^  build:$' "$workflow" | cut -d: -f1)
+          test -n "$source_custody_line"
+          test -n "$prepare_line"
+          test -n "$preflight_line"
+          test -n "$build_line"
+          test "$source_custody_line" -lt "$prepare_line"
+          test "$prepare_line" -lt "$preflight_line"
+          test "$preflight_line" -lt "$build_line"
+          grep -Fq 'needs: [resolve-release, source-custody, prepare-installer-inputs, credential-preflight]' "$workflow"
           grep -Fqx "lipo \"\$universal\" -verify_arch arm64 x86_64" "$builder"
           grep -Fqx '          lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64' "$workflow"
           if grep -Eq '^[[:space:]]*lipo[[:space:]]+-verify_arch' "$builder" "$workflow"; then
@@ -260,36 +1132,181 @@ jobs:
           grep -Fq 'name: Validate v4.1.x DMG bridge' "$workflow"
           grep -Fq 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer' "$shell_wrapper"
           grep -Fq 'tr300_restore_managed_state' "$shell_wrapper"
-          grep -Fq 'migrate-cleanup --quiet --strict --cargo-copy --user-profile' "$builder"
-          grep -Fq 'tr300-migration-probe' "$builder"
-          grep -Fq 'migrate-cleanup --quiet --strict --dry-run' "$builder"
-          grep -Fq '.config/tr300/tr300-receipt.json' "$builder"
-          grep -Fq 'rollback_managed' "$builder"
+          test ! -e scripts/macos-pkg-rollback.c
+          test ! -e scripts/test-macos-pkg-rollback.sh
+          if grep -Eq 'tr300-migration-probe|tr300-pkg-rollback|macos-pkg-rollback|pkg_scripts.*/postinstall|POSTINSTALL' "$builder"; then
+            echo 'direct PKG must not ship post-payload managed-state migration code' >&2
+            exit 1
+          fi
+          # Validation names the retired members only to prove they are absent;
+          # the executable provenance fixture forbids them in prep/build jobs.
+          if grep -Eq 'pkg_scripts.*/postinstall|POSTINSTALL' "$workflow"; then
+            echo 'direct PKG workflow must not prepare or install a postinstall script' >&2
+            exit 1
+          fi
+          grep -Fq 'managed_state_present()' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'for home in /Users/* /Users/.[!.]* /Users/..?*; do' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'LC_ALL=C /usr/bin/grep -Fix -e "$entry_name"' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'entry_match_count=$(/usr/bin/wc -l' "$builder"
+          grep -Fq 'found multiple ASCII-case-insensitive entries matching' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'if [ -L /Users ] || [ ! -d /Users ]; then' "$builder"
+          grep -Fq 'LC_ALL=C /bin/ls -1A /Users' "$builder"
+          grep -Fq 'list_standard_directory()' "$builder"
+          grep -Fq 'standard_leaf_present()' "$builder"
+          grep -Fq 'could not list managed receipt parent for local home' "$ci_workflow"
+          grep -Fq 'unlistable /Users root was incorrectly accepted' "$ci_workflow"
+          grep -Fq '/Users/.tr300-pkg-preinstall-' "$ci_workflow"
+          grep -Fq '/Users/..tr300-pkg-preinstall-' "$ci_workflow"
+          grep -Fq 'case-variant managed binary was incorrectly accepted' "$ci_workflow"
+          grep -Fq 'case-variant managed receipt was incorrectly accepted' "$ci_workflow"
+          grep -Fq 'hdiutil create -size 64m -fs HFSX -volname TR300CaseFold' "$ci_workflow"
+          grep -Fq 'dual folded-name managed owner was incorrectly accepted' "$ci_workflow"
+          grep -Fq 'minimum_human_uid=501' "$builder"
+          grep -Fq 'maximum_human_uid=4294967295' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'if [ "$account_uid_digits" -gt 10 ]; then' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'if [ "$account_uid" -gt "$maximum_human_uid" ]; then' "$builder"
+          test "$(grep -Fc 'UID outside the supported unsigned 32-bit range' \
+            "$builder")" -eq 2
+          if sed -n '/account_uid_digits=/,/inspection_required=0/p' "$builder" | \
+            grep -Fq 'continue'; then
+            echo 'unsupported positive UIDs must fail closed instead of being skipped' >&2
+            exit 1
+          fi
+          grep -Fq 'custom_fixture_uid=3000000000' "$ci_workflow"
+          # shellcheck disable=SC2016
+          grep -Fq 'malformed positive UID $malformed_uid was incorrectly accepted by PackageKit' \
+            "$ci_workflow"
+          # shellcheck disable=SC2016
+          grep -Fq 'while IFS= read -r account; do' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/bin/dscl -plist . -read "/Users/${account}" UniqueID' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/bin/plutil -lint "$plist_path"' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/libexec/PlistBuddy -c "Print ${plist_entry}:0"' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq '/usr/libexec/PlistBuddy -c "Print ${plist_entry}:1"' "$builder"
+          grep -Fq "plist_capture_sentinel='__TR300_PLIST_CAPTURE_END__'" "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'single_plist_value=${plist_with_terminator%"$plist_newline"}' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'account_home=$single_plist_value' "$builder"
+          # shellcheck disable=SC2016
+          if grep -Fq 'account_home=$(read_single_plist_string' "$builder"; then
+            echo 'Directory Service home parsing must not recapture through command substitution' >&2
+            exit 1
+          fi
+          # shellcheck disable=SC2016
+          grep -Fq 'case "${3-}" in' "$builder"
+          grep -Fq 'supports only the current system volume (/)' "$builder"
+          grep -Fq 'account_uid_sign=negative' "$builder"
+          grep -Fq 'inspection_required=0' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq '[ "$account_uid" -ge "$minimum_human_uid" ]' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'inspect_home_once "$account_home" "$inspection_required"' "$builder"
+          if grep -Eq 'SUDO_USER|SUDO_UID|console_user=|plutil[[:space:]]+-extract([[:space:]]|$)|[[:space:]]-expect([[:space:]]|$)' \
+            "$builder"; then
+            echo 'preinstall must avoid launch-environment identity and macOS-12-only plist flags' >&2
+            exit 1
+          fi
+          if grep -Fq "/usr/bin/awk '{print \$2}'" "$builder"; then
+            echo 'NFSHomeDirectory parsing must preserve custom-home spaces' >&2
+            exit 1
+          fi
+          grep -Fq 'Rerun the managed installer to refresh this copy to a receipt-aware version' "$builder"
+          grep -Fq 'Rerun the managed installer to restore a verifiable managed owner' "$builder"
+          grep -Fq 'uninstall and choose Complete before retrying the PKG' "$builder"
+          # shellcheck disable=SC2016
+          grep -Fq 'cmp "$PREPARED_DIRECTORY/preinstall" "$bound_package/Scripts/preinstall"' "$workflow"
+          grep -Fq 'managed ownership was incorrectly accepted by the direct PKG' "$workflow"
+          grep -Fq '/Users/tr300-pkg-fixture-' "$workflow"
+          grep -Fq 'second-home managed evidence was incorrectly accepted' "$workflow"
+          grep -Fq 'tr300 signed pkg custom home.XXXXXXXX' "$workflow"
+          grep -Fq 'signed PKG incorrectly accepted custom-home managed evidence' "$workflow"
+          grep -Fq '/usr/bin/env -u SUDO_USER -u SUDO_UID' "$workflow"
+          grep -Fq 'alternate-volume package target was incorrectly accepted' "$ci_workflow"
+          grep -Fq 'trailing-newline eligible home was incorrectly accepted by PackageKit' "$ci_workflow"
+          grep -Fq 'broken managed symlink evidence was incorrectly accepted' "$workflow"
+          # shellcheck disable=SC2016
+          test "$(grep -Fc 'cat > "${pkg_scripts}/preinstall"' "$builder")" -eq 1
           render_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/tr300-wrapper-render.XXXXXXXX")
           trap 'rm -rf "$render_dir"' EXIT
           sed -n "/<<'PREINSTALL'/,/^PREINSTALL$/p" "$builder" | sed '1d;$d' > "$render_dir/pkg-preinstall.sh"
-          sed -n "/<<'POSTINSTALL'/,/^POSTINSTALL$/p" "$builder" | sed '1d;$d' > "$render_dir/pkg-postinstall.sh"
           test -s "$render_dir/pkg-preinstall.sh"
-          test -s "$render_dir/pkg-postinstall.sh"
-          shellcheck "$render_dir/pkg-preinstall.sh" "$render_dir/pkg-postinstall.sh"
+          shellcheck "$render_dir/pkg-preinstall.sh"
           render_tag=v0.0.0-ci
           render_version=0.0.0
+          shell_dist_sha256=1111111111111111111111111111111111111111111111111111111111111111
+          powershell_dist_sha256=2222222222222222222222222222222222222222222222222222222222222222
           sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
+            -e "s/@TR300_DIST_INSTALLER_SHA256@/${shell_dist_sha256}/g" \
             "$shell_wrapper" > "$render_dir/tr300-installer.sh"
           sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
+            -e "s/@TR300_DIST_INSTALLER_SHA256@/${powershell_dist_sha256}/g" \
             "$powershell_wrapper" > "$render_dir/tr300-installer.ps1"
           if grep -R -F '@TR300_' "$render_dir"; then
             echo 'pre-tag managed wrapper render left a placeholder behind' >&2
             exit 1
           fi
           grep -Fq "tr300_tag='${render_tag}'" "$render_dir/tr300-installer.sh"
+          grep -Fq "tr300_dist_installer_sha256='${shell_dist_sha256}'" \
+            "$render_dir/tr300-installer.sh"
           grep -Fq "releases/download/\${tr300_tag}" "$render_dir/tr300-installer.sh"
           grep -Fq "\${tr300_release_base}/tr300-dist-installer.sh" "$render_dir/tr300-installer.sh"
           grep -Fq "\$Tr300Tag = '${render_tag}'" "$render_dir/tr300-installer.ps1"
+          grep -Fq "\$Tr300DistInstallerSha256 = '${powershell_dist_sha256}'" \
+            "$render_dir/tr300-installer.ps1"
           grep -Fq "releases/download/\$Tr300Tag\"" "$render_dir/tr300-installer.ps1"
           grep -Fq "\$Tr300ReleaseBase/tr300-dist-installer.ps1" "$render_dir/tr300-installer.ps1"
-          grep -Fq 'mv artifacts/tr300-installer.sh artifacts/tr300-dist-installer.sh' "$release"
-          grep -Fq 'mv artifacts/tr300-installer.ps1 artifacts/tr300-dist-installer.ps1' "$release"
+          # These are literal workflow-fixture expressions, not shell variables.
+          # shellcheck disable=SC2016
+          grep -F -A1 'mv "$OUTPUT_DIRECTORY/tr300-installer.sh"' "$release" |
+            grep -Fq '"$OUTPUT_DIRECTORY/tr300-dist-installer.sh"'
+          # shellcheck disable=SC2016
+          grep -F -A1 'mv "$OUTPUT_DIRECTORY/tr300-installer.ps1"' "$release" |
+            grep -Fq '"$OUTPUT_DIRECTORY/tr300-dist-installer.ps1"'
+          grep -Fq '@TR300_DIST_INSTALLER_SHA256@' "$shell_wrapper" "$powershell_wrapper"
+          # shellcheck disable=SC2016
+          grep -Fq 'tr300_verify_dist_installer "$dist_installer"' "$shell_wrapper"
+          # shellcheck disable=SC2016
+          grep -Fq 'tr300_prepare_sha256sum "$dist_installer"' "$shell_wrapper"
+          # shellcheck disable=SC2016
+          grep -Fq 'PATH="${tr300_sha256sum_directory}:${PATH:-/usr/bin:/bin}"' "$shell_wrapper"
+          # shellcheck disable=SC2016
+          grep -Fq 'exec /usr/bin/shasum -a 256 "$1"' "$shell_wrapper"
+          grep -Fq 'trap tr300_cleanup EXIT' "$shell_wrapper"
+          grep -Fq "trap 'exit 1' HUP INT TERM" "$shell_wrapper"
+          if grep -Fq 'trap tr300_cleanup EXIT HUP INT TERM' "$shell_wrapper"; then
+            echo 'managed shell signal traps must exit before EXIT cleanup' >&2
+            exit 1
+          fi
+          grep -Fq 'tr300_cleanup_ran=1' "$shell_wrapper"
+          grep -Fq 'kill -TERM "$$"' "$shell_transaction"
+          # shellcheck disable=SC2016
+          grep -Fq '[ ! -e "$signal_state/committed" ]' "$shell_transaction"
+          # shellcheck disable=SC2016
+          grep -Fq 'Assert-Tr300DistInstallerHash -Path $distInstaller' "$powershell_wrapper"
+          # shellcheck disable=SC2016
+          shell_hash_line=$(grep -nF 'tr300_verify_dist_installer "$dist_installer"' \
+            "$shell_wrapper" | cut -d: -f1)
+          # shellcheck disable=SC2016
+          shell_exec_line=$(grep -nF '/bin/sh "$dist_installer" "$@"' \
+            "$shell_wrapper" | cut -d: -f1)
+          # shellcheck disable=SC2016
+          powershell_hash_line=$(grep -nF 'Assert-Tr300DistInstallerHash -Path $distInstaller' \
+            "$powershell_wrapper" | cut -d: -f1)
+          # shellcheck disable=SC2016
+          powershell_exec_line=$(grep -nF '& $launcher @childArgs' \
+            "$powershell_wrapper" | cut -d: -f1)
+          test "$shell_hash_line" -lt "$shell_exec_line"
+          test "$powershell_hash_line" -lt "$powershell_exec_line"
           # The PowerShell expression below is literal fixture text.
           # shellcheck disable=SC2016
           grep -Fq 'Switching TR-300 ownership from $($Product.Channel) to powershell-installer' "$powershell_wrapper"
@@ -345,9 +1362,11 @@ jobs:
     name: Windows installer source gate
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Parse the managed PowerShell installer
         shell: pwsh
         run: |
@@ -398,6 +1417,8 @@ jobs:
         shell: pwsh
         run: |
           $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $cases = @(
             @{ Name = 'global'; Display = 'tr300'; Exe = "$env:ProgramFiles\tr300\bin\tr300.exe" },
             @{ Name = 'corporate'; Display = 'tr300 (Corporate Edition)'; Exe = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe" }
@@ -411,7 +1432,7 @@ jobs:
           foreach ($case in $cases) {
             foreach ($variant in @('newer-fixture', 'current', 'same-version-fixture')) {
               $msi = (Resolve-Path "target\wix-ci\$($case.Name)-$variant.msi").Path
-              $process = Start-Process msiexec.exe -Wait -PassThru `
+              $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
                 -ArgumentList @('/i', $msi, '/qn', '/norestart')
               if ($process.ExitCode -ne 0) {
                 throw "install failed for $msi with $($process.ExitCode)"
@@ -429,16 +1450,18 @@ jobs:
             if ($actualVersion -ne "tr300 $version") {
               throw "installed binary version does not match $version"
             }
-            $process = Start-Process msiexec.exe -Wait -PassThru `
+            $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
               -ArgumentList @('/x', $entries[0].PSChildName, '/qn', '/norestart')
             if ($process.ExitCode -ne 0) {
               throw "uninstall failed for $($case.Display) with $($process.ExitCode)"
             }
           }
       - name: Compile Global and Corporate Inno Setup sources
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress --no-color
+          & scripts/install-pinned-inno-setup.ps1
           $iscc = "C:\Program Files (x86)\Inno Setup 6\iscc.exe"
           if (-not (Test-Path $iscc)) { throw "iscc.exe not found" }
           $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
@@ -449,6 +1472,8 @@ jobs:
       - name: Prove current MSI and Inno formats take over bidirectionally
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $cases = @(
             @{
               Name = 'global'
@@ -472,7 +1497,8 @@ jobs:
             ) | Where-Object DisplayName -EQ $display
           }
           function Install-Msi([string] $path) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', (Resolve-Path $path).Path, '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', (Resolve-Path $path).Path, '/qn', '/norestart')
             if ($p.ExitCode -ne 0) { throw "MSI install failed for ${path}: $($p.ExitCode)" }
           }
           function Install-Exe([string] $path, [string] $name) {
@@ -486,7 +1512,8 @@ jobs:
           }
           function Remove-Entry($entry) {
             if ($entry.WindowsInstaller -eq 1) {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
             } else {
               if ($entry.UninstallString -notmatch '^"([^"]+)"$') { throw "unexpected Inno uninstall command" }
               $p = Start-Process $Matches[1] -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
@@ -524,6 +1551,8 @@ jobs:
       - name: Prove cross-edition native choices fail before mutation
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $globalMsi = (Resolve-Path 'target\wix-ci\global-current.msi').Path
           $corporateMsi = (Resolve-Path 'target\wix-ci\corporate-current.msi').Path
           $globalExe = (Resolve-Path 'inno\Output\tr300-x86_64-pc-windows-msvc-setup.exe').Path
@@ -532,7 +1561,8 @@ jobs:
           $corporateBinary = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
 
           function Install-Msi([string]$path) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $path, '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', $path, '/qn', '/norestart')
             if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
           }
           function Install-Exe([string]$path) {
@@ -540,7 +1570,8 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "EXE install failed: $($p.ExitCode)" }
           }
           function Expect-MsiBlocked([string]$path) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $path, '/qn', '/norestart')
+            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+              -ArgumentList @('/i', $path, '/qn', '/norestart')
             if ($p.ExitCode -eq 0) { throw 'cross-edition MSI unexpectedly mutated the machine' }
           }
           function Expect-ExeBlocked([string]$path) {
@@ -556,7 +1587,8 @@ jobs:
           function Remove-Edition([string]$display) {
             $entry = @(Entries $display)[0]
             if ($entry.WindowsInstaller -eq 1) {
-              $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/x', $entry.PSChildName, '/qn', '/norestart')
             } else {
               if ($entry.UninstallString -notmatch '^"([^"]+)"$') { throw 'unexpected Inno uninstall command' }
               $p = Start-Process $Matches[1] -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
@@ -592,6 +1624,8 @@ jobs:
       - name: Prove ambiguous managed ownership blocks native packages before mutation
         shell: pwsh
         run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
           $cargoBinary = "$HOME\.cargo\bin\tr300.exe"
           $receipt = "$env:LOCALAPPDATA\tr300\tr300-receipt.json"
           New-Item -ItemType Directory -Force (Split-Path -Parent $cargoBinary), (Split-Path -Parent $receipt) | Out-Null
@@ -609,7 +1643,7 @@ jobs:
           foreach ($case in $cases) {
             $path = (Resolve-Path $case.Path).Path
             if ($case.Kind -eq 'msi') {
-              $process = Start-Process msiexec.exe -Wait -PassThru `
+              $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
                 -ArgumentList @('/i', $path, '/qn', '/norestart')
             } else {
               $log = Join-Path $env:RUNNER_TEMP "tr300-$($case.Name)-ambiguous.log"

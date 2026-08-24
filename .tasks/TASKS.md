@@ -10,15 +10,17 @@
 
 ## Active
 
-- [ ] **Review, merge, and release TR-300 v4.3.0** - harden the release chain, qualify the corrected candidate, then merge and run exact-SHA crates/tag/release/physical/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
-  - [ ] Remediate and independently validate every confirmed release/privilege security finding
+- [ ] **Integrate, qualify, and release TR-300 v4.3.0** - complete credential cutovers, reconcile hardened `main` into PR #14, then run exact-SHA crates/tag/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+  - [x] Remediate and independently validate every confirmed release/privilege security finding
+  - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
+  - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
+  - [x] Pass PR #15 exact-head local/hosted/security/native qualification, merge it, and pass exact-main CI
   - [ ] Migrate Apple secrets into `apple-signing`, prove native ARM/Intel access, remove repository copies and migration authority, and remove the temporary workflow
   - [ ] Prove crates.io OIDC, enable `trustpub_only`, revoke/delete the legacy token, remove bootstrap code, and reprove OIDC-only access
-  - [ ] Reconcile the hardened main branch into PR #14 and pass final review/gates
-  - [ ] Complete reachable physical hardware qualification without overstating unavailable evidence
-  - [ ] Merge only the accepted exact candidate and verify exact-main CI plus crates.io custody
-  - [ ] Push only v4.3.0 and pass every archive/installer/signing/notary/transition gate
-  - [ ] Audit all 34 public assets, deploy the homepage candidate, and close the release ledger
+  - [ ] Merge hardened main into PR #14 and pass final exact-head review and hosted gates
+  - [ ] Merge only the accepted candidate and verify exact-main CI plus crates.io custody
+  - [ ] Push only v4.3.0 and pass the private 24-to-30-to-validated-to-34 publication chain
+  - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
 
 ## Done
 

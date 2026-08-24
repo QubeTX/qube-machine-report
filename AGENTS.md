@@ -5,13 +5,13 @@ Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
 Companion docs:
 - [`CLAUDE.md`](./CLAUDE.md) — edit-time rules, the canonical 7-phase development workflow, CI gates, code patterns.
-- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger reconciled through 2026-08-23, including the unreleased v4.3 candidate decisions: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
+- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-08-24: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-08-23
+Last verified against source: 2026-08-24
 
 ## Task management system
 
@@ -53,13 +53,15 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.2.2`. Working manifest on the
-  `feature/v4.3.0-battery-perf-thermals` branch: `4.3.0`
-  (battery hardening, Windows full-mode latency, thermal reporting) in open PR
-  #14. The candidate is unreleased; repaired-code local gates and exact-head
-  hosted PR checks pass. The operator requires PR #14 to stay
-  open after validation unless separately authorizing a merge. v4.2.2 remains
-  the last fully published distribution state.
+- Current published version: `4.2.2`. The working manifest on
+  `feature/v4.3.0-battery-perf-thermals` is `4.3.0` (battery hardening, Windows
+  full-mode latency, thermal reporting), developed through PR #14. Release-chain
+  hardening merged to `main` as `1ffb0cc` and passed exact-main CI, but the
+  integrated candidate still requires fresh exact-head qualification. Merging
+  the protected PR does not publish the crate; v4.2.2 remains the last fully
+  published state until explicit trusted-OIDC crates publication, the single
+  tag/private 24-to-30-to-validated-to-34 asset chain, and post-public smokes
+  complete.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
   Windows exposes NVIDIA GPU temperature only through mode-bounded
@@ -84,6 +86,20 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   is required because public Rust records gained fields and collector helpers
   changed signature; the CLI and additive schema-v1 JSON stay compatible.
   Changed public records are `#[non_exhaustive]`.
+  v4.3 release hardening supersedes only the automatic managed-to-PKG Mac
+  transition: native Intel/ARM runners proved a failed `postinstall` can leave
+  the new payload behind. The candidate direct PKG therefore rejects standard
+  managed evidence (`~/.cargo/bin/tr300` or
+  `~/.config/tr300/tr300-receipt.json`) in every `/Users` home, including
+  dot-prefixed unregistered residue, plus all eligible local Directory Service
+  homes during `preinstall`, independent of console or launch environment. Each
+  `/Users` itself and every fixed parent level must be real listable directories
+  before absence is accepted; the scan is non-recursive. It uses the pre-macOS-12 plist-reader
+  contract and accepts only the current system volume (`/`). It ships no
+  `postinstall`/migration helper.
+  A managed user must first refresh through the managed installer, then run
+  receipt-aware Complete uninstall before switching to PKG. PKG-to-managed
+  remains supported.
 - Last fully published distribution state: release source
   `db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA CI/crates,
   both signed Apple archive jobs, all Windows packaging/transitions, and the
@@ -100,9 +116,14 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Repo: `https://github.com/QubeTX/qube-machine-report`
 - Default branch: `main` (renamed atomically from `master` on 2026-07-17;
   `origin/master` no longer exists)
-- Actions checkout runtime: all four workflows use `actions/checkout@v6`
-  (Node 24). Do not regress branch CI or crates publishing to the deprecated
-  Node 20-based v4 action.
+- Actions supply-chain runtime: every external action is pinned to a reviewed
+  40-hex commit. Checkout jobs use `actions/checkout` v6.1.0 (Node 24) with
+  read-only GitHub authorization and persisted checkout credentials disabled.
+  Fresh Apple signers and GitHub Release asset publishers deliberately have no
+  checkout. The crates publisher checks out only the exact SHA under read-only
+  authorization before OIDC and executes no package code while the publish
+  token exists. Do not restore mutable action refs or the Node 20-based v4
+  checkout.
 - Release tooling: cargo-dist `0.31.0`
 
 The crate exposes both:
@@ -128,9 +149,12 @@ keys remain available. The exact v4 boundary includes `Action`, `Cli`,
 
 .github/workflows/
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
-  crates-publish.yml          # publishes new crates.io versions after successful default-branch CI
-  release.yml                 # cargo-dist workflow + aliases + fail-closed Apple signing/notary step
-  windows-installers.yml      # hand-authored; builds Corporate MSI + both Inno Setup EXEs after release.yml (v3.15.0+)
+  crates-publish.yml          # explicit exact-main trusted-OIDC crates.io publication
+  release.yml                 # cargo-dist builds + fresh private-draft publisher
+  windows-installers.yml      # adds six Windows assets to the private draft
+  windows-installer-validation.yml # exact-byte pre-public matrix + public updater smoke
+  macos-installer.yml         # native Apple gates and sole 34-asset final publisher
+  apple-secret-migration.yml  # one-time no-checkout secret copy/name proof; remove after native cutover
 
 docs/
   agents/handoff/              # tracked cross-machine continuation records
@@ -181,6 +205,9 @@ tests/
 
 scripts/
   sign-notarize-macos.sh       # fail-closed Developer ID + Apple notary archive gate
+  build-sign-notarize-macos-installer.sh # universal PKG/DMG data-only builder
+  install-pinned-inno-setup.ps1 # official Inno 6.7.3 custody/installation gate
+  test-release-workflow-provenance.py # executable resolver/security contract
 
 wix/
   main.wxs                    # Global MSI packaging template (perMachine, system PATH)
@@ -553,10 +580,11 @@ The v4.3 Windows benchmark records seven alternating full-mode runs with
 medians of 5138.6 ms before and 2092.3 ms after (~3046.3 ms, 59.3%, 2.46×).
 Eleven alternating fast runs produced 247.0 ms and 238.9 ms medians; the
 apparent -3.3% is background-level, so documentation and tests must not claim a
-fast-mode performance gain. The full repaired-code local gate passes, and PR
-head `56b92d7` passed CI 32680492930 plus PR-mode Release plan 32680492910 with
-all four review threads resolved. A green PR does not authorize merge or
-establish AMD64 Linux/Raspberry Pi physical acceptance.
+fast-mode performance gain. The earlier collector head `56b92d7` passed CI
+32680492930 plus PR-mode Release plan 32680492910 with all four review threads
+resolved. Integrating current `main` creates a new exact head, so repeat the
+full local/hosted gates and resolve review against that SHA. These results do
+not establish AMD64 Linux/Raspberry Pi physical acceptance.
 
 Optional subprocess probes should use `collectors::command` timeout helpers.
 Missing tools, timeouts, malformed output, and permission failures should
@@ -578,10 +606,15 @@ Entry points in `src/install/mod.rs`:
 
 Prompt options:
 - profile-only cleanup
-- complete uninstall (profile + binary)
+- complete uninstall (profile + binary + exact matching cargo-dist receipt, when present)
 - cancel
 
-Complete uninstall requires explicit confirmation and shows the binary path before deletion. Do not bypass the prompt unless implementing a clearly requested non-interactive variant.
+Complete uninstall requires explicit confirmation and shows every ownership
+path before deletion. On Unix, it must preflight an exact managed receipt before
+profile mutation and remove the running managed binary/receipt pair
+transactionally; malformed, foreign, linked, or changing evidence fails closed.
+Do not bypass the prompt unless implementing a clearly requested
+non-interactive variant.
 
 ### Unix install (`src/install/unix.rs`)
 
@@ -653,21 +686,35 @@ Public installation guidance recommends the versionless managed wrappers:
 - Windows: `irm .../tr300-installer.ps1 | iex`
 - macOS/Linux: `curl .../tr300-installer.sh | sh`
 
-The release workflow renders each wrapper with one exact tag/version and keeps
-cargo-dist's raw scripts under the internal stable `tr300-dist-installer.*`
-names. A wrapper first establishes and verifies its own managed install, then
+The release workflow renders each wrapper with one exact tag/version plus the
+SHA-256 of its corresponding raw cargo-dist script, and keeps those scripts
+under the internal stable `tr300-dist-installer.*` names. A wrapper verifies the
+downloaded raw script before execution; the shell wrapper supplies a private
+system-backed `sha256sum` shim so cargo-dist cannot skip archive verification on
+macOS. A wrapper first establishes and verifies its own managed install, then
 converges only exact recognized prior ownership. Windows enumerates the fixed
 TR-300 MSI UpgradeCodes/Inno AppIds and uses UAC only for machine-wide removal.
 macOS removes a PKG only after receipt, root payload, per-file owner, path, and
-Developer ID identity all agree. The direct PKG performs the reciprocal bounded
-cleanup of an exact managed-shell/Cargo copy and matching receipt. Before
+Developer ID identity all agree. The direct PKG intentionally does not perform
+the reciprocal cleanup: it rejects standard managed binary/receipt evidence in
+  every `/Users` home (including dot-prefixed unregistered residue) plus all
+  eligible local Directory Service homes before payload installation,
+  independent of console or launch environment. It first proves `/Users`
+  itself enumerable, then enumerates only the fixed
+  parent levels and fails closed on symlinked, non-directory, or unlistable
+  intermediates; it does not recursively traverse homes or discover arbitrary
+  custom Cargo/cargo-dist/XDG locations, and
+rejects non-root PackageKit target volumes. A managed user first refreshes or
+reinstalls through the v4.3-or-later managed installer, runs receipt-aware
+Complete uninstall, then launches the PKG. Before
 cargo-dist mutates the managed path, each wrapper snapshots any prior
 managed/Cargo binary and receipt; a failed native convergence restores that
 snapshot and reports the surviving native owner.
 
 `tr300 update` is latest-only and preserves the proven channel. A deliberately
-launched fresh managed/native installer is authoritative user intent even for a
-same-version or downgrade repair. Opposite-edition native Windows installers
+launched fresh installer is authoritative user intent only inside its proven
+platform transaction, including same-version or downgrade repair. A direct Mac
+PKG refuses managed ownership instead of taking it over. Opposite-edition native Windows installers
 stop before mutation and direct users to the managed PowerShell convergence
 path; they do not cross scope behind Windows Installer. Raw `cargo install` is
 advanced/unmanaged because Cargo has no TR-300 post-install hook. Ambiguous
@@ -742,9 +789,11 @@ Behavior:
   proceeds. Ordinary MSI UpgradeCode/Inno AppId upgrades stay within format.
   Cross-edition native Windows attempts stop before mutation. The managed
   wrappers provide the supported cross-scope/native convergence path. On Mac,
-  managed shell and direct PKG can replace each other only after exact ownership
-  proof. The hidden bounded `migrate-cleanup` never deletes the running install,
-  toolchain, shared Cargo PATH, or Downloads. Current native packages always use
+  an exact PKG may still transition to managed shell; the reverse transition
+  requires receipt-aware Complete uninstall before the direct PKG runs. The
+  direct PKG has no postinstall and never mutates user-owned managed state. The
+  hidden bounded `migrate-cleanup` never deletes the running install, toolchain,
+  shared Cargo PATH, or Downloads. Current Windows native packages always use
   its mandatory `--strict` mode with no cleanup opt-out; a present cargo-dist
   receipt is validated before its binary is quarantined, and the prior pair is
   restored if strict cleanup cannot commit. Legacy direct calls without
@@ -806,22 +855,27 @@ native installer path is `.github/workflows/macos-installer.yml` plus
 tagged archives into one universal Mach-O, signs/notarizes it, and builds the
 signed, notarized, stapled system-wide `com.qubetx.tr300.pkg`. The direct PKG is
 the recommended native download and the v4.2+ updater payload because the PKG,
-not a DMG, owns `/usr/local/bin/tr300`, supplies the stable receipt, and provides
-the privileged transaction. A signed/notarized/stapled DMG containing the
+  not a DMG, owns `/usr/local/bin/tr300` and supplies the stable receipt. Its only
+  package script is a non-mutating `preinstall` that refuses standard managed
+  ownership before payload placement; it contains no postinstall helper. A
+  signed/notarized/stapled DMG containing the
 byte-identical PKG is still published only so immutable v4.1.x updaters can cross
 the transition; current clients never use that bridge.
 
-Hosted packaging order is load-bearing: check out the exact release tag before
-downloading signed archives into the workspace because checkout cleans
-untracked inputs. Xcode 16.4 architecture verification must use
-`lipo <file> -verify_arch arm64 x86_64` in both the builder and installed-binary
-gate. Do not restore input-last syntax. A validator chained from the
-supplemental Windows `workflow_run` cannot trust `head_branch` to retain the
-original tag; it resolves exactly one immutable release from the immediate
-upstream run's exact SHA and fails closed on ambiguity.
+Hosted packaging order is load-bearing. Read-only preparation jobs without Apple
+signing credentials bind the exact Release run ID, attempt, repository,
+tag/current-main SHA, artifact IDs/digests,
+and fixed input inventories before any Apple secret is available. Fresh
+`apple-signing` jobs have no checkout and execute only inline, reviewed system-
+tool logic over those data-only artifacts. Xcode 16.4 architecture verification
+must use `lipo <file> -verify_arch arm64 x86_64` in both the builder and
+installed-binary gate. A second-hop `workflow_run` never inherits transitive
+tag identity; every resolver peels the stable tag and rebinds the exact upstream
+workflow ID/path/event/repository/SHA/attempt and Release target.
 
-Repository Actions configuration uses these names (values are secrets and must
-never enter git, logs, tasks, handoffs, or docs):
+The protected `apple-signing` environment (main and immutable `v*` refs only)
+uses these names; values are secrets and must never enter git, logs, tasks,
+handoffs, or docs:
 
 - secrets: `APPLE_CERTIFICATE_P12_BASE64`,
   `APPLE_CERTIFICATE_PASSWORD`,
@@ -830,6 +884,24 @@ never enter git, logs, tasks, handoffs, or docs):
   `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`;
 - variables: `APPLE_SIGNING_IDENTITY`, the full Developer ID Installer common
   name in `APPLE_INSTALLER_SIGNING_IDENTITY`, and `APPLE_TEAM_ID`.
+
+The temporary `apple-secret-migration.yml` workflow performs only the one-time
+no-checkout, owner/current-main copy and exact name/policy inventory. Create a
+short-lived fine-grained personal access token restricted to
+`QubeTX/qube-machine-report`, with repository permissions `Contents: read`,
+`Actions: read`, and `Environments: write` only. From an authenticated
+workstation, install its value as the `apple-signing` environment secret named
+exactly `RELEASE_SECRET_MIGRATION_TOKEN` by running
+`gh secret set RELEASE_SECRET_MIGRATION_TOKEN --env apple-signing --repo QubeTX/qube-machine-report`
+and pasting the value only at the command's stdin prompt so it does not enter
+shell history. The operator runs the copy, then requires fresh native Apple
+Silicon and Intel credential-preflight jobs to prove both Application/Installer
+certificate import/signing plus read-only notary authentication from environment
+secrets. Only after those jobs pass does the operator delete the repository
+Apple secrets and `RELEASE_SECRET_MIGRATION_TOKEN`, rerun the environment-only
+preflight, and merge a protected follow-up PR that removes the migration
+workflow. The migration workflow itself does not delete credentials or
+substitute for native proof.
 
 The least-privilege App Store Connect key has Developer role. Installer-key RSA
 material/CSR may be generated with OpenSSL on Windows, issued through the Apple
@@ -870,16 +942,22 @@ ceremony; do not invent a cross-signing workaround.
 ### CI workflow (`.github/workflows/release.yml`)
 
 High-level job flow:
-1. `plan`
-2. `build-local-artifacts` — Apple publishing jobs sign and notarize after
-   `dist build`, before Post-build/upload; any Apple failure blocks hosting
-3. `build-global-artifacts`
-4. `host`
-5. `announce`
+1. `plan` rejects anything except a stable `vX.Y.Z` tag before checkout/build.
+2. `build-local-artifacts` and `build-global-artifacts` use read-only GitHub
+   authorization with no persisted checkout, signing, or publication credential.
+3. `sign-apple-artifacts` consumes fixed unsigned artifacts on fresh,
+   checkout-free `apple-signing` runners and emits canonical signed archives.
+4. `prepare-host-assets` renders and validates the fixed 24-file base inventory
+   without a write token.
+5. `host` is a fresh, checkout-free `release-publishing` job that rebinds tag =
+   current protected main = exact CI SHA, downloads the prepared artifact by
+   immutable ID/digest, and creates a **private 24-asset draft**.
+6. `announce` confirms only the private-draft handoff.
 
 Triggers:
 - pull requests run cargo-dist planning
-- pushes of semver-like tags matching `**[0-9]+.[0-9]+.[0-9]+*` publish releases
+- broad semver-like tag pushes enter the workflow, but its first step accepts
+  only exact stable `vX.Y.Z`; immutable tag rulesets block update/delete
 - Apple secrets are consumed only when `needs.plan.outputs.publishing == 'true'`;
   pull-request planning never receives them
 
@@ -895,36 +973,56 @@ cargo-dist publishes via `release.yml`:
   was canonicalized to `tr300`;
 - Global MSI installer for Windows (`tr300-x86_64-pc-windows-msvc.msi`)
 
-`windows-installers.yml` (v3.15.0+) publishes three additional Windows assets after `release.yml` finishes:
+`windows-installers.yml` (v3.15.0+) adds three Windows installers plus sidecars
+to the private 24-asset draft, producing an exact 30-asset candidate:
 - Corporate MSI (`tr300-x86_64-pc-windows-msvc-corporate.msi`) — perUser scope, no admin, installs to `%LocalAppData%\Programs\tr300\bin\` (built from `wix-corporate/corporate.wxs`)
 - Global EXE installer (`tr300-x86_64-pc-windows-msvc-setup.exe`) — Inno Setup, perMachine, same install path as Global MSI (built from `inno/global.iss`)
 - Corporate EXE installer (`tr300-x86_64-pc-windows-msvc-corporate-setup.exe`) — Inno Setup, perUser, same install path as Corporate MSI (built from `inno/corporate.iss`)
 
-`macos-installer.yml` runs after a successful tagged `release.yml`, builds the
-universal direct PKG plus compatibility DMG on native Intel, validates trust,
-install/update/uninstall and channel takeover on native Intel and Apple
-Silicon, and publishes:
+`windows-installer-validation.yml` first freezes and byte-validates that exact
+30-asset private draft, runs fresh installs plus authenticated direct prior-to-
+candidate transitions/rollback/uninstall without letting `/releases/latest`
+see the candidate, and emits an immutable acceptance proof. The real updater-
+to-candidate matrix remains post-public. `macos-installer.yml` then builds the
+universal direct PKG plus
+compatibility DMG from exact Release-run artifacts, validates trust,
+  managed-conflict rejection, clean/native install/update/uninstall,
+  checksum-bound public-v4.2.2-managed refresh plus receipt-aware
+  managed-to-PKG preparation, and PKG-to-managed takeover on
+  native Intel and Apple Silicon, and its sole fresh finalizer publishes only after matching the proof,
+the exact 34-asset inventory, and every asset byte. It adds:
 - `tr300-universal-apple-darwin.pkg`
 - `tr300-universal-apple-darwin.pkg.sha256`
 - `tr300-universal-apple-darwin.dmg`
 - `tr300-universal-apple-darwin.dmg.sha256`
 
 Total Windows native installer surface area per release remains four packages.
-Complete v4.2 candidate release asset count: 34 (the v4.1 set of 30, direct PKG
-and sidecar, plus two internal raw cargo-dist installer scripts).
+The public updater and published Linux/macOS smokes run only after the macOS
+finalizer makes the exact 34-asset release public; a failed supplement remains
+a private draft.
 
 ### crates.io publishing (`.github/workflows/crates-publish.yml`)
 
-The crates.io workflow is intentionally separate from the auto-generated
-`release.yml`. It is triggered by `workflow_run` after `CI` completes on
-`main`, checks out the exact CI-tested commit SHA, skips when the
-manifest version is already present on crates.io using a descriptive
-data-access `User-Agent`, and runs `cargo publish --locked` only when
-`CARGO_REGISTRY_TOKEN` is configured as a repository Actions secret. It reruns
-`cargo fmt --all -- --check`,
-`cargo clippy --all-targets --workspace -- -D warnings`,
-`cargo test --workspace --all-targets`, `cargo package --locked --list`, and
-`cargo publish --dry-run --locked` before the real publish.
+The crates.io workflow is intentionally separate from `release.yml` and is
+**manual only** (`workflow_dispatch operation=publish`). It accepts only the
+repository owner on protected current `main` after exact-SHA CI. A read-only
+validator with no registry credential uses exact Cargo 1.95 to build and dry-run
+the normalized package and records the exact `.crate` hash. A fresh protected
+`crates-io` environment job executes no repository/package code while
+credentialed: it repackages with `--no-verify`,
+requires byte equality, mints a short-lived OIDC token, publishes, and proves
+the public checksum plus crates.io trusted-publisher repository/run/SHA
+metadata. `trustpub_only=true` is a blocking policy gate.
+
+The temporary `configure_trusted_publisher` operation idempotently creates the
+exact crates.io tuple, proves OIDC, and enables `trustpub_only` with the existing
+scoped legacy token. Once that operation succeeds and the public policy is
+confirmed, revoke that exact token through the authenticated crates.io UI,
+delete the GitHub `CARGO_REGISTRY_TOKEN` secret, merge a protected follow-up
+that removes the bootstrap operation and every legacy-token reference, then
+dispatch `probe_trusted_publisher` to prove OIDC still works. The real version
+publication remains a later explicit release gate; never retain the legacy
+credential until then or restore automatic push/`workflow_run` publication.
 
 `Cargo.lock` is tracked and included in the crate package because both local
 release verification and the GitHub publish workflow use `--locked`. Do not
@@ -963,7 +1061,13 @@ release.
 
 ### Inno Setup EXE installers (`inno/global.iss` + `inno/corporate.iss`, v3.15.0+)
 
-Built by `windows-installers.yml` using `iscc.exe` (installed via `choco install innosetup` on the CI runner). Inputs: the prebuilt `target/release/tr300.exe` and the corresponding `.iss` script. Outputs: `tr300-x86_64-pc-windows-msvc-setup.exe` (Global) and `tr300-x86_64-pc-windows-msvc-corporate-setup.exe` (Corporate).
+Built by `windows-installers.yml` using the shared
+`scripts/install-pinned-inno-setup.ps1` contract. It downloads the official
+JRSoftware Inno Setup 6.7.3 installer, verifies the exact size/SHA-256, GitHub
+attestation, valid Pyrsys B.V. Authenticode signature, ProductVersion, absolute
+ISCC path, and installed ISCC version before use; Chocolatey is not trusted as
+the installer source. Inputs are the prebuilt `target/release/tr300.exe` and the
+corresponding `.iss` script. Outputs are the Global and Corporate Setup EXEs.
 
 - Global: `AppId={{AB14223F-…}`, `PrivilegesRequired=admin`, installs to `{commonpf}\tr300` = `%ProgramFiles%\tr300`, writes system PATH via HKLM, marker = `exe-global`.
 - Corporate: `AppId={{76A253EB-…}`, `PrivilegesRequired=lowest`, installs to `{userpf}\tr300` = `%LocalAppData%\Programs\tr300`, writes user PATH via HKCU, marker = `exe-corporate`.
@@ -1002,24 +1106,27 @@ Mac/local/hosted gate below remains blocking for future releases.
    - after shared/Mac/release changes: native Apple Silicon + native Intel tests
      and smokes; after Apple-input changes, real archive, direct-PKG, and
      compatibility-DMG sign/notary/staple/install/checksum round-trips
-4. Commit with message `release: vX.Y.Z - <summary>`.
-5. Push the default branch, **wait for `ci.yml` to go green on the exact
-   commit**, then confirm `crates-publish.yml` either published the new
-   crates.io version from that same SHA or skipped because it was already
-   present.
-6. Tag with `git tag vX.Y.Z`.
+4. Commit on a focused release branch, open a PR, resolve review threads, and
+   wait for all strict required checks. Merge through protected `main`; direct
+   release pushes are not allowed.
+5. Wait for `ci.yml` to go green on the exact current `main` SHA, then explicitly
+   dispatch `crates-publish.yml` with `operation=publish` and require the exact
+   trusted-OIDC/public-byte proof.
+6. Tag the proven exact-main SHA with `git tag vX.Y.Z`.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
    workflow trigger; an explicit single-tag push is sufficient).
-8. Wait for `.github/workflows/release.yml` to publish the GitHub Release
-   assets and installers. Require both Apple jobs to report Developer ID
-   signing and Apple `Accepted` before host; then extract both Mac archives and
-   verify their signatures/checksums.
-9. Wait for `windows-installers.yml` and verify all four first-class Windows
-   installers and both legacy installer aliases.
-10. Wait for `macos-installer.yml`; require native Intel and Apple Silicon
-    PKG/DMG install gates, then verify the expected 30-asset release.
-11. Only after the deployed release is verified, update/test/push the TR-300
-    homepage and record exact run IDs/evidence in `TESTING.md` and the handoff.
+8. Wait for `.github/workflows/release.yml` to create the private exact 24-asset
+   draft after both fresh Apple archive jobs report Developer ID signing and
+   Apple `Accepted`.
+9. Wait for `windows-installers.yml` to assemble the private 30-asset draft,
+   then require the private `windows-installer-validation.yml` exact-byte
+   transition matrix and proof to pass.
+10. Wait for `macos-installer.yml`; require native Intel/Apple Silicon PKG/DMG
+    gates and exact validation-proof custody. Its fresh finalizer alone may add
+    four assets and publish the verified 34-asset release.
+11. Require the public Windows updater smoke and published Linux/macOS smokes.
+    Only after the deployed release is verified, update/test/push the TR-300
+     homepage and record exact run IDs/evidence in `TESTING.md` and the handoff.
 
 After changing `[workspace.metadata.dist]`, regenerate the workflow with:
 

@@ -5,6 +5,11 @@
 Done. v4.2.2 is public; local, hosted, immutable-release, public-byte, homepage,
 and documentation evidence all satisfy MIC-1.
 
+v4.3 supersession: task `#r43` makes the Mac direction intentionally
+asymmetric. Exact PKG-to-managed takeover remains supported; managed-to-PKG now
+requires receipt-aware Complete uninstall before the direct PKG runs. Windows
+MIC-1 convergence is unchanged.
+
 ## Activity
 
 - 2026-07-18 — implemented the stable-name managed wrappers, strict transactional
@@ -101,10 +106,12 @@ hook.
 - Windows PowerShell verifies its new binary/receipt before enumerating the two
   exact MSI UpgradeCodes and two exact Inno AppIds and invoking real
   uninstallers.
-- macOS shell takeover requires exact receipt, payload owner, and Developer ID
-  proof. PKG `preinstall` uses its embedded exact candidate for strict dry-run
-  ownership proof before payload mutation; `postinstall` performs the reverse
-  allowlisted Cargo binary/receipt cleanup.
+- The shipped v4.2.2 macOS shell takeover requires exact receipt, payload owner,
+  and Developer ID proof. Its PKG `preinstall` uses the embedded exact candidate
+  for strict dry-run ownership proof before payload mutation; its `postinstall`
+  performs the reverse allowlisted Cargo binary/receipt cleanup. The v4.3
+  candidate supersedes that reciprocal direction with the preinstall-only
+  refusal recorded above.
 - Cross-edition native Windows packages stop before mutation when the other
   scope is registered or its exact native binary remains; same-edition format
   changes remain automatic only after a strict non-mutating managed-ownership
@@ -117,8 +124,8 @@ hook.
 - Once an external native uninstall/receipt retirement commits and has no
   supported inverse, the wrappers retain the already-verified managed owner and
   fail with partial-state recovery evidence rather than risking zero copies.
-- Current MSI/EXE/PKG integrations always use `migrate-cleanup --strict` with no
-  task/checkbox opt-out. Strict mode prevalidates and transactionally
+- Current Windows MSI/EXE integrations always use `migrate-cleanup --strict`
+  with no task/checkbox opt-out. Strict mode prevalidates and transactionally
   quarantines/restores an exact Cargo-path binary plus cargo-dist receipt;
   ambiguous evidence fails before mutation. Legacy no-`--strict` calls stay
   advisory for compatibility.
