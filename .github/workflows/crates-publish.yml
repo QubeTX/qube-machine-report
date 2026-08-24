@@ -222,6 +222,8 @@ jobs:
           workflow_id=$(gh api "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
           [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
           endpoint="repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$SOURCE_SHA&per_page=100"
+          # The counter intentionally bounds retries.
+          # shellcheck disable=SC2034
           for attempt in {1..120}; do
             gh api "$endpoint" > "$CI_STATE_PATH"
             mapfile -t rows < <(
@@ -242,9 +244,11 @@ jobs:
                 [[ "$conclusion" == success ]] || exit 65
                 remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
                 [[ "$remote_main" == "$SOURCE_SHA" ]]
-                echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
-                echo "workflow_run_id=$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
-                echo "ci_run_id=$run_id" >> "$GITHUB_OUTPUT"
+                {
+                  echo "source_sha=$SOURCE_SHA"
+                  echo "workflow_run_id=$WORKFLOW_RUN_ID"
+                  echo "ci_run_id=$run_id"
+                } >> "$GITHUB_OUTPUT"
                 exit 0
               fi
             fi
@@ -333,10 +337,12 @@ jobs:
           crate_sha256=${crate_sha256%% *}
           [[ "$crate_sha256" =~ ^[0-9a-f]{64}$ ]]
           printf '%s *%s\n' "$crate_sha256" "$crate_name" > "$crate_path.sha256"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "crate_name=$crate_name" >> "$GITHUB_OUTPUT"
-          echo "crate_sha256=$crate_sha256" >> "$GITHUB_OUTPUT"
-          echo "crate_path=$crate_path" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "crate_name=$crate_name"
+            echo "crate_sha256=$crate_sha256"
+            echo "crate_path=$crate_path"
+          } >> "$GITHUB_OUTPUT"
   publish:
     name: Publish from a fresh no-execution runner
     needs: validate-package
@@ -535,12 +541,14 @@ jobs:
                   raise SystemExit("crate VCS provenance does not bind the exact source SHA")
           PY
           chmod -R a-w "$SOURCE_DIRECTORY"
-          echo "manifest=$SOURCE_DIRECTORY/Cargo.toml" >> "$GITHUB_OUTPUT"
-          echo "home=$CLEAN_HOME" >> "$GITHUB_OUTPUT"
-          echo "cargo_home=$CLEAN_CARGO_HOME" >> "$GITHUB_OUTPUT"
-          echo "cwd=$CLEAN_CWD" >> "$GITHUB_OUTPUT"
-          echo "target=$CLEAN_TARGET" >> "$GITHUB_OUTPUT"
-          echo "toolchain_directory=$TOOLCHAIN_DIRECTORY" >> "$GITHUB_OUTPUT"
+          {
+            echo "manifest=$SOURCE_DIRECTORY/Cargo.toml"
+            echo "home=$CLEAN_HOME"
+            echo "cargo_home=$CLEAN_CARGO_HOME"
+            echo "cwd=$CLEAN_CWD"
+            echo "target=$CLEAN_TARGET"
+            echo "toolchain_directory=$TOOLCHAIN_DIRECTORY"
+          } >> "$GITHUB_OUTPUT"
       - name: Rebind the candidate to current main before registry adjudication
         env:
           GH_TOKEN: ${{ github.token }}
@@ -846,6 +854,8 @@ jobs:
           [[ "$crate_status" == 200 ]]
           jq -e '.crate.name == "tr300" and .crate.trustpub_only == true' \
             "$RUNNER_TEMP/published-crate-policy.json" >/dev/null
+          # The counter intentionally bounds retries.
+          # shellcheck disable=SC2034
           for attempt in {1..24}; do
             metadata_status=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
               --output "$RUNNER_TEMP/published-version.json" --write-out '%{http_code}' \

@@ -823,7 +823,7 @@ jobs:
           done
           (
             cd "$OUTPUT_DIRECTORY"
-            [[ $(wc -l < sha256.sum | tr -d '[:space:]') == ${#payloads[@]} ]]
+            [[ $(wc -l < sha256.sum | tr -d '[:space:]') == "${#payloads[@]}" ]]
             sha256sum -c sha256.sum
             : > __tr300-asset-sha256s
             for asset in "${public_assets[@]}"; do
@@ -967,7 +967,7 @@ jobs:
           ' "$ASSET_DIRECTORY/__tr300-release-metadata.json" >/dev/null
           (
             cd "$ASSET_DIRECTORY"
-            [[ $(wc -l < __tr300-asset-sha256s | tr -d '[:space:]') == ${#public_assets[@]} ]]
+            [[ $(wc -l < __tr300-asset-sha256s | tr -d '[:space:]') == "${#public_assets[@]}" ]]
             sha256sum -c __tr300-asset-sha256s
           )
       - name: Rebind protected source and publish the fixed 24 assets

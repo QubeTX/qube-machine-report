@@ -105,7 +105,6 @@ jobs:
             [[ -z "$expected_attempt" || "$actual_attempt" == "$expected_attempt" ]]
             validated_head_sha=$head_sha
             validated_run_attempt=$actual_attempt
-            validated_event=$event
           }
 
           resolve_tag_commit() {
