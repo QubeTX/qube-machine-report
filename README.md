@@ -452,37 +452,40 @@ known) and the versionless latest release page.
 
 ## Release Automation
 
-GitHub Actions handles both release assets and crates.io publishing:
+GitHub Actions handles both release assets and crates.io publishing through
+protected, exact-source workflows:
 
 - `CI` runs formatting, clippy, tests, release builds, speed checks, audit, and
   cargo-dist planning on pushes to the default branch. Native Apple Silicon and
   Intel macOS jobs plus AMD64/ARM64 Linux and Windows jobs are blocking, and
   workflow/shell validation runs in the same gate.
-- `Crates.io Publish` runs only after `CI` succeeds for that default-branch
-  commit, checks whether the manifest version is already on crates.io with a
-  descriptive data-access `User-Agent`, reruns fmt/clippy/tests/package/dry-run
-  with `--locked`, and publishes `tr300` only when the repository
-  `CARGO_REGISTRY_TOKEN` Actions secret is configured.
-- `Release` is the cargo-dist workflow triggered by an explicit `vX.Y.Z` tag;
-  it builds the cross-platform archives and installers. Before
-  upload, both Apple targets must pass Developer ID signing and Apple
-  notarization; the job fails closed if any credential or Apple gate fails. New
-  public managed installer assets use `tr300-installer.*`; their exact-tag
-  internal cargo-dist transactions use `tr300-dist-installer.*`. The workflow
-  also publishes `tr-300-installer.*` compatibility aliases so v3.14.2 binaries
-  can self-update after the old package name was removed. The cargo-dist config
-  permits checked-in workflow/MSI customizations with
-  `allow-dirty = ["ci", "msi"]`.
-- `macOS Universal Package` consumes those exact tagged Apple archives on a
-  native Intel runner, creates the universal Developer ID signed binary and
-  signed `com.qubetx.tr300.pkg`, notarizes/staples it, then installs and
-  exercises the direct package independently on native Apple Silicon and Intel
-  runners. It also proves the compatibility DMG contains the byte-identical
-  package and replays an immutable v4.1.3 update through that bridge. After all
-  gates pass, the workflow attaches the versionless PKG/sidecar plus the legacy
-  DMG/sidecar. Together with the two internal managed-installer transactions,
-  this brings a complete release to 34 assets. A physical Mac is an
-  optional visual smoke test, not a release dependency.
+- `Crates.io Publish` is an explicit owner-only dispatch after exact-current-
+  `main` CI. A tokenless Cargo 1.95 job builds and verifies the normalized
+  package; a fresh protected `crates-io` job reproduces the exact crate bytes,
+  mints a short-lived OIDC token only for `cargo publish --no-verify`, and
+  requires the public checksum and trusted-publisher provenance to match the
+  repository, run, and source SHA. No push or downstream `workflow_run`
+  automatically publishes a crate.
+- `Release` is the cargo-dist workflow triggered by an explicit stable
+  `vX.Y.Z` tag. Tokenless builders and fresh checkout-free Apple signers produce
+  the cross-platform archives, managed `tr300-installer.*` wrappers, internal
+  `tr300-dist-installer.*` transactions, and `tr-300-installer.*` compatibility
+  aliases. A fresh publisher creates a **private 24-asset draft**; it never
+  exposes a partial stable release. The cargo-dist config permits the reviewed
+  workflow/MSI customizations with `allow-dirty = ["ci", "msi"]`.
+- `Windows Installers` adds the Corporate MSI and both Global/Corporate Inno
+  EXEs plus their sidecars through a fresh publisher, producing a private
+  30-asset candidate. `Windows Installer Validation` freezes those exact bytes,
+  runs authenticated direct prior-to-candidate install/transition/uninstall
+  checks while public `latest` remains unchanged, and emits immutable acceptance
+  evidence.
+- `macOS Universal Package` consumes the exact Release-run Apple archives and
+  the Windows acceptance proof, builds/signs/notarizes the universal direct PKG
+  and compatibility DMG, and exercises both on native Apple Silicon and Intel.
+  Its sole fresh finalizer rechecks every accepted byte, adds four assets, and
+  is the only workflow allowed to publish the exact 34-asset release. Only then
+  do the real public updater matrix and published Linux/macOS smokes run. A
+  physical Mac remains an optional visual smoke test, not a release dependency.
 
 `Cargo.lock` is tracked so the crates.io publish workflow uses the same resolved
 dependency set that local release verification used.

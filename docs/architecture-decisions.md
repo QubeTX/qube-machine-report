@@ -10,7 +10,7 @@
 > revised) the decision. Verbatim moves from CLAUDE.md preserved word-for-word
 > so `git blame` history continues to make sense.
 >
-> **Coverage reconciled through 2026-07-18.** This is the repository's
+> **Coverage reconciled through 2026-08-24.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. Accepted decisions remain binding until a later dated
 > section explicitly supersedes them. Historical failure evidence is retained
@@ -49,6 +49,8 @@
   - [Post-release personal-hardware evidence boundary](#post-release-personal-hardware-evidence-boundary)
 - [Toolchain & release](#toolchain--release)
   - [Default branch is `main` (2026-07-17)](#default-branch-is-main-2026-07-17)
+  - [Stable-only release chain and privileged supplemental provenance (v4.3 candidate)](#stable-only-release-chain-and-privileged-supplemental-provenance-v43-candidate)
+  - [Privileged package launch and rollback boundaries (v4.3 candidate)](#privileged-package-launch-and-rollback-boundaries-v43-candidate)
   - [MSRV policy (v3.11.1+, addendum v3.13.1)](#msrv-policy-v3111-addendum-v3131)
   - [Self-update auto-rustup (v3.11.1+)](#self-update-auto-rustup-v3111)
   - [Intel macOS coverage policy (v3.11.2+)](#intel-macos-coverage-policy-v3112)
@@ -93,6 +95,9 @@ future hardware row has already been exercised.
 | Personal hardware evidence | Alienware complete; AMD64 laptop and Pi 4 still open | `#win`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
 | GitHub default branch `main` and checkout v6/Node 24 | Accepted and hosted-verified | GitHub default metadata, workflow filters/actions, exact-SHA CI/crates runs |
 | Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
+| Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; hosted candidate proof pending | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
+| Privileged Windows Installer launches use the OS-owned absolute executable | Accepted and release-blocking | native system-directory resolution, pinned working directory, hostile-search-path fixtures |
+| Native PKG takeover uses descriptor-bound, metadata-preserving rollback | Accepted and release-blocking; native hosted proof pending | signed universal helper, adversarial rollback fixture, Intel/ARM package jobs |
 | Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS direct PKG plus v4.1.x DMG bridge | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel direct install and legacy-update gates |
@@ -1439,10 +1444,14 @@ certificate from the final Mach-O to compare its SHA-1 fingerprint with the
 resolved identity. This keeps fingerprint selection unambiguous while making
 the clean CI environment behave like the proven local environment.
 
-Repository secrets hold the PKCS#12, its password, API private key, key ID, and
-issuer ID; repository variables select the signing identity/team. Only the
-names are documented. Pull-request planning does not receive them because the
-step additionally requires cargo-dist's publishing output.
+At the v4.0.1 release boundary, repository secrets held the PKCS#12, its
+password, API private key, key ID, and issuer ID; repository variables selected
+the signing identity/team. Only the names were documented, and pull-request
+planning did not receive the values. The v4.3 protected-environment decision at
+lines 1698ff supersedes that storage topology: release jobs consume Apple
+credentials only from `apple-signing`, and release is blocked until the
+one-time migration, native ARM/Intel environment-only preflight, repository-
+secret deletion, and migration-workflow removal are proven.
 
 This bare-archive conclusion applied to the v4.0 cargo-dist artifacts and is
 superseded for the installer-first path by the v4.1.0 PKG-in-DMG decision. The
@@ -1546,31 +1555,32 @@ Before mutation, the audit established:
 4. Update canonical release skills, agent guides, project status, testing
    ledger, handoff, changelogs, and planning documents. Preserve historical
    `master` references where rewriting them would falsify old evidence.
-5. Keep direct-default-branch delivery subject to the same local and hosted
-   quality gates. Branch naming changes the route, not the standard.
+5. Deliver release work through the protected pull-request path. The v4.3
+   rulesets and privileged-workflow decision supersede the original direct-
+   default-branch delivery route; branch naming changes the route, not the
+   standard.
 
 #### Workflow topology and exact-SHA boundary
 
-The preserved release topology is:
+The current protected release topology is:
 
 ```text
-push to main
-  -> CI (13 blocking format/clippy/test/build/speed/audit/dist-plan jobs)
-  -> Crates.io Publish workflow_run checks out the CI-tested head SHA
-       -> existing version: skip before token/check/package/publish access
-       -> new version: rerun locked gates, then publish
-
-explicit vX.Y.Z tag after main CI/crates settle
-  -> cargo-dist Release (six targets, aliases, fail-closed Apple jobs)
-  -> Windows Installers workflow_run (three installers + sidecars)
+protected PR merge to main
+  -> exact-current-main CI (strict required contexts)
+  -> owner-only manual Crates.io Publish (fresh protected OIDC boundary)
+  -> explicit stable vX.Y.Z tag
+       -> Release creates a private 24-asset draft
+       -> Windows Installers assembles 30 private assets
+       -> private Windows Installer Validation attests exact bytes/transitions
+       -> macOS Universal Package adds four assets and solely publishes 34
+       -> public updater and published Linux/macOS smokes
 ```
 
-`crates-publish.yml` checks `github.event.workflow_run.head_repository` and
-event type in addition to success, then checks out
-`github.event.workflow_run.head_sha`. This prevents a successful unrelated or
-fork run from publishing. Its crates.io existence query happens before secret
-use; a documentation-only commit at already-published 4.0.1 therefore proves
-the chain without accessing the registry token or trying to republish.
+The post-rename `workflow_run` crates chain and its already-published 4.0.1
+skip remain valid historical evidence, but they are no longer an active
+publication route. The v4.3 decision at lines 1698ff replaces that long-lived-
+token/same-runner design with explicit exact-main dispatch, protected OIDC,
+private-draft composition, and byte-bound acceptance before visibility.
 
 Tags remain the only binary-release trigger. A branch/workflow/documentation
 change with unchanged `Cargo.toml` does not justify a version bump, retag, or
@@ -1689,6 +1699,171 @@ their values must never enter this ADR, git, task memory, or logs.
   found 4.0.1 already published, and skipped registry-token access plus every
   check/package/publish step. This is the hosted proof for the substantive ADR
   reconciliation; the follow-up commit only records that proof.
+
+### Stable-only release chain and privileged supplemental provenance (v4.3 candidate)
+
+**Status:** Accepted and release-blocking; hosted exact-SHA validation remains
+required before publication.
+
+Cargo-dist's generic generated workflow recognizes prerelease and alternate tag
+shapes, but TR-300 publishes one crate plus a coupled 34-asset native installer
+chain. That chain is stable-only: crates publication deliberately excludes
+prereleases, and Windows Installer's `ProductVersion` contract accepts only a
+bounded numeric version rather than a SemVer suffix. See Microsoft's
+[ProductVersion property](https://learn.microsoft.com/en-us/windows/win32/msi/productversion)
+contract. Allowing a tag that only some publishers understand would create a
+partial public release, not a release candidate.
+
+The checked-in generated workflow therefore retains cargo-dist's broad trigger
+but adds a project override as the first plan step: a push tag must match exact
+stable `vX.Y.Z` syntax or fail before checkout, dist planning, artifact building,
+or hosting. Pull-request plan behavior remains available. Workflow-level
+permissions are read-only; only the tag-only host job receives `contents: write`.
+Regeneration must preserve both controls alongside the managed aliases and
+fail-closed Apple signing/notarization customization.
+
+Privileged supplemental workflows accept automatic input only from the exact
+successful same-repository run named in their contract. They resolve lightweight
+or annotated tags through the Git object API, require the resulting commit to
+equal the upstream `head_sha` and current protected `main`, and require the
+GitHub Release's 40-character `target_commitish` to equal that commit before
+checkout, Apple-secret use, or write permission. Manual recovery is limited to
+repository owner actor `30877743` on the current `main` workflow SHA and requires
+explicit upstream run IDs. The hosted environments independently enforce these
+protected-ref policies: `crates-io` admits only `main`; `apple-signing` admits
+`main` and immutable `v*` tags; and `release-publishing` admits `main` and
+immutable `v*` tags.
+
+Publication is draft-first. The fresh, checkout-free Release host consumes one
+fixed internal artifact by immutable ID and SHA-256 digest, rebinds the stable
+tag, current `main`, and exact successful CI immediately before its only write,
+and creates a private 24-asset draft. It does not execute cargo-dist, repository
+scripts, or package code with `contents: write`. The Windows supplement builds
+under `contents: read`, uploads exactly three installers plus three checksum
+sidecars as one immutable Actions artifact, and gives write permission only to a
+fresh checkout-free publisher. That publisher revalidates artifact ID/digest,
+source/run custody, current `main`, CI, and the exact private draft, then adds six
+literal collision-free paths. The draft now has 30 assets and remains private.
+
+Windows installer acceptance happens before public visibility. A workflow run
+triggered by the exact Windows Installers completion snapshots all 30 Release
+assets, requiring each API asset ID, size, and `sha256:` digest to match the
+downloaded byte, and proves the six supplement bytes equal the builder's exact
+internal artifact. It uploads this normalized set as one immutable validation
+input so every disposable Windows matrix job tests the same bytes. Before the
+candidate is public, updater probes must continue to see the prior public
+`/releases/latest`; candidate transitions use only authenticated exact draft
+installers. A successful matrix emits a fixed proof binding tag/source, Windows
+run and attempt, builder artifact ID/digest, validation input artifact
+ID/digest, validation run and attempt, and all 30 Release asset records.
+
+The macOS workflow establishes Apple archive input custody before any Apple
+credential is present. Its credential preflight and signer are fresh
+`apple-signing` runners with no source checkout or repository-script execution;
+they accept only fixed data artifacts and use inline system tools. The sole
+fresh checkout-free finalizer independently binds its four PKG/DMG files, the
+Windows builder artifact, and exactly one successful Windows Installer
+Validation workflow ID/name/path/event/repository/SHA/attempt plus its immutable
+proof. It re-downloads and hashes the current 30 draft bytes against that proof,
+adds four literal paths, requires the exact 34-asset inventory and checksum
+graph, then rebinds tag/current-main/CI/run/artifacts/draft immediately before
+changing only `draft` visibility. A failed upload leaves a private draft. A
+lost PATCH response is adjudicated by a fresh authoritative Release GET and
+byte/digest comparison rather than blind retry.
+
+After publication, Windows Installer Validation runs again from the successful
+macOS finalizer and performs the real `/releases/latest` updater matrix against
+the now-public candidate. The published managed-Linux and legacy-macOS bridge
+smokes likewise run only after visibility changes. These post-public runs gate
+homepage deployment and final release closure; they are never used to justify
+the earlier private-draft acceptance.
+
+Raw event and dispatch values enter resolver shells only through environment
+variables and are validated before use. Executable regression fixtures extract
+and run the actual checked-in resolver blocks against mocked GitHub API results,
+covering lightweight and annotated tags, API failure, missing or mismatched
+Release targets, fork/event/SHA mismatch, stable manual recovery, and tagless
+Apple preflight. A future prerelease channel requires a separate architecture
+decision covering crates, MSI version mapping and bounds, macOS package version
+semantics, updater ordering, latest-release behavior, all validators, and the
+complete asset contract; widening one regex is forbidden.
+
+Crates publication is an explicit owner-authorized `workflow_dispatch`, not an
+automatic main-push side effect. A tokenless job binds current protected `main`
+to exact successful CI and performs locked verification plus a default-verifying
+package/publish dry run with Cargo 1.95. A fresh `crates-io` environment runner
+checks out only that exact SHA without credentials, rejects symlinks, special or
+multiply linked inputs, unsafe Cargo configuration/manifest paths, and archive
+identity drift, then deterministically repackages from an empty private working
+directory under `env -i`. Only after its crate hash equals the validator's does
+the pinned crates.io authentication action mint a short-lived OIDC token. The
+token-bearing step runs only absolute Cargo `publish --locked --no-verify`; a
+separate tokenless step requires crates.io checksum and `trustpub_data` to bind
+the public crate to this repository, source SHA, and GitHub run.
+
+One-time cutover is explicit: configure the exact crates.io publisher tuple in
+the protected `crates-io` environment, prove OIDC, enable `trustpub_only`, then
+revoke the legacy token in the authenticated crates.io UI and delete the GitHub
+secret. A protected follow-up PR removes the bootstrap operation and every
+`CARGO_REGISTRY_TOKEN` reference; an explicit OIDC-only probe must still pass
+after removal. Routine publication fails closed unless public
+`trustpub_only == true`.
+
+Hosted repository enforcement recorded on 2026-08-24 is part of this decision:
+main ruleset `21268055` requires a PR, resolved conversations, and the strict 19
+Actions contexts bound to integration ID `15368`, with delete/force blocked;
+tag-creation ruleset `21268058` permits only actor `30877743` to create `v*`;
+immutable-tag ruleset `21268059` blocks every `v*` update and deletion.
+
+### Privileged package launch and rollback boundaries (v4.3 candidate)
+
+**Status:** Accepted and release-blocking; native Windows plus Intel and Apple
+Silicon hosted validation must pass on the exact release candidate.
+
+Windows package execution is a privilege boundary, not an ordinary PATH or
+current-directory lookup. The Global update worker and Inno installer may cross
+UAC, and the managed wrapper may request elevation for an exact machine-wide
+product. Every shipped MSI launch therefore resolves `msiexec.exe` from the
+Windows system-directory API or Inno's `{sys}` expansion, passes the absolute
+executable to the process API, and uses that same OS-owned directory as the
+child working directory. `ShellExecuteExW` pins the elevated worker to the
+validated `tr300.exe` parent; downloaded Inno installers run from their private
+staging parent; recognized Inno uninstallers run from their already validated
+absolute parent. Corporate per-user removal stays unelevated and Global removal
+keeps its existing `RunAs` boundary. Tests place hostile `msiexec.exe` and
+installer names in the current directory and `PATH`, then assert the program,
+arguments, working directory, wait/hidden behavior, and elevation at the real
+launch wrappers.
+
+The native macOS PKG has a different privilege problem: Installer scripts run
+as root while the managed Cargo binary and receipt live in user-owned
+directories. A pathname re-check followed by `cp` is not a transaction; the
+user can replace a parent directory or final component between operations, and
+package-script failure does not prove that Apple's payload or the prior managed
+state rolled back. The PKG now embeds a signed universal C helper. It walks the
+absolute home and managed subdirectories without following symlinks, binds
+directory and file identities through descriptors, rejects unexpected owner,
+type, size, link count, executable mode, or immutable/append flags, and runs
+only the strict Rust dry-run with dropped user credentials.
+
+When takeover is safe, both managed names move to random exclusive siblings
+inside their already-bound directories. Commit unlinks only identities that
+still match. Any pre-commit failure reconstructs the canonical pair from
+anonymous descriptor-bound snapshots through exclusive siblings and atomic
+`renameat`; on macOS, descriptor-based metadata copying preserves ownership,
+mode, ACLs, extended attributes, and safe file flags as well as size-bounded
+data. The helper never runs the old path-based mutating cleanup as root. Its
+fixture covers in-place change during dry-run, symlink substitution, directory
+rebinding, signals, staged-inode mutation/deletion, hardlinks, and successful
+commit, with native ACL/xattr/flag checks when those facilities are present.
+
+Rejected alternatives are a bare executable name, `Get-Command`/PATH lookup,
+PowerShell quoting as the elevation boundary, a root call back into the
+path-based Rust mutation, and shell `cp`/trap rollback. Each either leaves an
+attacker-controlled resolution step or cannot prove restoration after a race.
+Revalidate this decision when the Windows process boundary, MSI scope, managed
+receipt paths, macOS user-home selection, package-script timing, supported
+macOS floor, or preserved metadata set changes.
 
 ### MSRV policy (v3.11.1+, addendum v3.13.1)
 
@@ -2497,7 +2672,14 @@ completion of the named Release workflow provides the required sequencing, and
 
 - **WiX Burn** would let us produce a bundle.exe that wraps the existing MSI. Considered. Rejected because WiX 3 Burn is finicky (Bundle.wxs syntax is non-trivial, the build pipeline through `candle.exe` + `light.exe` differs from the MSI flow), and the `cargo-wix` CLI doesn't directly support Burn bundles. We'd need to drop down to raw WiX 3 tooling. Inno Setup is one `.iss` file per edition and a single `iscc` command.
 - **NSIS** is also viable but its scripting language is less ergonomic than Inno's Pascal-like syntax, and the resulting installers are slightly larger.
-- **Inno Setup** (chosen) is widely used in the Rust CLI ecosystem (gh CLI, deno, bun, uv all use it on Windows). Free, mature, well-documented. The `.iss` files are human-readable and self-contained. The CI install is one `choco install innosetup` line.
+- **Inno Setup** (chosen) is widely used in the Rust CLI ecosystem (gh CLI,
+  deno, bun, uv all use it on Windows). It is free, mature, well-documented,
+  and its `.iss` files are human-readable and self-contained. The original CI
+  used one `choco install innosetup` line; the v4.3 supply-chain contract
+  supersedes that mutable source with `scripts/install-pinned-inno-setup.ps1`,
+  which downloads the official JRSoftware 6.7.3 asset and verifies exact
+  size/SHA-256, GitHub attestation, Pyrsys B.V. Authenticode identity,
+  ProductVersion, absolute ISCC path, and installed ISCC version before use.
 
 **Why two separate Inno Setup .iss files instead of one parameterized.** Inno Setup supports `#define` and `#if` for compile-time conditionals, so a single file with `#define GLOBAL_OR_CORPORATE` would work. Rejected because: (1) the two files differ in enough ways (PrivilegesRequired, DefaultDirName, PATH registry root, AppId, OutputBaseFilename, Code block contents) that the conditional branches would dominate the file; (2) two files is more obvious to readers; (3) the AppIds are forever-distinct, so the files can't truly share an identity anyway. Duplicate-ish code is fine when the products are genuinely separate.
 
@@ -2731,8 +2913,11 @@ that loss is silent and irrecoverable.
 **Fix.** `src/install/mod.rs::atomic_write(path, content)`:
 1. Write to a sibling temp file (`.<filename>.tr300-tmp`) in the same
    parent directory.
-2. `sync_all()` to flush to disk.
-3. `std::fs::rename(temp, target)` — atomic on POSIX, atomic on NTFS
+2. On Unix, capture an existing resolved target's permissions and apply them
+   to the opened sibling before writing any profile bytes. A private `0600`
+   profile must never be replaced by a broader umask-derived mode.
+3. `sync_all()` to flush to disk.
+4. `std::fs::rename(temp, target)` — atomic on POSIX, atomic on NTFS
    within a volume.
 
 The temp file in the same parent dir is load-bearing: NTFS guarantees

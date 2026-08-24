@@ -4,14 +4,25 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-07-18
-**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.2.2
+**Last updated:** 2026-08-24
+**Complete GitHub distribution / crates.io / working manifest:** 4.2.2 / 4.2.2 / 4.3.0
 **Release scope:** MIC-1 managed-install defaults, authoritative fresh-channel
 takeover, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
+
+The active v4.3 campaign remains unreleased. Its code candidate adds battery,
+thermal, and Windows full-mode improvements; its release hardening moves crate
+publication to owner-only protected OIDC and makes GitHub publication a private
+24-asset draft → private 30-asset Windows candidate → exact private Windows
+acceptance proof → macOS-only 34-asset finalization chain. Before release, the
+exact committed SHA still needs hosted CI, the one-time Apple environment-secret
+migration plus native ARM/Intel environment-only preflight and cleanup, and the
+crates.io publisher bootstrap/`trustpub_only` cutover, legacy-token removal,
+bootstrap-code removal, and OIDC-only probe. AMD64 Linux laptop and Raspberry Pi
+physical qualification remain separate open acceptance gates.
 
 The v4.0.1 branch migration/release baseline remains complete: commit
 `41c30b1e43f8abc5208f0d94702ed12cd91fb7a7` passed all 13 hosted CI jobs on
@@ -499,7 +510,8 @@ patch fix-forward.
 - Table output remains 51 display columns unless explicitly redesigned.
 - Do not surface unique device identifiers.
 - Keep `Cargo.toml` `rust-version` and `rust-toolchain.toml` channel in lockstep.
-- Never tag before exact-SHA CI and crates publication settle.
+- Never tag before exact-current-main CI and the explicit owner-only trusted-
+  OIDC crates publication settle.
 - Never publish locally just because registry credentials are available.
 - Windows installer GUIDs and `InstallSource` marker strings are permanent and
   must remain in lockstep across WiX, Inno, updater, and migration code.
@@ -524,3 +536,10 @@ The v4.2.2 release is complete. The v4.2.0 crate/tag and v4.2.1 30-asset
 incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
+
+The v4.3 candidate and release-security campaign are **not complete**. Do not
+tag, publish, update the homepage, or close the release milestone until the
+protected OIDC/Apple cutovers above are complete, the exact source SHA passes
+all hosted gates, the private 30-asset Windows proof succeeds, macOS solely
+publishes the exact 34-asset release, and every post-public smoke/public-byte
+audit is green.

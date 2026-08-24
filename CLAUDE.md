@@ -3,9 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **Companion file:** The canonical architecture decision ledger through
-> 2026-07-18 (single-Rust/product/output semantics, v4 manual-save and
+> 2026-08-24 (single-Rust/product/output semantics, v4 manual-save and
 > origin-preserving update behavior, reusable installer contract, enforced Mac trust, `main` and Actions
-> runtime, toolchain/release policy, Windows accuracy/distribution/
+> runtime, protected release/OIDC custody, toolchain/release policy, Windows accuracy/distribution/
 > consolidation, and install safety) lives in
 > [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — the
 > **why**: context, rejected alternatives, consequences, evidence, revalidation
@@ -249,7 +249,7 @@ skill didn't trigger. Deep rationale for every rule: [`docs/architecture-decisio
 | `wix/**`, `wix-corporate/**`, `inno/**`, `windows-installers.yml`, `release.yml`, `src/update.rs`, `src/migrate.rs` | `windows-distribution-and-update` | the four product GUIDs are PERMANENT; registry `InstallSource` marker strings in lockstep (installer / `update.rs` / JSON); keep SHA256 + post-install verify; preserve both checked-in `release.yml` customizations (legacy aliases + fail-closed Apple trust) |
 | `CHANGELOG.md`, `HUMAN_CHANGELOG.md` | `tr300-changelog` | update both in the **same commit** (strip technical noise from the human mirror) |
 | `Cargo.toml` `rust-version`, `rust-toolchain.toml` | (§ MSRV policy below) | bump both in lockstep; keep `components = ["rustfmt", "clippy"]` |
-| a non-trivial change end-to-end | `tr300-dev-workflow` | follow the 7 phases; never `--no-verify`; tag only after `ci.yml` green + `crates-publish` resolved |
+| a non-trivial change end-to-end | `tr300-dev-workflow` | follow the 7 phases; never bypass Git hooks with `git commit --no-verify`; tag only after `ci.yml` green + `crates-publish` resolved |
 | cutting / shipping a release | `release` | full ordered release procedure + fix-forward loop |
 
 ### Summaries for the high-traffic Windows subsystems
@@ -403,8 +403,10 @@ The canonical cadence for any non-trivial change. **Full detail — each phase's
 
 ## CI
 
-Six GitHub Actions workflows guard release quality and publication (full
-job-by-job detail + local-repro commands: the
+Six persistent GitHub Actions workflows guard release quality and publication;
+`apple-secret-migration.yml` is a temporary seventh workflow that must be
+removed after environment-secret cutover. Full job-by-job detail and local-
+repro commands are in the
 [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md) skill):
 
 - **`ci.yml`** — every push to `main` + every PR: `fmt`, locked
@@ -414,24 +416,36 @@ job-by-job detail + local-repro commands: the
   (5-run median of `tr300 --fast` < 1500 ms), blocking `audit`, and
   `dist-plan`. macOS test/build/speed are hard gates; do not restore the old
   v3.14.5 `continue-on-error` workaround.
-- **`release.yml`** — cargo-dist v0.31.0, tag-triggered (`vX.Y.Z`); 6 targets + shell/PowerShell/MSI installers. Raw cargo-dist scripts are renamed to internal `tr300-dist-installer.*`; public `tr300-installer.*` plus legacy `tr-300-installer.*` are rendered MIC-1 wrappers. It is generated and then intentionally checked in with the wrapper-render, public latest-link normalization, and fail-closed Apple signing/notarization zones. Do not regenerate or edit across those zones without preserving all three and reopening the Mac gate.
-- **`crates-publish.yml`** — after `CI` succeeds on `main`; checks out the exact tested SHA, re-runs gates `--locked`, publishes to crates.io with `CARGO_REGISTRY_TOKEN`.
-- **`windows-installers.yml`** — after the cargo-dist release, builds and signs
-  the Corporate MSI plus both Global/Corporate Inno EXEs.
+- **`release.yml`** — cargo-dist v0.31.0, exact stable-tag-triggered
+  (`vX.Y.Z`); tokenless builders plus fresh checkout-free Apple signers and
+  publisher. It renders the MIC-1 wrappers and creates only a private exact
+  24-asset draft.
+- **`crates-publish.yml`** — explicit owner-only dispatch after exact-main CI.
+  A tokenless Cargo 1.95 validator proves the package bytes; a fresh protected
+  `crates-io` runner executes no package code while a short-lived OIDC token is
+  present, publishes with `--no-verify`, and verifies public hash/provenance.
+- **`windows-installers.yml`** — after the private cargo-dist draft, builds the
+  Corporate MSI plus both Global/Corporate Inno EXEs and adds six exact assets
+  through a fresh checkout-free publisher, producing a private 30-asset draft.
 - **`windows-installer-validation.yml`** — disposable Windows jobs validate
-  every installer/update/uninstall channel and both directions of fresh
-  MSI/Inno takeover.
-- **`macos-installer.yml`** — preflights the Installer identity on native ARM
-  and Intel, then builds, notarizes, installs, verifies, and publishes the
-  universal direct PKG plus compatibility DMG after the cargo-dist release.
+  the exact private 30-asset set before publication, attest fresh installs plus
+  authenticated direct prior-to-candidate transitions/uninstall/takeover while
+  public `latest` remains unchanged, and run the real updater-to-candidate
+  matrix only after finalization.
+- **`macos-installer.yml`** — binds exact Release-run inputs, uses fresh
+  `apple-signing` jobs for credentials, validates native ARM/Intel PKG/DMG
+  lifecycles, consumes the exact Windows acceptance proof, and is the sole fresh
+  publisher that may expose the exact 34-asset stable release.
 
-Workflow sequencing is product logic. In the Mac job, checkout the exact tag
-before downloading signed inputs; checkout cleans untracked workspace files.
-Keep Xcode 16.4 architecture checks input-first as
+Workflow sequencing is product logic. Credentialed and contents-write jobs are
+fresh boundaries: no checkout, repository script, or package/dependency code may
+precede or run with Apple secrets or a Release write token. Uncredentialed prep
+binds fixed artifact IDs/digests, run attempts, repository, tag/current-main
+SHA, and byte inventories. Keep Xcode 16.4 architecture checks input-first as
 `lipo <file> -verify_arch arm64 x86_64` in builder and validator. A second-hop
-`workflow_run` does not retain the original tag in `head_branch`; downstream
-Windows validation must resolve one immutable release from upstream
-`head_sha`, never parse a title or assume tag context is transitive.
+`workflow_run` does not retain transitive tag identity; each resolver peels the
+tag and validates the upstream workflow ID/path/event/repository/SHA/attempt and
+Release target rather than parsing a title or assuming context propagates.
 
 Every workflow job that checks out source uses `actions/checkout@v6` on Node
 24. Keep the branch CI and crates workflow aligned with the release and
@@ -453,20 +467,31 @@ hosted runner exposes a GUI-only defect.
 
 ### Enforced macOS trust path and Alienware freeze
 
-`.github/workflows/release.yml` explicitly runs
-`scripts/sign-notarize-macos.sh` after each Apple `dist build` and before
-cargo-dist Post-build/upload. It imports the Developer ID certificate into an
-ephemeral keychain, resolves the one expected identity there, and signs by its
-certificate fingerprint so a duplicate display name in the login keychain is
-not ambiguous. Because clean runners do not automatically search a newly
-created keychain, the script temporarily prepends only that keychain for the
-signing call and restores the original list immediately and from cleanup. It
-signs `tr300` with identifier `com.qubetx.tr300` plus hardened runtime/timestamp;
-verifies the embedded leaf fingerprint, authority, Team ID, identifier,
-runtime, and timestamp; requires Apple Notary Service `Accepted`; repacks those
-exact bytes; updates the archive sidecar and per-target manifest checksum; then
-removes all decoded credentials. Missing credentials or any Apple failure
-blocks hosting; never add an unsigned fallback.
+`.github/workflows/release.yml` first builds unsigned Apple archives without
+credentials, then passes fixed artifacts to fresh, checkout-free
+`apple-signing` jobs. Inline system-tool logic imports each Developer ID
+certificate into an ephemeral keychain, resolves the exact identity/fingerprint,
+signs `tr300` with identifier `com.qubetx.tr300`, hardened runtime, and timestamp,
+requires Apple Notary Service `Accepted`, verifies the leaf/authority/Team ID,
+repackages the exact bytes, and emits a fixed signed artifact. Missing
+credentials or any Apple failure blocks the private draft; never add an
+unsigned fallback. The package workflow applies the same data-only-prep/fresh-
+secret boundary to its Installer/Application/notary credentials.
+
+All Apple secrets live in the protected `apple-signing` environment. The
+temporary no-checkout `apple-secret-migration.yml` only copies the exact secret
+set and verifies destination names/policy; it does not delete credentials or
+replace native proof. The operator creates a short-lived fine-grained token
+restricted to this repository with `Contents: read`, `Actions: read`, and
+`Environments: write`, then installs it as the `apple-signing` environment secret
+named exactly `RELEASE_SECRET_MIGRATION_TOKEN` by running
+`gh secret set RELEASE_SECRET_MIGRATION_TOKEN --env apple-signing --repo QubeTX/qube-machine-report`
+and supplying the value only at the stdin prompt. After the copy, fresh native
+Apple Silicon and Intel preflights must prove Application/Installer certificate
+import/signing plus read-only notary authentication from environment secrets.
+Only then delete the repository Apple secrets and
+`RELEASE_SECRET_MIGRATION_TOKEN`, rerun the environment-only preflight, and
+remove the migration workflow in a protected follow-up PR.
 
 The cargo-dist archives still contain a bare standalone CLI and therefore use
 Apple acceptance plus `codesign --verify --strict`; a bare-binary
@@ -499,7 +524,12 @@ A physical Mac is optional unless CI exposes a GUI-only defect.
 
 ## Release Process
 
-Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump → doc-set update → `main` push → wait for `ci.yml` green → wait for `crates-publish.yml` → tag push → watch `release.yml` → fix-forward loop — is the [`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md) § "Release checklist" as the canonical 10-file doc list. Load-bearing invariants:
+Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump →
+protected PR → exact-main CI → explicit trusted-OIDC crate publication → tag →
+private 24-asset draft → Windows 30-asset assembly/acceptance → macOS 34-asset
+finalization → public smokes → fix-forward — is the
+[`release`](./.claude/skills/release/SKILL.md) skill, with [`AGENTS.md`](./AGENTS.md)
+§ "Release checklist" as the canonical doc list. Load-bearing invariants:
 
 **Current scope:** Alienware Windows evidence is part of the release line. AMD
 Linux/Pi 4 checks remain open. They never substitute for or waive native
@@ -507,24 +537,35 @@ Apple-Silicon/Intel, package/security, exact-SHA CI/crates, Apple notarization,
 and release-asset gates.
 
 - Bump `Cargo.toml` `version`; update the doc set in lockstep (incl. `HUMAN_CHANGELOG.md` — see the `tr300-changelog` skill).
-- Commit `release: vX.Y.Z - <summary>`; push and wait for `ci.yml` green on that exact commit.
-- Confirm `crates-publish.yml` published (or skipped) from that SHA.
-- **Tag only after `ci.yml` is green AND `crates-publish.yml` has resolved.** Create `git tag vX.Y.Z` and push the single tag explicitly (`git push origin vX.Y.Z`) — **never** `git push --tags`.
-- The tag push triggers `release.yml` (6 targets + installers, internal raw
-  scripts, canonical managed `tr300-installer.*`, and legacy wrapper aliases).
-  Both Apple jobs
-  must sign and receive Notary `Accepted` before hosting; then
-  `windows-installers.yml` and `macos-installer.yml` must finish. The latter
-  requires native Intel and Apple Silicon direct-PKG/DMG-bridge validation.
-  Verify all 34 assets before updating the homepage for v4.2.2.
+- Commit `release: vX.Y.Z - <summary>` on a branch; merge only through the
+  protected PR after all strict checks and review threads resolve.
+- Wait for exact-current-main `ci.yml`, then manually dispatch
+  `crates-publish.yml operation=publish` and require trusted OIDC/public-byte
+  provenance. No push or `workflow_run` automatically publishes a crate.
+- **Tag only after exact-main CI and explicit crates publication are proven.**
+  Create `git tag vX.Y.Z` and push the single tag explicitly — never
+  `git push --tags`.
+- `release.yml` creates a private 24-asset draft. `windows-installers.yml` takes
+  it to 30, private Windows validation attests those exact bytes, and only
+  `macos-installer.yml` may add four native assets and publish the exact 34.
+  Require post-public updater/Linux/macOS smokes before homepage/final closure.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
-workflow use `cargo publish --locked`. `allow-dirty = ["ci", "msi"]` is
+workflow use locked Cargo publication. The fresh OIDC runner executes no
+package code while credentialed: tokenless validation has already built the
+normalized package, and authenticated Cargo uses `--no-verify` only after
+reproducing the exact expected bytes in an empty/config-free boundary. The
+crate must enforce `trustpub_only=true`. The one-time bootstrap uses the legacy
+token only to create the exact publisher tuple, prove OIDC, and enable that
+flag; then UI-revoke the token, delete the GitHub secret, remove bootstrap code
+in a protected follow-up, and run the explicit OIDC-only probe.
+
+`allow-dirty = ["ci", "msi"]` is
 intentional for the checked-in release customization and WiX source. After
 changing `[workspace.metadata.dist]`, regenerate with `dist init` (the binary is
 `dist`, not `cargo dist`) and preserve the legacy installer-alias step, the
-  managed-wrapper rendering, public latest-link release-note normalization,
-  and the fail-closed Apple signing/notarization step.
+managed-wrapper rendering, private-draft publisher, exact artifact custody, and
+fresh Apple signing/notarization boundaries.
 
 ## HUMAN_CHANGELOG.md (companion changelog)
 

@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Privileged supplemental release workflows now bind every build to one
+  trusted stable release commit.** Automatic Windows and macOS packaging runs
+  require a successful same-repository tag push, resolve lightweight and
+  annotated tags to a commit, and require the GitHub Release target and
+  upstream workflow SHA to match before checkout, Apple credential use, or
+  release writes. Manual tagged recovery uses the same binding; executable
+  fixtures exercise the checked-in resolver blocks against fork, event, tag,
+  API-failure, and SHA-mismatch cases.
+- **A stable GitHub Release remains private until Windows installer acceptance
+  proves the exact candidate bytes.** The release host creates a fixed 24-asset
+  draft, the isolated Windows publisher raises it to 30, and the Windows matrix
+  consumes one immutable snapshot that binds every Release asset ID, size, and
+  digest to the exact Windows builder artifact. Only the isolated macOS
+  finalizer can add the four Apple assets and publish, and only after it
+  revalidates the successful Windows validation run, attempt, proof artifact,
+  current protected `main`, tag, CI, and all 30 accepted bytes. The real public
+  updater matrix runs only after publication.
+- **Crates.io publication now uses explicit protected-environment OIDC instead
+  of exposing a long-lived token to a build runner.** Owner-authorized manual
+  publication first performs locked/default-verifying package checks without
+  credentials. A fresh runner rejects unsafe source/config/archive shapes,
+  deterministically matches the candidate crate, and mints a short-lived token
+  only for the absolute `cargo publish --no-verify` command; tokenless
+  adjudication requires crates.io checksum and trusted-publisher provenance for
+  the exact repository, run, and source SHA. A one-time bootstrap enables
+  `trustpub_only`; its legacy secret and bootstrap path must then be removed.
+- **Apple release credentials move behind a protected environment and fresh
+  no-checkout runners.** The one-time migration copies only the exact secret
+  inventory; native Apple Silicon and Intel preflights must then prove both
+  Developer ID identities plus read-only notary authentication before the
+  repository copies and migration token are deleted. Release signing jobs use
+  only the `apple-signing` environment and fixed data artifacts, never a source
+  checkout or repository script while credentials are present.
+- **Windows release builds use one pinned official Inno Setup toolchain.** CI
+  and the installer builder share `install-pinned-inno-setup.ps1`, which fetches
+  JRSoftware 6.7.3 and requires its exact size/SHA-256, GitHub attestation,
+  valid Pyrsys B.V. Authenticode signature, ProductVersion, absolute ISCC path,
+  and installed compiler version. Chocolatey is no longer a trusted installer
+  source.
+- **Atomic Unix shell-profile updates preserve an existing file's privacy
+  mode.** A profile intentionally restricted to its owner is copied to a
+  same-mode temporary file before any content is written, so replacement can
+  no longer widen a private profile to the process's ordinary create mode.
+- **Privileged Windows package launches no longer trust the current directory
+  or `PATH`.** The updater, managed PowerShell takeover, Inno MSI bridge, and
+  hosted transition fixtures resolve the OS-owned absolute
+  `System32\msiexec.exe` and pin its working directory to `System32`. The UAC
+  worker and Inno installers/uninstallers likewise run from their validated
+  executable parent or private staging directory. Existing Global elevation
+  and Corporate user-scope behavior remains intact; regression tests plant
+  hostile executable names and caller directories and verify the actual
+  process boundaries.
+- **Native macOS package takeover now restores prior managed state through
+  descriptor-bound transactions.** The PKG rejects symlinked, multiply linked,
+  malformed, or concurrently changed managed files; snapshots the exact pair
+  through open descriptors; and stages, commits, or restores only inside the
+  already-bound user-owned directories. Anonymous backups preserve bounded
+  data plus macOS ACLs, extended attributes, ownership, modes, and safe flags,
+  including when staged names are modified or deleted before rollback.
+
 ## [4.2.2] - 2026-07-18
 
 ### Fixed
