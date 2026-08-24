@@ -248,31 +248,61 @@ expect_transaction_failure() {
 }
 
 assert_prior_state_restored() {
-    [ -f "$binary" ]
-    [ ! -L "$binary" ]
-    [ -f "$receipt" ]
-    [ ! -L "$receipt" ]
-    [ "$(digest_file "$binary")" = "$original_binary" ]
-    [ "$(digest_file "$receipt")" = "$original_receipt" ]
-    [ "$(file_mode "$binary")" = 751 ]
-    [ "$(file_mode "$receipt")" = 640 ]
-    [ "$(file_uid "$binary")" = "$original_binary_uid" ]
-    [ "$(file_gid "$binary")" = "$original_binary_gid" ]
-    [ "$(file_uid "$receipt")" = "$original_receipt_uid" ]
-    [ "$(file_gid "$receipt")" = "$original_receipt_gid" ]
+    [ -f "$binary" ] || {
+        echo 'rollback did not restore the managed binary as a regular file' >&2
+        return 1
+    }
+    [ ! -L "$binary" ] || {
+        echo 'rollback restored the managed binary as a symlink' >&2
+        return 1
+    }
+    [ -f "$receipt" ] || {
+        echo 'rollback did not restore the managed receipt as a regular file' >&2
+        return 1
+    }
+    [ ! -L "$receipt" ] || {
+        echo 'rollback restored the managed receipt as a symlink' >&2
+        return 1
+    }
+    assert_restored_value() {
+        if [ "$1" != "$2" ]; then
+            echo "rollback did not restore expected ${3}" >&2
+            return 1
+        fi
+    }
+    assert_restored_value "$(digest_file "$binary")" \
+        "$original_binary" 'binary bytes'
+    assert_restored_value "$(digest_file "$receipt")" \
+        "$original_receipt" 'receipt bytes'
+    assert_restored_value "$(file_mode "$binary")" 751 'binary mode'
+    assert_restored_value "$(file_mode "$receipt")" 640 'receipt mode'
+    assert_restored_value "$(file_uid "$binary")" \
+        "$original_binary_uid" 'binary UID'
+    assert_restored_value "$(file_gid "$binary")" \
+        "$original_binary_gid" 'binary GID'
+    assert_restored_value "$(file_uid "$receipt")" \
+        "$original_receipt_uid" 'receipt UID'
+    assert_restored_value "$(file_gid "$receipt")" \
+        "$original_receipt_gid" 'receipt GID'
     if [ "$has_xattr" -eq 1 ]; then
-        [ "$(xattr -p com.qubetx.tr300.rollback-test "$binary")" = \
-            "$binary_xattr" ]
-        [ "$(xattr -p com.qubetx.tr300.rollback-test "$receipt")" = \
-            "$receipt_xattr" ]
+        assert_restored_value \
+            "$(xattr -p com.qubetx.tr300.rollback-test "$binary")" \
+            "$binary_xattr" 'binary extended attribute'
+        assert_restored_value \
+            "$(xattr -p com.qubetx.tr300.rollback-test "$receipt")" \
+            "$receipt_xattr" 'receipt extended attribute'
     fi
     if [ "$has_acl" -eq 1 ]; then
-        [ "$(acl_entries "$binary")" = "$binary_acl" ]
-        [ "$(acl_entries "$receipt")" = "$receipt_acl" ]
+        assert_restored_value "$(acl_entries "$binary")" \
+            "$binary_acl" 'binary ACL'
+        assert_restored_value "$(acl_entries "$receipt")" \
+            "$receipt_acl" 'receipt ACL'
     fi
     if [ "$has_flags" -eq 1 ]; then
-        [ "$(stat -f '%Sf' "$binary")" = "$binary_flags" ]
-        [ "$(stat -f '%Sf' "$receipt")" = "$receipt_flags" ]
+        assert_restored_value "$(stat -f '%Sf' "$binary")" \
+            "$binary_flags" 'binary flags'
+        assert_restored_value "$(stat -f '%Sf' "$receipt")" \
+            "$receipt_flags" 'receipt flags'
     fi
 }
 
@@ -515,25 +545,58 @@ POSTINSTALL
         --install-location "$native_install_root" "$native_pkg"
     rm -f "$cleanup_marker"
     set +e
-    sudo -n installer -pkg "$native_pkg" -target /
+    sudo -n installer -dumplog -verboseR -pkg "$native_pkg" -target /
     native_status=$?
     set -e
     if [ "$native_status" -eq 0 ]; then
         echo 'native postinstall failure fixture unexpectedly committed' >&2
         exit 1
     fi
-    [ "$(sed -n '1p' "$cleanup_marker")" = 'strict-dry-run' ]
-    [ "$(sed -n '2p' "$cleanup_marker")" = 'strict-dry-run' ]
-    [ "$(sed -n '3p' "$cleanup_marker")" = 'test-hook' ]
-    [ "$(stat -f '%u' "$cleanup_marker")" = "$(id -u)" ]
-    [ "$(cat "$native_state_evidence")" = '0:600:1' ]
-    ! grep -Fq 'MUTATING-CLEANUP-INVOKED' "$cleanup_marker" || exit 1
+    if [ ! -f "$cleanup_marker" ]; then
+        echo 'native PKG fixture did not create the cleanup marker' >&2
+        exit 1
+    fi
+    for marker_expectation in \
+        '1:strict-dry-run' '2:strict-dry-run' '3:test-hook'; do
+        marker_line=${marker_expectation%%:*}
+        expected_marker=${marker_expectation#*:}
+        actual_marker=$(sed -n "${marker_line}p" "$cleanup_marker")
+        if [ "$actual_marker" != "$expected_marker" ]; then
+            echo "native PKG cleanup marker line ${marker_line}: expected ${expected_marker}, got ${actual_marker:-<empty>}" >&2
+            sed -n '1,8p' "$cleanup_marker" >&2
+            exit 1
+        fi
+    done
+    if [ "$(stat -f '%u' "$cleanup_marker")" != "$(id -u)" ]; then
+        echo 'native PKG cleanup probe did not run as the target user' >&2
+        stat -f 'marker uid=%u mode=%Lp links=%l' "$cleanup_marker" >&2
+        exit 1
+    fi
+    if [ ! -f "$native_state_evidence" ]; then
+        echo 'native PKG postinstall did not record preflight-state metadata' >&2
+        exit 1
+    fi
+    if [ "$(cat "$native_state_evidence")" != '0:600:1' ]; then
+        echo 'native PKG preflight state did not remain root-owned, private, and singly linked' >&2
+        sed -n '1p' "$native_state_evidence" >&2
+        exit 1
+    fi
+    if grep -Fq 'MUTATING-CLEANUP-INVOKED' "$cleanup_marker"; then
+        echo 'native PKG fixture invoked mutating cleanup after a failed dry-run' >&2
+        exit 1
+    fi
+    echo 'native PKG marker and preflight-state assertions passed'
     assert_prior_state_restored
-    [ ! -e "${native_install_root}/payload-marker" ]
+    echo 'native PKG managed-state restoration assertions passed'
+    if [ -e "${native_install_root}/payload-marker" ]; then
+        echo 'failed native fixture left its payload behind' >&2
+        exit 1
+    fi
     if pkgutil --pkg-info "$native_identifier" >/dev/null 2>&1; then
         echo 'failed native fixture left an Installer receipt behind' >&2
         exit 1
     fi
+    echo 'native PKG payload and receipt rollback assertions passed'
 fi
 
 # A symlink at snapshot time is not a managed file identity and must fail
