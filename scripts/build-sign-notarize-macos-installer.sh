@@ -17,6 +17,7 @@ version=${1#v}
 arm_archive=$2
 x86_archive=$3
 output_dir=$4
+script_source_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 
 required_vars=(
     APPLE_CERTIFICATE_P12_BASE64
@@ -173,11 +174,27 @@ install -m 755 "$universal" "${payload}/usr/local/bin/tr300"
 pkg_scripts="${work_dir}/pkg-scripts"
 mkdir -m 755 "$pkg_scripts"
 install -m 755 "$universal" "${pkg_scripts}/tr300-migration-probe"
+rollback_helper="${pkg_scripts}/tr300-pkg-rollback"
+xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
+    -mmacosx-version-min=11.0 -arch arm64 -arch x86_64 \
+    "${script_source_dir}/macos-pkg-rollback.c" -o "$rollback_helper"
+chmod 755 "$rollback_helper"
+lipo "$rollback_helper" -verify_arch arm64 x86_64
+codesign --force --identifier com.qubetx.tr300.pkg-rollback \
+    --options runtime --timestamp --keychain "$keychain" \
+    --sign "$APPLE_SIGNING_IDENTITY" "$rollback_helper"
+codesign --verify --strict --verbose=4 "$rollback_helper"
+rollback_details=$(codesign -d --verbose=4 "$rollback_helper" 2>&1)
+grep -Fqx 'Identifier=com.qubetx.tr300.pkg-rollback' <<< "$rollback_details"
+grep -Fqx "TeamIdentifier=${APPLE_TEAM_ID}" <<< "$rollback_details"
+grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$rollback_details"
+grep -Eq '^Timestamp=.+' <<< "$rollback_details"
 cat > "${pkg_scripts}/preinstall" <<'PREINSTALL'
 #!/bin/sh
 # Fail closed before Installer lays down the PKG payload when an existing
 # managed-shell/Cargo owner cannot be proven safe to converge. The embedded
-# probe is the exact signed universal binary that the package will install.
+# probe is the exact signed universal binary that the package will install;
+# the helper binds and privately copies it before dropping to the home owner.
 set -u
 
 console_user=$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)
@@ -188,8 +205,10 @@ case "$console_user" in
         else
             candidates=''
             for home in /Users/*; do
-                if [ ! -e "${home}/.cargo/bin/tr300" ] && \
-                    [ ! -e "${home}/.config/tr300/tr300-receipt.json" ]; then
+                if { [ ! -e "${home}/.cargo/bin/tr300" ] && \
+                    [ ! -L "${home}/.cargo/bin/tr300" ]; } && \
+                    { [ ! -e "${home}/.config/tr300/tr300-receipt.json" ] && \
+                    [ ! -L "${home}/.config/tr300/tr300-receipt.json" ]; }; then
                     continue
                 fi
                 candidates="${candidates}${home}\n"
@@ -217,8 +236,9 @@ fi
 
 script_dir=$(/usr/bin/dirname -- "$0") || exit 1
 script_dir=$(unset CDPATH; cd -- "$script_dir" && pwd -P) || exit 1
-"${script_dir}/tr300-migration-probe" migrate-cleanup --quiet --strict --dry-run \
-    --cargo-copy --user-profile "$user_home"
+preflight_state="${script_dir}/tr300-preflight-state"
+"${script_dir}/tr300-pkg-rollback" check "$user_home" \
+    "${script_dir}/tr300-migration-probe" "$preflight_state"
 PREINSTALL
 chmod 755 "${pkg_scripts}/preinstall"
 cat > "${pkg_scripts}/postinstall" <<'POSTINSTALL'
@@ -241,8 +261,10 @@ case "$console_user" in
             # multiple user owners are ambiguous and must fail the package.
             candidates=''
             for home in /Users/*; do
-                if [ ! -e "${home}/.cargo/bin/tr300" ] && \
-                    [ ! -e "${home}/.config/tr300/tr300-receipt.json" ]; then
+                if { [ ! -e "${home}/.cargo/bin/tr300" ] && \
+                    [ ! -L "${home}/.cargo/bin/tr300" ]; } && \
+                    { [ ! -e "${home}/.config/tr300/tr300-receipt.json" ] && \
+                    [ ! -L "${home}/.config/tr300/tr300-receipt.json" ]; }; then
                     continue
                 fi
                 candidates="${candidates}${home}\n"
@@ -264,54 +286,14 @@ if [ -z "${user_home:-}" ]; then
         | /usr/bin/awk '{print $2}')
 fi
 if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
-    echo "TR-300: could not resolve the active user's home; preserving any CLI install." >&2
-    exit 0
-fi
-
-managed_binary="${user_home}/.cargo/bin/tr300"
-managed_receipt="${user_home}/.config/tr300/tr300-receipt.json"
-rollback_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/tr300-pkg-takeover.XXXXXXXX") || exit 1
-managed_binary_existed=0
-managed_receipt_existed=0
-takeover_committed=0
-# Invoked indirectly by the EXIT/HUP/INT/TERM trap below.
-# ShellCheck versions classify that indirection as SC2317 or SC2329.
-# shellcheck disable=SC2317,SC2329
-rollback_managed() {
-    if [ "$takeover_committed" -eq 0 ]; then
-        if [ "$managed_binary_existed" -eq 1 ]; then
-            /bin/mkdir -p "$(/usr/bin/dirname "$managed_binary")"
-            /bin/cp -p "$rollback_dir/tr300" "$managed_binary" || true
-        fi
-        if [ "$managed_receipt_existed" -eq 1 ]; then
-            /bin/mkdir -p "$(/usr/bin/dirname "$managed_receipt")"
-            /bin/cp -p "$rollback_dir/tr300-receipt.json" "$managed_receipt" || true
-        fi
-    fi
-    /bin/rm -rf "$rollback_dir"
-    takeover_committed=1
-}
-trap rollback_managed EXIT HUP INT TERM
-if [ -f "$managed_binary" ]; then
-    /bin/cp -p "$managed_binary" "$rollback_dir/tr300" || exit 1
-    managed_binary_existed=1
-fi
-if [ -f "$managed_receipt" ]; then
-    /bin/cp -p "$managed_receipt" "$rollback_dir/tr300-receipt.json" || exit 1
-    managed_receipt_existed=1
-fi
-
-/usr/local/bin/tr300 migrate-cleanup --quiet --strict --cargo-copy --user-profile "$user_home"
-if [ -e "$managed_binary" ]; then
-    echo "TR-300: the prior Cargo-path copy could not be removed; PKG takeover is incomplete." >&2
+    echo "TR-300: the active user's home changed after preflight; preserving any CLI install and failing PKG takeover." >&2
     exit 1
 fi
-if [ -e "$managed_receipt" ]; then
-    echo "TR-300: the matching managed-installer receipt could not be removed; PKG takeover is incomplete." >&2
-    exit 1
-fi
-takeover_committed=1
-exit 0
+
+script_dir=$(/usr/bin/dirname -- "$0") || exit 1
+script_dir=$(unset CDPATH; cd -- "$script_dir" && pwd -P) || exit 1
+preflight_state="${script_dir}/tr300-preflight-state"
+"${script_dir}/tr300-pkg-rollback" run "$user_home" "$preflight_state"
 POSTINSTALL
 chmod 755 "${pkg_scripts}/postinstall"
 pkg="${work_dir}/tr300.pkg"
