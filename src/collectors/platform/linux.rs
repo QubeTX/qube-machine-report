@@ -499,8 +499,10 @@ fn get_battery() -> Option<String> {
 ///   could admit this class of supply as a bogus laptop-style BATTERY row on a
 ///   headless SBC; the exact source of the historical report remains unproven.
 /// - Capacity-only gauges with no measurement file (voltage/current/power)
-///   report floating register junk; real packs and UPS HATs always expose at
-///   least one live `*_now` or `*_avg` measurement attribute.
+///   are rejected by this conservative policy because the percentage cannot
+///   be corroborated. Linux drivers may omit unsupported attributes, so this
+///   can intentionally hide a legitimate capacity-only pack until physical
+///   hardware evidence supports a narrower rule.
 /// - `capacity` is cross-checked against available energy/charge live/full
 ///   pairs so a stale percentage cannot masquerade as a live reading.
 /// - `read_dir` order is unspecified; candidates are sorted with `BAT*`
@@ -1309,8 +1311,9 @@ mod tests {
             "BAT0",
             &[BATTERY_TYPE, ("capacity", "30\n"), ("status", "Unknown\n")],
         );
-        // Capacity-only nodes are how phantom/floating gauges masquerade as
-        // real packs.
+        // A capacity-only percentage is not enough evidence to distinguish a
+        // system pack from a phantom/floating gauge under the conservative
+        // selection policy.
         assert_eq!(get_battery_in(dir.path()), None);
     }
 

@@ -564,7 +564,7 @@ fn gpu_temp_timeout(mode: CollectMode) -> CommandTimeout {
 fn parse_nvidia_smi_temp(stdout: &str) -> Option<f64> {
     stdout
         .lines()
-        .filter_map(|line| line.split(',').next()?.trim().parse::<f64>().ok())
+        .filter_map(|line| line.trim().parse::<f64>().ok())
         .filter(|value| value.is_finite() && (-20.0..150.0).contains(value))
         .max_by(f64::total_cmp)
 }
@@ -2421,6 +2421,7 @@ mod thermal_tests {
         );
         assert_eq!(parse_nvidia_smi_temp(""), None);
         assert_eq!(parse_nvidia_smi_temp("not-a-number\n"), None);
+        assert_eq!(parse_nvidia_smi_temp("48, ignored\n"), None);
     }
 
     #[test]
