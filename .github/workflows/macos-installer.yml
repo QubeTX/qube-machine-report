@@ -1823,6 +1823,7 @@ jobs:
           custom_fixture_home=''
           custom_fixture_receipt=''
           custom_fixture_plist="$RUNNER_TEMP/tr300-signed-pkg-custom-user.plist"
+          signed_preinstall="$RUNNER_TEMP/tr300-direct-pkg-preinstall"
 
           release_asset_record() {
             local release_json=$1
@@ -1855,7 +1856,7 @@ jobs:
               sudo /usr/bin/dscl . -delete "/Users/$custom_fixture_user" \
                 >/dev/null 2>&1 || true
             fi
-            rm -f "$custom_fixture_plist"
+            rm -f "$custom_fixture_plist" "$signed_preinstall"
             if [ -n "$custom_fixture_home" ]; then
               case "$custom_fixture_home" in
                 "/private/tmp/tr300 signed pkg custom home."*)
@@ -1933,6 +1934,10 @@ jobs:
           test -f "$expanded_pkg/Scripts/preinstall"
           test ! -L "$expanded_pkg/Scripts/preinstall"
           test -x "$expanded_pkg/Scripts/preinstall"
+          test ! -e "$signed_preinstall"
+          test ! -L "$signed_preinstall"
+          install -m 0500 "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"
+          cmp "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"
           for forbidden_package_script in \
             postinstall tr300-pkg-rollback tr300-migration-probe; do
             test ! -e "$expanded_pkg/Scripts/$forbidden_package_script"
@@ -2073,18 +2078,34 @@ jobs:
           baseline_managed_hash=$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')
           baseline_managed_receipt_hash=$(shasum -a 256 "$managed_receipt" | awk '{print $1}')
           managed_conflict_log="$RUNNER_TEMP/tr300-v422-managed-pkg-conflict.log"
+
+          # Hosted PackageKit reduces preinstall stderr to a generic script-failure
+          # record. First run the byte-identical script extracted from the signed
+          # package to bind the expected reason to this exact managed state.
+          # The unprivileged runner shell intentionally owns this diagnostic log.
+          # shellcheck disable=SC2024
+          if sudo /bin/sh "$signed_preinstall" package-path / / \
+            > "$managed_conflict_log" 2>&1; then
+            echo 'managed ownership was incorrectly accepted by the signed preinstall' >&2
+            exit 1
+          fi
+          grep -Fq 'Rerun the managed installer to refresh this copy to a receipt-aware version' \
+            "$managed_conflict_log"
+
+          # Then require PackageKit itself to attribute its rejection to the
+          # preinstall script while preserving every ownership invariant below.
           set +e
           # The unprivileged runner shell intentionally owns this diagnostic log.
           # shellcheck disable=SC2024
-          sudo installer -pkg "$pkg" -target / > "$managed_conflict_log" 2>&1
+          sudo installer -pkg "$pkg" -target / -dumplog >> "$managed_conflict_log" 2>&1
           managed_conflict_status=$?
           set -e
           if [ "$managed_conflict_status" -eq 0 ]; then
             echo 'managed ownership was incorrectly accepted by the direct PKG' >&2
             exit 1
           fi
-          grep -Fq 'Rerun the managed installer to refresh this copy to a receipt-aware version' \
-            "$managed_conflict_log"
+          grep -Fq 'PKInstallErrorDomain Code=112' "$managed_conflict_log"
+          grep -Fq 'NSFilePath=./preinstall' "$managed_conflict_log"
           if [ "$(shasum -a 256 "$HOME/.cargo/bin/tr300" | awk '{print $1}')" != "$baseline_managed_hash" ]; then
             echo 'rejected package changed the managed binary' >&2
             exit 1
