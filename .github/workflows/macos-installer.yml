@@ -817,6 +817,7 @@ jobs:
           python3 - upstream "$work_directory" <<'PY'
           import os
           import shutil
+          import stat
           import sys
           import tarfile
           from pathlib import Path, PurePosixPath
@@ -845,11 +846,19 @@ jobs:
                       if pure.is_absolute() or ".." in pure.parts or member.issym() or member.islnk():
                           raise SystemExit(f"unsafe archive member: {member.name!r}")
                       if member.isdir():
-                          if member.name != root or member.mode != 0o755:
+                          if (
+                              member.name != root
+                              or member.mode not in (0o755, stat.S_IFDIR | 0o755)
+                          ):
                               raise SystemExit("unexpected archive directory metadata")
                           continue
                       expected_mode = 0o755 if member.name == f"{root}/tr300" else 0o644
-                      if not member.isfile() or member.size <= 0 or member.mode != expected_mode:
+                      if (
+                          not member.isfile()
+                          or member.size <= 0
+                          or member.mode
+                          not in (expected_mode, stat.S_IFREG | expected_mode)
+                      ):
                           raise SystemExit(f"unexpected archive file metadata: {member.name!r}")
                       if member.name != f"{root}/tr300":
                           continue

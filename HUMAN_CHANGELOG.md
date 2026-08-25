@@ -13,12 +13,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.4] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.3 remains available as an immutable crate, while
+  v4.3.4 is the next complete downloadable release candidate.
+
+### Fixed
+- **Mac packaging now understands the safe file-mode form emitted by its pinned
+  archive tool.** The workflow accepts the tool's matching file-type markers
+  with the expected permissions, while still rejecting links, type confusion,
+  special permissions, unexpected files, unsafe paths, and oversized archives.
+  Tests reproduce both the real packaging-tool bytes and the portable
+  permission-only form.
+
+### Security
+- **Version 4.3.3 stopped safely before Mac signing or any partial download
+  release.** Its crate and tag stay untouched. Version 4.3.4 fixes forward
+  through the same automatic review, `main`, signing, and publication chain.
+
 ## [4.3.3] - 2026-08-25
 
 ### Changed
 - **This is a packaging-only repair; the report itself is unchanged from the
-  v4.3 line.** Version 4.3.2 remains available as an immutable crate, while
-  v4.3.3 is the next complete downloadable release candidate.
+  v4.3 line.** Version 4.3.2 remains available as an immutable crate. Version
+  4.3.3 reached crates.io, but its downloadable-release run stopped safely;
+  v4.3.4 is the next complete-download candidate.
 
 ### Fixed
 - **The release system now understands the exact checksum files produced by

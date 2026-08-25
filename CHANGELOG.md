@@ -7,12 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.4] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.3 crate and tag remain published; v4.3.4 is the
+  next candidate for the complete cross-platform GitHub download release.
+
+### Fixed
+- **Apple archive staging now accepts cargo-dist's exact safe Unix mode
+  encoding.** The pinned producer stores matching POSIX file-type bits together
+  with `0755`/`0644` permissions. Both the fresh signer and downstream universal
+  installer preparation accept only that representation or the equivalent
+  permission-only form, while continuing to reject mismatched types, special
+  permission bits, links, traversal, unexpected members, and oversized output.
+  Extracted-workflow fixtures reproduce the real raw tar headers and exercise
+  both accepted forms plus type-confusion and setuid rejection.
+
+### Security
+- **The failed v4.3.3 tag stopped before credential use or partial release
+  creation.** Exact-main CI, trusted-OIDC crates publication, native preflight,
+  and all six tagged platform builds succeeded. Both Apple signers then rejected
+  the safe producer mode encoding before signing or notarization. No GitHub
+  draft exists for v4.3.3, and its immutable tag is not moved or reused.
+
 ## [4.3.3] - 2026-08-25
 
 ### Changed
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
-  behavior.** The immutable v4.3.2 crate and tag remain published; v4.3.3 is the
-  next candidate for the complete cross-platform GitHub download release.
+  behavior.** The immutable v4.3.2 crate and tag remain published. v4.3.3
+  reached crates.io, but its tagged GitHub packaging run failed closed before
+  credential use; v4.3.4 is the next complete-download candidate.
 
 ### Fixed
 - **Release custody now models cargo-dist 0.31.0 checksum bytes exactly.** Raw

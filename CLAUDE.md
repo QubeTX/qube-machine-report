@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete GitHub distribution: **4.2.2**. Current crates.io package: **4.3.2**.
-The working fix-forward manifest is **4.3.3**. PR #14 merged as
+Complete GitHub distribution: **4.2.2**. Current crates.io package: **4.3.3**.
+The working fix-forward manifest is **4.3.4**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -70,8 +70,13 @@ Apple signers encountered Bash-4-only syntax under macOS system Bash 3.2. PR
 automatic OIDC run `32809616807`, and native preflight `32810343902` passed.
 Tagged Release `32810420213` built all targets, then both Apple signers rejected
 cargo-dist's valid two-LF raw checksum form before credential use or draft.
-None of the three failed tags has a GitHub draft; all stay immutable. v4.2.2 remains the
-complete GitHub-distribution boundary until reviewed v4.3.3 passes the normal
+PR #20 corrected that contract and merged as `cf1ac838`; exact-main CI
+`32814328977`, automatic OIDC run `32814329178`, and native preflight
+`32815263338` passed. Tagged Release `32815338720` built all six targets, then
+both Apple signers rejected cargo-dist's safe full POSIX mode encoding before
+credential use. None of the four failed tags has a GitHub draft; all stay
+immutable. v4.2.2 remains the complete GitHub-distribution boundary until
+reviewed v4.3.4 passes the normal
 automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
@@ -617,8 +622,8 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.3 chain completes, v4.2.2 remains the complete GitHub
-  distribution. The v4.3.0, v4.3.1, and v4.3.2 crates/tags stay published and
+- Until the v4.3.4 chain completes, v4.2.2 remains the complete GitHub
+  distribution. The v4.3.0 through v4.3.3 crates/tags stay published and
   immutable, but none has a GitHub Release. Native Apple workflow blocks must parse
   under system `/bin/bash` 3.2; both Mac CI legs syntax-check the affected jobs
   and execute the exact checkout-free signer-staging block before tagging.
