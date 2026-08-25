@@ -1915,7 +1915,8 @@ build-job hardening. Both publishers skipped; the draft stayed private at
 exactly 24 assets and nothing became public. v4.3.9 fixes forward without
 moving that tag: the Apple producer and consumer enforce one six-file contract,
 and read-only `github.token` is restored only where the pinned Inno attestation
-check requires it. No checked-out build job receives Release mutation access.
+check requires it, then removed and verified absent before the third-party
+installer launch. No checked-out build job receives Release mutation access.
 
 Privileged supplemental workflows accept automatic input only from the exact
 successful same-repository run named in their contract. They resolve lightweight

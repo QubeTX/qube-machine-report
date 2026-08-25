@@ -95,9 +95,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   fresh no-checkout jobs while keeping every checked-out builder and candidate
   execution job read-only. v4.3.9 reconciles the downstream Apple consumer
   with the freezer's six-file inventory and restores read-only `github.token`
-  only to the Windows Inno attestation step. The automated PR-to-public chain and its
-  least-privilege boundaries remain intact. AMD64 Linux laptop and Raspberry Pi
-  physical acceptance remain open.
+  only to the Windows Inno attestation step, then removes and verifies removal
+  of `GH_TOKEN` before launching the third-party installer. The automated
+  PR-to-public chain and its least-privilege boundaries remain intact. AMD64
+  Linux laptop and Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
 - Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel

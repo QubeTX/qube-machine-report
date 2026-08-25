@@ -79,7 +79,15 @@ if (-not (Test-Path -LiteralPath $ghPath -PathType Leaf)) {
     throw 'the GitHub CLI executable is unavailable'
 }
 & $ghPath release verify-asset $releaseTag $installer --repo $releaseRepository --format json | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$verificationExitCode = $LASTEXITCODE
+
+# The official installer is third-party code and must not inherit the token
+# needed only by GitHub CLI for the release-attestation check above.
+Remove-Item -LiteralPath Env:GH_TOKEN -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath Env:GH_TOKEN) {
+    throw 'could not remove GitHub authorization before launching Inno Setup'
+}
+if ($verificationExitCode -ne 0) {
     throw 'GitHub release attestation verification failed for Inno Setup'
 }
 

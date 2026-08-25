@@ -16,8 +16,9 @@ intentional six-file set (`tr300-installer.sh`, `tr300-dist-installer.sh`, two
 signed Apple archives, and their two checksum sidecars), while the preparation
 consumer still required the obsolete four-file archive-only set. v4.3.9 is
 also scoped to restore the read-only `github.token` only to the Windows step
-whose pinned Inno Setup verification invokes `gh release verify-asset`; no
-checked-out build job gains Release mutation access. Review,
+whose pinned Inno Setup verification invokes `gh release verify-asset`, then
+remove and verify removal of `GH_TOKEN` before the third-party installer is
+launched; no checked-out build job gains Release mutation access. Review,
 exact-main CI/OIDC, native preflight, a new immutable tag, the complete private
 24-to-30-to-validated-to-34 chain, public-byte audit, smokes, deployment, and
 physical AMD64 Linux/Raspberry Pi evidence all remain open.
@@ -31,12 +32,14 @@ structural actionlint; standalone ShellCheck including the extracted exact PKG
 Git Bash, PowerShell 7, and Windows PowerShell; Apple staging compatibility;
 and the full executable release-provenance suite passed. Negative provenance
 mutations rejected Apple producer/consumer drift plus missing, job-scoped,
-workflow-scoped, duplicated, or substituted Windows authorization. Live
-v4.3.9 full/fast table, JSON, and ASCII smokes passed: Windows CPU temperature
+workflow-scoped, duplicated, substituted, or post-verification inherited
+Windows authorization. Live v4.3.9 full/fast table, JSON, and ASCII smokes
+passed: Windows CPU temperature
 remained `null`, and the report's 52 C NVIDIA value was consistent with the
-direct 53 C reading. Independent review found no blocking issue after factual
-ledger wording and the workflow-level token regression were corrected. These
-local results do not satisfy the still-open hosted/native/public gates above.
+direct 53 C reading. Independent review corrected factual ledger and token-
+scope claims, then exposed the child-process token inheritance repaired by the
+scrub/order regression. Final exact-head review and hosted/native/public gates
+remain open; these local results do not satisfy them.
 
 ### v4.3.8 — Published crate; exact private draft, failed Apple input inventory
 

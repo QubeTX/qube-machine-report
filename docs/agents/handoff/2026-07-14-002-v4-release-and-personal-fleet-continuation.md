@@ -173,8 +173,9 @@ stayed private at exactly 24 assets and nothing became public.
 The supported path is now v4.3.9 through the normal reviewed no-click
 automation on `codex/v4.3.9-apple-custody-inventory`. Reconcile the Apple
 consumer with the trusted six-file inventory and restore read-only
-`github.token` only to the Inno attestation step, while preserving read-only
-builders, numeric release-ID binding, and every draft/asset invariant. After
+`github.token` only to the Inno attestation step, then remove and verify removal
+of `GH_TOKEN` before launching the third-party installer, while preserving
+read-only builders, numeric release-ID binding, and every draft/asset invariant. After
 exact-main CI, automatic OIDC publication, and native preflight pass, push only
 `v4.3.9` and let the private 24-to-30-to-validated-to-34 chain run. Never move
 or delete v4.3.0 through v4.3.8, hand-assemble any existing draft, or publish a

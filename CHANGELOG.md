@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Windows Inno Setup bootstrap receives read-only GitHub authorization
   only where its pinned-installer attestation verification requires it.** Build
   and packaging remain read-only; the repair restores `github.token` to the
-  verification step without granting Release mutation access.
+  verification step without granting Release mutation access, then removes and
+  verifies removal of `GH_TOKEN` before launching the third-party installer.
 
 ### Security
 - **The failed v4.3.8 GitHub distribution remains private and immutable.** Its

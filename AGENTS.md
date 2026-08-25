@@ -142,7 +142,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   `gh release verify-asset` had no `GH_TOKEN` after build-job hardening. Both
   publishers skipped; the draft stayed private at exactly 24 assets and
   nothing became public. v4.3.9 narrowly reconciles the Apple inventory and
-  restores read-only `github.token` only to the Inno attestation step. No
+  restores read-only `github.token` only to the Inno attestation step, then
+  removes and verifies removal of `GH_TOKEN` before the installer launch. No
   v4.3.0 through v4.3.4 draft exists; v4.3.5, v4.3.6, v4.3.7, and v4.3.8
   each have one exact private 24-asset draft. Never move, delete, reuse, or
   rerun any v4.3.0 through v4.3.8 tag unchanged.

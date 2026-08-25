@@ -8354,6 +8354,35 @@ def check_structural_contract(
         "& $iscc '/Qp'",
     ):
         require(inno_installer, needle, "pinned Inno Setup helper")
+    release_verification = inno_installer.index("$ghPath release verify-asset")
+    verification_exit_capture = inno_installer.index(
+        "$verificationExitCode = $LASTEXITCODE", release_verification
+    )
+    token_removal = inno_installer.index(
+        "Remove-Item -LiteralPath Env:GH_TOKEN -ErrorAction SilentlyContinue",
+        verification_exit_capture,
+    )
+    token_removal_assertion = inno_installer.index(
+        "if (Test-Path -LiteralPath Env:GH_TOKEN)", token_removal
+    )
+    verification_failure_check = inno_installer.index(
+        "if ($verificationExitCode -ne 0)", token_removal_assertion
+    )
+    installer_execution = inno_installer.index(
+        "$installerProcess = Start-Process", verification_failure_check
+    )
+    if not (
+        release_verification
+        < verification_exit_capture
+        < token_removal
+        < token_removal_assertion
+        < verification_failure_check
+        < installer_execution
+    ):
+        raise AssertionError(
+            "pinned Inno Setup helper must remove and verify removal of GH_TOKEN "
+            "after release verification and before launching third-party code"
+        )
     iscc_validation = """$isccSignature = Get-AuthenticodeSignature -LiteralPath $iscc
 if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
     $null -eq $isccSignature.SignerCertificate -or

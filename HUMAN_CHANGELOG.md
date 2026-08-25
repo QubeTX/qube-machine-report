@@ -27,7 +27,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   next step no longer rejects those valid installer files as unexpected.
 - **The Windows packaging stage again supplies read-only GitHub authorization
   to the official installer verification step.** That narrowly restores the
-  identity check without allowing the build job to change a Release.
+  identity check without allowing the build job to change a Release. The helper
+  removes and checks the token before launching the downloaded setup program,
+  so that third-party child process cannot inherit it.
 
 ### Security
 - **Version 4.3.8 never became public on GitHub.** Its crate and first-stage

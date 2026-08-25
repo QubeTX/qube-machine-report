@@ -118,7 +118,8 @@ coverage on both Mac runners, then its immutable release exposed cargo-dist
   without adding a manual approval or weakening the automated chain. v4.3.9
   makes the downstream Apple consumer accept that freezer's intentional
   six-file inventory and restores read-only `github.token` only to the Windows
-  Inno Setup attestation step; it does not change product behavior.
+  Inno Setup attestation step, then removes and verifies removal of `GH_TOKEN`
+  before the installer launch; it does not change product behavior.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
