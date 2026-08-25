@@ -13,7 +13,7 @@ installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
 bridge. v4.3.0 is published on crates.io through trusted OIDC but its immutable
 GitHub tag failed closed before draft creation on a Windows release-bootstrap
-guard. v4.3.1 is the reviewed packaging fix-forward for the performance/
+guard. v4.3.1 is the under-review packaging fix-forward for the performance/
 battery/thermal and release-custody work developed through PR #14. Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
@@ -233,10 +233,11 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
-1. Preserve `4.2.2` as the last published boundary. Keep `Cargo.toml`,
+1. Preserve `4.2.2` as the last complete GitHub-distribution boundary and
+   `4.3.0` as the trusted-OIDC crate plus immutable failed tag. Keep `Cargo.toml`,
    `Cargo.lock`, generated man page, and the full docs set synchronized at
-   `4.3.0`; date the release-note blocks on the final source commit while
-   keeping status ledgers explicit that publication is still pending.
+   `4.3.1`; date the release-note blocks on the final fix-forward source commit
+   while keeping status ledgers explicit that GitHub publication is pending.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
@@ -247,8 +248,8 @@ do not have to infer platform semantics.
 4. Let the exact-main push start `CI` and `crates-publish.yml`; the publisher
    must wait without a registry credential for that exact CI result before exact package bytes
    plus trusted OIDC/public provenance are accepted.
-5. Create and push only tag `v4.3.0` after exact-main CI/crates proof. Existing
-   immutable `v*` tags must not move.
+5. Create and push only tag `v4.3.1` after exact-main CI/crates proof. Existing
+   immutable `v*` tags, including failed `v4.3.0`, must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers
    to produce 30, and private Windows Installer Validation to attest those exact
    bytes and pass every channel/transition gate.
@@ -260,8 +261,9 @@ do not have to infer platform semantics.
 
 Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,
 native macOS 29664824418, Windows packaging 29664824432, and Windows transition
-validation 29664948031. The current v4.3.0 candidate has no publication run or
-release evidence yet.
+validation 29664948031. v4.3.0 OIDC/CI evidence is `32794371283`/
+`32794371259`; failed GitHub Release run `32795846831` created no draft. The
+current v4.3.1 candidate has no publication run or tag yet.
 
 Never publish locally merely because a credential exists. Never tag before
 exact-current-main CI and its automatic trusted-OIDC crates run settle.
@@ -310,7 +312,6 @@ excluded. The tracked project tree is:
 ├── .codex/config.toml
 ├── .firecrawl/polyform-nc-1.0.0.md
 ├── .github/workflows
-│   ├── apple-secret-migration.yml
 │   ├── ci.yml
 │   ├── crates-publish.yml
 │   ├── macos-installer.yml

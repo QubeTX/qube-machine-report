@@ -9,7 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.3.1] - 2026-08-24
 
+### Added
+- **This is the first complete GitHub distribution of the v4.3 product
+  changes.** Reports can include deterministic, fault-aware Linux CPU/GPU
+  temperatures (including `soc_thermal`) and mode-bounded NVIDIA GPU
+  temperature on Windows. Windows CPU temperature stays absent/JSON `null`
+  because ACPI zones do not establish CPU identity; macOS thermals remain
+  unavailable. Schema-v1 JSON adds nullable `cpu.temperature_c` and
+  `cpu.gpu_temperature_c`, and `-f/--full` explicitly selects the existing
+  default full collection mode.
+
+### Changed
+- **Windows full-mode collection is materially faster on the controlled
+  Alienware benchmark.** Seven alternating runs per version measured medians
+  of 5146.9 ms and 2120.2 ms: 58.8% less elapsed time and a 2.43× runtime
+  ratio. Eleven fast-mode runs measured 257.3 ms and 260.4 ms (+1.2%), which is
+  background-level and supports no fast-mode performance-gain claim.
+- **Managed-to-PKG switching on macOS is now an explicit safe sequence:**
+  refresh through the managed installer, choose receipt-aware Complete
+  uninstall, then run the direct PKG. Its preinstall refuses standard managed
+  evidence across `/Users` and eligible local Directory Service homes before
+  payload placement; clean/native upgrades and PKG-to-managed remain supported.
+
 ### Fixed
+- **Linux battery selection and macOS fallback parsing are stricter.** Linux
+  accepts well-formed `*_now`/`*_avg` readings, signed/zero current and power,
+  rejects explicit Device/absent/malformed supplies, and selects
+  deterministically. macOS accepts only a recognizable `InternalBattery`
+  record. The historical Raspberry Pi "30%" source remains unverified pending
+  physical sysfs evidence.
 - **Windows release packaging now accepts the verified cargo-dist executable
   created by the official installer's normal hard-linked alias.** The v4.3.0
   tag stopped safely before creating a GitHub Release because a new path guard
@@ -17,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejects actual reparse-point redirection while accepting the regular file, and
   ordinary pull-request/main CI executes that exact Windows bootstrap before a
   release tag can be qualified.
+
+### Security
+- **Crate and installer publication now use the completed v4.3 custody chain.**
+  Accepted `main` pushes publish crates only through short-lived trusted OIDC
+  after exact CI/package proof. GitHub Releases stay private through the exact
+  24-base → 30-Windows → validated → 34-asset native-Apple chain; only the
+  finalizer can publish, and post-public updater/Linux/macOS smokes remain
+  mandatory. Normal releases require no approval click or long-lived crates
+  token.
 
 ## [4.3.0] - 2026-08-24
 

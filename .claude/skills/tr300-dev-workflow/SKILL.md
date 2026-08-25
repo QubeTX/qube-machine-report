@@ -81,9 +81,9 @@ Mark the parent PR task `completed` in `TaskList`. Move on to the next PR's pare
 
 ## CI
 
-Six persistent GitHub Actions workflows guard release quality and publication;
-the temporary Apple secret migration workflow exists only during credential
-cutover:
+Six persistent GitHub Actions workflows guard release quality and publication.
+The one-time Apple secret migration workflow was removed after the completed
+credential cutover:
 
 - **`.github/workflows/ci.yml`** — runs on every push to `main` and every pull request. Jobs:
   - `fmt` — `cargo fmt --check` (Linux only)
@@ -93,6 +93,9 @@ cutover:
   - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
   - `audit` — blocking `cargo audit` against RustSec advisories; a finding fails CI
   - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
+  - `release-bootstrap-windows` — executes the exact pinned cargo-dist PowerShell
+    bootstrap on Windows Server 2022, including its regular-file/reparse-point
+    and exact-version checks, before a release tag exists
 - **`.github/workflows/crates-publish.yml`** — starts automatically with a same-repository `main` push, then waits without a registry credential for that exact SHA's successful CI run. A read-only Cargo 1.95 validator proves the exact tested package; a fresh `crates-io` runner executes no package code while a short-lived OIDC token exists and verifies public bytes/provenance. Manual dispatch is diagnostics only.
 - **`.github/workflows/release.yml`** — exact stable-tag cargo-dist v0.31.0 builds, fresh checkout-free Apple signers, and a fresh publisher that creates a private 24-asset draft. Preserve the stable-tag, fixed-artifact, MIC-1 alias, private-host, and Apple trust zones after `dist init`.
 - **`.github/workflows/windows-installers.yml`** — adds six exact Windows installer/sidecar assets to the private draft through a separate checkout-free publisher, producing 30 assets.

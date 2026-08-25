@@ -589,8 +589,9 @@ incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
 
-The v4.3 release campaign is **not complete**. Do not tag, update the homepage,
-or close the release milestone until the release-source PR and exact-main CI
-pass, automatic OIDC crates publication succeeds, the private 30-asset Windows
-proof succeeds, macOS solely publishes the exact 34-asset release, and every
-post-public smoke/public-byte audit is green.
+The v4.3 release campaign is **not complete**. Do not tag v4.3.1, update the
+homepage, or close the release milestone until the fix-forward PR and exact-
+main CI pass and automatic OIDC crates publication succeeds. Then push only
+v4.3.1 and require the private 30-asset Windows proof, macOS-only exact
+34-asset publication, and every post-public smoke/public-byte audit to pass.
+Never move or reuse failed tag v4.3.0.

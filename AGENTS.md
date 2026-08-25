@@ -154,13 +154,12 @@ keys remain available. The exact v4 boundary includes `Action`, `Cli`,
   settings.local.json         # Claude Code local output style setting
 
 .github/workflows/
-  ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
+  ci.yml                      # cross-platform Rust/speed/audit/dist/bootstrap/workflow gates
   crates-publish.yml          # automatic exact-main push/CI-gated trusted-OIDC crates.io publication
   release.yml                 # cargo-dist builds + fresh private-draft publisher
   windows-installers.yml      # adds six Windows assets to the private draft
   windows-installer-validation.yml # exact-byte pre-public matrix + public updater smoke
   macos-installer.yml         # native Apple gates and sole 34-asset final publisher
-  apple-secret-migration.yml  # one-time no-checkout secret copy/name proof; remove after native cutover
 
 docs/
   agents/handoff/              # tracked cross-machine continuation records
@@ -890,23 +889,14 @@ handoffs, or docs:
 - variables: `APPLE_SIGNING_IDENTITY`, the full Developer ID Installer common
   name in `APPLE_INSTALLER_SIGNING_IDENTITY`, and `APPLE_TEAM_ID`.
 
-The temporary `apple-secret-migration.yml` workflow performs only the one-time
-no-checkout, owner/current-main copy and exact name/policy inventory. Create a
-short-lived fine-grained personal access token restricted to
-`QubeTX/qube-machine-report`, with repository permissions `Contents: read`,
-`Actions: read`, and `Environments: write` only. From an authenticated
-workstation, install its value as the `apple-signing` environment secret named
-exactly `RELEASE_SECRET_MIGRATION_TOKEN` by running
-`gh secret set RELEASE_SECRET_MIGRATION_TOKEN --env apple-signing --repo QubeTX/qube-machine-report`
-and pasting the value only at the command's stdin prompt so it does not enter
-shell history. The operator runs the copy, then requires fresh native Apple
-Silicon and Intel credential-preflight jobs to prove both Application/Installer
-certificate import/signing plus read-only notary authentication from environment
-secrets. Only after those jobs pass does the operator delete the repository
-Apple secrets and `RELEASE_SECRET_MIGRATION_TOKEN`, rerun the environment-only
-preflight, and merge a protected follow-up PR that removes the migration
-workflow. The migration workflow itself does not delete credentials or
-substitute for native proof.
+The one-time Apple secret migration completed on 2026-08-24. Native Apple
+Silicon and Intel preflights proved both Application/Installer certificate
+import/signing plus read-only notary authentication from environment secrets;
+the repository copies and `RELEASE_SECRET_MIGRATION_TOKEN` were deleted, and
+PR #16 removed `apple-secret-migration.yml`. Do not recreate that workflow or
+repository-scoped Apple secrets for routine releases. A future credential
+rotation must retain fresh native preflight proof and the protected
+`apple-signing` boundary.
 
 The least-privilege App Store Connect key has Developer role. Installer-key RSA
 material/CSR may be generated with OpenSSL on Windows, issued through the Apple

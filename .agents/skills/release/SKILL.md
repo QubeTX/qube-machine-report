@@ -216,13 +216,15 @@ Green means all of these passed:
 - `speed` (5-run median of `tr300 --fast` < 1500 ms on all three platforms)
 - `audit` (cargo audit, blocking)
 - `dist-plan` (cargo-dist config parses)
+- `release-bootstrap-windows` (the exact pinned Windows cargo-dist bootstrap
+  installs and verifies on Windows Server 2022)
 - `workflow-validation` (actionlint, ShellCheck, executable provenance, managed
   transaction, and macOS preinstall/package-lifecycle guards)
 - `windows-installer-sources` (managed PowerShell transaction plus both WiX and
   Inno source/transition gates)
 
-That is the strict 19-context inventory recorded in the protected-main
-ruleset. Do not treat a subset or a still-running matrix leg as a green gate.
+That is the strict 20-job inventory for the current workflow. Do not treat a
+subset or a still-running matrix leg as a green gate.
 
 If any job fails:
 

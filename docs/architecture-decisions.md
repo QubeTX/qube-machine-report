@@ -75,7 +75,7 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
-- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-candidate)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.1 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v431-distribution)
 
 ---
 
@@ -3316,15 +3316,18 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 candidate)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.1 distribution)
 
-**Status:** Merged, unreleased candidate. Final PR #14 head `8f5919b` passed the
+**Status:** Product code published on crates.io as v4.3.0; complete GitHub
+distribution is the v4.3.1 fix-forward. Final PR #14 head `8f5919b` passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
 reviews, and every review thread. It merged as `2f997d2`; exact-main CI
-`32766014047` passed all 19 jobs. Tagged release, public distribution, and
-physical AMD64 Linux/Raspberry Pi acceptance remain separate gates. This
-section records the product contract and rationale, not those later results.
+`32766014047` passed all 19 jobs. Automatic OIDC later published exact v4.3.0;
+its tag failed before draft creation on the Windows bootstrap guard. Reviewed
+v4.3.1 tagged/public distribution and physical AMD64 Linux/Raspberry Pi
+acceptance remain separate gates. This section records the product contract
+and rationale, not those later results.
 
 **Decision 1 — thermals report only trusted sensors, in both `--fast` and full
 mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,

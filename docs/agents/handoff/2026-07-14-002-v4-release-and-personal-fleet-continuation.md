@@ -1,17 +1,21 @@
 # Handoff: v4 release, origin-preserving updates, and fleet continuation
 
-**Date:** 2026-07-14–18 CDT
+**Date:** 2026-07-14–2026-08-24 CDT
 **Session:** 002
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.2.2` / `4.2.2` (all prior tags remain immutable)
+**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.0` / `4.3.1` (all prior tags remain immutable)
+**Active fix-forward branch:** `codex/v4.3.1-release-bootstrap-fix`
 **Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
-**Release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
-**Hosted run IDs:** CI 29664547910; crates 29664653519; cargo-dist 29664688035;
-native macOS 29664824418; Windows Installers 29664824432; Windows transitions 29664948031
+**Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
+**Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
+29664688035; native macOS 29664824418; Windows Installers 29664824432; Windows
+transitions 29664948031. v4.3.0 exact-main CI 32794371259; automatic trusted-
+OIDC crates 32794371283; final tagless Apple preflight 32795757823; failed-
+closed GitHub Release 32795846831.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
 `#adrlog`
@@ -20,6 +24,26 @@ This is the exhaustive portable continuation record. The SHAUGHV board source,
 milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+
+## 2026-08-24 v4.3.0 publication split and v4.3.1 fix-forward
+
+Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
+published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
+`trustpub_only=true` and binds the public checksum/provenance to that source and
+run. Immutable tag `v4.3.0` points to the same SHA. Its Release run failed
+before Apple signing, hosting, or draft creation because the pinned official
+cargo-dist PowerShell installer deliberately hard-links `dist.exe` and
+`cargo-dist.exe`, while a new generic nonempty-`LinkType` guard rejected the
+valid tool. An unchanged rerun uses the same immutable workflow and cannot
+pass; every downstream recovery correctly requires a successful exact Release.
+
+The supported path is v4.3.1 through a reviewed PR and the normal no-click
+automation. One shared pinned PowerShell bootstrap is used by the release
+matrix and a new Windows Server 2022 CI job; it requires a regular leaf and
+rejects reparse-point redirection while accepting the installer's ordinary
+hard-linked alias. After exact-main CI and automatic OIDC publication pass,
+push only `v4.3.1` and let the private 24-to-30-to-validated-to-34 chain run.
+Never move/delete v4.3.0, hand-assemble a draft, or publish a partial release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 

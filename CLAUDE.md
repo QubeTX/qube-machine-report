@@ -448,9 +448,9 @@ The canonical cadence for any non-trivial change. **Full detail — each phase's
 
 ## CI
 
-Six persistent GitHub Actions workflows guard release quality and publication;
-`apple-secret-migration.yml` is a temporary seventh workflow that must be
-removed after environment-secret cutover. Full job-by-job detail and local-
+Six persistent GitHub Actions workflows guard release quality and publication.
+The one-time Apple secret migration workflow was removed after the completed
+environment-secret cutover. Full job-by-job detail and local-
 repro commands are in the
 [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md) skill):
 
@@ -459,7 +459,8 @@ repro commands are in the
   macOS ARM/Intel + Windows), locked `build` smoke
   (+`--version`/`--fast --json`), `speed`
   (5-run median of `tr300 --fast` < 1500 ms), blocking `audit`, and
-  `dist-plan`. macOS test/build/speed are hard gates; do not restore the old
+  `dist-plan`, plus `release-bootstrap-windows`, which executes the exact pinned
+  cargo-dist bootstrap on Windows Server 2022. macOS test/build/speed are hard gates; do not restore the old
   v3.14.5 `continue-on-error` workaround.
 - **`release.yml`** — cargo-dist v0.31.0, exact stable-tag-triggered
   (`vX.Y.Z`); read-only builders with no persisted checkout/signing/publication
@@ -531,21 +532,13 @@ credentials or any Apple failure blocks the private draft; never add an
 unsigned fallback. The package workflow applies the same data-only-prep/fresh-
 secret boundary to its Installer/Application/notary credentials.
 
-Before any v4.3 tag or signing run, all Apple secrets must be migrated into the
-protected `apple-signing` environment and the repository copies removed. The
-temporary no-checkout `apple-secret-migration.yml` only copies the exact secret
-set and verifies destination names/policy; it does not delete credentials or
-replace native proof. The operator creates a short-lived fine-grained token
-restricted to this repository with `Contents: read`, `Actions: read`, and
-`Environments: write`, then installs it as the `apple-signing` environment secret
-named exactly `RELEASE_SECRET_MIGRATION_TOKEN` by running
-`gh secret set RELEASE_SECRET_MIGRATION_TOKEN --env apple-signing --repo QubeTX/qube-machine-report`
-and supplying the value only at the stdin prompt. After the copy, fresh native
-Apple Silicon and Intel preflights must prove Application/Installer certificate
-import/signing plus read-only notary authentication from environment secrets.
-Only then delete the repository Apple secrets and
-`RELEASE_SECRET_MIGRATION_TOKEN`, rerun the environment-only preflight, and
-remove the migration workflow in a protected follow-up PR.
+The Apple cutover completed on 2026-08-24: secrets now exist only in the
+protected `apple-signing` environment, repository copies and the temporary
+migration token were removed, native Apple Silicon and Intel preflights passed,
+and PR #16 removed `apple-secret-migration.yml`. Routine releases must use that
+steady-state boundary without recreating repository-scoped Apple secrets or a
+migration workflow. A future credential rotation still requires fresh native
+preflight proof before a tag.
 
 The cargo-dist archives still contain a bare standalone CLI and therefore use
 Apple acceptance plus `codesign --verify --strict`; a bare-binary
