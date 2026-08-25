@@ -10,7 +10,9 @@
 
 ## Active
 
-- [ ] **Complete the TR-300 v4.3 release through v4.3.12** - preserve the immutable failed v4.3.0 through v4.3.11 tags and private drafts, carry the narrow native Mac fixture-cleanup fix forward, and finish the existing no-click exact-SHA crates/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+## Done
+
+- [x] **Complete the TR-300 v4.3 release through v4.3.12** - preserved the immutable failed v4.3.0 through v4.3.11 tags and private drafts, carried the narrow native Mac fixture-cleanup fix forward, and completed the no-click exact-SHA crates/native/public chain (needs #v430) (ms #v43) (owner codex) (done 2026-08-25) #r43
   - [x] Remediate and independently validate every confirmed release/privilege security finding
   - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
   - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
@@ -32,11 +34,8 @@
   - [x] Qualify and merge the v4.3.9 Apple-inventory/Windows-attestation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed Mac ordering/private-worker results
   - [x] Qualify and merge the v4.3.10 checksum/validation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed native PackageKit assertion result
   - [x] Qualify and merge the v4.3.11 native-validation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed `/Users` fixture-cleanup result
-  - [ ] Qualify and merge the v4.3.12 fixture-cleanup fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
-  - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
-
-## Done
-
+  - [x] Qualify and merge the v4.3.12 fixture-cleanup fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
+  - [x] Audit public bytes, post-public updater/Linux/macOS smokes, and versionless homepage behavior
 - [x] **Repair and revalidate v4.3.0 PR #14** - correct platform accuracy, preserve the measurable Windows full-mode gain, prove exact-head CI, and leave the PR open (ms #v43) (owner codex) (done 2026-08-23) #v430
   - [x] Repair Windows launch-relative deadlines and trustworthy NVIDIA-only thermals
   - [x] Repair Linux battery compatibility and deterministic fault-aware thermals

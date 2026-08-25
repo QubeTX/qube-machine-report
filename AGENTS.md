@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.11`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.12` (battery hardening, Windows
+- Current crates.io version and complete GitHub distribution: `4.3.12`;
+  working manifest: `4.3.12` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -157,13 +157,16 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   reached exact private 30-asset draft `376514152`; its signed/notarized Mac
   package passed the managed-install rejection before both native jobs failed
   only while removing a fixture from root-owned `/Users` without privilege.
-  v4.3.12 carries the unchanged product and installer policy plus that narrow
-  test-cleanup repair through the normal automated chain.
+  v4.3.12 carried the unchanged product and installer policy plus that narrow
+  test-cleanup repair through the normal automated chain. Exact source/tag
+  `19246b76f39c53340e6be62a332cedca9bca766c` passed exact-main CI/OIDC,
+  native preflight, private 24-to-30 asset assembly, private Windows
+  validation, native Intel/Apple Silicon PKG lifecycles, macOS-only 34-asset
+  publication, post-public Windows/updater validation, and public smokes.
   No production updater custody is weakened. Never move, delete, reuse, or
   rerun an immutable v4.3.0 through v4.3.11 tag unchanged.
-  v4.2.2 remains the last complete public GitHub distribution until reviewed
-  v4.3.12 passes exact-main CI/OIDC and the automatic private
-  24-to-30-to-validated-to-34 asset chain plus post-public smokes.
+  v4.3.12 is the current complete public GitHub distribution with exactly 34
+  nonempty stable-name assets; v4.2.2 remains the prior complete baseline.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
   Windows exposes NVIDIA GPU temperature only through mode-bounded
@@ -202,15 +205,14 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   A managed user must first refresh through the managed installer, then run
   receipt-aware Complete uninstall before switching to PKG. PKG-to-managed
   remains supported.
-- Last fully published distribution state: release source
-  `db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA CI/crates,
-  both signed Apple archive jobs, all Windows packaging/transitions, and the
-  native Intel/ARM universal direct-PKG/legacy-DMG workflow. The public release
-  has 34 nonempty stable-name assets whose sidecars and versionless `latest`
-  entrypoints were audited against the immutable bytes. Homepage commit
-  `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
-  `https://reports.qubetx.com/`; exact evidence is in `TESTING.md` and the
-  current handoff.
+- Last fully published distribution state: release source/tag
+  `19246b76f39c53340e6be62a332cedca9bca766c` passed exact-main CI, trusted-OIDC
+  crates publication, all Windows packaging/transitions, and the native
+  Intel/ARM universal direct-PKG/legacy-DMG workflow. The public v4.3.12 release
+  has 34 nonempty stable-name assets whose digests and versionless `latest`
+  entrypoints were audited against the immutable bytes. The live homepage at
+  `https://reports.qubetx.com/` already uses those versionless links; exact
+  evidence is in `TESTING.md` and the current handoff.
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
 - Convenience alias installed by `--install`: `report`

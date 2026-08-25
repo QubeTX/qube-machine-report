@@ -5,8 +5,8 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-08-25
-**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.11 / 4.3.12
-(v4.2.2 remains the last complete GitHub distribution. Release-chain hardening merged
+**Complete public GitHub distribution / crates.io / working manifest:** 4.3.12 / 4.3.12 / 4.3.12
+(v4.2.2 remains the prior complete GitHub distribution. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.
 Exact-main CI run `32766014047` passed all 19 jobs. Release-automation PR #16
@@ -84,13 +84,15 @@ credential use because cargo-dist's raw checksum files end in two LF bytes,
   message assertion. v4.3.11 repaired that assertion, passed through an exact
   private 30-asset draft, signing/notarization, and the real managed-install
   rejection, then its native test cleanup could not unlink its exact fixture
-  from root-owned `/Users`. v4.3.12 is the narrow supported fix-forward, and
-  no prior tag may move.)
+  from root-owned `/Users`. v4.3.12 fixed that cleanup and completed exact-main
+  CI/OIDC, both native Apple lifecycles, private Windows validation, exact
+  34-asset publication, and post-public validation at source/tag `19246b76`.
+  No prior tag moved.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.12 distribution fix-forward):** Linux battery-selection hardening accepts
+**Shipped in v4.3.12:** Linux battery-selection hardening accepts
 well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
 contradictory device/absence evidence; the historical Pi "30%" source remains
 unproven. Linux thermals choose the hottest valid sensor deterministically,
@@ -137,9 +139,8 @@ Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
-The active v4.3 GitHub-distribution campaign remains incomplete. Its product
-code is published on crates.io through v4.3.11; the v4.3.12 packaging
-fix-forward carries
+The v4.3 GitHub-distribution campaign is complete. Its product code is
+published on crates.io and GitHub as v4.3.12; the release carries
 battery, thermal, and Windows full-mode improvements. A `main` push starts CI
 and the crate-publication workflow together; the registry-uncredentialed
 validator waits for that exact CI run to pass before the fresh protected OIDC
@@ -149,9 +150,9 @@ acceptance proof → macOS-only 34-asset finalization chain. The Apple secrets a
 in `apple-signing`; native ARM/Intel preflight passed, repository copies and the
 temporary migration token are gone, and PR #16 removed the one-time workflow.
 The crates.io publisher tuple, automatic exact-main publication, and
-  `trustpub_only` probe passed for all twelve published v4.3 crates. v4.3.12 must repeat
-that automatic proof and its native Bash-3.2 preflight before its new immutable
-tag is eligible for the native/public chain.
+  `trustpub_only` probe passed for all thirteen published v4.3 crates. v4.3.12
+repeated that automatic proof and native Bash-3.2 preflight before its immutable
+tag entered and completed the native/public chain.
 AMD64 Linux laptop and Raspberry Pi physical qualification remain separate open
 acceptance gates.
 
@@ -685,11 +686,10 @@ incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
 
-The v4.3 release campaign is **not complete**. Do not tag v4.3.12, update the
-homepage, or close the release milestone until the fixture-cleanup fix-forward PR,
-exact-main CI, automatic OIDC crates publication, and native Apple staging
-preflight succeed. Then push only v4.3.12 and require the private 30-asset
-Windows proof, macOS-only exact 34-asset publication, and every post-public
-smoke/public-byte audit to pass. Never move or reuse failed tags v4.3.0 through
-v4.3.11; the first five created no draft, the exact v4.3.5 through v4.3.8
-24-asset drafts and exact v4.3.9 through v4.3.11 30-asset drafts must remain private.
+The v4.3 release campaign is **complete** at exact source/tag `19246b76`.
+v4.3.12 passed exact-main CI, automatic trusted-OIDC crates publication,
+native Apple preflight, private 24-to-30 asset assembly, private Windows proof,
+macOS-only exact 34-asset publication, and every post-public smoke/validation
+gate. Never move or reuse v4.3.0 through v4.3.11; the first five created no
+draft, the exact v4.3.5 through v4.3.8 24-asset drafts and exact v4.3.9 through
+v4.3.11 30-asset drafts remain private.

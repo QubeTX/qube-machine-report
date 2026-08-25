@@ -12,10 +12,10 @@
 >
 > **Coverage reconciled through 2026-08-25.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
-> one file per decision. v4.2.2 is the last complete GitHub distribution;
-> v4.3.11 is the current crates.io package, but the immutable v4.3.0 through
-> v4.3.11 tags all failed to complete GitHub distribution; v4.3.12 is the packaging
-> fix-forward.
+> one file per decision. v4.3.12 is the current complete crates.io and GitHub
+> distribution at exact source/tag
+> `19246b76f39c53340e6be62a332cedca9bca766c`; the immutable v4.3.0 through
+> v4.3.11 tags remain published history and were not moved or reused.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
 > until a later dated section explicitly supersedes them. Historical failure
@@ -23,7 +23,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (v4.2.2 complete distribution; v4.3.12 fix-forward)](#decision-ledger-status-v422-complete-distribution-v4312-fix-forward)
+- [Decision ledger status (v4.3.12 complete distribution)](#decision-ledger-status-v4312-complete-distribution)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -80,7 +80,7 @@
 
 ---
 
-## Decision ledger status (v4.2.2 complete distribution; v4.3.12 fix-forward)
+## Decision ledger status (v4.3.12 complete distribution)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
@@ -113,17 +113,18 @@ then both native jobs stopped on an incorrect PackageKit message assertion.
 Nothing became public. v4.3.11 then reached exact private 30-asset draft
 `376514152`; its signed/notarized Mac packages passed the real managed-install
 rejection, then fixture cleanup failed because unprivileged `rmdir` could not
-unlink a child from root-owned `/Users`. All twelve tags remain immutable. The
-v4.3.12 rows describe the required packaging fix-forward; its fresh
-exact-main, crate, tag, native installer, and public-byte gates remain
-independent proof.
+unlink a child from root-owned `/Users`. All twelve tags remain immutable.
+v4.3.12 then passed exact-main CI, trusted-OIDC crate publication, native
+preflight, the private 24-to-30-to-validated-to-34 chain, native Intel/Apple
+Silicon package lifecycles, post-public validation, and the public-byte audit
+at exact source/tag `19246b76f39c53340e6be62a332cedca9bca766c`.
 
 | Decision family | Status | Enforcement / source of truth |
 |---|---|---|
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.11; complete GitHub distribution moves to v4.3.12; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published completely through v4.3.12; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -132,9 +133,9 @@ independent proof.
 | Personal hardware evidence | Alienware report/hardware and v4.1.3 same-channel evidence complete; natural v4.2.2 UAC update, AMD64 laptop, and Pi 4 still open | `#win`, `#w422`, `#amd`, `#pi4`, `TESTING.md`; hosted jobs do not impersonate physical machines |
 | GitHub default branch `main` and checkout v6/Node 24 | Accepted and hosted-verified | GitHub default metadata, workflow filters/actions, exact-SHA CI/crates runs |
 | Two-place Rust 1.95 pin and tag-gated cargo-dist publication | Accepted | `Cargo.toml`, `rust-toolchain.toml`, release skill/workflows |
-| Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; PR #15 head and exact-`main` workflow/provenance gates pass; integrated/tagged 24-to-30-to-34 proof remains | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
+| Stable-only tags plus exact supplemental release provenance | Accepted and release-blocking; v4.3.12 completed the exact tagged 24-to-30-to-validated-to-34 proof | release resolver fixtures, read-only workflow defaults, commit-bound Release target |
 | Privileged Windows Installer launches use the OS-owned absolute executable | Accepted and release-blocking | native system-directory resolution, pinned working directory, hostile-search-path fixtures |
-| Direct macOS PKG rejects standard managed ownership before payload installation | Accepted and release-blocking; native Intel/ARM pre-tag PackageKit fixtures pass on PR #15 and exact `main`; signed/notarized tagged lifecycle remains | preinstall-only package, `/Users` plus local Directory Service custom-home refusal fixtures, Intel/ARM package jobs |
+| Direct macOS PKG rejects standard managed ownership before payload installation | Accepted and release-blocking; v4.3.12 passed pre-tag fixtures plus signed/notarized tagged Intel/ARM lifecycles | preinstall-only package, `/Users` plus local Directory Service custom-home refusal fixtures, Intel/ARM package jobs |
 | Windows native-first facts and four-installer model | Accepted | Windows collector, update origin marker, WiX/Inno sources and supplemental workflow |
 | Origin-preserving updates with no cross-channel fallback | Accepted and release-blocking | `src/update.rs`, installer receipts/markers, isolated update fixtures |
 | Native universal macOS direct PKG plus v4.1.x DMG bridge | Accepted and release-blocking | `macos-installer.yml`, signing script, native ARM/Intel direct install and legacy-update gates |
@@ -3473,8 +3474,9 @@ unusual portable-install scenarios.
 
 ## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.12 distribution)
 
-**Status:** Product code is published on crates.io through v4.3.11; complete
-GitHub distribution is the v4.3.12 fix-forward. Final PR #14 head `8f5919b`
+**Status:** Product code and complete GitHub distribution are published through
+v4.3.12 at exact source/tag
+`19246b76f39c53340e6be62a332cedca9bca766c`. Final PR #14 head `8f5919b`
 passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
@@ -3495,10 +3497,10 @@ boundary but exposed the Apple inventory and Windows attestation-token
 contracts described above. v4.3.9 and v4.3.10 fixed later private-stage
 boundaries; v4.3.10 stopped only on the native PackageKit message assertion
 described above. v4.3.11 passed that assertion but its test harness could not
-unlink a fixture from root-owned `/Users`. Reviewed v4.3.12 tagged/public
-distribution and physical AMD64 Linux/Raspberry Pi
-acceptance remain separate gates. This section records the product contract and
-rationale, not those later results.
+unlink a fixture from root-owned `/Users`. v4.3.12 repaired only that fixture
+cleanup and passed exact-main CI/OIDC, both native Apple lifecycles, the exact
+34-asset finalizer, post-public validation, and the public-byte audit. Physical
+AMD64 Linux and Raspberry Pi acceptance remain separate open gates.
 
 **Decision 1 — thermals report only trusted sensors, in both `--fast` and full
 mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,

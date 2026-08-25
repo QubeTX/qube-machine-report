@@ -9,17 +9,36 @@ as passed.
 
 ### v4.3.12 — Native Mac fixture-cleanup fix-forward (as of 2026-08-25)
 
-Release status: active distribution-only candidate. Product behavior and
-installer policy are unchanged from v4.3.11. The only workflow change removes
-the runner-owned nested fixture directories normally and uses `sudo` solely to
-unlink the exact validated fixture directory from root-owned `/Users`.
-Executable provenance coverage requires the corrected split cleanup and
+Release status: complete. Product behavior and installer policy are unchanged
+from v4.3.11. The only workflow change removes runner-owned nested fixture
+directories normally and uses `sudo` solely to unlink the exact validated
+fixture directory from root-owned `/Users`; executable provenance coverage
 rejects the former combined unprivileged `rmdir`.
 
-The v4.3.12 local, exact-head PR, exact-main CI/OIDC, native preflight, tag,
-private 24-to-30-to-validated-to-34, public-smoke, byte-audit, and deployment
-gates remain open until their exact evidence is recorded. The v4.3.11 crate,
-tag, and private draft will not move or be reused.
+Exact PR #30 head `7fe751f8fe39bd4c5764998f3784b26d025936a2`
+passed all 20 CI jobs in `32868424781` and Release plan `32868425481`, then
+merged normally as exact source/tag
+`19246b76f39c53340e6be62a332cedca9bca766c`. Exact-main CI `32869031682`
+passed all 20 jobs. Automatic trusted-OIDC run `32869029189` published the
+unyanked crate with checksum
+`1ac1807630cd2bfc3c996e0960ca7ba303a090a0139035dd71a311f38f25119b`;
+tagless native Apple preflight `32869891315` passed both architectures.
+
+Tagged Release `32869971805` passed all 13 jobs and created exact private
+24-asset draft `376540890`. Windows Installers `32870555353` extended it to
+30 assets, and private Windows validation `32870926989` passed all 16 jobs.
+macOS run `32870555348` built, signed, notarized, and validated the universal
+PKG/compatibility DMG on native Intel and Apple Silicon; both direct-PKG jobs
+passed the previously failing second-home cleanup. Its sole finalizer published
+exactly 34 nonempty assets, the managed Linux installer smoke passed, and both
+legacy-DMG bridge smokes passed. Post-public Windows/updater run `32871841072`
+passed all nine applicable jobs. GitHub reports every asset with a 64-hex
+SHA-256 digest, `releases/latest` resolves to v4.3.12, and representative
+managed, Windows, macOS, and Linux stable download URLs return HTTP 200.
+`https://reports.qubetx.com/` returns HTTP 200 and its deployed bundle uses
+versionless `releases/latest/download` links, so no homepage source deployment
+was required. AMD64 Linux laptop, Raspberry Pi, and the separate Alienware
+v4.2.2 UAC task remain open and are not inferred from hosted release proof.
 
 ### v4.3.11 — Native Mac validation fix-forward (as of 2026-08-25)
 
