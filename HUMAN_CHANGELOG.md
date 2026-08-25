@@ -13,12 +13,44 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.10] - 2026-08-25
+
+### Changed
+- **This is another packaging-only repair; the report itself is unchanged from
+  the v4.3 line.** Version 4.3.9 remains preserved as an immutable crate, tag,
+  and private draft. Version 4.3.10 is the only active candidate for complete
+  cross-platform downloads.
+- **Windows now proves each repair using the right source for that release
+  stage.** Before publication it reuses the exact private installer bytes that
+  were already frozen. After publication it automatically exercises the real
+  Global updater against the public version-specific download.
+
+### Fixed
+- **Mac packaging no longer depends on alphabetic ordering differences between
+  runners.** It accepts the three expected checksum rows in any order but still
+  rejects a missing, extra, duplicate, renamed, or malformed entry. Automated
+  tests exercise every valid ordering and the invalid cases.
+- **Private Windows testing no longer tries to download an asset that is still
+  intentionally private.** All private installer and recovery checks remain;
+  the real Global live-update transaction runs automatically once the exact
+  release is public, and its error output is preserved if it fails.
+
+### Security
+- **Version 4.3.9 never became public on GitHub.** Its source checks, crate,
+  first-stage release, and Windows packaging succeeded, leaving a correct
+  private 30-download draft. Mac packaging stopped before using Apple
+  credentials because one filename comparison depended on runner ordering.
+  Windows testing passed every other case but the Global updater could not
+  anonymously download the still-private candidate. Version 4.3.10 fixes both
+  test boundaries without weakening installer or publication custody.
+
 ## [4.3.9] - 2026-08-25
 
 ### Changed
 - **This is another packaging-only repair; the report itself is unchanged from
   the v4.3 line.** Version 4.3.8 remains an immutable crate, tag, and private
-  draft. Version 4.3.9 is the only active candidate for complete downloads.
+  draft. Version 4.3.9 became the next complete-download candidate and remains
+  preserved as evidence of the later private-stage stops recorded above.
 
 ### Fixed
 - **The Mac packaging stage now agrees on the exact files handed between its

@@ -7,13 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.10] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3
+  report behavior.** The immutable v4.3.9 crate, tag, and exact 30-asset
+  private draft remain preserved. v4.3.10 is the sole active candidate for the
+  complete cross-platform GitHub download release.
+- **Global Windows live-image repair is qualified at the boundary where its
+  immutable download URL exists.** Private validation re-runs the already-
+  frozen MSI/EXE bytes for same-version repair; the automatic post-public
+  validation invokes the real Global update worker against the published exact
+  tag. Production updater custody and channel selection are unchanged.
+
+### Fixed
+- **The final macOS signer accepts checksum-manifest rows in any producer
+  order while still requiring the exact three names once each.** An exact
+  parser rejects missing, extra, duplicate, renamed, malformed-hash, and
+  malformed-delimiter records independently of runner locale or `sort`
+  behavior. Executable fixtures cover every valid ordering and the fail-closed
+  cases.
+- **Private Windows acceptance no longer asks the production update worker to
+  fetch an intentionally unpublished draft asset.** The private matrix retains
+  frozen-byte install, repair, transition, rollback, registration, PATH, and
+  uninstall checks. The public matrix retains the real Global MSI/EXE live-
+  image transaction and now captures worker output when that proof fails.
+
+### Security
+- **The failed v4.3.9 GitHub distribution remains private and immutable.** Tag
+  and main resolve to `a4a75e975ebceba90a585deeb4767a4546504a18`;
+  exact-main CI `32848574652` passed 20/20, trusted-OIDC run `32848574607`
+  published the exact unyanked crate, native Apple credential preflight
+  `32849403638` passed, Release `32849508590` passed all 13 jobs, and Windows
+  Installers `32850002419` assembled exact private draft `376401700` with 30
+  assets. macOS run `32850002313` then stopped before Apple credential use on a
+  locale-sensitive checksum-name comparison even though all three payload
+  hashes passed. Private Windows validation `32850359079` passed every other
+  case but correctly could not run the Global worker against anonymous v4.3.9
+  URLs while the release was still private. The attestation and all macOS
+  publication jobs skipped; no GitHub release or homepage change became public.
+
 ## [4.3.9] - 2026-08-25
 
 ### Changed
 - **This is a narrow distribution-only fix-forward carrying the unchanged v4.3
   product behavior.** The immutable v4.3.8 crate, tag, and exact private draft
-  remain preserved. v4.3.9 is the sole active release candidate for the
-  complete cross-platform GitHub download release.
+  remain preserved. v4.3.9 became the next complete-download candidate and is
+  retained as immutable evidence of the later pre-public stops recorded above.
 
 ### Fixed
 - **The macOS package input consumer now accepts the same exact six-file

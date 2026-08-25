@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.8`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.9` (battery hardening, Windows
+- Current crates.io version: `4.3.9`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.10` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -141,14 +141,20 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   `97787896541` at `Install the pinned official Inno Setup 6.7.3` because
   `gh release verify-asset` had no `GH_TOKEN` after build-job hardening. Both
   publishers skipped; the draft stayed private at exactly 24 assets and
-  nothing became public. v4.3.9 narrowly reconciles the Apple inventory and
-  restores read-only `github.token` only to the Inno attestation step, then
-  removes and verifies removal of `GH_TOKEN` before the installer launch. No
-  v4.3.0 through v4.3.4 draft exists; v4.3.5, v4.3.6, v4.3.7, and v4.3.8
-  each have one exact private 24-asset draft. Never move, delete, reuse, or
-  rerun any v4.3.0 through v4.3.8 tag unchanged.
+  nothing became public. v4.3.9 repaired both boundaries, passed exact-main CI,
+  OIDC publication, native preflight, Release 13/13, and Windows assembly; its
+  exact draft reached 30 assets. macOS run `32850002313` then stopped before
+  Apple credential use because its checksum-name comparator depended on locale
+  ordering. Private Windows validation `32850359079` passed every case except
+  the Global MSI/EXE live-image worker, which correctly could not fetch an
+  anonymous exact-tag asset while v4.3.9 remained private. v4.3.10 replaces the
+  fragile Mac comparison with an order-independent exact manifest parser,
+  proves frozen Global repairs privately, and reserves the real network-backed
+  worker for the automatic post-public validation. No production updater
+  custody is weakened. Never move, delete, reuse, or rerun an immutable v4.3.0
+  through v4.3.9 tag unchanged.
   v4.2.2 remains the last complete public GitHub distribution until reviewed
-  v4.3.9 passes exact-main CI/OIDC and the automatic private
+  v4.3.10 passes exact-main CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;

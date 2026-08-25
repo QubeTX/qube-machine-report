@@ -13,8 +13,8 @@
 > **Coverage reconciled through 2026-08-25.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last complete GitHub distribution;
-> v4.3.8 is the current crates.io package, but the immutable v4.3.0 through
-> v4.3.8 tags all failed to complete GitHub distribution; v4.3.9 is the packaging
+> v4.3.9 is the current crates.io package, but the immutable v4.3.0 through
+> v4.3.9 tags all failed to complete GitHub distribution; v4.3.10 is the packaging
 > fix-forward.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
@@ -23,7 +23,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (v4.2.2 complete distribution; v4.3.9 fix-forward)](#decision-ledger-status-v422-complete-distribution-v439-fix-forward)
+- [Decision ledger status (v4.2.2 complete distribution; v4.3.10 fix-forward)](#decision-ledger-status-v422-complete-distribution-v4310-fix-forward)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -76,19 +76,20 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
-- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.9 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v439-distribution)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.10 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v4310-distribution)
 
 ---
 
-## Decision ledger status (v4.2.2 complete distribution; v4.3.9 fix-forward)
+## Decision ledger status (v4.2.2 complete distribution; v4.3.10 fix-forward)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
 the testing ledger, technical and human changelogs, agent guides, and the public
 v4.2.2 release state and the split v4.3 state. Product bytes are published on
-crates.io through v4.3.8 via exact-main trusted OIDC, but Releases
+crates.io through v4.3.9 via exact-main trusted OIDC, but Releases
 `32795846831`, `32800944635`, `32810420213`, `32815338720`, `32821575317`,
-`32824925889`, `32831292249`, `32835470143`, and `32842969776` each failed before complete publication. The
+`32824925889`, `32831292249`, `32835470143`, `32842969776`, and
+`32849508590` each failed before complete publication. The
 first five stopped
 before draft creation on independent Windows-bootstrap, Apple system-Bash,
 raw-checksum, raw-tar-mode, and release-manifest-filter defects. v4.3.5 created
@@ -104,8 +105,10 @@ visibility boundary and created exact private 24-asset draft `376357745`, but
 its macOS consumer rejected the trusted freezer's six-file Apple/source
 inventory against a stale four-file contract, while its Windows build lacked
 `GH_TOKEN` for pinned Inno Setup attestation verification. Both publishers
-skipped and nothing became public. All nine tags remain immutable. The v4.3.9
-rows describe the required packaging fix-forward; its fresh
+skipped and nothing became public. v4.3.9 then reached an exact private
+30-asset draft before the Mac ordering and private-worker test defects recorded
+in `TESTING.md`; nothing became public. All ten tags remain immutable. The
+v4.3.10 rows describe the required packaging fix-forward; its fresh
 exact-main, crate, tag, native installer, and public-byte gates remain
 independent proof.
 
@@ -114,7 +117,7 @@ independent proof.
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.8; complete GitHub distribution moves to v4.3.9; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.9; complete GitHub distribution moves to v4.3.10; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -960,8 +963,11 @@ converged, it invokes only the exact tagged same-channel candidate; MSI
 requires one target binary/registration, correct marker and PATH, successful
 current no-op JSON, markerless unambiguous recovery, and uninstall. This is
 legacy recovery evidence, never a substitute for testing current code. Current
-Global jobs separately invoke the strict worker as a same-version repair and
-require the private backup to disappear.
+Global jobs prove the exact frozen installer as a same-version repair while the
+candidate remains private. After publication, the automatic public matrix
+invokes the strict network-backed worker against the immutable tag, requires its
+private backup to disappear, and repeats binary, registration, marker, and PATH
+convergence checks.
 
 #### Real legacy-to-current evidence
 
@@ -1003,11 +1009,11 @@ quoting, hidden action parsing, version/origin/backup validation, Program Files
 layout, backup naming, worker exit mapping, cleanup token/lifetime, MSI/Inno
 launch flags, Restart Manager policy, Windows runner image, or update JSON
 ownership require Windows unit/Clippy gates plus prior-version transition,
-same-version Global worker repair, rollback/failure recovery, one-copy
-registration/PATH proof, no-op JSON, and uninstall on disposable Windows. A
-future real old-to-new release must exercise the parent `runas` path; a direct
-same-version worker repair proves the current transaction but does not claim a
-future tag existed during pre-release validation.
+private frozen-byte same-version repair, post-public Global worker repair,
+rollback/failure recovery, one-copy registration/PATH proof, no-op JSON, and
+uninstall on disposable Windows. A future real old-to-new release must exercise
+the parent `runas` path; the network-backed worker is not a valid pre-public
+test because its immutable anonymous tag URL does not exist until publication.
 
 ### Authenticated and diagnosable hosted updater probes (v4.1.3 closure)
 
@@ -3459,10 +3465,10 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.9 distribution)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.10 distribution)
 
-**Status:** Product code is published on crates.io through v4.3.8; complete
-GitHub distribution is the v4.3.9 fix-forward. Final PR #14 head `8f5919b`
+**Status:** Product code is published on crates.io through v4.3.9; complete
+GitHub distribution is the v4.3.10 fix-forward. Final PR #14 head `8f5919b`
 passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
@@ -3480,7 +3486,7 @@ installer checksum-record mismatch. v4.3.7 fixed that mismatch, and its tag
 created the exact private 24-asset draft but exposed the read-only
 downstream draft-visibility boundary described above. v4.3.8 fixed that
 boundary but exposed the Apple inventory and Windows attestation-token
-contracts described above. Reviewed v4.3.9 tagged/
+contracts described above. Reviewed v4.3.10 tagged/
 public distribution and physical AMD64 Linux/Raspberry Pi
 acceptance remain separate gates. This section records the product contract and
 rationale, not those later results.

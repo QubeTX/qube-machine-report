@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import itertools
 import json
 import lzma
 import os
@@ -1866,6 +1867,91 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
         'python3 - "$PREPARED_DIRECTORY" "${expected[@]}" <<\'PY\'',
         "build prepared invocation binding",
     )
+    require_exact_line_sequence(
+        build,
+        'python3 - "$PREPARED_DIRECTORY/SHA256SUMS" \\\n'
+        "  PROVENANCE preinstall tr300-universal <<'PY'",
+        "build checksum manifest invocation binding",
+    )
+
+    manifest_names = ("PROVENANCE", "preinstall", "tr300-universal")
+    manifest_program = extract_unique_python_heredoc(
+        build,
+        "checksum manifest must contain exactly one entry per expected file",
+        "credentialed build checksum manifest",
+    )
+    manifest_records = {
+        name: f"{hashlib.sha256(name.encode('ascii')).hexdigest()}  {name}\n"
+        for name in manifest_names
+    }
+
+    def run_manifest_fixture(label: str, payload: bytes, expected_success: bool) -> None:
+        with tempfile.TemporaryDirectory(prefix="tr300-macos-manifest-") as raw:
+            manifest_path = Path(raw) / "SHA256SUMS"
+            manifest_path.write_bytes(payload)
+            result = subprocess.run(
+                [sys.executable, "-", str(manifest_path), *manifest_names],
+                input=manifest_program,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=False,
+            )
+            if (result.returncode == 0) != expected_success:
+                raise AssertionError(
+                    f"checksum manifest fixture={label!r} returned "
+                    f"{result.returncode}, expected_success={expected_success}\n"
+                    f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                )
+
+    for permutation in itertools.permutations(manifest_names):
+        run_manifest_fixture(
+            f"valid-order-{'-'.join(permutation)}",
+            "".join(manifest_records[name] for name in permutation).encode("ascii"),
+            True,
+        )
+
+    canonical = [manifest_records[name] for name in manifest_names]
+    malformed_digest = "g" * 64
+    uppercase_digest = "A" * 64
+    unexpected_digest = hashlib.sha256(b"unexpected").hexdigest()
+    invalid_manifests = {
+        "duplicate": canonical[0] + canonical[1] + canonical[0],
+        "missing": canonical[0] + canonical[1],
+        "extra": "".join(canonical) + f"{unexpected_digest}  unexpected\n",
+        "renamed": canonical[0] + canonical[1] + canonical[2].replace(
+            "tr300-universal", "renamed"
+        ),
+        "single-space-delimiter": canonical[0].replace("  PROVENANCE", " PROVENANCE")
+        + canonical[1]
+        + canonical[2],
+        "tab-delimiter": canonical[0].replace("  PROVENANCE", "\tPROVENANCE")
+        + canonical[1]
+        + canonical[2],
+        "asterisk-delimiter": canonical[0].replace("  PROVENANCE", " *PROVENANCE")
+        + canonical[1]
+        + canonical[2],
+        "three-space-delimiter": canonical[0].replace(
+            "  PROVENANCE", "   PROVENANCE"
+        )
+        + canonical[1]
+        + canonical[2],
+        "short-hash": canonical[0].replace(canonical[0][:64], "0" * 63)
+        + canonical[1]
+        + canonical[2],
+        "nonhex-hash": canonical[0].replace(canonical[0][:64], malformed_digest)
+        + canonical[1]
+        + canonical[2],
+        "uppercase-hash": canonical[0].replace(canonical[0][:64], uppercase_digest)
+        + canonical[1]
+        + canonical[2],
+        "missing-final-newline": "".join(canonical).removesuffix("\n"),
+        "crlf": "".join(canonical).replace("\n", "\r\n"),
+        "blank-line": canonical[0] + "\n" + canonical[1] + canonical[2],
+    }
+    for label, payload in invalid_manifests.items():
+        run_manifest_fixture(label, payload.encode("ascii"), False)
 
     trusted_upload = extract_unique_named_step(
         custody,
@@ -6241,6 +6327,79 @@ def check_windows_validation_provenance(workflow: str) -> None:
         "$env:VALIDATION_MODE -eq 'private'",
         f"{label} private/public channel dispatch",
     )
+    private_guard = (
+        "if ($env:VALIDATION_MODE -eq 'private' -and "
+        "$env:KIND -in @('msi-global', 'exe-global')) {"
+    )
+    public_guard = (
+        "if ($env:VALIDATION_MODE -eq 'public' -and "
+        "$env:KIND -in @('msi-global', 'exe-global')) {"
+    )
+
+    def assert_global_repair_routing(candidate: str) -> None:
+        if candidate.count(private_guard) != 1 or candidate.count(public_guard) != 1:
+            raise AssertionError(f"{label}: Global repair mode guards are not unique")
+        private_start = candidate.index(private_guard)
+        public_start = candidate.index(public_guard, private_start)
+        ownership_start = candidate.index(
+            "# All ownership assertions below deliberately run after", public_start
+        )
+        private_block = candidate[private_start:public_start]
+        public_block = candidate[public_start:ownership_start]
+        if private_block.count("Install-Candidate") != 1 or "update-worker" in private_block:
+            raise AssertionError(
+                f"{label}: private Global repair is not bound only to frozen bytes"
+            )
+        if "Install-Candidate" in public_block or public_block.count("'update-worker'") != 1:
+            raise AssertionError(
+                f"{label}: public Global repair is not bound only to the live-image worker"
+            )
+        for needle in (
+            "tr300-global-worker-$strategy.stdout.log",
+            "tr300-global-worker-$strategy.stderr.log",
+            "@('TR300_GITHUB_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN')",
+            "-RedirectStandardOutput $workerStdout -RedirectStandardError $workerStderr",
+            "stdout=$($workerOutput.Trim()); stderr=$($workerError.Trim())",
+        ):
+            require(public_block, needle, f"{label} tokenless public Global worker")
+        token_list = public_block.index("$githubTokenNames = @(")
+        token_clear = public_block.index(
+            "[Environment]::SetEnvironmentVariable($name, $null, 'Process')",
+            token_list,
+        )
+        worker_launch = public_block.index(
+            "$worker = Start-Process -FilePath $env:EXE", token_clear
+        )
+        finally_restore = public_block.index("} finally {", worker_launch)
+        token_restore = public_block.index(
+            "[Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')",
+            finally_restore,
+        )
+        failure_check = public_block.index("if ($worker.ExitCode -ne 0)", token_restore)
+        if not token_list < token_clear < worker_launch < finally_restore < token_restore < failure_check:
+            raise AssertionError(f"{label}: public Global worker token boundary is out of order")
+        ownership = candidate[ownership_start:]
+        for needle in (
+            "expected one active installed copy",
+            "PATH does not contain the selected channel directory",
+            "scoped marker is missing",
+            "expected one $display registration at $env:EXPECTED_VERSION",
+        ):
+            require(ownership, needle, f"{label} post-repair ownership convergence")
+
+    assert_global_repair_routing(channel_verify)
+    routing_mutations = (
+        channel_verify.replace(private_guard, "if ($env:KIND -in @('msi-global', 'exe-global')) {", 1),
+        channel_verify.replace(public_guard, "if ($env:KIND -in @('msi-global', 'exe-global')) {", 1),
+        channel_verify.replace(public_guard, private_guard, 1),
+    )
+    for mutation in routing_mutations:
+        try:
+            assert_global_repair_routing(mutation)
+        except (AssertionError, ValueError):
+            pass
+        else:
+            raise AssertionError(f"{label}: invalid Global repair routing mutation passed")
     for needle in (
         "TR300_DIST_INSTALLER_PATH",
         "TR300_DOWNLOAD_URL",
