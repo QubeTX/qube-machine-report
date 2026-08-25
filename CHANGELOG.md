@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.11] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward; the v4.3 report behavior is
+  unchanged.** The v4.3.10 crate, tag, and exact private 30-asset draft remain
+  immutable. v4.3.11 is the sole active candidate for complete cross-platform
+  GitHub distribution.
+
+### Fixed
+- **Native Mac validation now proves the managed-install rejection at both
+  observable boundaries.** It runs the exact `preinstall` extracted from the
+  signed PKG to bind the human recovery diagnostic, then runs PackageKit and
+  requires its generic preinstall failure (`PKInstallErrorDomain Code=112`
+  with `NSFilePath=./preinstall`) while retaining the unchanged managed binary,
+  unchanged managed receipt, absent native payload, and absent native receipt
+  checks.
+
+### Security
+- **The failed v4.3.10 GitHub distribution remains private and immutable.**
+  Exact source/tag `e8b0bb73f895f3c2b2d2f62fd39df5846db8f526` passed exact-main
+  CI `32854836544`, trusted-OIDC crates publication `32854836651`, native
+  Apple preflight `32855676983`, Release `32855768841`, Windows Installers
+  `32856291489`, and private Windows validation `32856682126`. Draft
+  `376446284` reached exactly 30 assets. macOS run `32856291645` signed and
+  notarized both native artifacts, then both native validation jobs failed only
+  because the harness searched PackageKit output for a script-owned human
+  message. No GitHub release became public. PR #28 repaired that exact harness
+  boundary and merged as `e55c71bd35d410cc0abda5419168c5384f92690a`
+  after exact-head CI `32859056143`; exact-main CI `32859831814` passed. A
+  recovery dispatch `32860673370` correctly refused the old tag because its
+  source no longer equaled protected `main`, so the immutable-tag policy
+  requires this patch release instead of moving or reusing v4.3.10.
+
 ## [4.3.10] - 2026-08-25
 
 ### Changed

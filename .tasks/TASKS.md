@@ -10,7 +10,7 @@
 
 ## Active
 
-- [ ] **Complete the TR-300 v4.3 release through v4.3.10** - preserve the immutable failed v4.3.0 through v4.3.9 tags and private drafts, repair the two v4.3.9 acceptance-harness defects, and finish the existing no-click exact-SHA crates/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+- [ ] **Complete the TR-300 v4.3 release through v4.3.11** - preserve the immutable failed v4.3.0 through v4.3.10 tags and private drafts, carry the reviewed native Mac validation fix forward, and finish the existing no-click exact-SHA crates/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
   - [x] Remediate and independently validate every confirmed release/privilege security finding
   - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
   - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
@@ -30,7 +30,8 @@
   - [x] Qualify and merge the v4.3.7 release-hash fix, publish it through OIDC, and preserve its exact private 24-asset draft plus fail-closed read-only downstream visibility result
   - [x] Qualify and merge the v4.3.8 private-draft-visibility fix, publish it through OIDC, and preserve its exact private 24-asset draft plus fail-closed Apple-inventory and Windows-attestation results
   - [x] Qualify and merge the v4.3.9 Apple-inventory/Windows-attestation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed Mac ordering/private-worker results
-  - [ ] Qualify and merge the v4.3.10 checksum/validation fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
+  - [x] Qualify and merge the v4.3.10 checksum/validation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed native PackageKit assertion result
+  - [ ] Qualify and merge the v4.3.11 native-validation fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
   - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
 
 ## Done

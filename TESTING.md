@@ -7,20 +7,56 @@ as passed.
 
 ## Per-version verification log
 
+### v4.3.11 — Native Mac validation fix-forward (as of 2026-08-25)
+
+Release status: active packaging-only candidate. Product and installer policy
+are unchanged from v4.3.10. The release delta is limited to version/release
+metadata plus the already-merged native Mac harness repair from PR #28: run the
+exact signed-PKG `preinstall` directly to prove its human recovery diagnostic,
+then require real PackageKit to report `PKInstallErrorDomain Code=112` and
+`NSFilePath=./preinstall` while proving the managed binary/receipt are
+unchanged and no native payload/receipt appears. Local, exact-head PR,
+exact-main CI/OIDC, native preflight, tag, private 24-to-30-to-validated-to-34,
+public smoke, byte-audit, and deployment gates remain open until their exact
+v4.3.11 evidence is recorded. The v4.3.10 tag and private draft will not move
+or be reused.
+
+Local release-source evidence on 2026-08-25: formatting; warnings-denied
+workspace/all-target Clippy; 185 unit tests and 22 integration tests; 39-file
+locked package inventory; locked publish dry-run; optimized workspace build;
+RustSec audit of 221 locked dependencies against 1,226 loaded advisories;
+cargo-dist 0.31.0 plan; structural actionlint; standalone ShellCheck for every
+release script/wrapper plus the exact extracted PKG `preinstall`; managed-
+installer transaction fixtures under Git Bash, PowerShell 7, and Windows
+PowerShell 5.1; pinned-Inno parsing under both PowerShell hosts; and the full
+executable release-provenance suite passed. Release-binary table, ASCII, fast
+JSON, and full JSON smokes passed; fast JSON measured 259.6 ms and full JSON
+2119.2 ms on the Alienware. Windows CPU temperature remained `null`, and the
+reported 52 C NVIDIA temperature exactly matched direct `nvidia-smi`. Product
+code and benchmark-sensitive paths are byte-for-byte unchanged from v4.3.10;
+no performance gain is newly claimed.
+
 ### v4.3.10 — Mac checksum and staged Windows validation fix-forward (as of 2026-08-25)
 
-Release status: active, unreleased packaging-only candidate. It carries the
-unchanged v4.3 report behavior and fixes two acceptance-harness defects exposed
-after the immutable v4.3.9 tag. The Mac finalizer replaces its locale-sensitive
-checksum-name comparison with an order-independent exact parser and executable
-permutation/malformed-manifest fixtures. Private Windows validation proves
-same-version Global repair with the exact frozen MSI/EXE bytes; the real Global
-live-image worker remains in the shared matrix but runs only during the
-automatic post-public pass, when its immutable anonymous tag URL exists.
-Production updater routing and custody are unchanged, and worker output is
-captured for decisive failure diagnostics. Local, PR, exact-main, OIDC, native
-preflight, tag, private 24-to-30-to-validated-to-34, public smoke, and byte-audit
-gates remain open until their exact v4.3.10 evidence is recorded.
+Release status: exact source and crates.io publication completed; its GitHub
+draft exists but remains private. Tag `v4.3.10` points to exact source
+`e8b0bb73f895f3c2b2d2f62fd39df5846db8f526`. Exact-main CI
+`32854836544`, automatic trusted-OIDC crates run `32854836651`, native Apple
+preflight `32855676983`, all 13 Release jobs in `32855768841`, Windows
+Installers `32856291489`, and private Windows Installer Validation
+`32856682126` passed. Draft `376446284` reached exactly 30 assets.
+
+macOS run `32856291645` built, signed, and notarized the universal PKG and
+compatibility DMG, then both native validation jobs stopped on one harness
+assertion: PackageKit emitted its normal generic `PKInstallErrorDomain Code=112`
+with `NSFilePath=./preinstall` instead of repeating the preinstall script's
+human recovery message. No publisher ran and nothing became public. PR #28
+changed only that validation boundary; exact-head CI `32859056143` and Release
+plan `32859054543` passed, it merged as
+`e55c71bd35d410cc0abda5419168c5384f92690a`, and exact-main CI
+`32859831814` passed. Recovery run `32860673370` then correctly refused to
+reuse the old tag because its source did not equal protected `main`. v4.3.11
+therefore fixes forward without moving or mutating v4.3.10.
 
 ### v4.3.9 — Apple inventory and Windows attestation fix-forward (as of 2026-08-25)
 

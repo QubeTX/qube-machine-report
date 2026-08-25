@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.9`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.10` (battery hardening, Windows
+- Current crates.io version: `4.3.10`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.11` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -146,15 +146,18 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   exact draft reached 30 assets. macOS run `32850002313` then stopped before
   Apple credential use because its checksum-name comparator depended on locale
   ordering. Private Windows validation `32850359079` passed every case except
-  the Global MSI/EXE live-image worker, which correctly could not fetch an
-  anonymous exact-tag asset while v4.3.9 remained private. v4.3.10 replaces the
-  fragile Mac comparison with an order-independent exact manifest parser,
-  proves frozen Global repairs privately, and reserves the real network-backed
-  worker for the automatic post-public validation. No production updater
-  custody is weakened. Never move, delete, reuse, or rerun an immutable v4.3.0
-  through v4.3.9 tag unchanged.
+  the Global MSI/EXE live-image worker, which could not fetch an anonymous
+  exact-tag asset while v4.3.9 remained private. v4.3.10 repaired both defects,
+  published its exact crate, passed Release/Windows/private validation, and
+  reached exact private 30-asset draft `376446284`. macOS run `32856291645`
+  signed/notarized both artifacts, then stopped because the native harness
+  expected PackageKit to repeat the preinstall script's human message. PR #28
+  repaired only that assertion and merged as `e55c71b`; v4.3.11 carries the
+  unchanged product and installer policy through the normal automated chain.
+  No production updater custody is weakened. Never move, delete, reuse, or
+  rerun an immutable v4.3.0 through v4.3.10 tag unchanged.
   v4.2.2 remains the last complete public GitHub distribution until reviewed
-  v4.3.10 passes exact-main CI/OIDC and the automatic private
+  v4.3.11 passes exact-main CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;

@@ -13,6 +13,29 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.11] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged.** Version
+  4.3.10 remains preserved as an immutable crate, tag, and private draft.
+  Version 4.3.11 is the only active candidate for complete cross-platform
+  downloads.
+
+### Fixed
+- **Mac testing now checks each rejection message where macOS actually exposes
+  it.** The package's own safety script is checked directly for its useful
+  recovery guidance, while the real macOS installer is checked for its normal
+  generic pre-install failure and for leaving the existing managed install
+  completely untouched.
+
+### Security
+- **Version 4.3.10 never became public on GitHub.** Its crate, first-stage
+  release, Windows packages, signatures, and notarization succeeded, leaving a
+  correct private 30-download draft. The final Mac tests stopped only because
+  they expected macOS to repeat a script message that PackageKit intentionally
+  summarizes. Version 4.3.11 fixes that test boundary without weakening the
+  package policy, release automation, or immutable-tag rules.
+
 ## [4.3.10] - 2026-08-25
 
 ### Changed
