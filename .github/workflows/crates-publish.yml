@@ -1,9 +1,7 @@
 name: Crates.io Publish
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -23,7 +21,7 @@ env:
   RUSTFLAGS: "-D warnings"
 
 concurrency:
-  group: crates-publish-${{ github.event.workflow_run.head_sha || inputs.operation || github.sha }}
+  group: crates-publish-${{ inputs.operation || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -47,7 +45,7 @@ jobs:
 
   validate-package:
     name: Validate and package the exact CI-tested source
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository && github.repository == 'QubeTX/qube-machine-report'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -65,45 +63,75 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
-          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
-          UPSTREAM_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
-          UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          PUBLISH_WORKFLOW_RUN_ID: ${{ github.run_id }}
+          CI_STATE_PATH: ${{ runner.temp }}/ci-runs.json
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$EVENT_NAME" == workflow_run &&
+          [[ "$EVENT_NAME" == push &&
              "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
-             "$UPSTREAM_RUN_ID" =~ ^[1-9][0-9]*$ &&
-             "$UPSTREAM_WORKFLOW_ID" =~ ^[1-9][0-9]*$ &&
-             "$UPSTREAM_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
-             "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ &&
-             "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
-          trusted_workflow_id=$(gh api \
-            "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
-          [[ "$trusted_workflow_id" =~ ^[1-9][0-9]*$ ]]
-          IFS=$'\t' read -r actual_id workflow_id run_name run_path event status conclusion \
-            repository head_repository head_branch source_sha run_attempt < <(
-              gh api "repos/$EXPECTED_REPOSITORY/actions/runs/$UPSTREAM_RUN_ID" \
-                --jq '[.id, .workflow_id, .name, .path, .event, .status, .conclusion, .repository.full_name, .head_repository.full_name, .head_branch, .head_sha, .run_attempt] | @tsv'
-            )
-          [[ "$actual_id" == "$UPSTREAM_RUN_ID" &&
-             "$workflow_id" == "$trusted_workflow_id" &&
-             "$workflow_id" == "$UPSTREAM_WORKFLOW_ID" &&
-             "$run_name" == CI && "$run_path" == .github/workflows/ci.yml &&
-             "$event" == push && "$status" == completed && "$conclusion" == success &&
-             "$repository" == "$EXPECTED_REPOSITORY" &&
-             "$head_repository" == "$EXPECTED_REPOSITORY" &&
-             "$head_branch" == main && "$source_sha" == "$UPSTREAM_SHA" &&
-             "$run_attempt" == "$UPSTREAM_RUN_ATTEMPT" ]]
+             "$SOURCE_REF" == refs/heads/main &&
+             "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ &&
+             "$PUBLISH_WORKFLOW_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           remote_main=$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          [[ "$remote_main" == "$source_sha" && "$WORKFLOW_SHA" == "$source_sha" ]]
-          {
-            echo "source_sha=$source_sha"
-            echo "workflow_run_id=$UPSTREAM_RUN_ID"
-            echo "ci_run_id=$UPSTREAM_RUN_ID"
-          } >> "$GITHUB_OUTPUT"
+          [[ "$remote_main" == "$SOURCE_SHA" ]]
+          workflow_id=$(gh api \
+            "repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml" --jq .id)
+          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+          endpoint="repos/$EXPECTED_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$SOURCE_SHA&per_page=100"
+          # The counter intentionally bounds retries while CI for this same push runs.
+          # shellcheck disable=SC2034
+          for attempt in {1..120}; do
+            gh api "$endpoint" > "$CI_STATE_PATH"
+            mapfile -t rows < <(
+              jq -r --argjson workflow_id "$workflow_id" \
+                --arg repo "$EXPECTED_REPOSITORY" --arg sha "$SOURCE_SHA" '
+                .workflow_runs[] |
+                select(.workflow_id == $workflow_id and .name == "CI" and
+                       .path == ".github/workflows/ci.yml" and .event == "push" and
+                       .repository.full_name == $repo and
+                       .head_repository.full_name == $repo and
+                       .head_branch == "main" and .head_sha == $sha) |
+                [.id, .status, (.conclusion // "__pending__"), .run_attempt] | @tsv
+              ' "$CI_STATE_PATH"
+            )
+            [[ ${#rows[@]} -le 1 ]] || exit 65
+            if [[ ${#rows[@]} -eq 1 ]]; then
+              IFS=$'\t' read -r ci_run_id status conclusion run_attempt <<< "${rows[0]}"
+              [[ "$ci_run_id" =~ ^[1-9][0-9]*$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]]
+              if [[ "$status" == completed ]]; then
+                [[ "$conclusion" == success ]] || exit 65
+                IFS=$'\t' read -r actual_id actual_workflow_id run_name run_path \
+                  event actual_status actual_conclusion repository head_repository \
+                  head_branch source_sha actual_run_attempt < <(
+                    gh api "repos/$EXPECTED_REPOSITORY/actions/runs/$ci_run_id" \
+                      --jq '[.id, .workflow_id, .name, .path, .event, .status, .conclusion, .repository.full_name, .head_repository.full_name, .head_branch, .head_sha, .run_attempt] | @tsv'
+                  )
+                [[ "$actual_id" == "$ci_run_id" &&
+                   "$actual_workflow_id" == "$workflow_id" &&
+                   "$run_name" == CI && "$run_path" == .github/workflows/ci.yml &&
+                   "$event" == push && "$actual_status" == completed &&
+                   "$actual_conclusion" == success &&
+                   "$repository" == "$EXPECTED_REPOSITORY" &&
+                   "$head_repository" == "$EXPECTED_REPOSITORY" &&
+                   "$head_branch" == main && "$source_sha" == "$SOURCE_SHA" &&
+                   "$actual_run_attempt" == "$run_attempt" ]]
+                remote_main=$(gh api \
+                  "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+                [[ "$remote_main" == "$SOURCE_SHA" ]]
+                {
+                  echo "source_sha=$SOURCE_SHA"
+                  echo "workflow_run_id=$PUBLISH_WORKFLOW_RUN_ID"
+                  echo "ci_run_id=$ci_run_id"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+            sleep 15
+          done
+          exit 1
 
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:

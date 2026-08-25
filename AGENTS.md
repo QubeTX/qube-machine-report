@@ -148,7 +148,7 @@ keys remain available. The exact v4 boundary includes `Action`, `Cli`,
 
 .github/workflows/
   ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
-  crates-publish.yml          # automatic post-CI exact-main trusted-OIDC crates.io publication
+  crates-publish.yml          # automatic exact-main push/CI-gated trusted-OIDC crates.io publication
   release.yml                 # cargo-dist builds + fresh private-draft publisher
   windows-installers.yml      # adds six Windows assets to the private draft
   windows-installer-validation.yml # exact-byte pre-public matrix + public updater smoke
@@ -1002,9 +1002,10 @@ a private draft.
 ### crates.io publishing (`.github/workflows/crates-publish.yml`)
 
 The crates.io workflow is intentionally separate from `release.yml`. A
-successful same-repository push to `main` automatically starts it after `CI`,
-bound to that exact tested SHA. A read-only validator with no registry
-credential uses exact Cargo 1.95 to build and dry-run the normalized package and
+same-repository push to `main` automatically starts it alongside `CI`. Its
+read-only validator has no registry credential, waits for that exact SHA's CI
+run to finish successfully, re-fetches the run identity, and rebinds current
+`main` before exact Cargo 1.95 builds and dry-runs the normalized package and
 records the exact `.crate` hash. A fresh protected
 `crates-io` environment job executes no repository/package code while
 credentialed: it repackages with `--no-verify`,
@@ -1102,9 +1103,9 @@ Mac/local/hosted gate below remains blocking for future releases.
      compatibility-DMG sign/notary/staple/install/checksum round-trips
 4. Commit on a focused release branch, open a PR, resolve review threads, and
    wait for all required checks. Merge only the reviewed exact commit.
-5. Wait for `ci.yml` to go green on the exact current `main` SHA, then require
-   the automatically triggered `crates-publish.yml` run to prove the exact
-   trusted-OIDC/public bytes and provenance.
+5. The `main` push starts `ci.yml` and `crates-publish.yml` together. Require the
+   registry-uncredentialed crates validator to wait for and prove that exact SHA's green
+   CI, then require the fresh publisher's trusted-OIDC/public-byte provenance.
 6. Tag the proven exact-main SHA with `git tag vX.Y.Z`.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
    workflow trigger; an explicit single-tag push is sufficient).

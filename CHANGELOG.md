@@ -81,8 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   current protected `main`, tag, CI, and all 30 accepted bytes. The real public
   updater matrix runs only after publication.
 - **Crates.io publication uses automatic protected-environment OIDC instead of
-  exposing a reusable token to a build runner.** Every successful same-repository
-  `main` CI run automatically starts publication for that exact tested commit.
+  exposing a reusable token to a build runner.** Every same-repository `main`
+  push starts the publication workflow, whose registry-uncredentialed validator waits
+  for that exact commit's successful CI run before continuing.
   Locked/default-verifying package checks run with read-only GitHub authorization
   and no registry credential; a fresh runner rejects unsafe source, config, and
   archive shapes, deterministically matches the candidate crate, and mints a

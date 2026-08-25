@@ -238,9 +238,10 @@ See § 13 for the fix-forward loop.
 
 ## § 9 Observe automatic crate publication through trusted OIDC
 
-`crates-publish.yml` automatically follows a successful same-repository `CI`
-push run on `main` and publishes that exact tested SHA. There is no normal
-manual publication step:
+`crates-publish.yml` starts automatically on a same-repository push to `main`.
+Its registry-uncredentialed validator waits for that exact SHA's `CI` push run to pass,
+then the fresh publisher publishes the tested SHA. There is no normal manual
+publication step:
 
 ```bash
 gh run list --workflow=crates-publish.yml --branch main --limit 3
@@ -432,8 +433,8 @@ If `ci.yml` or the automatic `crates-publish.yml` run fails:
    version** — the tag has not moved yet, so `Cargo.toml` `version` stays as set
    in § 3.
 3. Push the branch and wait for the protected PR's exact-head checks.
-4. Merge, watch exact-main CI again from § 8, and let its successful completion
-   start a fresh automatic crates publication run for that SHA.
+4. Merge and watch the push-triggered CI and crates runs again from § 8. The
+   crates run must remain without a registry credential until its exact-SHA CI poll succeeds.
 
 Repeat until exact-main `ci.yml` and the automatic crates publication are proven,
 then proceed to § 10.

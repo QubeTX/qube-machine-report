@@ -265,7 +265,17 @@ if [[ -n ${MOCK_FAIL_ENDPOINT:-} && $endpoint == "$MOCK_FAIL_ENDPOINT" ]]; then
 fi
 case "$endpoint" in
     repos/*/actions/workflows/ci.yml/runs\\?*)
-        cat "$MOCK_CI_RUNS_JSON"
+        if [[ -n ${MOCK_CI_RUNS_AFTER:-} ]]; then
+            ci_marker="$MOCK_CI_STATE_DIR/ci-runs-seen"
+            if [[ ! -e $ci_marker ]]; then
+                : > "$ci_marker"
+                cat "$MOCK_CI_RUNS_JSON"
+            else
+                cat "$MOCK_CI_RUNS_AFTER"
+            fi
+        else
+            cat "$MOCK_CI_RUNS_JSON"
+        fi
         ;;
     repos/*/actions/workflows/ci.yml)
         printf '%s\\n' "${MOCK_CI_WORKFLOW_ID:-333333}"
@@ -572,6 +582,26 @@ elif ".id == $id" in normalized and ".workflow_run.id == $run" in normalized:
     if "$sha" in normalized:
         condition = condition and nested(data, "workflow_run", "head_sha") == variables.get("sha")
     require(condition)
+elif (
+    ".workflow_runs[]" in normalized and
+    '(.conclusion // "__pending__")' in normalized and
+    "| @tsv" in normalized
+):
+    for run in data.get("workflow_runs", []):
+        if (
+            run.get("workflow_id") == variables.get("workflow_id") and
+            run.get("name") == "CI" and
+            run.get("path") == ".github/workflows/ci.yml" and
+            run.get("event") == "push" and
+            nested(run, "repository", "full_name") == variables.get("repo") and
+            nested(run, "head_repository", "full_name") == variables.get("repo") and
+            run.get("head_branch") == "main" and
+            run.get("head_sha") == variables.get("sha")
+        ):
+            emit("\t".join(str(value) for value in (
+                run.get("id"), run.get("status"),
+                run.get("conclusion") or "__pending__", run.get("run_attempt"),
+            )))
 elif ".workflow_runs[]" in normalized and "| .id" in normalized:
     expected_name = "Windows Installers" if 'name == "Windows Installers"' in normalized else "CI"
     expected_path = (
@@ -2925,6 +2955,7 @@ def check_actual_resolvers(
     release: str,
     windows: str,
     macos: str,
+    crates: str,
     windows_validation: str,
     bash: str,
     mock_bin: Path,
@@ -2973,6 +3004,82 @@ def check_actual_resolvers(
         windows_validation,
         "Resolve tag and require every Windows family",
         WINDOWS_VALIDATION_WORKFLOW.name,
+    )
+    crates_ci_waiter = extract_named_run(
+        crates,
+        "Require successful CI for this exact main commit",
+        CRATES_WORKFLOW.name,
+    )
+
+    ci_fixture_directory = mock_bin.parent / "crates-ci-waiter"
+    ci_fixture_directory.mkdir()
+    ci_state = ci_fixture_directory / "state"
+    ci_state.mkdir()
+    ci_runs_before = ci_fixture_directory / "before.json"
+    ci_runs_after = ci_fixture_directory / "after.json"
+    ci_run_id = "444444"
+    publish_run_id = "555555"
+
+    def ci_run(status: str, conclusion: str | None) -> dict[str, object]:
+        return {
+            "id": int(ci_run_id),
+            "workflow_id": 333333,
+            "name": "CI",
+            "path": ".github/workflows/ci.yml",
+            "event": "push",
+            "status": status,
+            "conclusion": conclusion,
+            "repository": {"full_name": REPOSITORY},
+            "head_repository": {"full_name": REPOSITORY},
+            "head_branch": "main",
+            "head_sha": TRUSTED_SHA,
+            "run_attempt": 1,
+        }
+
+    ci_runs_before.write_text(
+        json.dumps({"workflow_runs": [ci_run("in_progress", None)]}),
+        encoding="utf-8",
+        newline="\n",
+    )
+    ci_runs_after.write_text(
+        json.dumps({"workflow_runs": [ci_run("completed", "success")]}),
+        encoding="utf-8",
+        newline="\n",
+    )
+    fixture_waiter = crates_ci_waiter.replace("sleep 15", "sleep 0")
+    if fixture_waiter == crates_ci_waiter:
+        raise AssertionError("crates CI waiter fixture could not bound its retry delay")
+    run_case(
+        bash=bash,
+        mock_bin=mock_bin,
+        block=fixture_waiter,
+        name="crates publisher waits for in-progress exact CI",
+        overrides={
+            "EVENT_NAME": "push",
+            "SOURCE_REF": "refs/heads/main",
+            "SOURCE_SHA": TRUSTED_SHA,
+            "PUBLISH_WORKFLOW_RUN_ID": publish_run_id,
+            "CI_STATE_PATH": (ci_fixture_directory / "ci-runs.json").as_posix(),
+            "MOCK_CI_RUNS_JSON": ci_runs_before.as_posix(),
+            "MOCK_CI_RUNS_AFTER": ci_runs_after.as_posix(),
+            "MOCK_CI_STATE_DIR": ci_state.as_posix(),
+            "MOCK_RELEASE_RUN_ID": ci_run_id,
+            "MOCK_RELEASE_WORKFLOW_ID": "333333",
+            "MOCK_RELEASE_RUN_NAME": "CI",
+            "MOCK_RELEASE_RUN_PATH": ".github/workflows/ci.yml",
+            "MOCK_RELEASE_RUN_EVENT": "push",
+            "MOCK_RELEASE_RUN_STATUS": "completed",
+            "MOCK_RELEASE_RUN_CONCLUSION": "success",
+            "MOCK_RELEASE_RUN_TAG": "main",
+            "MOCK_RELEASE_RUN_SHA": TRUSTED_SHA,
+            "MOCK_RELEASE_RUN_ATTEMPT": "1",
+        },
+        expected_success=True,
+        expected_outputs={
+            "source_sha": TRUSTED_SHA,
+            "workflow_run_id": publish_run_id,
+            "ci_run_id": ci_run_id,
+        },
     )
 
     for tag, succeeds in (
@@ -5402,19 +5509,17 @@ def check_crates_token_boundary(workflow: str) -> None:
     label = CRATES_WORKFLOW.name
     trigger = workflow[: workflow.index("permissions:")]
     for needle in (
-        "workflow_run:",
-        'workflows: ["CI"]',
-        "types: [completed]",
+        "push:",
         "branches: [main]",
     ):
-        require(trigger, needle, f"{label} automatic post-CI trigger")
-    if re.search(r"(?m)^\s{2}push:\s*$", trigger):
+        require(trigger, needle, f"{label} automatic main-push trigger")
+    if "workflow_run:" in trigger or "github.event.workflow_run" in workflow:
         raise AssertionError(
-            f"{label}: crates publication must consume the successful CI run, not race it"
+            f"{label}: crates.io trusted OIDC does not support workflow_run events"
         )
     require(
         workflow,
-        "if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository && github.repository == 'QubeTX/qube-machine-report'",
+        "if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report'",
         f"{label} automatic trusted-main publish gate",
     )
     probe_job = extract_job(workflow, "probe-trusted-publisher", label)
@@ -5463,27 +5568,48 @@ def check_crates_token_boundary(workflow: str) -> None:
         raise AssertionError(f"{label}: validation regained a credential")
     for needle in (
         "EVENT_NAME: ${{ github.event_name }}",
-        "UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}",
-        "UPSTREAM_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}",
-        "UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}",
-        "UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}",
-        "WORKFLOW_SHA: ${{ github.sha }}",
-        '"$EVENT_NAME" == workflow_run',
+        "SOURCE_REF: ${{ github.ref }}",
+        "SOURCE_SHA: ${{ github.sha }}",
+        "PUBLISH_WORKFLOW_RUN_ID: ${{ github.run_id }}",
+        "CI_STATE_PATH: ${{ runner.temp }}/ci-runs.json",
+        '"$EVENT_NAME" == push',
         '"$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report',
+        '"$SOURCE_REF" == refs/heads/main',
+        '"$PUBLISH_WORKFLOW_RUN_ID" =~ ^[1-9][0-9]*$',
         "actions/workflows/ci.yml",
-        "actions/runs/$UPSTREAM_RUN_ID",
-        '"$workflow_id" == "$trusted_workflow_id"',
-        '"$workflow_id" == "$UPSTREAM_WORKFLOW_ID"',
-        '"$event" == push',
+        "runs?event=push&head_sha=$SOURCE_SHA&per_page=100",
+        'select(.workflow_id == $workflow_id and .name == "CI"',
+        '.path == ".github/workflows/ci.yml" and .event == "push"',
+        ".repository.full_name == $repo",
+        ".head_repository.full_name == $repo",
+        '.head_branch == "main" and .head_sha == $sha',
+        '(.conclusion // "__pending__")',
+        "[[ ${#rows[@]} -le 1 ]]",
         '"$status" == completed',
         '"$conclusion" == success',
+        "actions/runs/$ci_run_id",
+        '"$actual_id" == "$ci_run_id"',
+        '"$actual_workflow_id" == "$workflow_id"',
+        '"$run_name" == CI',
+        '"$run_path" == .github/workflows/ci.yml',
+        '"$event" == push',
+        '"$actual_status" == completed',
+        '"$actual_conclusion" == success',
+        '"$repository" == "$EXPECTED_REPOSITORY"',
+        '"$head_repository" == "$EXPECTED_REPOSITORY"',
         '"$head_branch" == main',
-        '"$source_sha" == "$UPSTREAM_SHA"',
-        '"$run_attempt" == "$UPSTREAM_RUN_ATTEMPT"',
-        '"$WORKFLOW_SHA" == "$source_sha"',
+        '"$source_sha" == "$SOURCE_SHA"',
+        '"$actual_run_attempt" == "$run_attempt"',
+        "for attempt in {1..120}",
+        "sleep 15",
+        'echo "source_sha=$SOURCE_SHA"',
+        'echo "workflow_run_id=$PUBLISH_WORKFLOW_RUN_ID"',
+        'echo "ci_run_id=$ci_run_id"',
         'git/ref/heads/main',
     ):
         require(source_gate, needle, f"{label} exact automatic publish gate")
+    if source_gate.count('git/ref/heads/main') != 2:
+        raise AssertionError(f"{label}: current-main bind must occur before and after CI")
     for needle in (
         "rustup toolchain install 1.95",
         "cargo\\ 1\\.95",
@@ -5911,7 +6037,7 @@ def main() -> None:
         write_windows_shasum_compat(mock_bin)
         write_fixture_jq_compat(mock_bin)
         check_actual_resolvers(
-            release, windows, macos, windows_validation, bash, mock_bin
+            release, windows, macos, crates, windows_validation, bash, mock_bin
         )
 
     print("actual release resolver fixtures and structural guards passed")

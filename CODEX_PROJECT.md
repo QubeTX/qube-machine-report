@@ -234,8 +234,9 @@ do not have to infer platform semantics.
 3. Prepare the final release-source correction on a focused PR, rerun the
    complete local gate, and merge only after every required check and review
    thread passes. Earlier-head checks are not evidence for the merge result.
-4. Let successful exact-main `CI` automatically start `crates-publish.yml`, then
-   require exact package bytes plus trusted OIDC/public provenance.
+4. Let the exact-main push start `CI` and `crates-publish.yml`; the publisher
+   must wait without a registry credential for that exact CI result before exact package bytes
+   plus trusted OIDC/public provenance are accepted.
 5. Create and push only tag `v4.3.0` after exact-main CI/crates proof. Existing
    immutable `v*` tags must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers

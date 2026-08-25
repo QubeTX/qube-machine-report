@@ -494,9 +494,9 @@ protected, exact-source workflows:
   cargo-dist planning on pushes to the default branch. Native Apple Silicon and
   Intel macOS jobs plus AMD64/ARM64 Linux and Windows jobs are blocking, and
   workflow/shell validation runs in the same gate.
-- After a same-repository push to `main` passes `CI`, `Crates.io Publish`
-  automatically consumes that exact successful run. A read-only Cargo 1.95 job
-  with no registry credential builds and verifies the normalized package; a
+- A same-repository push to `main` starts `Crates.io Publish` automatically.
+  Its read-only Cargo 1.95 job has no registry credential and waits for that
+  exact SHA's `CI` run to pass before it builds and verifies the normalized package; a
   fresh protected `crates-io` job reproduces the exact crate bytes, mints a
   short-lived OIDC token only for `cargo publish --no-verify`, and requires the
   public checksum and trusted-publisher provenance to match the repository,

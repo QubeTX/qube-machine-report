@@ -9,7 +9,10 @@
 (v4.2.2 remains the last fully published state. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.
-Exact-main CI run `32766014047` passed all 19 jobs.)
+Exact-main CI run `32766014047` passed all 19 jobs. Release-automation PR #16
+merged as `75e7092`; its exact-main CI passed, but crates.io rejected the
+automatic `workflow_run` trusted-publishing event before issuing a crates.io
+publish token. PR #17 is the supported-main-push fix-forward.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
@@ -26,22 +29,28 @@ per version produced medians of 5146.9 ms and 2120.2 ms (~3026.6 ms, 58.8%,
 2.43×), while 11 alternating fast runs per version at 257.3 ms and 260.4 ms
 (+1.2%) are background-level and support no gain claim. The explicit
 `-f/--full` flag is also included.
-PR #14 exact head `8f5919b` and merge `2f997d2` passed their hosted gates; the
-final release-automation/metadata PR and its exact-main CI plus automatic crates
-run remain before tagging.
+PR #14 exact head `8f5919b` and merge `2f997d2` passed their hosted gates.
+PR #16 exact head `57b2597` merged as `75e7092`, and exact-main CI
+`32791121107` passed all 19 jobs. Automatic crates run `32791618652` then
+failed closed only because crates.io does not accept `workflow_run` for trusted
+publishing; no crates.io publish token, crate, or tag was created. PR #17
+changes the no-click path to a supported `main` push whose registry-uncredentialed
+validator waits for exact CI success. Its merge and automatic publication proof
+remain before tagging.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
 The active v4.3 campaign remains unreleased. Its merged code candidate adds
-battery, thermal, and Windows full-mode improvements. Crate publication
-automatically follows successful exact-main CI through protected OIDC, and
-GitHub publication remains a private
+battery, thermal, and Windows full-mode improvements. A `main` push starts CI
+and the crate-publication workflow together; the registry-uncredentialed
+validator waits for that exact CI run to pass before the fresh protected OIDC
+publisher can run. GitHub publication remains a private
 24-asset draft → private 30-asset Windows candidate → exact private Windows
 acceptance proof → macOS-only 34-asset finalization chain. The Apple secrets are
 in `apple-signing`; native ARM/Intel preflight passed, repository copies and the
-temporary migration token are gone, and the one-time workflow is removed in
-the release-source PR. The crates.io publisher tuple and `trustpub_only` probe
+temporary migration token are gone, and PR #16 removed the one-time workflow.
+The crates.io publisher tuple and `trustpub_only` probe
 passed; the first automatic exact-main publication remains the decisive proof.
 AMD64 Linux laptop and Raspberry Pi physical qualification remain separate open
 acceptance gates.

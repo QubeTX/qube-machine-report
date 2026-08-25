@@ -462,9 +462,9 @@ repro commands are in the
   credential plus fresh checkout-free Apple signers and
   publisher. It renders the MIC-1 wrappers and creates only a private exact
   24-asset draft.
-- **`crates-publish.yml`** — automatically follows a successful same-repository
-  `main` CI run and binds publication to that exact tested SHA. A read-only
-  Cargo 1.95 validator with no registry credential proves the
+- **`crates-publish.yml`** — starts automatically on a same-repository `main`
+  push, then waits without a registry credential for that exact SHA's CI run
+  to pass before publication can continue. A read-only Cargo 1.95 validator proves the
   package bytes; a fresh protected
   `crates-io` runner executes no package code while a short-lived OIDC token is
   present, publishes with `--no-verify`, and verifies public hash/provenance.
@@ -589,8 +589,9 @@ and release-asset gates.
 - Bump `Cargo.toml` `version`; update the doc set in lockstep (incl. `HUMAN_CHANGELOG.md` — see the `tr300-changelog` skill).
 - Commit `release: vX.Y.Z - <summary>` on a branch; merge the PR only after all
   required checks pass and review threads resolve.
-- A successful same-repository push to `main` automatically triggers
-  `crates-publish.yml` for that exact CI-tested SHA. Require its trusted
+- A same-repository push to `main` automatically triggers both CI and
+  `crates-publish.yml`; the publisher waits without a registry credential for that exact SHA's
+  successful CI result. Require its trusted
   OIDC/public-byte provenance; no manual publication dispatch belongs in the
   normal path.
 - **Tag only after exact-main CI and automatic crates publication are proven.**
