@@ -382,12 +382,12 @@ jobs:
           PY
           archive_sha=$(shasum -a 256 "unsigned/$archive" | awk '{print $1}')
           expected_sidecar="$archive_sha *$archive"
-          sidecar_size=$(wc -c < "unsigned/$sidecar" | tr -d '[:space:]')
-          expected_size=$((${#expected_sidecar} + 1))
-          IFS= read -r actual_sidecar < "unsigned/$sidecar"
-          if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
-                  "$sidecar_size" == "$expected_size" &&
-                  "$actual_sidecar" == "$expected_sidecar" ]]; then
+          if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "unsigned Apple archive checksum is malformed" >&2
+            exit 1
+          fi
+          if ! python3 -c 'import pathlib, sys; path, expected = sys.argv[1:]; raise SystemExit(pathlib.Path(path).read_bytes() != (expected + "\n\n").encode("utf-8"))' \
+            "unsigned/$sidecar" "$expected_sidecar"; then
             echo "unsigned Apple checksum sidecar is malformed or does not match" >&2
             exit 1
           fi
@@ -733,6 +733,60 @@ jobs:
           for name in "${cargo_assets[@]}"; do
             install -m 0644 "$INPUT_DIRECTORY/$name" "$OUTPUT_DIRECTORY/$name"
           done
+
+          # cargo-dist 0.31.0 emits its raw checksum sidecars and aggregate
+          # with one blank line after the final checksum record. Verify those
+          # producer bytes exactly before canonicalizing the public files to
+          # one trailing LF. The Apple signer already canonicalizes its two
+          # sidecars after replacing the archives with signed/notarized bytes.
+          python3 - "$OUTPUT_DIRECTORY" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          output = Path(sys.argv[1])
+          payloads = (
+              "source.tar.gz",
+              "tr300-aarch64-apple-darwin.tar.xz",
+              "tr300-aarch64-unknown-linux-gnu.tar.xz",
+              "tr300-x86_64-apple-darwin.tar.xz",
+              "tr300-x86_64-pc-windows-msvc.msi",
+              "tr300-x86_64-pc-windows-msvc.zip",
+              "tr300-x86_64-unknown-linux-gnu.tar.xz",
+              "tr300-x86_64-unknown-linux-musl.tar.xz",
+          )
+          raw_cargo_dist_payloads = {
+              "source.tar.gz",
+              "tr300-aarch64-unknown-linux-gnu.tar.xz",
+              "tr300-x86_64-pc-windows-msvc.msi",
+              "tr300-x86_64-pc-windows-msvc.zip",
+              "tr300-x86_64-unknown-linux-gnu.tar.xz",
+              "tr300-x86_64-unknown-linux-musl.tar.xz",
+          }
+          canonical_sidecars = {}
+          checksum_records = []
+          for payload_name in payloads:
+              payload = output / payload_name
+              digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+              record = f"{digest} *{payload_name}".encode("utf-8")
+              sidecar = output / f"{payload_name}.sha256"
+              expected_ending = b"\n\n" if payload_name in raw_cargo_dist_payloads else b"\n"
+              if sidecar.read_bytes() != record + expected_ending:
+                  raise SystemExit(
+                      f"checksum sidecar does not match its producer contract: {payload_name}"
+                  )
+              canonical_sidecars[sidecar] = record + b"\n"
+              checksum_records.append(record + b"\n")
+
+          canonical_checksum = b"".join(checksum_records)
+          checksum_path = output / "sha256.sum"
+          if checksum_path.read_bytes() != canonical_checksum + b"\n":
+              raise SystemExit("raw cargo-dist aggregate checksum file is malformed")
+
+          for sidecar, contents in canonical_sidecars.items():
+              sidecar.write_bytes(contents)
+          checksum_path.write_bytes(canonical_checksum)
+          PY
 
           mv "$OUTPUT_DIRECTORY/tr300-installer.sh" \
             "$OUTPUT_DIRECTORY/tr300-dist-installer.sh"
