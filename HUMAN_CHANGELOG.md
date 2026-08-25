@@ -13,12 +13,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.5] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.4 remains available as an immutable crate, while
+  v4.3.5 is the next complete downloadable release candidate.
+
+### Fixed
+- **Release notes and download metadata now survive their validation step
+  intact.** The release workflow checks that the title, notes, and stable-release
+  status are valid while retaining the complete packaging record for the next
+  stage. Tests run that real validation sequence and reject incomplete or
+  incorrectly typed release information.
+
+### Security
+- **Version 4.3.4 stopped safely after Mac signing but before any download draft
+  or public release was created.** Its crate and tag stay untouched. Version
+  4.3.5 fixes forward through the same automatic review, signing, and
+  publication chain.
+
 ## [4.3.4] - 2026-08-25
 
 ### Changed
 - **This is a packaging-only repair; the report itself is unchanged from the
-  v4.3 line.** Version 4.3.3 remains available as an immutable crate, while
-  v4.3.4 is the next complete downloadable release candidate.
+  v4.3 line.** Version 4.3.3 remains available as an immutable crate. Version
+  4.3.4 reached crates.io and passed Mac archive signing, but its downloadable
+  release stopped safely during metadata preparation; v4.3.5 fixes forward.
 
 ### Fixed
 - **Mac packaging now understands the safe file-mode form emitted by its pinned

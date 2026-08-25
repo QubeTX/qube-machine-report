@@ -7,12 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.5] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.4 crate and tag remain published; v4.3.5 is the
+  sole candidate for the complete cross-platform GitHub download release.
+
+### Fixed
+- **Release metadata validation now preserves the complete cargo-dist manifest.**
+  The uncredentialed 24-asset preparation step validates the stable title, body,
+  and prerelease fields with an explicit `jq` branch that returns the original
+  object on success and errors on malformed input. An executable regression
+  extracts the production validation/projection chain, proves unrelated
+  manifest fields survive unchanged, verifies the projected release metadata,
+  and rejects prerelease, missing, empty, non-string, boolean, and null inputs.
+
+### Security
+- **The failed v4.3.4 tag stopped before upload or partial release creation.**
+  Exact-main CI, trusted-OIDC crates publication, native preflight, all six
+  platform builds, both Apple signing/notarization jobs, and global assembly
+  succeeded. The read-only preparation job then failed because its validation
+  predicate wrote `true` instead of the manifest object. No host job, GitHub
+  draft, or downstream publication ran; the tag is not moved or reused.
+
 ## [4.3.4] - 2026-08-25
 
 ### Changed
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
-  behavior.** The immutable v4.3.3 crate and tag remain published; v4.3.4 is the
-  next candidate for the complete cross-platform GitHub download release.
+  behavior.** The immutable v4.3.3 crate and tag remain published. v4.3.4
+  reached crates.io and proved the repaired Apple archive/signing path, but its
+  tagged GitHub packaging run stopped in read-only metadata preparation before
+  draft creation; v4.3.5 is the next complete-download candidate.
 
 ### Fixed
 - **Apple archive staging now accepts cargo-dist's exact safe Unix mode

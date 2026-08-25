@@ -13,8 +13,8 @@
 > **Coverage reconciled through 2026-08-25.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last complete GitHub distribution;
-> v4.3.3 is the current crates.io package, but the immutable v4.3.0 through
-> v4.3.3 tags all failed before GitHub draft creation; v4.3.4 is the packaging
+> v4.3.4 is the current crates.io package, but the immutable v4.3.0 through
+> v4.3.4 tags all failed before GitHub draft creation; v4.3.5 is the packaging
 > fix-forward.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
@@ -23,7 +23,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (v4.2.2 complete distribution; v4.3.4 fix-forward)](#decision-ledger-status-v422-complete-distribution-v434-fix-forward)
+- [Decision ledger status (v4.2.2 complete distribution; v4.3.5 fix-forward)](#decision-ledger-status-v422-complete-distribution-v435-fix-forward)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -76,21 +76,21 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
-- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.4 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v434-distribution)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.5 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v435-distribution)
 
 ---
 
-## Decision ledger status (v4.2.2 complete distribution; v4.3.4 fix-forward)
+## Decision ledger status (v4.2.2 complete distribution; v4.3.5 fix-forward)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
 the testing ledger, technical and human changelogs, agent guides, and the public
 v4.2.2 release state and the split v4.3 state. Product bytes are published on
-crates.io through v4.3.3 via exact-main trusted OIDC, but Releases
-`32795846831`, `32800944635`, `32810420213`, and `32815338720` each failed
-before draft creation on independent Windows-bootstrap, Apple system-Bash,
-raw-checksum, and raw-tar-mode producer-contract defects. All four tags remain
-immutable. The v4.3.4 rows
+crates.io through v4.3.4 via exact-main trusted OIDC, but Releases
+`32795846831`, `32800944635`, `32810420213`, `32815338720`, and `32821575317`
+each failed before draft creation on independent Windows-bootstrap, Apple
+system-Bash, raw-checksum, raw-tar-mode, and release-manifest-filter defects.
+All five tags remain immutable. The v4.3.5 rows
 describe the required packaging fix-forward; its fresh
 exact-main, crate, tag, native installer, and public-byte gates remain
 independent proof.
@@ -100,7 +100,7 @@ independent proof.
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.3; complete GitHub distribution moves to v4.3.4; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.4; complete GitHub distribution moves to v4.3.5; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -1758,8 +1758,8 @@ their values must never enter this ADR, git, task memory, or logs.
 
 **Status:** Accepted and release-blocking. PR #15 exact head and its merge on
 exact `main` passed the implementation, workflow, provenance, and native
-fixture gates. The v4.3.0 through v4.3.3 crates/tags are immutable; the reviewed
-v4.3.4 exact SHA and tagged end-to-end chain remain required before complete
+fixture gates. The v4.3.0 through v4.3.4 crates/tags are immutable; the reviewed
+v4.3.5 exact SHA and tagged end-to-end chain remain required before complete
 GitHub publication.
 
 Cargo-dist's generic generated workflow recognizes prerelease and alternate tag
@@ -1836,6 +1836,15 @@ sticky bits, incorrect permissions, links, traversal, unexpected members, and
 oversized expansion remain rejected. Extracted-workflow fixtures synthesize
 the real raw headers, retain a permission-only compatibility case, and reject
 type confusion plus special permissions before credential use.
+
+The immutable v4.3.4 tag proved that tar-mode repair end to end: Release
+`32821575317` passed its plan, all six platform builds, both fresh Apple
+signer/notary jobs, and global artifacts. Its uncredentialed 24-asset
+preparation then failed before upload because jq predicate context replaced
+the cargo-dist plan object with a boolean and the next field lookup indexed
+that boolean. Hosting and all downstream workflows skipped, and no draft was
+created. v4.3.5 fixes forward without moving any prior tag and preserves the
+validated manifest object while testing its metadata fields.
 
 Privileged supplemental workflows accept automatic input only from the exact
 successful same-repository run named in their contract. They resolve lightweight
@@ -3367,10 +3376,10 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.4 distribution)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.5 distribution)
 
-**Status:** Product code is published on crates.io through v4.3.3; complete
-GitHub distribution is the v4.3.4 fix-forward. Final PR #14 head `8f5919b`
+**Status:** Product code is published on crates.io through v4.3.4; complete
+GitHub distribution is the v4.3.5 fix-forward. Final PR #14 head `8f5919b`
 passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
@@ -3381,7 +3390,8 @@ repaired that guard, and exact-main trusted OIDC published v4.3.1, but its tag
 failed before draft creation on Apple system-Bash compatibility. v4.3.2 fixed
 that boundary but its tag exposed the raw checksum contract described above.
 v4.3.3 fixed that contract but its tag exposed the raw tar-mode contract.
-Reviewed v4.3.4 tagged/public distribution and physical AMD64 Linux/Raspberry Pi
+v4.3.4 fixed that contract but its tag exposed the release-manifest predicate
+context defect. Reviewed v4.3.5 tagged/public distribution and physical AMD64 Linux/Raspberry Pi
 acceptance remain separate gates. This section records the product contract and
 rationale, not those later results.
 

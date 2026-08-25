@@ -7,22 +7,42 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.4 — cargo-dist tar-mode fix-forward (as of 2026-08-25)
+### v4.3.5 — release-manifest preservation fix-forward (as of 2026-08-25)
 
-Release status: active. Exact v4.3.3 ARM and Intel artifacts from failed Release
-`32815338720` prove that pinned cargo-dist stores full POSIX mode values in raw
-tar headers: root `040755`, binary `0100755`, and documentation `0100644`.
-Both checksum sidecars matched and ended in the now-supported two-LF producer
-form, proving the v4.3.3 checksum repair passed. The v4.3.4 correction accepts
-only the matching full POSIX or permission-only representation in both the
-fresh signer and downstream universal-installer extraction boundaries. It
-continues to reject mismatched embedded types, setuid/special permissions,
-links, traversal, unexpected members, and oversized archives. Extracted-
-workflow fixtures synthesize the real header bytes and exercise both accepted
-forms plus type-confusion, setuid, symlink, and hardlink rejection. The current
-stager also extracted both exact failed-run archives successfully. Complete
-local/hosted review, exact-main CI/OIDC, native preflight, and the fresh
-automatic 24 → 30 → validated → 34/public chain remain required.
+Release status: active packaging-only candidate. The read-only v4.3.4 release
+preparation step used `jq -e` with a bare predicate, so it persisted the JSON
+boolean `true` instead of the validated cargo-dist manifest. The following
+metadata projection then failed when it indexed `announcement_title`. v4.3.5
+uses an explicit fail-closed branch that returns the complete original object
+only when stable title/body metadata is valid. The executable provenance suite
+extracts and runs the production validation/projection chain, proves unrelated
+manifest fields survive, verifies the exact metadata projection, and rejects
+prerelease, missing, empty, non-string, boolean, and null inputs. The complete
+local gate, focused review, exact-head PR gates, exact-main CI/OIDC, native
+preflight, and fresh automatic 24 → 30 → validated → 34/public chain remain
+required.
+
+### v4.3.4 — Published crate; failed-closed release-metadata preparation
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. PR #21 head
+`a631e971786682bc823b3351e4cf3a569afe491f` passed all 20 CI jobs in
+`32819974330`, Release plan `32819974234`, and independent review. It merged as
+`ed22545e444f968296d5a34cbc27a0a205e92ae0`; exact-main CI `32820725614`
+passed 20/20, automatic trusted-OIDC run `32820725583` published unyanked
+v4.3.4, and native Intel/Apple Silicon preflight `32821497928` passed. A fresh
+crates.io record matched checksum
+`b74d1aec64b44f5f7f56d284dcb89dd44f1d6b2aa18400e49adb2acb27cbd304`.
+
+Tagged Release `32821575317` passed its plan, all six platform builds, both
+fresh Apple signing/notarization jobs, and global artifact assembly. This
+proves the v4.3.4 exact tar-mode repair against real cargo-dist output. The
+uncredentialed preparation job `97721850618` then wrote the result of a
+metadata predicate (`true`) to `dist-manifest.json`; its next projection failed
+with `Cannot index boolean with string "announcement_title"`. The prepared
+artifact was never uploaded, host/announce skipped, all downstream workflows
+skipped, and no draft or public release was created. The tag is immutable;
+v4.3.5 fixes forward.
 
 ### v4.3.3 — Published crate; failed-closed tar-mode staging
 

@@ -836,9 +836,12 @@ jobs:
           cp "$OUTPUT_DIRECTORY/tr300-installer.ps1" \
             "$OUTPUT_DIRECTORY/tr-300-installer.ps1"
           printf '%s\n' "$PLAN_MANIFEST" | jq -e '
-            .announcement_is_prerelease == false and
-            (.announcement_title | type == "string" and length > 0) and
-            (.announcement_github_body | type == "string" and length > 0)
+            if .announcement_is_prerelease == false and
+              (.announcement_title | type == "string" and length > 0) and
+              (.announcement_github_body | type == "string" and length > 0)
+            then .
+            else error("release manifest metadata is malformed")
+            end
           ' > "$OUTPUT_DIRECTORY/dist-manifest.json"
           jq --arg tag "$RELEASE_TAG" --arg source_sha "$SOURCE_SHA" '
             {

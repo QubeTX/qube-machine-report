@@ -1396,6 +1396,181 @@ def run_release_sidecar_normalization_fixtures(release: str) -> None:
                     )
 
 
+def run_release_manifest_preservation_fixtures(release: str, bash: str) -> None:
+    prepare = extract_unique_named_run(
+        release,
+        "Render and validate the fixed 24-asset initial release",
+        RELEASE_WORKFLOW.name,
+    )
+    start_marker = "printf '%s\\n' \"$PLAN_MANIFEST\" | jq -e '"
+    end_marker = '  > "$OUTPUT_DIRECTORY/__tr300-release-metadata.json"\n'
+    start = prepare.find(start_marker)
+    end = prepare.find(end_marker, start)
+    if start < 0 or end < 0:
+        raise AssertionError("release manifest preservation fragment was not found")
+    fragment = prepare[start : end + len(end_marker)]
+
+    with tempfile.TemporaryDirectory(prefix="tr300-release-manifest-") as case_raw:
+        case_dir = Path(case_raw)
+        environment = os.environ.copy()
+        fixture_prefix = "set -euo pipefail\n"
+        if os.name == "nt":
+            compat_bin = case_dir / "bin"
+            compat_bin.mkdir()
+            write_fixture_jq_compat(compat_bin)
+            conversion_environment = environment.copy()
+            conversion_environment["TR300_COMPAT_BIN"] = str(compat_bin)
+            path_probe = subprocess.run(
+                [
+                    bash,
+                    "--noprofile",
+                    "--norc",
+                    "-c",
+                    'cygpath -u "$TR300_COMPAT_BIN"',
+                ],
+                env=conversion_environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=False,
+            )
+            if path_probe.returncode != 0 or not path_probe.stdout.strip():
+                raise AssertionError(
+                    "could not prepare release manifest fixture jq path: "
+                    f"{path_probe.stderr}"
+                )
+            environment["TR300_COMPAT_BIN"] = path_probe.stdout.strip()
+            fixture_prefix += 'jq() { "$TR300_COMPAT_BIN/jq" "$@"; }\n'
+        elif shutil.which("jq") is None:
+            raise AssertionError("jq is required for release manifest fixtures")
+
+        for mutation, expected_success in (
+            (None, True),
+            ("prerelease", False),
+            ("missing-title", False),
+            ("empty-title", False),
+            ("nonstring-title", False),
+            ("missing-body", False),
+            ("empty-body", False),
+            ("nonstring-body", False),
+            ("boolean-root", False),
+            ("null-root", False),
+        ):
+            manifest: object = {
+                "dist_version": "0.31.0",
+                "announcement_tag": "v99.99.99",
+                "announcement_is_prerelease": False,
+                "announcement_title": "99.99.99 - fixture",
+                "announcement_github_body": "fixture release notes",
+                "artifacts": {"fixture": {"kind": "sentinel"}},
+                "releases": [{"app_name": "tr300", "display": True}],
+                "fixture_marker": {"preserve": [True, 7, "all fields"]},
+            }
+            if mutation == "boolean-root":
+                manifest = True
+            elif mutation == "null-root":
+                manifest = None
+            else:
+                assert isinstance(manifest, dict)
+                if mutation == "prerelease":
+                    manifest["announcement_is_prerelease"] = True
+                elif mutation == "missing-title":
+                    del manifest["announcement_title"]
+                elif mutation == "empty-title":
+                    manifest["announcement_title"] = ""
+                elif mutation == "nonstring-title":
+                    manifest["announcement_title"] = 7
+                elif mutation == "missing-body":
+                    del manifest["announcement_github_body"]
+                elif mutation == "empty-body":
+                    manifest["announcement_github_body"] = ""
+                elif mutation == "nonstring-body":
+                    manifest["announcement_github_body"] = ["not", "a", "string"]
+                elif mutation is not None:
+                    raise AssertionError(
+                        f"unknown release manifest mutation: {mutation}"
+                    )
+
+            output = case_dir / f"output-{mutation or 'valid'}"
+            output.mkdir()
+            output_environment = environment.copy()
+            output_path = str(output)
+            if os.name == "nt":
+                conversion_environment = output_environment.copy()
+                conversion_environment["TR300_OUTPUT_DIRECTORY"] = output_path
+                output_probe = subprocess.run(
+                    [
+                        bash,
+                        "--noprofile",
+                        "--norc",
+                        "-c",
+                        'cygpath -u "$TR300_OUTPUT_DIRECTORY"',
+                    ],
+                    env=conversion_environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10,
+                    check=False,
+                )
+                if output_probe.returncode != 0 or not output_probe.stdout.strip():
+                    raise AssertionError(
+                        "could not prepare release manifest fixture output path: "
+                        f"{output_probe.stderr}"
+                    )
+                output_path = output_probe.stdout.strip()
+            output_environment.update(
+                {
+                    "PLAN_MANIFEST": json.dumps(manifest, separators=(",", ":")),
+                    "OUTPUT_DIRECTORY": output_path,
+                    "RELEASE_TAG": "v99.99.99",
+                    "SOURCE_SHA": "a" * 40,
+                }
+            )
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", "-s"],
+                cwd=case_dir,
+                env=output_environment,
+                input=fixture_prefix + fragment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+            )
+            succeeded = result.returncode == 0
+            if succeeded != expected_success:
+                raise AssertionError(
+                    f"release manifest mutation={mutation} returned "
+                    f"{result.returncode}, expected_success={expected_success}\n"
+                    f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                )
+            metadata_path = output / "__tr300-release-metadata.json"
+            if expected_success:
+                persisted = json.loads((output / "dist-manifest.json").read_text())
+                if persisted != manifest or not isinstance(persisted, dict):
+                    raise AssertionError(
+                        "release manifest validation did not preserve the complete object"
+                    )
+                metadata = json.loads(metadata_path.read_text())
+                expected_metadata = {
+                    "tag": "v99.99.99",
+                    "source_sha": "a" * 40,
+                    "title": manifest["announcement_title"],
+                    "body": manifest["announcement_github_body"],
+                    "prerelease": False,
+                }
+                if metadata != expected_metadata:
+                    raise AssertionError(
+                        f"release metadata projection changed: {metadata!r}"
+                    )
+            elif metadata_path.exists():
+                raise AssertionError(
+                    f"rejected release manifest produced metadata: mutation={mutation}"
+                )
+
+
 def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
     prepare = extract_unique_named_run(
         macos,
@@ -1780,13 +1955,16 @@ while index < len(arguments):
         index += 3
         continue
     break
-if index + 2 != len(arguments):
+if index >= len(arguments) or index + 2 < len(arguments):
     print(f"fixture jq rejects arguments: {arguments!r}", file=sys.stderr)
     raise SystemExit(3)
 query = arguments[index]
-path = arguments[index + 1]
-with open(path, "r", encoding="utf-8") as source:
-    data = json.load(source)
+if index + 1 == len(arguments):
+    data = json.load(sys.stdin)
+else:
+    path = arguments[index + 1]
+    with open(path, "r", encoding="utf-8") as source:
+        data = json.load(source)
 normalized = " ".join(query.split())
 
 def nested(record, *parts):
@@ -1808,7 +1986,34 @@ def emit(value):
 def require(condition):
     raise SystemExit(0 if condition else 1)
 
-if normalized == ".total_count":
+if (
+    "release manifest metadata is malformed" in normalized and
+    normalized.startswith("if .announcement_is_prerelease == false and") and
+    "then . else error(" in normalized and normalized.endswith("end")
+):
+    valid = (
+        data.get("announcement_is_prerelease") is False and
+        isinstance(data.get("announcement_title"), str) and
+        len(data["announcement_title"]) > 0 and
+        isinstance(data.get("announcement_github_body"), str) and
+        len(data["announcement_github_body"]) > 0
+    ) if isinstance(data, dict) else False
+    if not valid:
+        raise SystemExit(5)
+    emit(data)
+elif (
+    normalized ==
+    "{ tag: $tag, source_sha: $source_sha, title: .announcement_title, "
+    "body: .announcement_github_body, prerelease: .announcement_is_prerelease }"
+):
+    emit({
+        "tag": variables.get("tag"),
+        "source_sha": variables.get("source_sha"),
+        "title": data.get("announcement_title"),
+        "body": data.get("announcement_github_body"),
+        "prerelease": data.get("announcement_is_prerelease"),
+    })
+elif normalized == ".total_count":
     emit(data.get("total_count"))
 elif normalized == ".artifacts | length":
     emit(len(data.get("artifacts", [])))
@@ -7423,6 +7628,7 @@ def main() -> None:
         windows_validation,
         windows_cargo_dist_installer,
     )
+    run_release_manifest_preservation_fixtures(release, bash)
     run_release_sidecar_normalization_fixtures(release)
     run_macos_archive_mode_compatibility_fixtures(macos)
     run_macos_inventory_compatibility_fixtures(macos)
