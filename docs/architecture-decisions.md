@@ -13,8 +13,8 @@
 > **Coverage reconciled through 2026-08-25.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last complete GitHub distribution;
-> v4.3.6 is the current crates.io package, but the immutable v4.3.0 through
-> v4.3.6 tags all failed to complete GitHub distribution; v4.3.7 is the packaging
+> v4.3.7 is the current crates.io package, but the immutable v4.3.0 through
+> v4.3.7 tags all failed to complete GitHub distribution; v4.3.8 is the packaging
 > fix-forward.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
@@ -23,7 +23,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (v4.2.2 complete distribution; v4.3.7 fix-forward)](#decision-ledger-status-v422-complete-distribution-v437-fix-forward)
+- [Decision ledger status (v4.2.2 complete distribution; v4.3.8 fix-forward)](#decision-ledger-status-v422-complete-distribution-v438-fix-forward)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -76,27 +76,31 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
-- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.7 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v437-distribution)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.8 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v438-distribution)
 
 ---
 
-## Decision ledger status (v4.2.2 complete distribution; v4.3.7 fix-forward)
+## Decision ledger status (v4.2.2 complete distribution; v4.3.8 fix-forward)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
 the testing ledger, technical and human changelogs, agent guides, and the public
 v4.2.2 release state and the split v4.3 state. Product bytes are published on
-crates.io through v4.3.6 via exact-main trusted OIDC, but Releases
+crates.io through v4.3.7 via exact-main trusted OIDC, but Releases
 `32795846831`, `32800944635`, `32810420213`, `32815338720`, `32821575317`,
-`32824925889`, and `32831292249` each failed before complete publication. The
+`32824925889`, `32831292249`, and `32835470143` each failed before complete publication. The
 first five stopped
 before draft creation on independent Windows-bootstrap, Apple system-Bash,
 raw-checksum, raw-tar-mode, and release-manifest-filter defects. v4.3.5 created
 the correct private 24-asset draft, then its by-tag verification failed because
 GitHub returns 404 for drafts. v4.3.6 created its exact private 24-asset draft,
 then its managed-installer checksum lookup expected a binary-mode filename
-marker that default `sha256sum` does not write. All seven tags remain immutable.
-The v4.3.7 rows describe the required packaging fix-forward; its fresh
+marker that default `sha256sum` does not write. v4.3.7 created exact private
+24-asset draft `376309349`, but both automatic downstream source resolvers used
+read-only tokens without push access; GitHub omitted private drafts from their
+authenticated release collections, so they deterministically saw zero matches
+and stopped before any downstream build/publication. All eight tags remain
+immutable. The v4.3.8 rows describe the required packaging fix-forward; its fresh
 exact-main, crate, tag, native installer, and public-byte gates remain
 independent proof.
 
@@ -105,7 +109,7 @@ independent proof.
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.6; complete GitHub distribution moves to v4.3.7; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.7; complete GitHub distribution moves to v4.3.8; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -1763,8 +1767,8 @@ their values must never enter this ADR, git, task memory, or logs.
 
 **Status:** Accepted and release-blocking. PR #15 exact head and its merge on
 exact `main` passed the implementation, workflow, provenance, and native
-fixture gates. The v4.3.0 through v4.3.6 crates/tags are immutable; the reviewed
-v4.3.7 exact SHA and tagged end-to-end chain remain required before complete
+fixture gates. The v4.3.0 through v4.3.7 crates/tags are immutable; the reviewed
+v4.3.8 exact SHA and tagged end-to-end chain remain required before complete
 GitHub publication.
 
 Cargo-dist's generic generated workflow recognizes prerelease and alternate tag
@@ -1874,28 +1878,50 @@ empty and its 64-hex guard failed. Announcement and all downstream workflows
 skipped, and the draft remains private. v4.3.7 fixes only that deterministic
 producer/consumer mismatch while preserving the exact draft and asset guards.
 
+The immutable v4.3.7 tag proved that checksum repair. PR #24 head `eebce78c`
+passed Release plan `32833632174` and all 20 CI jobs in `32833632116`, then
+merged as exact source `b9aa12850720b49c120c6465cefd094a843c5fc4`.
+Exact-main CI `32834399658`, automatic
+trusted-OIDC crates run `32834399800`, and native preflight `32835377627`
+passed. Release `32835470143` passed all 13 jobs and created exact private
+24-asset draft `376309349`. Automatic Windows run `32835918254` and macOS run
+`32835918239` then failed in their first source-custody jobs. Their read-only
+tokens lack push access, and GitHub only exposes draft releases to callers with
+push access, so the otherwise-correct paginated resolvers deterministically
+received zero matching drafts. All downstream build/publication jobs skipped;
+the exact draft remains private. v4.3.8 fixes forward without moving that tag:
+private-draft discovery and rebinding must occur in a narrowly scoped trusted
+publisher boundary while downstream builders remain read-only and the complete
+PR-to-main-to-OIDC-to-tag-to-34-asset chain stays automatic.
+
 Privileged supplemental workflows accept automatic input only from the exact
 successful same-repository run named in their contract. They resolve lightweight
 or annotated tags through the Git object API, require the resulting commit to
 equal the upstream `head_sha` and current protected `main`, and require the
 GitHub Release's 40-character `target_commitish` to equal that commit before
-checkout, Apple-secret use, or write permission. Manual recovery is limited to
-repository owner actor `30877743` on the current `main` workflow SHA and requires
-explicit upstream run IDs. The hosted environments independently enforce these
-protected-ref policies: `crates-io` admits only `main`; `apple-signing` admits
-`main` and immutable `v*` tags; and `release-publishing` admits `main` and
-immutable `v*` tags.
+repository checkout, Apple-secret use, or any Release mutation. A no-checkout
+resolver or byte freezer may hold `contents: write` solely because GitHub
+requires push access to enumerate, bind, and download a private draft; it
+executes no repository, installer, or package code. Manual recovery is limited
+to repository owner actor
+`30877743` on the current `main` workflow SHA and requires explicit upstream run
+IDs. The hosted environments independently enforce these protected-ref
+policies: `crates-io` admits only `main`; `apple-signing` admits `main` and
+immutable `v*` tags; and `release-publishing` admits `main` and immutable `v*`
+tags.
 
 Publication is draft-first. The fresh, checkout-free Release host consumes one
 fixed internal artifact by immutable ID and SHA-256 digest, rebinds the stable
 tag, current `main`, and exact successful CI immediately before its only write,
 and creates a private 24-asset draft. It does not execute cargo-dist, repository
-scripts, or package code with `contents: write`. The Windows supplement builds
-under `contents: read`, uploads exactly three installers plus three checksum
-sidecars as one immutable Actions artifact, and gives write permission only to a
-fresh checkout-free publisher. That publisher revalidates artifact ID/digest,
-source/run custody, current `main`, CI, and the exact private draft, then adds six
-literal collision-free paths. The draft now has 30 assets and remains private.
+scripts, or package code with `contents: write`. The Windows supplement first
+uses a no-checkout `contents: write` resolver only to authenticate and bind the
+exact private draft. Its checked-out build then runs under `contents: read`,
+uploads exactly three installers plus three checksum sidecars as one immutable
+Actions artifact, and passes mutation custody to a fresh checkout-free
+publisher. That publisher revalidates artifact ID/digest, source/run custody,
+current `main`, CI, and the exact private draft, then adds six literal
+collision-free paths. The draft now has 30 assets and remains private.
 
 The prepared 24-asset artifact is also the managed-wrapper source of truth. Its
 private checksum manifest binds each public wrapper, raw cargo-dist script, and
@@ -1910,8 +1936,10 @@ Windows installer acceptance happens before public visibility. A workflow run
 triggered by the exact Windows Installers completion snapshots all 30 Release
 assets, requiring each API asset ID, size, and `sha256:` digest to match the
 downloaded byte, and proves the six supplement bytes equal the builder's exact
-internal artifact. It uploads this normalized set as one immutable validation
-input so every disposable Windows matrix job tests the same bytes. Before the
+internal artifact. Its fresh no-checkout resolver/freezer uses push-capable
+`contents` access only for that private-draft read/download; it uploads the
+normalized set as one immutable validation input so every read-only disposable
+Windows matrix job tests the same bytes. Before the
 candidate is public, updater probes must continue to see the prior public
 `/releases/latest`; candidate transitions use only authenticated exact draft
 installers. A successful matrix emits a fixed proof binding tag/source, Windows
@@ -1935,10 +1963,13 @@ byte/digest comparison rather than blind retry.
 For a tagged `workflow_run` or recovery dispatch, the macOS resolver queries
 protected `main` and requires the downstream workflow-code SHA, current remote
 main, and resolved tag source SHA to be identical before it emits any custody or
-build output. This check occurs before the `apple-signing` preflight/build jobs
-can receive credentials. Tagless credential preflight remains bound to the
-current protected-main SHA. Default-branch workflow code is therefore never
-implicitly trusted merely because an upstream tagged run succeeded.
+build output. Its fresh no-checkout `contents: write` token exists only so the
+resolver can enumerate and bind the exact private draft; later source-custody,
+build, and candidate-execution jobs are read-only. This check occurs before the
+`apple-signing` preflight/build jobs can receive credentials. Tagless credential
+preflight remains bound to the current protected-main SHA. Default-branch
+workflow code is therefore never implicitly trusted merely because an upstream
+tagged run succeeded.
 
 After publication, Windows Installer Validation runs again from the successful
 macOS finalizer and performs the real `/releases/latest` updater matrix against
@@ -3404,10 +3435,10 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.7 distribution)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.8 distribution)
 
-**Status:** Product code is published on crates.io through v4.3.6; complete
-GitHub distribution is the v4.3.7 fix-forward. Final PR #14 head `8f5919b`
+**Status:** Product code is published on crates.io through v4.3.7; complete
+GitHub distribution is the v4.3.8 fix-forward. Final PR #14 head `8f5919b`
 passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
@@ -3421,8 +3452,10 @@ v4.3.3 fixed that contract but its tag exposed the raw tar-mode contract.
 v4.3.4 fixed that contract but its tag exposed the release-manifest predicate
 context defect. v4.3.5 fixed that defect but its tag exposed the draft by-tag
 lookup gap. v4.3.6 fixed draft discovery but its tag exposed the managed-
-installer checksum-record mismatch. Reviewed v4.3.7 tagged/public distribution
-and physical AMD64 Linux/Raspberry Pi
+installer checksum-record mismatch. v4.3.7 fixed that mismatch, and its tag
+created the exact private 24-asset draft but exposed the read-only
+downstream draft-visibility boundary described above. Reviewed v4.3.8 tagged/
+public distribution and physical AMD64 Linux/Raspberry Pi
 acceptance remain separate gates. This section records the product contract and
 rationale, not those later results.
 

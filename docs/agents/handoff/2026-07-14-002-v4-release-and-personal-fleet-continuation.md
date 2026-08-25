@@ -7,8 +7,8 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete public GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.6` / `4.3.7` (all prior tags remain immutable)
-**Active fix-forward branch:** `codex/v4.3.7-release-hash-fix`
+**Complete public GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.7` / `4.3.8` (all prior tags remain immutable)
+**Active fix-forward branch:** `codex/v4.3.8-private-draft-visibility`
 **Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
@@ -33,7 +33,11 @@ closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
   draft id 376242296. v4.3.6 PR CI 32829236226; Release plan 32829236145;
   exact-main CI 32830286853; automatic trusted-OIDC crates 32830286932;
   tagless native preflight 32830369613; failed-closed Release 32831292249;
-  private 24-asset draft id 376283574.
+  private 24-asset draft id 376283574. v4.3.7 PR CI 32833632116; Release plan
+  32833632174; exact-main CI 32834399658; automatic trusted-OIDC crates
+  32834399800; tagless native preflight 32835377627; successful 13-job Release
+  32835470143; private 24-asset draft id 376309349; failed-closed Windows
+  32835918254 and macOS 32835918239 downstream source resolution.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
 `#adrlog`, `#v43`, `#v430`, `#r43`
@@ -43,7 +47,7 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-08-24–25 v4.3.0–v4.3.6 publication splits and v4.3.7 fix-forward
+## 2026-08-24–25 v4.3.0–v4.3.7 publication splits and v4.3.8 fix-forward
 
 Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
 published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
@@ -127,13 +131,28 @@ default `sha256sum` writes awk field two as `tr300-installer.sh`, while the
 managed-installer hash lookup required `*tr300-installer.sh`. Announcement and
 every downstream workflow skipped; the draft remains private.
 
-The supported path is now v4.3.7 through the normal reviewed no-click
-automation on `codex/v4.3.7-release-hash-fix`. Correct the checksum-record
-lookup while preserving numeric release-ID binding and every draft/asset
-invariant. After exact-main CI, automatic OIDC publication, and native
-preflight pass, push only `v4.3.7` and let the private
-24-to-30-to-validated-to-34 chain run. Never move or delete v4.3.0 through
-v4.3.6, hand-assemble either existing draft, or publish a partial release.
+PR #24 exact head `eebce78cb0e62efce1e9d70ec20068316f5c36d5` repaired that
+checksum lookup, passed Release plan `32833632174` and all 20 CI jobs in
+`32833632116`, then merged as exact source
+`b9aa12850720b49c120c6465cefd094a843c5fc4`. Exact-main CI `32834399658`,
+automatic trusted-OIDC v4.3.7 publication `32834399800`, and native preflight
+`32835377627` passed. Crates.io serves exact unyanked v4.3.7 with checksum
+`225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
+Release `32835470143` passed all 13 jobs and created exact private 24-asset
+draft `376309349`. Automatic Windows run `32835918254` and macOS run
+`32835918239` then failed before any downstream build/publication: both source
+resolvers used read-only tokens without push access, so GitHub omitted private
+drafts from their authenticated release collections and they deterministically
+saw zero matches. The exact draft remains private.
+
+The supported path is now v4.3.8 through the normal reviewed no-click
+automation on `codex/v4.3.8-private-draft-visibility`. Repair the trusted
+private-draft identity handoff while preserving read-only builders, numeric
+release-ID binding, and every draft/asset invariant. After exact-main CI,
+automatic OIDC publication, and native preflight pass, push only `v4.3.8` and
+let the private 24-to-30-to-validated-to-34 chain run. Never move or delete
+v4.3.0 through v4.3.7, hand-assemble any existing draft, or publish a partial
+release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 
@@ -1105,20 +1124,21 @@ This section records observed hosted state, never expectation.
 ## What's Next
 
 The v4.3 GitHub distribution and homepage update are not complete. Continue the
-immutable-tag-safe v4.3.7 release before returning to the physical-hardware
+immutable-tag-safe v4.3.8 release before returning to the physical-hardware
 queue:
 
-1. Finish the managed-installer checksum-record repair on
-   `codex/v4.3.7-release-hash-fix`; pass the complete local gate, independent
-   review, exact-head PR CI, and Release plan.
+1. Finish review and qualification of the private-draft-visibility repair on
+   `codex/v4.3.8-private-draft-visibility`; pass the complete local gate,
+   independent review, exact-head PR CI, and Release plan.
 2. Merge only the accepted exact SHA. Require exact-main CI, automatic trusted-
-   OIDC v4.3.7 publication, and native Intel/Apple Silicon credential/staging
-   preflight before pushing only immutable tag `v4.3.7`.
+   OIDC v4.3.8 publication, and native Intel/Apple Silicon credential/staging
+   preflight before pushing only immutable tag `v4.3.8`.
 3. Require the automatic private 24-to-30-to-validated-to-34 asset chain, both
    native Apple lifecycles, public Windows updater plus Linux/macOS smokes, and
    the public-byte audit before updating the homepage or closing `#r43`/`#v43`.
-4. Keep `v4.3.0` through `v4.3.6` immutable. The first five produced no draft;
-   v4.3.5 and v4.3.6 produced private drafts `376242296` and `376283574`.
+4. Keep `v4.3.0` through `v4.3.7` immutable. The first five produced no draft;
+   v4.3.5, v4.3.6, and v4.3.7 produced private drafts `376242296`, `376283574`,
+   and `376309349`.
    Do not delete, move, reuse, or hand-recover any tag or draft.
 5. After release closure, continue the personal Alienware, AMD64 Linux, and
    Raspberry Pi 4 tasks. Those physical checks remain open and must not be

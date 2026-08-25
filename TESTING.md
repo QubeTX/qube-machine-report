@@ -7,34 +7,84 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.7 — managed-installer digest handoff fix-forward (as of 2026-08-25)
+### v4.3.8 — private-draft visibility/custody fix-forward (as of 2026-08-25)
 
-Release status: active packaging-only candidate. Tagged v4.3.6 Release run
-`32831292249` created and revalidated its exact private 24-asset draft, then
-failed while extracting the already-verified managed shell-installer digest.
-The prepared checksum manifest uses GNU `sha256sum` text records whose second
-field is `tr300-installer.sh`; the host step incorrectly searched for the
-literal filename `*tr300-installer.sh`, returned an empty value, and failed its
-64-hex assertion. Windows assembly and every later workflow skipped, so the
-v4.3.6 draft remains private.
+Release status: active, unreleased packaging-only candidate. GitHub's official
+release contract exposes draft releases only to callers with push access. The
+v4.3.7 Release publisher had that access and created the one correct draft, but
+the immediate Windows and macOS workflow-run resolvers used read-only tokens;
+their authenticated release listings returned zero matching draft records.
+v4.3.8 is scoped to repair that automated visibility and custody boundary. Its
+implementation and executable regression coverage are present on the working
+branch, but review and the complete local/hosted/native qualification remain
+open. No v4.3.8 publication or completed-fix claim is made.
 
-v4.3.7 changes only that distribution handoff and its regression boundary. The
-publisher now matches the exact plain filename. The executable host fixture
-runs through the previously omitted checksum/output tail with a real two-space
-checksum record and requires the exact digest in `GITHUB_OUTPUT`. The complete
-local gate passed: formatting, Clippy with warnings denied, all 208
-unit/integration/doc tests, release build, RustSec audit, cargo-dist 0.31.0
-plan, actionlint/ShellCheck, the full executable provenance suite, Apple
-staging compatibility, managed-installer transaction fixtures, the 39-file
-package inventory, publish dry-run, and fast/full table, JSON, and ASCII
-smokes. Two independent reviews found no blocker. Seven alternating full-mode
-runs against installed v4.2.2 measured medians of 5140.3 ms and 2102.1 ms
-(59.1% faster; 2.45×). Eleven alternating fast-mode runs measured 241.0 ms and
-242.3 ms (+0.6%, statistically unchanged and not a speedup claim). Windows CPU
-temperature remained absent/JSON `null`; the reported 53 C NVIDIA temperature
-matched direct `nvidia-smi` at 53 C. Exact-head PR checks, exact-main CI/OIDC,
-native preflight, and the automatic 24 → 30 → validated → 34/public chain
-remain required.
+The working permission split gives fresh no-checkout resolver/freezer jobs
+`contents: write` only because push access is required to enumerate and freeze
+private Release state. Checked-out builders and every job that executes
+candidate installers, wrappers, archives, or product code use read-only GitHub
+authorization and consume immutable internal artifacts; fresh no-checkout
+publisher steps are the only steps that perform a mutation on the bound draft.
+
+Observed working-tree evidence on 2026-08-25: `cargo fmt --all -- --check`,
+locked workspace Clippy with warnings denied, all 207 unit/integration tests
+(185 unit plus 22 integration), locked release build, and `cargo audit` passed
+(221 dependencies checked against 1,226 loaded advisories; no vulnerabilities).
+Cargo-dist 0.31.0 `dist plan` passed. The full executable release-provenance
+suite passed twice; managed shell and PowerShell transaction fixtures passed,
+including PowerShell under both `pwsh` and Windows PowerShell 5.1. ShellCheck
+passed every script/wrapper plus the extracted exact PKG `PREINSTALL`; both
+PowerShell hosts parsed `scripts/install-pinned-inno-setup.ps1`; actionlint
+passed the changed workflows with embedded ShellCheck disabled; and
+`git diff --check` passed. An isolated live `file://` probe of v4.3.7's raw
+cargo-dist installer installed exact `tr300 4.3.7`. Fast/full table and JSON
+runtime smokes plus ASCII output passed. Seven alternating full-mode runs of
+the exact v4.3.8 candidate and installed v4.2.2 measured medians of 2094.4 ms
+and 5134.0 ms respectively: v4.3.8 remained below 2.5 seconds and was 59.2%
+faster (2.45×). Eleven alternating fast-mode runs measured 247.1 ms and
+246.2 ms respectively (+0.4%); this is background-level and supports no fast-
+mode gain claim. Direct `nvidia-smi` reported 54 C while the candidate reported
+53 C, and Windows CPU temperature remained JSON `null`. Actionlint 1.7.12
+passed every workflow with its embedded ShellCheck integration disabled, and
+standalone ShellCheck 0.11.0 passed every tracked shell script; the combined
+Windows-host invocation wedged without a diagnostic, so the combined Linux
+hosted gate remains authoritative and open. The pre-commit 39-file package
+inventory and locked publish dry-run passed with `--allow-dirty`; their binding
+clean-tree repeats, hosted checks, and every release/publication gate remain
+open and are not implied by these local results.
+
+### v4.3.7 — Published crate; exact private draft, failed downstream visibility
+
+Release status: exact source and crate publication completed; the GitHub draft
+exists but remains private. Tag and main resolve to exact commit
+`b9aa12850720b49c120c6465cefd094a843c5fc4`. Exact-main CI `32834399658`
+passed, trusted-OIDC run `32834399800` published unyanked v4.3.7 with checksum
+`225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`,
+and native Intel/Apple Silicon credential preflight `32835377627` passed.
+
+Tagged Release `32835470143` passed all 13 jobs: plan, all six platform builds,
+both fresh Apple signing/notarization jobs, global assembly, exact fixed-asset
+preparation, host, and announce. It created private stable draft `376309349`
+for exact tag/target `v4.3.7` /
+`b9aa12850720b49c120c6465cefd094a843c5fc4`, with exactly 24 expected nonempty
+assets. Windows Installers `32835918254` and macOS Universal Package
+`32835918239` then failed in their initial read-only provenance resolvers: each
+received zero matching private-draft records. Their build, credential, and
+publisher jobs skipped; Windows validation skipped, no assets were added, and
+nothing became public. The tag and draft are immutable evidence; v4.3.8 fixes
+forward.
+
+The v4.3.7 candidate had already passed the complete local gate: formatting,
+Clippy with warnings denied, all 208 unit/integration/doc tests, release build,
+RustSec audit, cargo-dist 0.31.0 plan, actionlint/ShellCheck, the full executable
+provenance suite, Apple staging compatibility, managed-installer transaction
+fixtures, the 39-file package inventory, publish dry-run, and fast/full table,
+JSON, and ASCII smokes. Two independent reviews found no blocker. Seven
+alternating full-mode runs against installed v4.2.2 measured medians of 5140.3
+ms and 2102.1 ms (59.1% faster; 2.45×). Eleven alternating fast-mode runs
+measured 241.0 ms and 242.3 ms (+0.6%, statistically unchanged and not a
+speedup claim). Windows CPU temperature remained absent/JSON `null`; the
+reported 53 C NVIDIA temperature matched direct `nvidia-smi` at 53 C.
 
 ### v4.3.6 — Published crate; correct private draft, failed checksum handoff
 

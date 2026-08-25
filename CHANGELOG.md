@@ -7,13 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.8] - Unreleased
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.7 crate and tag remain published, and its
+  exact 24-asset GitHub draft remains private. v4.3.8 is the sole active,
+  unreleased candidate for the complete cross-platform GitHub download release.
+- **The release ledger now records GitHub's draft-visibility contract
+  explicitly.** Only callers with push access receive draft releases from the
+  releases listing. The read-only downstream tokens used by v4.3.7 therefore
+  received zero matching records even though the exact draft existed and was
+  visible to the push-access publisher and maintainer.
+
+### Fixed
+- **The v4.3.8 candidate is scoped to repair automated private-draft visibility
+  and custody.** The working branch now contains the implementation and
+  executable regression coverage. It remains unqualified and unreleased: no
+  publication or completed-fix claim is made until the reviewed candidate
+  passes the complete local, hosted, native, and public release gates.
+- **Private-draft access is isolated from checkout, build, and candidate
+  execution.** Fresh no-checkout resolver/freezer jobs receive push-capable
+  `contents` access only to enumerate, bind, and freeze the exact private
+  Release. Checked-out builders and every job that executes installer or
+  package bytes remain read-only; only fresh no-checkout publisher steps perform
+  mutations on the already-bound draft.
+
+### Security
+- **The failed v4.3.7 GitHub distribution remains private and immutable.**
+  Crates.io serves unyanked `tr300` v4.3.7 with checksum
+  `225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
+  Tag and main both resolve to
+  `b9aa12850720b49c120c6465cefd094a843c5fc4`. Release run `32835470143`
+  passed all 13 jobs and created exact private draft `376309349` with 24
+  nonempty assets. Windows Installers `32835918254` and macOS Universal Package
+  `32835918239` then failed in their initial read-only draft resolvers after
+  receiving zero matching records; Windows validation skipped. No downstream
+  build or mutation occurred, no asset was added, and nothing became public.
+
 ## [4.3.7] - 2026-08-25
 
 ### Changed
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
   behavior.** The immutable v4.3.6 crate and tag remain published, and its
-  correct 24-asset GitHub draft remains private. v4.3.7 is the sole candidate
-  for the complete cross-platform GitHub download release.
+  correct 24-asset GitHub draft remains private. v4.3.7 repaired the checksum
+  handoff, reached its own exact private 24-asset draft, and is now immutable;
+  v4.3.8 fixes forward the downstream draft-visibility boundary.
 
 ### Fixed
 - **The fresh release publisher now reads the managed shell-installer digest
@@ -27,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installer digest in `GITHUB_OUTPUT`, so the v4.3.6 typo fails locally.
 
 ### Security
+- **The v4.3.7 chain created no public release.** Its exact source and unyanked
+  crate published successfully, and tagged Release `32835470143` passed all 13
+  jobs before creating exact private draft `376309349`. Both immediate
+  read-only downstream resolvers received zero draft records and failed before
+  build, credential, or mutation work; validation skipped and the 24-asset
+  draft remains private.
 - **The failed v4.3.6 chain created no public release.** Exact-main CI,
   trusted-OIDC crate publication, native Apple credential preflight, every
   platform build, both Apple signing/notarization jobs, global assembly, and
@@ -41,7 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
   behavior.** Its immutable crate and tag remain published. Its correctly
   assembled 24-asset GitHub draft remains private after the host checksum
-  handoff failed; v4.3.7 is the sole complete-download candidate.
+  handoff failed. v4.3.7 later repaired that handoff but exposed the downstream
+  draft-visibility boundary; v4.3.8 is now the sole active candidate.
 
 ### Fixed
 - **Every pre-public workflow now identifies private drafts through the
@@ -73,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
   behavior.** Its immutable crate and tag remain published. Its correct
   24-asset GitHub draft remains private after the host assertion failed;
-  v4.3.6 was its immutable fix-forward and v4.3.7 is the current candidate.
+  v4.3.6 was its immediate immutable fix-forward, and v4.3.8 is now the active
+  candidate after the later v4.3.7 stop.
 
 ### Fixed
 - **Release metadata validation now preserves the complete cargo-dist manifest.**
