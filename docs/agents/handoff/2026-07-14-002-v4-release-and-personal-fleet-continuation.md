@@ -7,8 +7,8 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.4` / `4.3.5` (all prior tags remain immutable)
-**Active fix-forward branch:** `codex/v4.3.5-preserve-release-manifest`
+**Complete public GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.5` / `4.3.6` (all prior tags remain immutable)
+**Active fix-forward branch:** `codex/v4.3.6-draft-release-lookup`
 **Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
@@ -27,6 +27,10 @@ closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
   v4.3.4 PR CI 32819974330; Release plan 32819974234; exact-main CI
   32820725614; automatic trusted-OIDC crates 32820725583; tagless native
   preflight 32821497928; failed-closed Release 32821575317.
+  v4.3.5 PR CI 32823394621; Release plan 32823394660; exact-main CI
+  32823922777; automatic trusted-OIDC crates 32823922726; tagless native
+  preflight 32824834401; failed-closed Release 32824925889; private 24-asset
+  draft id 376242296.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
 `#adrlog`, `#v43`, `#v430`, `#r43`
@@ -36,7 +40,7 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-08-24–25 v4.3.0–v4.3.4 publication splits and v4.3.5 fix-forward
+## 2026-08-24–25 v4.3.0–v4.3.5 publication splits and v4.3.6 fix-forward
 
 Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
 published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
@@ -94,12 +98,25 @@ preparation failed before upload because jq predicate context indexed a
 boolean instead of the plan manifest. Host and every downstream workflow
 skipped; no draft exists.
 
-The supported path is now v4.3.5 through the normal reviewed no-click
-automation on `codex/v4.3.5-preserve-release-manifest`. Preserve the validated
-cargo-dist plan object while testing its metadata. After exact-main CI,
-automatic OIDC publication, and native preflight pass, push only `v4.3.5` and
-let the private 24-to-30-to-validated-to-34 chain run. Never move or delete
-v4.3.0 through v4.3.4, hand-assemble a draft, or publish a partial release.
+PR #22 exact head `f9aac4f7e4601402e34c0959f790d587bdabab76` repaired that
+manifest boundary and passed CI `32823394621` plus Release plan `32823394660`
+before merge as exact source `42879b4af0699148aea46a841e76aa5fc1673786`.
+Exact-main CI `32823922777`, automatic trusted-OIDC v4.3.5 publication
+`32823922726`, and native preflight `32824834401` passed. Crates.io serves
+unyanked v4.3.5 with checksum
+`a5facb0b31419f128e85f74c8636bf134388212b68937bf795bf498924c99032`.
+Immutable Release `32824925889` created the correct private 24-asset draft,
+release id `376242296`, then host verification failed because GitHub's by-tag
+endpoint returns 404 for drafts. Announcement and every downstream workflow
+skipped; the draft remains private.
+
+The supported path is now v4.3.6 through the normal reviewed no-click
+automation on `codex/v4.3.6-draft-release-lookup`. Carry and validate the
+immutable release ID returned at draft creation instead of rediscovering the
+private object by tag. After exact-main CI, automatic OIDC publication, and
+native preflight pass, push only `v4.3.6` and let the private
+24-to-30-to-validated-to-34 chain run. Never move or delete v4.3.0 through
+v4.3.5, hand-assemble the existing draft, or publish a partial release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 
@@ -1071,20 +1088,21 @@ This section records observed hosted state, never expectation.
 ## What's Next
 
 The v4.3 GitHub distribution and homepage update are not complete. Continue the
-immutable-tag-safe v4.3.5 release before returning to the physical-hardware
+immutable-tag-safe v4.3.6 release before returning to the physical-hardware
 queue:
 
-1. Finish the release-manifest preservation repair on
-   `codex/v4.3.5-preserve-release-manifest`; pass the complete local gate, independent
+1. Finish the draft-release lookup repair on
+   `codex/v4.3.6-draft-release-lookup`; pass the complete local gate, independent
    review, exact-head PR CI, and Release plan.
 2. Merge only the accepted exact SHA. Require exact-main CI, automatic trusted-
-   OIDC v4.3.5 publication, and native Intel/Apple Silicon credential/staging
-   preflight before pushing only immutable tag `v4.3.5`.
+   OIDC v4.3.6 publication, and native Intel/Apple Silicon credential/staging
+   preflight before pushing only immutable tag `v4.3.6`.
 3. Require the automatic private 24-to-30-to-validated-to-34 asset chain, both
    native Apple lifecycles, public Windows updater plus Linux/macOS smokes, and
    the public-byte audit before updating the homepage or closing `#r43`/`#v43`.
-4. Keep `v4.3.0` through `v4.3.4` immutable. None produced a GitHub
-   draft; do not delete, move, reuse, or hand-recover any tag.
+4. Keep `v4.3.0` through `v4.3.5` immutable. The first five produced no draft;
+   v4.3.5 produced private draft `376242296`. Do not delete, move, reuse, or
+   hand-recover any tag or draft.
 5. After release closure, continue the personal Alienware, AMD64 Linux, and
    Raspberry Pi 4 tasks. Those physical checks remain open and must not be
    inferred from hosted evidence.

@@ -7,20 +7,56 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.5 — release-manifest preservation fix-forward (as of 2026-08-25)
+### v4.3.6 — private-draft identity fix-forward (as of 2026-08-25)
 
-Release status: active packaging-only candidate. The read-only v4.3.4 release
-preparation step used `jq -e` with a bare predicate, so it persisted the JSON
-boolean `true` instead of the validated cargo-dist manifest. The following
-metadata projection then failed when it indexed `announcement_title`. v4.3.5
-uses an explicit fail-closed branch that returns the complete original object
-only when stable title/body metadata is valid. The executable provenance suite
-extracts and runs the production validation/projection chain, proves unrelated
-manifest fields survive, verifies the exact metadata projection, and rejects
-prerelease, missing, empty, non-string, boolean, and null inputs. The complete
-local gate, focused review, exact-head PR gates, exact-main CI/OIDC, native
-preflight, and fresh automatic 24 → 30 → validated → 34/public chain remain
-required.
+Release status: active packaging-only candidate. GitHub's REST
+`/releases/tags/{tag}` endpoint does not return private drafts, even to the
+authenticated publisher. v4.3.6 resolves the exact private draft through the
+fully paginated authenticated releases collection, requires one matching tag,
+target SHA, stable draft state, title, URL, and asset inventory, then carries
+its positive numeric release ID through Windows packaging, private Windows
+validation, native Mac validation, and final publication. Pre-public reads and
+the final visibility PATCH use `/releases/{id}`; public checks remain tag based.
+
+The executable host fixture extracts the production asset/list/create/list/ID
+sequence and reproduces the real API split: a draft is visible in the
+authenticated collection while the by-tag endpoint returns 404. It accepts one
+exact 24-asset draft and rejects a pre-existing match on page two before any
+creation, duplicate matches, wrong targets, public or prerelease state,
+missing/extra assets, and zero-byte assets. Exact-head PR gates, exact-main
+CI/OIDC, native preflight, and the fresh automatic 24 → 30 → validated →
+34/public chain remain required.
+
+The corrected local candidate passed formatting, Clippy with warnings denied,
+all 208 unit/integration/doc tests, release build, RustSec audit, cargo-dist
+0.31.0 plan, actionlint/ShellCheck, the full executable provenance suite,
+Apple staging compatibility, the 39-file package inventory, publish dry-run,
+and fast/full table, JSON, and ASCII smokes. Seven alternating full-mode runs
+against installed v4.2.2 measured medians of 5147.8 ms and 2112.4 ms (59.0%
+faster); 11 alternating fast-mode runs measured 302.8 ms and 312.9 ms (+3.3%,
+within the non-regression band and not a speedup claim). Windows table/ASCII
+output omitted CPU temperature, JSON retained `cpu.temperature_c: null`, and
+the reported 53 C NVIDIA temperature matched direct `nvidia-smi` at 53 C.
+
+### v4.3.5 — Published crate; correct private draft, failed host assertion
+
+Release status: exact source and crate publication completed; a correct GitHub
+draft exists but remains private. PR #22 head
+`f9aac4f7e4601402e34c0959f790d587bdabab76` passed all 20 CI jobs in
+`32823394621`, Release plan `32823394660`, and focused review. It merged as
+`42879b4af0699148aea46a841e76aa5fc1673786`; exact-main CI `32823922777`
+passed 20/20, trusted-OIDC run `32823922726` published unyanked v4.3.5 with
+checksum `a5facb0b31419f128e85f74c8636bf134388212b68937bf795bf498924c99032`,
+and native Intel/Apple Silicon preflight `32824834401` passed.
+
+Tagged Release `32824925889` passed plan, all six platform builds, both fresh
+Apple signing/notarization jobs, global assembly, and the repaired exact
+24-asset preparation. Host job `97731923914` successfully created private draft
+ID `376242296` for exact tag/target `v4.3.5` / `42879b4...`, with all 24 expected
+nonempty assets. Its immediate `GET /releases/tags/v4.3.5` assertion then
+returned 404 because that endpoint does not expose drafts. The Release run
+failed, Windows/macOS workflow-run consumers skipped, and nothing became
+public. The draft stays private and the tag is immutable; v4.3.6 fixes forward.
 
 ### v4.3.4 — Published crate; failed-closed release-metadata preparation
 

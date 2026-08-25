@@ -7,12 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.6] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.5 crate and tag remain published, and its
+  correctly assembled 24-asset GitHub draft remains private. v4.3.6 is the sole
+  candidate for the complete cross-platform GitHub download release.
+
+### Fixed
+- **Every pre-public workflow now identifies private drafts through the
+  authenticated, fully paginated releases collection.** Release hosting first
+  proves the exact tag is absent, then binds the created draft URL to exactly
+  one tag/target/title/asset record and its positive numeric release ID.
+  Windows packaging, private Windows validation, native Mac validation, and the
+  final Mac publisher carry that ID forward and re-read `/releases/{id}` before
+  any privileged mutation. Public and post-public tag lookups are unchanged.
+- **Executable release-host regression coverage now models GitHub's real draft
+  visibility.** The extracted production list/create/list sequence runs against
+  a stateful mock where the by-tag endpoint remains 404 for drafts. It accepts
+  one exact draft and rejects a page-two pre-existing release before mutation,
+  duplicates, wrong targets, public/prerelease records, missing or extra assets,
+  and zero-byte assets.
+
+### Security
+- **The failed v4.3.5 chain created no public release.** Its tagged Release run
+  completed every build, both Apple signing/notarization jobs, global assembly,
+  and exact 24-asset preparation. `gh release create` then made the correct
+  private draft, but the post-create assertion used GitHub's draft-blind
+  release-by-tag REST endpoint and received 404. The run failed, downstream
+  workflows skipped, and the draft remains private and immutable evidence.
+
 ## [4.3.5] - 2026-08-25
 
 ### Changed
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
-  behavior.** The immutable v4.3.4 crate and tag remain published; v4.3.5 is the
-  sole candidate for the complete cross-platform GitHub download release.
+  behavior.** Its immutable crate and tag remain published. Its correct
+  24-asset GitHub draft remains private after the host assertion failed;
+  v4.3.6 is the sole complete-download candidate.
 
 ### Fixed
 - **Release metadata validation now preserves the complete cargo-dist manifest.**
@@ -24,12 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and rejects prerelease, missing, empty, non-string, boolean, and null inputs.
 
 ### Security
-- **The failed v4.3.4 tag stopped before upload or partial release creation.**
-  Exact-main CI, trusted-OIDC crates publication, native preflight, all six
-  platform builds, both Apple signing/notarization jobs, and global assembly
-  succeeded. The read-only preparation job then failed because its validation
-  predicate wrote `true` instead of the manifest object. No host job, GitHub
-  draft, or downstream publication ran; the tag is not moved or reused.
+- **The failed v4.3.5 tag stopped with a correct private draft and no public
+  release.** Exact-main CI, trusted-OIDC crates publication, native preflight,
+  all six platform builds, both Apple signing/notarization jobs, global
+  assembly, and 24-asset preparation succeeded. Hosting created the exact
+  private draft, then its release-by-tag REST assertion returned 404 because
+  GitHub does not expose drafts through that endpoint. Downstream workflows
+  skipped; the private draft and immutable tag are not moved or reused.
 
 ## [4.3.4] - 2026-08-25
 

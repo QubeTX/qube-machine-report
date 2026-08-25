@@ -13,12 +13,36 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.6] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.5 remains an immutable crate and private draft, while
+  v4.3.6 is the next complete downloadable release candidate.
+
+### Fixed
+- **The automated release chain can now see its own private draft.** GitHub does
+  not expose drafts through its normal “release by tag” endpoint. The release,
+  Windows, validation, and Mac jobs now find the one exact draft through the
+  authenticated release inventory, bind its numeric ID, and keep checking that
+  same draft until it is ready to become public.
+- **Tests now reproduce the real GitHub behavior that caused the stop.** They
+  verify that the draft remains invisible through the old lookup, is visible in
+  the full authenticated inventory, and that ambiguous, changed, incomplete,
+  public, prerelease, or empty download sets stop before publication.
+
+### Security
+- **Version 4.3.5 never became public.** It built and signed successfully and
+  created the correct 24-download private draft. Its final verification used
+  the wrong GitHub lookup, received “not found,” and stopped the chain before
+  Windows and Mac completion. The draft remains private; v4.3.6 fixes forward.
+
 ## [4.3.5] - 2026-08-25
 
 ### Changed
 - **This is a packaging-only repair; the report itself is unchanged from the
-  v4.3 line.** Version 4.3.4 remains available as an immutable crate, while
-  v4.3.5 is the next complete downloadable release candidate.
+  v4.3 line.** Its immutable crate and tag remain available. Its correct
+  24-download draft remains private, and v4.3.6 is the next complete candidate.
 
 ### Fixed
 - **Release notes and download metadata now survive their validation step
@@ -28,10 +52,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   incorrectly typed release information.
 
 ### Security
-- **Version 4.3.4 stopped safely after Mac signing but before any download draft
-  or public release was created.** Its crate and tag stay untouched. Version
-  4.3.5 fixes forward through the same automatic review, signing, and
-  publication chain.
+- **Version 4.3.5 stopped safely after creating the correct private draft.** The
+  workflow's follow-up tag lookup cannot see drafts, so it reported “not found”
+  and prevented every public step. Its crate, tag, and private draft stay
+  untouched; version 4.3.6 fixes forward.
 
 ## [4.3.4] - 2026-08-25
 

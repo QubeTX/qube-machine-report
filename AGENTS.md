@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.4`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.5` (battery hardening, Windows
+- Current crates.io version: `4.3.5`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.6` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -93,9 +93,20 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   Apple signer/notary jobs, and global artifacts, then the uncredentialed
   24-asset preparation failed closed when its jq filter indexed a boolean as
   the release manifest. Host and every downstream workflow skipped; no draft
-  exists. No v4.3.0 through v4.3.4 GitHub draft exists. Never move, delete,
-  reuse, or rerun those tags unchanged. v4.2.2 remains the last complete GitHub
-  distribution until reviewed v4.3.5 passes exact-main CI/OIDC and the automatic private
+  exists. PR #22 exact head `f9aac4f7e4601402e34c0959f790d587bdabab76`
+  passed CI `32823394621` and Release plan `32823394660`, then merged as exact
+  `42879b4af0699148aea46a841e76aa5fc1673786`. Exact-main CI `32823922777`,
+  automatic trusted-OIDC crates run `32823922726`, and native preflight
+  `32824834401` passed. Crates.io serves exact unyanked v4.3.5 with checksum
+  `a5facb0b31419f128e85f74c8636bf134388212b68937bf795bf498924c99032`.
+  Tagged Release `32824925889` passed through exact 24-asset preparation and
+  created private draft release `376242296`, then the host failed because
+  GitHub's by-tag endpoint returns 404 for drafts. Announcement and every
+  downstream workflow skipped; the correct 24-asset draft remains private.
+  No v4.3.0 through v4.3.4 draft exists, and v4.3.5 is the first private draft
+  in the failed chain. Never move, delete, reuse, or rerun those tags unchanged.
+  v4.2.2 remains the last complete public GitHub distribution until reviewed
+  v4.3.6 passes exact-main CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
