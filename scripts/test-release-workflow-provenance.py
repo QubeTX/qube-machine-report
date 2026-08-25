@@ -7411,6 +7411,9 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "unexpected direct-PKG Scripts inventory",
         'test -f "$expanded_pkg/Scripts/preinstall"',
         'test ! -L "$expanded_pkg/Scripts/preinstall"',
+        'signed_preinstall="$RUNNER_TEMP/tr300-direct-pkg-preinstall"',
+        'install -m 0500 "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"',
+        'cmp "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"',
         "postinstall tr300-pkg-rollback tr300-migration-probe",
         'rm -rf "$expanded_pkg"',
         'custom_fixture_home=$(mktemp -d \\',
@@ -7466,7 +7469,12 @@ def check_macos_publish_boundary(workflow: str) -> None:
         '"$baseline_dist_after" == "$baseline_dist_before"',
         '"$baseline_archive_after" == "$baseline_archive_before"',
         'test "$("$HOME/.cargo/bin/tr300" --version)" = \'tr300 4.2.2\'',
+        '/bin/sh "$signed_preinstall" package-path / /',
+        "managed ownership was incorrectly accepted by the signed preinstall",
         "Rerun the managed installer to refresh this copy to a receipt-aware version",
+        'sudo installer -pkg "$pkg" -target / -dumplog',
+        "PKInstallErrorDomain Code=112",
+        "NSFilePath=./preinstall",
         'sh "$managed_installer"',
         'test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"',
         "printf '2\\ny\\n' | \"$HOME/.cargo/bin/tr300\" uninstall",
@@ -7598,8 +7606,18 @@ def check_macos_publish_boundary(workflow: str) -> None:
         raise AssertionError(
             f"{label}: v4.2.2 wrapper/raw/archive record sandwich is out of order"
         )
+    signed_preinstall_index = native_validation.index(
+        '/bin/sh "$signed_preinstall" package-path / /', managed_baseline_index
+    )
+    managed_diagnostic_index = native_validation.index(
+        "Rerun the managed installer to refresh this copy to a receipt-aware version",
+        signed_preinstall_index,
+    )
     managed_rejection_index = native_validation.index(
-        'sudo installer -pkg "$pkg" -target /', managed_baseline_index
+        'sudo installer -pkg "$pkg" -target / -dumplog', managed_diagnostic_index
+    )
+    managed_packagekit_index = native_validation.index(
+        "PKInstallErrorDomain Code=112", managed_rejection_index
     )
     managed_refresh_index = native_validation.index(
         'sh "$managed_installer"', managed_rejection_index
@@ -7621,7 +7639,10 @@ def check_macos_publish_boundary(workflow: str) -> None:
     )
     if not (
         managed_baseline_index
+        < signed_preinstall_index
+        < managed_diagnostic_index
         < managed_rejection_index
+        < managed_packagekit_index
         and source_byte_index
         < candidate_local_path_index
         < candidate_tokenless_index
