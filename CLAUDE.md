@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.10**.
-The working fix-forward manifest is **4.3.11**. PR #14 merged as
+Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.11**.
+The working fix-forward manifest is **4.3.12**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -133,9 +133,13 @@ repair bytes, and the existing automatic post-public pass for the real Global
 worker. Its exact crate and private 30-asset draft succeeded, while native Mac
 validation stopped only because PackageKit did not repeat a script-owned human
 message. PR #28 repaired that assertion without changing installer policy.
-All eleven v4.3.0 through v4.3.10 tags stay immutable. v4.2.2 remains the
-complete public GitHub-distribution boundary until reviewed v4.3.11 passes the
-normal automated tag chain. Exact v4.2.2 source
+v4.3.11 then passed exact-main CI/OIDC, native preflight, Release, and Windows
+assembly and reached exact private 30-asset draft `376514152`. Its signed and
+notarized Mac package passed the managed-install rejection before both native
+jobs stopped while removing a fixture from root-owned `/Users` without
+privilege. All twelve v4.3.0 through v4.3.11 tags stay immutable. v4.2.2
+remains the complete public GitHub-distribution boundary until reviewed
+v4.3.12 passes the normal automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
@@ -683,8 +687,8 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.11 chain completes, v4.2.2 remains the complete public GitHub
-  distribution. The v4.3.0 through v4.3.10 crates/tags stay published and
+- Until the v4.3.12 chain completes, v4.2.2 remains the complete public GitHub
+  distribution. The v4.3.0 through v4.3.11 crates/tags stay published and
   immutable; v4.3.5, v4.3.6, v4.3.7, and v4.3.8 each have one exact private 24-asset
   GitHub draft. A read-only downstream token cannot enumerate those drafts
   because GitHub requires push access for draft visibility; the automated

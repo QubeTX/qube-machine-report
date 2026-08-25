@@ -13,6 +13,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.12] - 2026-08-25
+
+### Changed
+- **This is a packaging-test repair; the report and installer rules are
+  unchanged.** Version 4.3.11 remains preserved as an immutable crate, tag,
+  and private draft. Version 4.3.12 is the only active candidate for complete
+  cross-platform downloads.
+
+### Fixed
+- **Mac testing now uses the permission required to remove its temporary test
+  account directory from the system-owned Users folder.** The cleanup remains
+  limited to the exact temporary fixture, and automated coverage prevents the
+  invalid unprivileged cleanup from returning.
+
+### Security
+- **Version 4.3.11 never became public on GitHub.** Its crate, first-stage
+  release, Windows packages, Apple signatures, notarization, and the actual
+  managed-install safety rejection all succeeded. The final Mac tests stopped
+  only while deleting their temporary fixture. Version 4.3.12 repairs that
+  test cleanup without changing the product, installer policy, or immutable-
+  tag rules.
+
 ## [4.3.11] - 2026-08-25
 
 ### Changed
