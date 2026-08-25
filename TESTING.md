@@ -7,25 +7,43 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.2 — Apple system-Bash fix-forward (as of 2026-08-24)
+### v4.3.3 — cargo-dist sidecar fix-forward (as of 2026-08-25)
 
-Release status: active. Both earlier v4.3 tags are immutable and neither
-created a GitHub Release or draft, so only a fresh reviewed `v4.3.2` tag may
-restart the automatic distribution chain. The correction removes Bash-4-only
-file-inventory constructs from the checkout-free Apple signers and every
-affected native `macos-installer.yml` job. Exact inventories remain fail-closed
-through Python standard-library `os.scandir` plus non-following regular-file
-checks. Both native Mac CI legs must prove that `/bin/bash` is version 3.2,
-syntax-check every affected native workflow block plus every classified Bash
-block in the tag-only cargo-dist build matrix, and execute the exact
-signer-staging block for both Apple targets. The three exact macOS-installer
-inventory snippets also run against clean, missing, extra, empty, directory,
-and symlink fixtures; signer fixtures reject hidden extras, corrupt sidecars,
-and symlink/hard-link archive members. The focused compatibility
-harness and complete local provenance fixture suite pass on the working branch;
-the full local gate, reviewed exact-head PR, exact-main CI/OIDC, fresh native
-credential preflight, and automatic tagged 24 → 30 → validated → 34/public
-chain remain required before this log can record release completion.
+Release status: active. The immutable v4.3.2 tag exposed one final deterministic
+producer-contract mismatch before credential use: pinned cargo-dist 0.31.0
+writes each checksum record followed by a blank line (`LF LF`), while the new
+exact Apple guard modeled one `LF`. The v4.3.3 correction byte-validates that
+raw form, validates the corresponding eight-record `sha256.sum`, and only then
+canonicalizes all public sidecars and the aggregate to one terminal `LF`.
+Extracted-workflow fixtures accept the exact downloaded form and reject
+one-/three-LF, CRLF, same-length trailing garbage, signed-sidecar drift, and
+aggregate drift without changing rejected fixture files. The complete local
+candidate gate passed: locked formatting and warnings-denied Clippy; 185 unit
+and 22 integration tests; optimized build; 39-file package inventory and
+publish dry-run; RustSec audit over 221 dependencies; cargo-dist 0.31.0 plan;
+full and focused executable provenance fixtures; structural actionlint plus
+direct ShellCheck/Bash syntax; and fast/full table, JSON, and ASCII runtime
+smokes. The release binary reported v4.3.3; sample fast/full table runs were
+236.1 ms and 2108.5 ms, Windows CPU temperature stayed null, and the reported
+53 °C NVIDIA value matched direct `nvidia-smi`. The reviewed exact-head PR,
+exact-main CI/OIDC, native credential preflight, and fresh automatic 24 → 30 →
+validated → 34/public chain remain required.
+
+### v4.3.2 — Published crate; failed-closed checksum staging
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. PR #19 head
+`8b78d6de86f74deaaec0ba21be99b05f757a233a` passed CI `32809107588`, Release
+plan `32809107593`, native Intel/ARM Bash 3.2 staging, and independent review.
+It merged as `c246ded23a93f8c383498989a334268442ec2e57`; exact-main CI
+`32809616793` passed and automatic trusted-OIDC run `32809616807` published
+unyanked v4.3.2. A fresh crate download matched checksum
+`d6b1976c000a3fb06a4ee7b6cfaf410352e6e518076d840cb817232a0c511c`, and
+tagless native preflight `32810343902` passed. Tagged Release `32810420213`
+then passed its plan and all six platform builds, but Apple signer jobs
+`97689121553` and `97689121586` rejected cargo-dist's valid two-LF raw
+sidecars before signing, notarization, upload, or draft creation. Every
+downstream workflow skipped. The tag is immutable; v4.3.3 fixes forward.
 
 ### v4.3.1 — Published crate; failed-closed Apple packaging
 

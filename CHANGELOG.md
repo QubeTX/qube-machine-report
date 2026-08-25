@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.3] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.2 crate and tag remain published; v4.3.3 is the
+  next candidate for the complete cross-platform GitHub download release.
+
+### Fixed
+- **Release custody now models cargo-dist 0.31.0 checksum bytes exactly.** Raw
+  cargo-dist sidecars and its aggregate checksum end with one blank line after
+  the final checksum record. Fresh Apple signers require that exact two-LF
+  producer form before staging, while the 24-asset preparation step verifies
+  all raw source/Linux/Windows sidecars plus `sha256.sum` before rewriting them
+  to a canonical one-LF public form. Regression fixtures execute the extracted
+  workflow code against the observed producer bytes and reject missing, extra,
+  CRLF, same-length trailing-garbage, signed-sidecar, and aggregate mutations
+  without changing any fixture file.
+
+### Security
+- **The failed v4.3.2 tag stopped before credential use or partial release
+  creation.** Exact-main CI and trusted-OIDC crates publication succeeded, then
+  all six platform archives built; both Apple signers rejected the valid raw
+  two-LF sidecars before signing or notarization. No GitHub draft exists for
+  v4.3.2, and its immutable tag is not moved or reused.
+
 ## [4.3.2] - 2026-08-24
 
 ### Added
@@ -20,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default full collection mode.
 
 ### Changed
+- **Distribution status:** exact v4.3.2 passed main CI and published to
+  crates.io through trusted OIDC. Its immutable tag built all six platform
+  archives, but both Apple signer jobs rejected cargo-dist 0.31.0's valid
+  two-LF checksum-sidecar ending before signing, notarization, upload, or draft
+  creation. Version 4.3.3 fixes forward without moving or reusing the tag.
 - **Windows full-mode collection is materially faster on the controlled
   Alienware benchmark.** Seven alternating runs per version measured medians
   of 5146.9 ms and 2120.2 ms: 58.8% less elapsed time and a 2.43× runtime

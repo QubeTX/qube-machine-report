@@ -825,10 +825,13 @@ def check_native_apple_bash_contract(release: str, macos: str) -> None:
     )
     require_exact_line_sequence(
         apple_staging,
-        """
-        if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
-                "$sidecar_size" == "$expected_size" &&
-                "$actual_sidecar" == "$expected_sidecar" ]]; then
+        r"""
+        if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "unsigned Apple archive checksum is malformed" >&2
+          exit 1
+        fi
+        if ! python3 -c 'import pathlib, sys; path, expected = sys.argv[1:]; raise SystemExit(pathlib.Path(path).read_bytes() != (expected + "\n\n").encode("utf-8"))' \
+          "unsigned/$sidecar" "$expected_sidecar"; then
           echo "unsigned Apple checksum sidecar is malformed or does not match" >&2
           exit 1
         fi
@@ -972,7 +975,7 @@ def write_apple_staging_fixture(
     digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     sidecar_name = f"{archive_name}.sha256"
     (unsigned / sidecar_name).write_text(
-        f"{digest} *{archive_name}\n", encoding="utf-8", newline="\n"
+        f"{digest} *{archive_name}\n\n", encoding="utf-8", newline="\n"
     )
     manifest_name = f"{target}-dist-manifest.json"
     (unsigned / manifest_name).write_text(
@@ -1004,7 +1007,23 @@ def write_apple_staging_fixture(
             sidecar.mkdir()
     elif mutation == "sidecar":
         (unsigned / sidecar_name).write_text(
-            f"{'0' * 64} *{archive_name}\n", encoding="utf-8", newline="\n"
+            f"{'0' * 64} *{archive_name}\n\n", encoding="utf-8", newline="\n"
+        )
+    elif mutation == "sidecar-single-newline":
+        (unsigned / sidecar_name).write_text(
+            f"{digest} *{archive_name}\n", encoding="utf-8", newline="\n"
+        )
+    elif mutation == "sidecar-extra-newline":
+        (unsigned / sidecar_name).write_text(
+            f"{digest} *{archive_name}\n\n\n", encoding="utf-8", newline="\n"
+        )
+    elif mutation == "sidecar-crlf":
+        (unsigned / sidecar_name).write_bytes(
+            f"{digest} *{archive_name}\r\n\r\n".encode("utf-8")
+        )
+    elif mutation == "sidecar-same-length-tail":
+        (unsigned / sidecar_name).write_bytes(
+            f"{digest} *{archive_name}\nX".encode("utf-8")
         )
     elif mutation in ("archive-symlink", "archive-hardlink"):
         pass
@@ -1022,6 +1041,10 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
         ("aarch64-apple-darwin", "extra", "v99.99.99", False),
         ("aarch64-apple-darwin", "symlink", "v99.99.99", False),
         ("aarch64-apple-darwin", "sidecar", "v99.99.99", False),
+        ("aarch64-apple-darwin", "sidecar-single-newline", "v99.99.99", False),
+        ("aarch64-apple-darwin", "sidecar-extra-newline", "v99.99.99", False),
+        ("aarch64-apple-darwin", "sidecar-crlf", "v99.99.99", False),
+        ("aarch64-apple-darwin", "sidecar-same-length-tail", "v99.99.99", False),
         ("aarch64-apple-darwin", "archive-symlink", "v99.99.99", False),
         ("aarch64-apple-darwin", "archive-hardlink", "v99.99.99", False),
         ("aarch64-apple-darwin", None, "v99.99.99-rc.1", False),
@@ -1121,6 +1144,130 @@ def extract_unique_python_heredoc(block: str, marker: str, label: str) -> str:
             f"found {len(matches)}"
         )
     return matches[0]
+
+
+def run_release_sidecar_normalization_fixtures(release: str) -> None:
+    prepare = extract_unique_named_run(
+        release,
+        "Render and validate the fixed 24-asset initial release",
+        RELEASE_WORKFLOW.name,
+    )
+    program = extract_unique_python_heredoc(
+        prepare,
+        "raw_cargo_dist_payloads = {",
+        "release sidecar normalization",
+    )
+    payload_names = (
+        "source.tar.gz",
+        "tr300-aarch64-apple-darwin.tar.xz",
+        "tr300-aarch64-unknown-linux-gnu.tar.xz",
+        "tr300-x86_64-apple-darwin.tar.xz",
+        "tr300-x86_64-pc-windows-msvc.msi",
+        "tr300-x86_64-pc-windows-msvc.zip",
+        "tr300-x86_64-unknown-linux-gnu.tar.xz",
+        "tr300-x86_64-unknown-linux-musl.tar.xz",
+    )
+    raw_payload_names = {
+        "source.tar.gz",
+        "tr300-aarch64-unknown-linux-gnu.tar.xz",
+        "tr300-x86_64-pc-windows-msvc.msi",
+        "tr300-x86_64-pc-windows-msvc.zip",
+        "tr300-x86_64-unknown-linux-gnu.tar.xz",
+        "tr300-x86_64-unknown-linux-musl.tar.xz",
+    }
+
+    for mutation, expected_success in (
+        (None, True),
+        ("raw-single-newline", False),
+        ("raw-triple-newline", False),
+        ("raw-crlf", False),
+        ("raw-same-length-tail", False),
+        ("signed-double-newline", False),
+        ("aggregate-single-newline", False),
+        ("aggregate-triple-newline", False),
+        ("aggregate-mismatch", False),
+    ):
+        with tempfile.TemporaryDirectory(prefix="tr300-release-sidecars-") as case_raw:
+            case_dir = Path(case_raw)
+            records: dict[str, bytes] = {}
+            for index, payload_name in enumerate(payload_names, start=1):
+                payload = f"fixture payload {index}: {payload_name}\n".encode()
+                (case_dir / payload_name).write_bytes(payload)
+                record = (
+                    f"{hashlib.sha256(payload).hexdigest()} *{payload_name}".encode()
+                )
+                records[payload_name] = record
+                ending = b"\n\n" if payload_name in raw_payload_names else b"\n"
+                (case_dir / f"{payload_name}.sha256").write_bytes(record + ending)
+
+            canonical_checksum = b"".join(
+                records[payload_name] + b"\n" for payload_name in payload_names
+            )
+            checksum_path = case_dir / "sha256.sum"
+            checksum_path.write_bytes(canonical_checksum + b"\n")
+
+            raw_name = "source.tar.gz"
+            raw_sidecar = case_dir / f"{raw_name}.sha256"
+            signed_name = "tr300-aarch64-apple-darwin.tar.xz"
+            signed_sidecar = case_dir / f"{signed_name}.sha256"
+            if mutation == "raw-single-newline":
+                raw_sidecar.write_bytes(records[raw_name] + b"\n")
+            elif mutation == "raw-triple-newline":
+                raw_sidecar.write_bytes(records[raw_name] + b"\n\n\n")
+            elif mutation == "raw-crlf":
+                raw_sidecar.write_bytes(records[raw_name] + b"\r\n\r\n")
+            elif mutation == "raw-same-length-tail":
+                raw_sidecar.write_bytes(records[raw_name] + b"\nX")
+            elif mutation == "signed-double-newline":
+                signed_sidecar.write_bytes(records[signed_name] + b"\n\n")
+            elif mutation == "aggregate-single-newline":
+                checksum_path.write_bytes(canonical_checksum)
+            elif mutation == "aggregate-triple-newline":
+                checksum_path.write_bytes(canonical_checksum + b"\n\n")
+            elif mutation == "aggregate-mismatch":
+                checksum_path.write_bytes(b"0" + canonical_checksum[1:] + b"\n")
+            elif mutation is not None:
+                raise AssertionError(f"unknown release sidecar mutation: {mutation}")
+
+            before = {
+                path.name: path.read_bytes() for path in case_dir.iterdir() if path.is_file()
+            }
+            result = subprocess.run(
+                [sys.executable, "-", str(case_dir)],
+                input=program,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+            )
+            succeeded = result.returncode == 0
+            if succeeded != expected_success:
+                raise AssertionError(
+                    f"release sidecar normalization mutation={mutation} returned "
+                    f"{result.returncode}, expected_success={expected_success}\n"
+                    f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                )
+            if expected_success:
+                for payload_name in payload_names:
+                    actual = (case_dir / f"{payload_name}.sha256").read_bytes()
+                    expected = records[payload_name] + b"\n"
+                    if actual != expected:
+                        raise AssertionError(
+                            f"release sidecar was not canonicalized: {payload_name}"
+                        )
+                if checksum_path.read_bytes() != canonical_checksum:
+                    raise AssertionError("release aggregate checksum was not canonicalized")
+            else:
+                after = {
+                    path.name: path.read_bytes()
+                    for path in case_dir.iterdir()
+                    if path.is_file()
+                }
+                if after != before:
+                    raise AssertionError(
+                        f"rejected release sidecar mutation changed files: {mutation}"
+                    )
 
 
 def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
@@ -6480,6 +6627,31 @@ def check_release_token_boundary(workflow: str) -> None:
     require(prepare, "artifact_id: ${{ steps.prepared-upload.outputs.artifact-id }}", label)
     require(prepare, "artifact_digest: ${{ steps.prepared-upload.outputs.artifact-digest }}", label)
     require(prepare, "Render and validate the fixed 24-asset initial release", label)
+    require(
+        prepare,
+        "raw_cargo_dist_payloads = {",
+        f"{label} raw cargo-dist sidecar inventory",
+    )
+    require(
+        prepare,
+        'expected_ending = b"\\n\\n" if payload_name in raw_cargo_dist_payloads else b"\\n"',
+        f"{label} exact raw cargo-dist sidecar bytes",
+    )
+    require(
+        prepare,
+        'checksum_path.read_bytes() != canonical_checksum + b"\\n"',
+        f"{label} exact raw cargo-dist aggregate bytes",
+    )
+    require(
+        prepare,
+        "sidecar.write_bytes(contents)",
+        f"{label} canonical public sidecar rewrite",
+    )
+    require(
+        prepare,
+        "checksum_path.write_bytes(canonical_checksum)",
+        f"{label} canonical aggregate rewrite",
+    )
     require(prepare, "[[ ${#prepared[@]} -eq $((${#public_assets[@]} + 3)) ]]", label)
     if "contents: write" in prepare or "GH_TOKEN" in prepare:
         raise AssertionError(f"{label}: source preparation gained release write capability")
@@ -7119,6 +7291,7 @@ def main() -> None:
         windows_validation,
         windows_cargo_dist_installer,
     )
+    run_release_sidecar_normalization_fixtures(release)
     run_macos_inventory_compatibility_fixtures(macos)
     with tempfile.TemporaryDirectory(prefix="tr300-provenance-gh-") as fixture_raw:
         mock_bin = Path(fixture_raw) / "bin"
@@ -7149,6 +7322,7 @@ if __name__ == "__main__":
             )
         check_native_apple_bash_syntax(release, macos, fixture_bash)
         run_apple_staging_compatibility_fixture(release, fixture_bash)
+        run_release_sidecar_normalization_fixtures(release)
         run_macos_inventory_compatibility_fixtures(macos)
         print(
             "Apple release staging and native job syntax are compatible with "
