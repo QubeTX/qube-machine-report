@@ -1641,10 +1641,9 @@ def run_release_host_draft_fixtures(release: str, bash: str) -> None:
         host, "Rebind protected source and publish the fixed 24 assets", RELEASE_WORKFLOW.name
     )
     start = publisher.find("public_assets=(")
-    end = publisher.find("managed_installer_sha256=", start)
-    if start < 0 or end < 0:
+    if start < 0:
         raise AssertionError("release host draft fragment was not extractable")
-    fragment = publisher[start:end]
+    fragment = publisher[start:]
     array_end = fragment.find("\n)", fragment.find("public_assets=("))
     if array_end < 0:
         raise AssertionError("release host public asset array was not extractable")
@@ -1732,11 +1731,15 @@ def run_release_host_draft_fixtures(release: str, bash: str) -> None:
             (assets / "__tr300-notes.txt").write_text(
                 "fixture release notes\n", encoding="utf-8", newline="\n"
             )
+            managed_installer_sha256 = hashlib.sha256(b"fixture\n").hexdigest()
             (assets / "__tr300-asset-sha256s").write_text(
-                "fixture custody\n", encoding="utf-8", newline="\n"
+                f"{managed_installer_sha256}  tr300-installer.sh\n",
+                encoding="utf-8",
+                newline="\n",
             )
             config_path = directory / "config.json"
             log_path = directory / "gh-calls.jsonl"
+            github_output = directory / "github-output"
             config_path.write_text(
                 json.dumps({"pages": pages, "created": created}, separators=(",", ":")),
                 encoding="utf-8",
@@ -1752,6 +1755,7 @@ def run_release_host_draft_fixtures(release: str, bash: str) -> None:
                     "RELEASE_TAG": tag,
                     "EXPECTED_SHA": source_sha,
                     "GH_TOKEN": "fixture-token",
+                    "GITHUB_OUTPUT": github_output.as_posix(),
                     "MOCK_RELEASE_HOST_CONFIG": config_path.as_posix(),
                     "MOCK_RELEASE_HOST_LOG": log_path.as_posix(),
                     "TR300_RELEASE_HOST_BIN": bin_dir.as_posix(),
@@ -1787,6 +1791,12 @@ def run_release_host_draft_fixtures(release: str, bash: str) -> None:
                     f"stderr:\n{result.stderr}"
                 )
             if expected_success:
+                if github_output.read_text(encoding="utf-8") != (
+                    f"managed_installer_sha256={managed_installer_sha256}\n"
+                ):
+                    raise AssertionError(
+                        "release host fixture did not propagate the managed installer digest"
+                    )
                 by_tag = subprocess.run(
                     [
                         bash,
@@ -7518,6 +7528,7 @@ def check_release_token_boundary(workflow: str) -> None:
         "created release is not the unique exact private draft",
         'gh api "repos/$EXPECTED_REPOSITORY/releases/$release_id"',
         "([.assets[].name] | sort) == $expected_assets",
+        'awk \'$2 == "tr300-installer.sh" { print $1 }\'',
     ):
         require(publisher, needle, f"{label} fixed draft publisher")
     if "releases/tags/$RELEASE_TAG" in publisher:

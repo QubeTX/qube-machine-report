@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-08-25
-**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.5 / 4.3.6
+**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.6 / 4.3.7
 (v4.2.2 remains the last complete GitHub distribution. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.
@@ -44,12 +44,21 @@ credential use because cargo-dist's raw checksum files end in two LF bytes,
   passed. Immutable Release `32824925889` created correct private 24-asset
   draft `376242296`, then host verification failed because GitHub's by-tag
   endpoint returns 404 for drafts. Downstream workflows skipped and the draft
-  remains private. v4.3.6 is the supported fix-forward, and no prior tag may move.)
+  remains private. PR #23 exact head `ebb4f76a` passed CI `32829236226` and
+  Release plan `32829236145`, then merged as exact `9ab392f4`; exact-main CI
+  `32830286853`, automatic OIDC v4.3.6 publication `32830286932`, and native
+  preflight `32830369613` passed. Release `32831292249` passed all builds,
+  signers, global assembly, and preparation, then host job `97751759346`
+  created exact private 24-asset draft `376283574` and failed because its
+  managed-installer lookup expected `*tr300-installer.sh` while default
+  `sha256sum` writes `tr300-installer.sh`. Downstream workflows skipped and the
+  draft remains private. v4.3.7 is the supported fix-forward, and no prior tag
+  may move.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.6 distribution fix-forward):** Linux battery-selection hardening accepts
+**In flight (v4.3.7 distribution fix-forward):** Linux battery-selection hardening accepts
 well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
 contradictory device/absence evidence; the historical Pi "30%" source remains
 unproven. Linux thermals choose the hottest valid sensor deterministically,
@@ -80,13 +89,14 @@ coverage on both Mac runners, then its immutable release exposed cargo-dist
   preserves the validated cargo-dist plan object across release-metadata
   predicates rather than allowing boolean filter context to replace it. v4.3.6
   carries the created private draft's immutable release ID instead of relying
-  on a public-only by-tag lookup.
+  on a public-only by-tag lookup. v4.3.7 fixes the checksum-record lookup used
+  to export the managed installer digest after exact draft validation.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
 The active v4.3 GitHub-distribution campaign remains incomplete. Its product
-  code is published on crates.io through v4.3.5; the v4.3.6 packaging fix-forward carries
+  code is published on crates.io through v4.3.6; the v4.3.7 packaging fix-forward carries
 battery, thermal, and Windows full-mode improvements. A `main` push starts CI
 and the crate-publication workflow together; the registry-uncredentialed
 validator waits for that exact CI run to pass before the fresh protected OIDC
@@ -96,7 +106,7 @@ acceptance proof → macOS-only 34-asset finalization chain. The Apple secrets a
 in `apple-signing`; native ARM/Intel preflight passed, repository copies and the
 temporary migration token are gone, and PR #16 removed the one-time workflow.
 The crates.io publisher tuple, automatic exact-main publication, and
-  `trustpub_only` probe passed for all six published v4.3 crates. v4.3.6 must repeat
+  `trustpub_only` probe passed for all seven published v4.3 crates. v4.3.7 must repeat
 that automatic proof and its native Bash-3.2 preflight before its new immutable
 tag is eligible for the native/public chain.
 AMD64 Linux laptop and Raspberry Pi physical qualification remain separate open
@@ -632,11 +642,12 @@ incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
 
-The v4.3 release campaign is **not complete**. Do not tag v4.3.6, update the
-homepage, or close the release milestone until the draft-lookup fix-forward PR,
+The v4.3 release campaign is **not complete**. Do not tag v4.3.7, update the
+homepage, or close the release milestone until the checksum-lookup fix-forward
+PR,
 exact-main CI, automatic OIDC crates publication, and native Apple staging
-preflight succeed. Then push only v4.3.6 and require the private 30-asset
+preflight succeed. Then push only v4.3.7 and require the private 30-asset
 Windows proof, macOS-only exact 34-asset publication, and every post-public
 smoke/public-byte audit to pass. Never move or reuse failed tags v4.3.0 through
-v4.3.5; the first five created no draft and v4.3.5's exact 24-asset draft must
-remain private.
+v4.3.6; the first five created no draft, while the exact v4.3.5 and v4.3.6
+24-asset drafts must remain private.
