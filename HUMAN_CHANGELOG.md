@@ -13,6 +13,47 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-08-24
+
+### Added
+- **This is the first complete downloadable release of everything added in
+  v4.3.** Linux can show trustworthy CPU and GPU temperatures, Windows can show
+  a bounded NVIDIA GPU reading, and unsupported temperatures simply stay
+  blank. The machine-readable report gains matching optional fields, and the
+  new `--full` flag explicitly chooses the normal complete report.
+
+### Changed
+- **The full Windows report is substantially faster on the controlled test
+  machine.** Its median fell from 5146.9 ms to 2120.2 ms across seven
+  alternating runs per version—58.8% less time, or a 2.43× runtime ratio.
+  Quick-mode medians differed by only 1.2%, so no quick-mode speedup is claimed.
+- **Switching a Mac from the managed install to the direct package now follows
+  a clear safe sequence.** Refresh the managed copy, choose Complete uninstall,
+  then run the PKG. The package checks all standard local-account locations
+  before installing anything and preserves any conflict it finds.
+
+### Fixed
+- **Battery detection is more conservative.** Linux recognizes current and
+  averaged readings—including legitimate negative and zero values—while
+  rejecting device-scoped, absent, or malformed supplies. The Mac fallback now
+  accepts only a real internal-battery record. The old Raspberry Pi "30%"
+  report remains unverified until it can be examined on the physical Pi.
+- **Windows release packaging is repaired and now rehearsed before release.**
+  Version 4.3.0 reached crates.io, but its GitHub packaging run stopped safely
+  before publishing downloads because a new file-safety check rejected the
+  official build tool installer's normal hard-linked alias. The check still
+  blocks real path redirection, while every pull request and accepted `main`
+  update now runs the same Windows bootstrap used by a release tag.
+
+### Security
+- **Crates.io publishing is automatic after accepted code reaches `main`; once
+  the qualified tag is pushed, GitHub packaging continues without approval
+  clicks.** Every irreversible step still proves the exact source and bytes.
+  Crates.io uses a short-lived trusted login only after CI passes. GitHub
+  downloads stay private through Windows and native Mac validation, then the
+  final Mac step publishes the complete 34-file release and post-public updater
+  checks run. Routine releases need no stored crates publishing token.
+
 ## [4.3.0] - 2026-08-24
 
 ### Added

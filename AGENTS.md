@@ -53,14 +53,21 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.2.2`. The working manifest on `main` is `4.3.0`
-  (battery hardening, Windows full-mode latency, thermal reporting). PR #14
+- Current crates.io version: `4.3.0`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.1` (battery hardening, Windows
+  full-mode latency, thermal reporting, and a Windows release-bootstrap fix).
+  PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
   local, hosted, security, review, and benchmark gates; exact-main CI run
-  `32766014047` passed all 19 jobs. v4.2.2 remains the last fully published
-  state until the final release-source merge passes CI, its automatic OIDC
-  crates publication succeeds, and the single tag/private
-  24-to-30-to-validated-to-34 asset chain plus post-public smokes complete.
+  `32766014047` passed all 19 jobs. Publisher PR #17 merged as `c788029d`;
+  exact-main CI `32794371259` and automatic trusted-OIDC run `32794371283`
+  published exact unyanked v4.3.0 with `trustpub_only=true`. Immutable tag
+  `v4.3.0` points to that SHA, but Release run `32795846831` failed before
+  draft creation because its new guard rejected the official cargo-dist
+  installer's normal NTFS hard-linked alias. Do not move or reuse that tag.
+  v4.2.2 remains the last complete GitHub distribution until reviewed v4.3.1
+  passes exact-main CI/OIDC and the automatic private
+  24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
   Windows exposes NVIDIA GPU temperature only through mode-bounded
@@ -147,13 +154,12 @@ keys remain available. The exact v4 boundary includes `Action`, `Cli`,
   settings.local.json         # Claude Code local output style setting
 
 .github/workflows/
-  ci.yml                      # cross-platform fmt/clippy/test/build/speed/audit/dist-plan
+  ci.yml                      # cross-platform Rust/speed/audit/dist/bootstrap/workflow gates
   crates-publish.yml          # automatic exact-main push/CI-gated trusted-OIDC crates.io publication
   release.yml                 # cargo-dist builds + fresh private-draft publisher
   windows-installers.yml      # adds six Windows assets to the private draft
   windows-installer-validation.yml # exact-byte pre-public matrix + public updater smoke
   macos-installer.yml         # native Apple gates and sole 34-asset final publisher
-  apple-secret-migration.yml  # one-time no-checkout secret copy/name proof; remove after native cutover
 
 docs/
   agents/handoff/              # tracked cross-machine continuation records
@@ -883,23 +889,14 @@ handoffs, or docs:
 - variables: `APPLE_SIGNING_IDENTITY`, the full Developer ID Installer common
   name in `APPLE_INSTALLER_SIGNING_IDENTITY`, and `APPLE_TEAM_ID`.
 
-The temporary `apple-secret-migration.yml` workflow performs only the one-time
-no-checkout, owner/current-main copy and exact name/policy inventory. Create a
-short-lived fine-grained personal access token restricted to
-`QubeTX/qube-machine-report`, with repository permissions `Contents: read`,
-`Actions: read`, and `Environments: write` only. From an authenticated
-workstation, install its value as the `apple-signing` environment secret named
-exactly `RELEASE_SECRET_MIGRATION_TOKEN` by running
-`gh secret set RELEASE_SECRET_MIGRATION_TOKEN --env apple-signing --repo QubeTX/qube-machine-report`
-and pasting the value only at the command's stdin prompt so it does not enter
-shell history. The operator runs the copy, then requires fresh native Apple
-Silicon and Intel credential-preflight jobs to prove both Application/Installer
-certificate import/signing plus read-only notary authentication from environment
-secrets. Only after those jobs pass does the operator delete the repository
-Apple secrets and `RELEASE_SECRET_MIGRATION_TOKEN`, rerun the environment-only
-preflight, and merge a protected follow-up PR that removes the migration
-workflow. The migration workflow itself does not delete credentials or
-substitute for native proof.
+The one-time Apple secret migration completed on 2026-08-24. Native Apple
+Silicon and Intel preflights proved both Application/Installer certificate
+import/signing plus read-only notary authentication from environment secrets;
+the repository copies and `RELEASE_SECRET_MIGRATION_TOKEN` were deleted, and
+PR #16 removed `apple-secret-migration.yml`. Do not recreate that workflow or
+repository-scoped Apple secrets for routine releases. A future credential
+rotation must retain fresh native preflight proof and the protected
+`apple-signing` boundary.
 
 The least-privilege App Store Connect key has Developer role. Installer-key RSA
 material/CSR may be generated with OpenSSL on Windows, issued through the Apple
