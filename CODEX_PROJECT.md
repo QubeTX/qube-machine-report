@@ -11,8 +11,8 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
 MIC-1 baseline: managed CLI installers are the recommended default, fresh
 installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
-bridge. v4.3.7 is published on crates.io through trusted OIDC, but the
-immutable v4.3.0 through v4.3.7 tags failed to complete GitHub distribution:
+bridge. v4.3.8 is published on crates.io through trusted OIDC, but the
+immutable v4.3.0 through v4.3.8 tags failed to complete GitHub distribution:
 first on a Windows release-bootstrap guard, then on Bash-4-only
 syntax in fresh native Apple signer jobs, then on a checksum guard that did not
 model cargo-dist 0.31.0's two-LF raw sidecars, and finally on a tar-mode guard
@@ -29,8 +29,14 @@ private 24-asset draft, but the read-only Windows and macOS downstream tokens
 lacked push access and GitHub therefore omitted the draft from their
 authenticated release listings; both source resolvers deterministically saw
 zero releases and stopped before any downstream build or publication. v4.3.8
-is the only eligible fix-forward for the
-performance/battery/thermal and release-custody work developed through PR #14.
+repaired that boundary, passed exact-main CI/OIDC, native preflight, and all 13
+Release jobs, then created exact private 24-asset draft `376357745`. Its macOS
+consumer rejected the trusted freezer's intentional six-file Apple/source
+inventory because it still required four archive files; its Windows Inno
+Setup attestation step lacked `GH_TOKEN`. Both failed before publication and
+the draft remained private at exactly 24 assets. v4.3.9 is the only eligible
+fix-forward for those two narrow distribution contracts and the unchanged
+performance/battery/thermal work developed through PR #14.
 Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
@@ -46,25 +52,25 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
   direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
   stable-`latest` audit passed.
-- Current crates.io package: `4.3.7`, exact source
-  `b9aa12850720b49c120c6465cefd094a843c5fc4`, published by automatic trusted
-  OIDC run `32834399800` after exact-main CI `32834399658`, with
+- Current crates.io package: `4.3.8`, exact source
+  `0b726a854666ed73e42fda675645a097fa887824`, published by automatic trusted
+  OIDC run `32842065501` after exact-main CI `32842065507`, with
   `trustpub_only=true` and public checksum
-  `225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
-  PR #24 exact head `eebce78cb0e62efce1e9d70ec20068316f5c36d5` passed Release
-  plan `32833632174` and all 20 CI jobs in `32833632116` before merge as the
-  exact source above. Immutable tag `v4.3.7` points to the same SHA. Native
-  Intel/Apple Silicon preflight `32835377627` passed. Release `32835470143`
-  passed all 13 jobs and created exact private 24-asset draft `376309349`.
-  Windows run `32835918254` and macOS run `32835918239` then failed in their
-  source resolvers because their read-only tokens lack push access and GitHub
-  omits private drafts from release listings for such callers. Every downstream
-  build/publication job skipped; the exact draft remains private. The earlier
+  `f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`.
+  Immutable tag `v4.3.8` points to the same SHA. Native Intel/Apple Silicon
+  preflight `32842865442` passed. Release `32842969776` passed all 13 jobs and
+  created exact private 24-asset draft `376357745`. macOS run `32843468883`
+  failed at uncredentialed prepare job `97787965884` on the deterministic
+  six-file-freezer versus four-file-consumer inventory mismatch. Windows run
+  `32843468892` failed in build job `97787896541` because the pinned Inno Setup
+  step's `gh release verify-asset` had no `GH_TOKEN`. Both publishers skipped;
+  the exact draft remains private at 24 assets and nothing became public. The earlier
   immutable `v4.3.0` through `v4.3.4` tags produced no draft; v4.3.5 and v4.3.6
-  own private drafts `376242296` and `376283574`. None of the eight tags may
+  own private drafts `376242296` and `376283574`; v4.3.7 owns `376309349`.
+  None of the nine tags may
   move, be deleted, or be reused.
-- Working manifest / GitHub-distribution fix-forward: `4.3.8` on
-  `codex/v4.3.8-private-draft-visibility`, carrying the
+- Working manifest / GitHub-distribution fix-forward: `4.3.9` on
+  `codex/v4.3.9-apple-custody-inventory`, carrying the
   product code merged through PR #14 as `2f997d2`. It adds
   deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
   `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
@@ -87,9 +93,12 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   managed-installer checksum-record lookup without weakening any draft or asset
   invariant. v4.3.8 isolates push-capable private-draft discovery/freezing in
   fresh no-checkout jobs while keeping every checked-out builder and candidate
-  execution job read-only. The automated PR-to-public chain and its
-  least-privilege boundaries remain intact. AMD64 Linux laptop and Raspberry Pi
-  physical acceptance remain open.
+  execution job read-only. v4.3.9 reconciles the downstream Apple consumer
+  with the freezer's six-file inventory and restores read-only `github.token`
+  only to the Windows Inno attestation step, then removes and verifies removal
+  of `GH_TOKEN` before launching the third-party installer. The automated
+  PR-to-public chain and its least-privilege boundaries remain intact. AMD64
+  Linux laptop and Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
 - Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel
@@ -123,7 +132,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
   documentation/workflow state reconciled 2026-08-25.
 
-### v4.2.2 complete-distribution baseline and v4.3.8 fix-forward
+### v4.2.2 complete-distribution baseline and v4.3.9 fix-forward
 
 - v4.3 Linux battery corroboration accepts standard `_now`/`_avg` voltage,
   current, power, charge, and energy signals, including signed discharge and
@@ -213,7 +222,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   set, exact-SHA CI/crates, disposable Windows managed/native matrices, both
   Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
   update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
-- The v4.3.8 release target remains 34 stable-name assets. Required pending
+- The v4.3.9 release target remains 34 stable-name assets. Required pending
   evidence is the fix-forward PR/local/hosted gate, automatic trusted-OIDC
   crates publication, private Windows byte/matrix proof, both Apple-native
   lifecycles/finalization, post-public smokes, public-byte audit, and homepage
@@ -287,7 +296,7 @@ do not have to infer platform semantics.
    immutable failed GitHub-distribution tags. The first five produced no draft;
    v4.3.5, v4.3.6, and v4.3.7 produced exact private 24-asset drafts. Keep
    `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.3.8`; date the release-note blocks on the final
+   synchronized at `4.3.9`; date the release-note blocks on the final
    fix-forward source commit while keeping status ledgers explicit that GitHub
    publication is pending.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
@@ -300,9 +309,9 @@ do not have to infer platform semantics.
 4. Let the exact-main push start `CI` and `crates-publish.yml`; the publisher
    must wait without a registry credential for that exact CI result before exact package bytes
    plus trusted OIDC/public provenance are accepted.
-5. Create and push only tag `v4.3.8` after exact-main CI/crates proof and native
+5. Create and push only tag `v4.3.9` after exact-main CI/crates proof and native
    Apple Bash-3.2 staging preflight. Existing immutable `v*` tags, including
-   failed `v4.3.0` through `v4.3.7`, must not move.
+   failed `v4.3.0` through `v4.3.8`, must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers
    to produce 30, and private Windows Installer Validation to attest those exact
    bytes and pass every channel/transition gate.
@@ -358,8 +367,12 @@ failed before credential use because the guard expected one LF instead of the
   `376309349`. Windows `32835918254` and macOS `32835918239` failed before
   downstream build/publication because their read-only tokens lacked push
   access and could not see that draft in the authenticated release collection.
-  The draft remains private. The current v4.3.8 candidate is on
-  `codex/v4.3.8-private-draft-visibility`.
+  The draft remains private. v4.3.8 then created exact private 24-asset draft
+  `376357745`; its macOS run `32843468883` failed on six-file versus four-file
+  inventory parity and its Windows run `32843468892` failed because the Inno
+  attestation step lacked `GH_TOKEN`. Both publishers skipped and nothing
+  became public. The current v4.3.9 candidate is on
+  `codex/v4.3.9-apple-custody-inventory`.
 
 Never publish locally merely because a credential exists. Never tag before
 exact-current-main CI and its automatic trusted-OIDC crates run settle.

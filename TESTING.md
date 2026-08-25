@@ -7,17 +7,63 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.8 — private-draft visibility/custody fix-forward (as of 2026-08-25)
+### v4.3.9 — Apple inventory and Windows attestation fix-forward (as of 2026-08-25)
 
-Release status: active, unreleased packaging-only candidate. GitHub's official
-release contract exposes draft releases only to callers with push access. The
-v4.3.7 Release publisher had that access and created the one correct draft, but
-the immediate Windows and macOS workflow-run resolvers used read-only tokens;
-their authenticated release listings returned zero matching draft records.
-v4.3.8 is scoped to repair that automated visibility and custody boundary. Its
-implementation and executable regression coverage are present on the working
-branch, but review and the complete local/hosted/native qualification remain
-open. No v4.3.8 publication or completed-fix claim is made.
+Release status: active, unreleased packaging-only candidate. v4.3.8 proved the
+private-draft visibility/custody repair, but the automatic macOS workflow then
+failed at the next uncredentialed boundary: its trusted artifact contained the
+intentional six-file set (`tr300-installer.sh`, `tr300-dist-installer.sh`, two
+signed Apple archives, and their two checksum sidecars), while the preparation
+consumer still required the obsolete four-file archive-only set. v4.3.9 is
+also scoped to restore the read-only `github.token` only to the Windows step
+whose pinned Inno Setup verification invokes `gh release verify-asset`, then
+remove and verify removal of `GH_TOKEN` before the third-party installer is
+launched; no checked-out build job gains Release mutation access. Review,
+exact-main CI/OIDC, native preflight, a new immutable tag, the complete private
+24-to-30-to-validated-to-34 chain, public-byte audit, smokes, deployment, and
+physical AMD64 Linux/Raspberry Pi evidence all remain open.
+
+Current local candidate evidence on 2026-08-25: formatting; warnings-denied
+locked Clippy; 185 unit tests, 22 integration tests, and the doc test; locked
+release build; 39-file package inventory; locked publish dry-run; RustSec audit
+(221 dependencies against 1,226 loaded advisories); cargo-dist 0.31.0 plan;
+structural actionlint; standalone ShellCheck including the extracted exact PKG
+`PREINSTALL`; PowerShell parser; managed-installer transaction fixtures under
+Git Bash, PowerShell 7, and Windows PowerShell; Apple staging compatibility;
+and the full executable release-provenance suite passed. Negative provenance
+mutations rejected Apple producer/consumer drift plus missing, job-scoped,
+workflow-scoped, duplicated, substituted, or post-verification inherited
+Windows authorization. Live v4.3.9 full/fast table, JSON, and ASCII smokes
+passed: Windows CPU temperature
+remained `null`, and the report's 52 C NVIDIA value was consistent with the
+direct 53 C reading. Independent review corrected factual ledger and token-
+scope claims, then exposed the child-process token inheritance repaired by the
+scrub/order regression. Final exact-head review and hosted/native/public gates
+remain open; these local results do not satisfy them.
+
+### v4.3.8 — Published crate; exact private draft, failed Apple input inventory
+
+Release status: exact source and crate publication completed; the GitHub draft
+exists but remains private. Tag and main resolve to exact commit
+`0b726a854666ed73e42fda675645a097fa887824`. Exact-main CI `32842065507`
+passed 20/20, trusted-OIDC run `32842065501` published unyanked v4.3.8 with
+checksum `f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`,
+and native Intel/Apple Silicon credential preflight `32842865442` passed.
+
+Tagged Release `32842969776` passed all 13 jobs and created exact private
+24-asset draft `376357745` for the same tag/target. Automatic macOS Universal
+Package run `32843468883` successfully resolved the private draft, froze the
+exact Release-run Apple/source bytes, and passed both installer-identity
+preflights. Its uncredentialed prepare job `97787965884` then failed
+deterministically because the frozen artifact contained the intended six files
+while the consumer's exact inventory listed only the four archives/sidecars.
+All package-build, sign/notary, final-publisher, and post-public smoke jobs
+skipped. Automatic Windows Installers run `32843468892` also failed
+deterministically: build job `97787896541` reached `Install the pinned official
+Inno Setup 6.7.3`, where `gh release verify-asset` had no `GH_TOKEN` after the
+build-job hardening. Windows publication skipped, the draft remained private
+at exactly 24 assets, and nothing became public. The tag and draft are
+immutable evidence; v4.3.9 fixes forward.
 
 The working permission split gives fresh no-checkout resolver/freezer jobs
 `contents: write` only because push access is required to enumerate and freeze
@@ -26,7 +72,8 @@ candidate installers, wrappers, archives, or product code use read-only GitHub
 authorization and consume immutable internal artifacts; fresh no-checkout
 publisher steps are the only steps that perform a mutation on the bound draft.
 
-Observed working-tree evidence on 2026-08-25: `cargo fmt --all -- --check`,
+Observed pre-tag v4.3.8 working-tree evidence on 2026-08-25:
+`cargo fmt --all -- --check`,
 locked workspace Clippy with warnings denied, all 207 unit/integration tests
 (185 unit plus 22 integration), locked release build, and `cargo audit` passed
 (221 dependencies checked against 1,226 loaded advisories; no vulnerabilities).
@@ -48,10 +95,11 @@ mode gain claim. Direct `nvidia-smi` reported 54 C while the candidate reported
 passed every workflow with its embedded ShellCheck integration disabled, and
 standalone ShellCheck 0.11.0 passed every tracked shell script; the combined
 Windows-host invocation wedged without a diagnostic, so the combined Linux
-hosted gate remains authoritative and open. The pre-commit 39-file package
+hosted gate was therefore the authoritative result. The pre-commit 39-file package
 inventory and locked publish dry-run passed with `--allow-dirty`; their binding
-clean-tree repeats, hosted checks, and every release/publication gate remain
-open and are not implied by these local results.
+clean-tree repeats and the hosted gates later passed as recorded above. These
+local results do not imply complete GitHub publication or physical Linux/Pi
+acceptance.
 
 ### v4.3.7 — Published crate; exact private draft, failed downstream visibility
 
@@ -71,7 +119,7 @@ assets. Windows Installers `32835918254` and macOS Universal Package
 `32835918239` then failed in their initial read-only provenance resolvers: each
 received zero matching private-draft records. Their build, credential, and
 publisher jobs skipped; Windows validation skipped, no assets were added, and
-nothing became public. The tag and draft are immutable evidence; v4.3.8 fixes
+nothing became public. The tag and draft are immutable evidence; v4.3.8 fixed
 forward.
 
 The v4.3.7 candidate had already passed the complete local gate: formatting,

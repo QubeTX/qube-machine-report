@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.7**.
-The working fix-forward manifest is **4.3.8**. PR #14 merged as
+Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.8**.
+The working fix-forward manifest is **4.3.9**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -112,9 +112,21 @@ Tagged Release `32835470143` passed all 13 jobs and created exact private
 `32835918239` then failed before downstream build/publication because their
 read-only workflow tokens lack push access and GitHub consequently omits
 private drafts from the authenticated release collection; both deterministic
-resolvers saw zero matches. The draft remains private. All eight v4.3.0 through
-v4.3.7 tags stay immutable. v4.2.2 remains the complete public GitHub-
-distribution boundary until reviewed v4.3.8 passes the normal
+resolvers saw zero matches. The draft remains private. Exact main/tag v4.3.8
+resolve to `0b726a854666ed73e42fda675645a097fa887824`; exact-main CI
+`32842065507` passed 20/20, automatic trusted-OIDC run `32842065501`
+published unyanked v4.3.8 with checksum
+`f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`,
+and native preflight `32842865442` passed. Release `32842969776` passed all 13
+jobs and created exact private 24-asset draft `376357745`. macOS run
+`32843468883` failed deterministically at uncredentialed prepare job
+`97787965884` because its trusted six-file Apple/source artifact met a stale
+four-file consumer inventory. Windows run `32843468892` failed in build job
+`97787896541` because the pinned Inno Setup step's `gh release verify-asset` had
+no `GH_TOKEN`. Both publishers skipped, the draft stayed private at exactly 24
+assets, and nothing became public. v4.3.9 fixes those two narrow contracts. All
+nine v4.3.0 through v4.3.8 tags stay immutable. v4.2.2 remains the complete
+public GitHub-distribution boundary until reviewed v4.3.9 passes the normal
 automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
@@ -663,9 +675,9 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.8 chain completes, v4.2.2 remains the complete public GitHub
-  distribution. The v4.3.0 through v4.3.7 crates/tags stay published and
-  immutable; v4.3.5, v4.3.6, and v4.3.7 each have one exact private 24-asset
+- Until the v4.3.9 chain completes, v4.2.2 remains the complete public GitHub
+  distribution. The v4.3.0 through v4.3.8 crates/tags stay published and
+  immutable; v4.3.5, v4.3.6, v4.3.7, and v4.3.8 each have one exact private 24-asset
   GitHub draft. A read-only downstream token cannot enumerate those drafts
   because GitHub requires push access for draft visibility; the automated
   chain must carry and rebind an exact release identity across that boundary

@@ -13,8 +13,8 @@
 > **Coverage reconciled through 2026-08-25.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last complete GitHub distribution;
-> v4.3.7 is the current crates.io package, but the immutable v4.3.0 through
-> v4.3.7 tags all failed to complete GitHub distribution; v4.3.8 is the packaging
+> v4.3.8 is the current crates.io package, but the immutable v4.3.0 through
+> v4.3.8 tags all failed to complete GitHub distribution; v4.3.9 is the packaging
 > fix-forward.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
@@ -23,7 +23,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (v4.2.2 complete distribution; v4.3.8 fix-forward)](#decision-ledger-status-v422-complete-distribution-v438-fix-forward)
+- [Decision ledger status (v4.2.2 complete distribution; v4.3.9 fix-forward)](#decision-ledger-status-v422-complete-distribution-v439-fix-forward)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -76,19 +76,19 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
-- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.8 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v438-distribution)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.9 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v439-distribution)
 
 ---
 
-## Decision ledger status (v4.2.2 complete distribution; v4.3.8 fix-forward)
+## Decision ledger status (v4.2.2 complete distribution; v4.3.9 fix-forward)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
 the testing ledger, technical and human changelogs, agent guides, and the public
 v4.2.2 release state and the split v4.3 state. Product bytes are published on
-crates.io through v4.3.7 via exact-main trusted OIDC, but Releases
+crates.io through v4.3.8 via exact-main trusted OIDC, but Releases
 `32795846831`, `32800944635`, `32810420213`, `32815338720`, `32821575317`,
-`32824925889`, `32831292249`, and `32835470143` each failed before complete publication. The
+`32824925889`, `32831292249`, `32835470143`, and `32842969776` each failed before complete publication. The
 first five stopped
 before draft creation on independent Windows-bootstrap, Apple system-Bash,
 raw-checksum, raw-tar-mode, and release-manifest-filter defects. v4.3.5 created
@@ -99,8 +99,13 @@ marker that default `sha256sum` does not write. v4.3.7 created exact private
 24-asset draft `376309349`, but both automatic downstream source resolvers used
 read-only tokens without push access; GitHub omitted private drafts from their
 authenticated release collections, so they deterministically saw zero matches
-and stopped before any downstream build/publication. All eight tags remain
-immutable. The v4.3.8 rows describe the required packaging fix-forward; its fresh
+and stopped before any downstream build/publication. v4.3.8 repaired that
+visibility boundary and created exact private 24-asset draft `376357745`, but
+its macOS consumer rejected the trusted freezer's six-file Apple/source
+inventory against a stale four-file contract, while its Windows build lacked
+`GH_TOKEN` for pinned Inno Setup attestation verification. Both publishers
+skipped and nothing became public. All nine tags remain immutable. The v4.3.9
+rows describe the required packaging fix-forward; its fresh
 exact-main, crate, tag, native installer, and public-byte gates remain
 independent proof.
 
@@ -109,7 +114,7 @@ independent proof.
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.7; complete GitHub distribution moves to v4.3.8; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.8; complete GitHub distribution moves to v4.3.9; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -1767,8 +1772,8 @@ their values must never enter this ADR, git, task memory, or logs.
 
 **Status:** Accepted and release-blocking. PR #15 exact head and its merge on
 exact `main` passed the implementation, workflow, provenance, and native
-fixture gates. The v4.3.0 through v4.3.7 crates/tags are immutable; the reviewed
-v4.3.8 exact SHA and tagged end-to-end chain remain required before complete
+fixture gates. The v4.3.0 through v4.3.8 crates/tags are immutable; the reviewed
+v4.3.9 exact SHA and tagged end-to-end chain remain required before complete
 GitHub publication.
 
 Cargo-dist's generic generated workflow recognizes prerelease and alternate tag
@@ -1889,10 +1894,29 @@ passed. Release `32835470143` passed all 13 jobs and created exact private
 tokens lack push access, and GitHub only exposes draft releases to callers with
 push access, so the otherwise-correct paginated resolvers deterministically
 received zero matching drafts. All downstream build/publication jobs skipped;
-the exact draft remains private. v4.3.8 fixes forward without moving that tag:
+the exact draft remains private. v4.3.8 fixed forward without moving that tag:
 private-draft discovery and rebinding must occur in a narrowly scoped trusted
 publisher boundary while downstream builders remain read-only and the complete
 PR-to-main-to-OIDC-to-tag-to-34-asset chain stays automatic.
+
+The immutable v4.3.8 tag proved that private-draft visibility repair. Exact
+main and tag resolve to `0b726a854666ed73e42fda675645a097fa887824`;
+exact-main CI `32842065507` passed 20/20, automatic trusted-OIDC run
+`32842065501` published unyanked v4.3.8 with checksum
+`f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`,
+and native preflight `32842865442` passed. Release `32842969776` passed all 13
+jobs and created exact private 24-asset draft `376357745`. Automatic macOS run
+`32843468883` bound and froze the exact source, then uncredentialed prepare job
+`97787965884` rejected the freezer's intentional six-file Apple/source artifact
+against its obsolete four-file archive-only inventory. Automatic Windows run
+`32843468892` failed in build job `97787896541` when `gh release verify-asset`
+in `Install the pinned official Inno Setup 6.7.3` had no `GH_TOKEN` after
+build-job hardening. Both publishers skipped; the draft stayed private at
+exactly 24 assets and nothing became public. v4.3.9 fixes forward without
+moving that tag: the Apple producer and consumer enforce one six-file contract,
+and read-only `github.token` is restored only where the pinned Inno attestation
+check requires it, then removed and verified absent before the third-party
+installer launch. No checked-out build job receives Release mutation access.
 
 Privileged supplemental workflows accept automatic input only from the exact
 successful same-repository run named in their contract. They resolve lightweight
@@ -3435,10 +3459,10 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.8 distribution)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.9 distribution)
 
-**Status:** Product code is published on crates.io through v4.3.7; complete
-GitHub distribution is the v4.3.8 fix-forward. Final PR #14 head `8f5919b`
+**Status:** Product code is published on crates.io through v4.3.8; complete
+GitHub distribution is the v4.3.9 fix-forward. Final PR #14 head `8f5919b`
 passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
@@ -3454,7 +3478,9 @@ context defect. v4.3.5 fixed that defect but its tag exposed the draft by-tag
 lookup gap. v4.3.6 fixed draft discovery but its tag exposed the managed-
 installer checksum-record mismatch. v4.3.7 fixed that mismatch, and its tag
 created the exact private 24-asset draft but exposed the read-only
-downstream draft-visibility boundary described above. Reviewed v4.3.8 tagged/
+downstream draft-visibility boundary described above. v4.3.8 fixed that
+boundary but exposed the Apple inventory and Windows attestation-token
+contracts described above. Reviewed v4.3.9 tagged/
 public distribution and physical AMD64 Linux/Raspberry Pi
 acceptance remain separate gates. This section records the product contract and
 rationale, not those later results.

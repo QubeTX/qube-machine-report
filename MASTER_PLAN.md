@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-08-25
-**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.7 / 4.3.8
+**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.8 / 4.3.9
 (v4.2.2 remains the last complete GitHub distribution. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.
@@ -62,13 +62,25 @@ credential use because cargo-dist's raw checksum files end in two LF bytes,
   their source resolvers: their read-only tokens lack push access, so GitHub's
   authenticated release collection omitted the private draft and both saw
   zero matches. Every downstream build/publication job skipped and the draft
-  remains private. v4.3.8 is the supported fix-forward, and no prior tag may
-  move.)
+  remains private. Exact main/tag v4.3.8 resolve to
+  `0b726a854666ed73e42fda675645a097fa887824`; exact-main CI `32842065507`
+  passed 20/20, automatic trusted-OIDC run `32842065501` published unyanked
+  v4.3.8 with checksum
+  `f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`,
+  and native preflight `32842865442` passed. Release `32842969776` passed all
+  13 jobs and created exact private 24-asset draft `376357745`. macOS run
+  `32843468883` then failed in uncredentialed prepare job `97787965884` because
+  its trusted six-file Apple/source inventory met a stale four-file consumer
+  contract. Windows run `32843468892` failed in build job `97787896541` when
+  the pinned Inno Setup step's `gh release verify-asset` had no `GH_TOKEN`.
+  Both publishers skipped, the draft stayed private at exactly 24 assets, and
+  nothing became public. v4.3.9 is the narrow supported fix-forward for those
+  two contracts, and no prior tag may move.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.8 distribution fix-forward):** Linux battery-selection hardening accepts
+**In flight (v4.3.9 distribution fix-forward):** Linux battery-selection hardening accepts
 well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
 contradictory device/absence evidence; the historical Pi "30%" source remains
 unproven. Linux thermals choose the hottest valid sensor deterministically,
@@ -103,13 +115,17 @@ coverage on both Mac runners, then its immutable release exposed cargo-dist
   to export the managed installer digest after exact draft validation. v4.3.8
   isolates push-capable private-draft discovery/freezing in fresh no-checkout
   jobs while checked-out builders and candidate execution remain read-only,
-  without adding a manual approval or weakening the automated chain.
+  without adding a manual approval or weakening the automated chain. v4.3.9
+  makes the downstream Apple consumer accept that freezer's intentional
+  six-file inventory and restores read-only `github.token` only to the Windows
+  Inno Setup attestation step, then removes and verifies removal of `GH_TOKEN`
+  before the installer launch; it does not change product behavior.
 Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Default branch:** `main` (atomically renamed from `master` on 2026-07-17)
 **Repository:** `QubeTX/qube-machine-report`
 
 The active v4.3 GitHub-distribution campaign remains incomplete. Its product
-  code is published on crates.io through v4.3.7; the v4.3.8 packaging fix-forward carries
+  code is published on crates.io through v4.3.8; the v4.3.9 packaging fix-forward carries
 battery, thermal, and Windows full-mode improvements. A `main` push starts CI
 and the crate-publication workflow together; the registry-uncredentialed
 validator waits for that exact CI run to pass before the fresh protected OIDC
@@ -119,7 +135,7 @@ acceptance proof → macOS-only 34-asset finalization chain. The Apple secrets a
 in `apple-signing`; native ARM/Intel preflight passed, repository copies and the
 temporary migration token are gone, and PR #16 removed the one-time workflow.
 The crates.io publisher tuple, automatic exact-main publication, and
-  `trustpub_only` probe passed for all eight published v4.3 crates. v4.3.8 must repeat
+  `trustpub_only` probe passed for all nine published v4.3 crates. v4.3.9 must repeat
 that automatic proof and its native Bash-3.2 preflight before its new immutable
 tag is eligible for the native/public chain.
 AMD64 Linux laptop and Raspberry Pi physical qualification remain separate open
@@ -655,12 +671,12 @@ incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
 
-The v4.3 release campaign is **not complete**. Do not tag v4.3.8, update the
-homepage, or close the release milestone until the private-draft-visibility fix-forward
+The v4.3 release campaign is **not complete**. Do not tag v4.3.9, update the
+homepage, or close the release milestone until the inventory/attestation fix-forward
 PR,
 exact-main CI, automatic OIDC crates publication, and native Apple staging
-preflight succeed. Then push only v4.3.8 and require the private 30-asset
+preflight succeed. Then push only v4.3.9 and require the private 30-asset
 Windows proof, macOS-only exact 34-asset publication, and every post-public
 smoke/public-byte audit to pass. Never move or reuse failed tags v4.3.0 through
-v4.3.7; the first five created no draft, while the exact v4.3.5, v4.3.6, and
-v4.3.7 24-asset drafts must remain private.
+v4.3.8; the first five created no draft, while the exact v4.3.5, v4.3.6,
+v4.3.7, and v4.3.8 24-asset drafts must remain private.
