@@ -517,7 +517,263 @@ def native_apple_build_blocks(release: str) -> list[tuple[str, str]]:
     return blocks
 
 
+def mask_shell_noncode(source: str) -> list[tuple[int, str]]:
+    """Mask quoted strings and here-doc bodies while preserving line positions."""
+    masked_lines: list[tuple[int, str]] = []
+    quote: str | None = None
+    heredoc: str | None = None
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if heredoc is not None:
+            if line.strip() == heredoc:
+                heredoc = None
+            masked_lines.append((line_number, ""))
+            continue
+
+        quote_at_start = quote
+        masked: list[str] = []
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if quote is not None:
+                masked.append(" ")
+                if quote == '"' and char == "\\" and index + 1 < len(line):
+                    index += 1
+                    masked.append(" ")
+                elif char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+                masked.append(" ")
+            elif char == "\\" and index + 1 < len(line):
+                masked.append(char)
+                index += 1
+                masked.append(" ")
+            elif char == "#" and (
+                index == 0 or line[index - 1].isspace() or line[index - 1] in ";|&(){}"
+            ):
+                masked.extend(" " * (len(line) - index))
+                break
+            else:
+                masked.append(char)
+            index += 1
+        masked_lines.append((line_number, "".join(masked)))
+
+        if quote_at_start is None:
+            operator = re.search(r"(?<!<)<<(?!<)-?[ \t]*", masked_lines[-1][1])
+            if operator is not None:
+                marker = re.match(
+                    r"<<-?[ \t]*(['\"])([A-Za-z_][A-Za-z0-9_]*)\1"
+                    r"(?=$|[ \t;|&])",
+                    line[operator.start() :],
+                )
+                if marker is None:
+                    raise AssertionError(
+                        f"line {line_number}: native Apple run blocks require a "
+                        "quoted simple here-doc delimiter; ambiguous << is forbidden"
+                    )
+                heredoc = marker.group(2)
+    return masked_lines
+
+
+def bash_test_closing_suffix(
+    lines: list[tuple[int, str]], start: int, label: str
+) -> str:
+    for _, line in lines[start:]:
+        closing = re.search(r"(?<!\S)\]\](?=$|[ \t;&|])", line)
+        if closing is not None:
+            return line[closing.end() :].strip()
+    raise AssertionError(
+        f"{label}:{lines[start][0]}: unterminated Bash compound command"
+    )
+
+
+def bash_subshell_closing_suffix(
+    lines: list[tuple[int, str]], start: int, label: str
+) -> tuple[str, int, int]:
+    depth = 0
+    for offset, (_, line) in enumerate(lines[start:], start=start):
+        begin = line.find("(") if offset == start else 0
+        for position in range(begin, len(line)):
+            if line[position] == "(":
+                depth += 1
+            elif line[position] == ")":
+                depth -= 1
+                if depth == 0:
+                    return line[position + 1 :].strip(), offset, position
+                if depth < 0:
+                    break
+    raise AssertionError(
+        f"{label}:{lines[start][0]}: unterminated Bash subshell command"
+    )
+
+
+def reject_unhandled_bash3_compound_guards(source: str, label: str) -> None:
+    """Enforce canonical fail-closed compound commands for macOS Bash 3.2."""
+    lines = mask_shell_noncode(source)
+    for index, (line_number, line) in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+
+        control = re.match(
+            r"^(if|elif|while|until)[ \t]+(?:![ \t]+)?(\[\[|\(\()", stripped
+        )
+        if control is not None:
+            if control.group(2) == "((":
+                raise AssertionError(
+                    f"{label}:{line_number}: use [[ ]] for native Apple arithmetic "
+                    "control conditions so the Bash 3.2 contract stays unambiguous"
+                )
+            suffix = bash_test_closing_suffix(lines, index, label)
+            expected = "; then" if control.group(1) in ("if", "elif") else "; do"
+            if suffix != expected:
+                raise AssertionError(
+                    f"{label}:{line_number}: native Apple compound control must end "
+                    f"canonically with `{expected}`"
+                )
+            continue
+
+        if stripped.startswith("[["):
+            suffix = bash_test_closing_suffix(lines, index, label)
+            if suffix != "|| exit 1":
+                raise AssertionError(
+                    f"{label}:{line_number}: standalone Bash compound guard must "
+                    "end with exact `|| exit 1` for macOS Bash 3.2"
+                )
+            continue
+
+        if stripped.startswith("(("):
+            raise AssertionError(
+                f"{label}:{line_number}: standalone Bash arithmetic conditions must "
+                "use explicit if/while control flow for macOS Bash 3.2"
+            )
+
+        if stripped.startswith("("):
+            suffix, closing_index, closing_position = bash_subshell_closing_suffix(
+                lines, index, label
+            )
+            if suffix != "|| exit 1":
+                raise AssertionError(
+                    f"{label}:{line_number}: standalone Bash subshell must end "
+                    "with exact `|| exit 1` for macOS Bash 3.2"
+                )
+            if stripped == "(":
+                for interior_index in range(index + 1, closing_index + 1):
+                    interior = lines[interior_index][1]
+                    if interior_index == closing_index:
+                        interior = interior[:closing_position]
+                    interior = interior.strip()
+                    if not interior or interior.endswith("\\"):
+                        continue
+                    if not interior.endswith("|| exit 1"):
+                        raise AssertionError(
+                            f"{label}:{lines[interior_index][0]}: every complete "
+                            "command in a multiline Bash 3.2 subshell must end "
+                            "with exact `|| exit 1`"
+                        )
+            else:
+                opening_position = line.find("(")
+                if closing_index == index:
+                    fragments = [line[opening_position + 1 : closing_position]]
+                else:
+                    fragments = [line[opening_position + 1 :]]
+                    fragments.extend(
+                        candidate
+                        for _, candidate in lines[index + 1 : closing_index]
+                    )
+                    fragments.append(lines[closing_index][1][:closing_position])
+                interior = "\n".join(fragments)
+                if re.search(r";|\|\||(?<!\|)\|(?!\|)|(?<!&)&(?!&)", interior):
+                    raise AssertionError(
+                        f"{label}:{line_number}: inline Bash 3.2 subshells must "
+                        "contain one command or a status-preserving && list"
+                    )
+            continue
+
+        prefixed_compound = re.search(
+            r"(?:[;|&!]|\{|\)|\bthen|\bdo|\belse)[ \t]*"
+            r"(?:\[\[|\(\(|\((?![<(]))",
+            stripped,
+        )
+        timed_compound = re.search(
+            r"(?:^|[;|&])[ \t]*(?:![ \t]+)*time(?:[ \t]+-p)?"
+            r"(?:[ \t]+!)*[ \t]+"
+            r"(?:\[\[|\(\(|\((?![<(]))",
+            stripped,
+        )
+        if prefixed_compound or timed_compound:
+            raise AssertionError(
+                f"{label}:{line_number}: Bash compound commands must use one "
+                "canonical control or fail-closed command per line"
+            )
+
+
+def check_bash3_compound_guard_scanner() -> None:
+    reject_unhandled_bash3_compound_guards(
+        "if [[ x == x ]]; then\n  :\nfi\n"
+        "while [[ x == x ]]; do\n  break\ndone\n"
+        "value=$((1 + 1))\n"
+        "grep -E '^[[:space:]]+$' input\n"
+        "key=${line#*\\\"}\n"
+        "jq '.value and\n  (.nested | type == \"string\")' input\n"
+        "cat <<'SH'\n[[ ignored ]]\n(ignored)\nSH\n"
+        "(false) || exit 1\n(\n  false || exit 1\n) || exit 1",
+        "scanner valid control-flow fixture",
+    )
+    reject_unhandled_bash3_compound_guards(
+        '[[ "$hash" =~ ^[[:xdigit:]]{40}$ &&\n'
+        '   "$size" == 1 ]] || exit 1',
+        "scanner valid fixture",
+    )
+    invalid = (
+        "[[ x == y ]]",
+        "[[ x == y ]] # bypass\n[[ x == x ]] || exit 1",
+        "[[ x == y ]]; true\n[[ x == x ]] || exit 1",
+        "[[ x ==\n   y ]] # bypass\n[[ x == x ]] || exit 1",
+        "(( 1 == 0 )) || exit 1",
+        ":; [[ x == y ]] || exit 1",
+        "! [[ x == y ]] || exit 1",
+        "{ [[ x == y ]] || exit 1; }",
+        "true && [[ x == y ]] || exit 1",
+        "[[ x == y ]] || exit 256",
+        "if [[ x == x ]]; then :; fi; [[ x == y ]]",
+        "if [[ x == x ]]; then [[ x == y ]]; fi",
+        "while [[ x == x ]]; do [[ x == y ]]; done",
+        "else [[ x == y ]] || exit 1",
+        "case x in x) [[ x == y ]] || exit 1 ;; esac",
+        "(false)",
+        "(\n  false\n)",
+        "true; (false) || exit 1",
+        "(false; true) || exit 1",
+        "(\n  false\n  true\n) || exit 1",
+        "true | [[ x == y ]] || exit 1",
+        "true & [[ x == y ]] || exit 1",
+        "time [[ x == y ]]; true",
+        "time -p (false); true",
+        "! time [[ x == y ]]; true",
+        "! ! time -p (false); true",
+        "printf '%s' '<<EOF'\n[[ x == y ]]",
+        "cat <<EOF-END\nignored\nEOF-END\n[[ x == y ]]",
+        "cat <<EOF.END\nignored\nEOF.END\n[[ x == y ]]",
+        "x=$((1 << BITS))\n[[ x == y ]]",
+        "true;# <<'EOF'\n[[ x == y ]]",
+        "(\n  (\n    false\n  ) || exit 1\n)\ntrue",
+        "(\n  value=$(true) || exit 1\n  false\n)",
+    )
+    for case_number, source in enumerate(invalid, start=1):
+        try:
+            reject_unhandled_bash3_compound_guards(
+                source, f"scanner invalid fixture {case_number}"
+            )
+        except AssertionError:
+            continue
+        raise AssertionError(
+            f"Bash 3.2 compound-guard scanner accepted invalid fixture {case_number}"
+        )
+
+
 def check_native_apple_bash_contract(release: str, macos: str) -> None:
+    check_bash3_compound_guard_scanner()
     for workflow_name, workflow in (
         (RELEASE_WORKFLOW.name, release),
         (MACOS_WORKFLOW.name, macos),
@@ -557,8 +813,39 @@ def check_native_apple_bash_contract(release: str, macos: str) -> None:
         "stat.S_ISREG(metadata.st_mode)",
         "Apple input regular-file validation",
     )
-    native_sources = native_apple_job_bodies(release, macos)
-    native_sources.extend(native_apple_build_blocks(release))
+    require_exact_line_sequence(
+        apple_staging,
+        r"""
+        if ! [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo "unsupported Apple signing tag: $RELEASE_TAG" >&2
+          exit 64
+        fi
+        """,
+        "Apple signer explicit stable-tag rejection",
+    )
+    require_exact_line_sequence(
+        apple_staging,
+        """
+        if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
+                "$sidecar_size" == "$expected_size" &&
+                "$actual_sidecar" == "$expected_sidecar" ]]; then
+          echo "unsigned Apple checksum sidecar is malformed or does not match" >&2
+          exit 1
+        fi
+        """,
+        "Apple signer explicit sidecar rejection",
+    )
+    native_jobs = native_apple_job_bodies(release, macos)
+    native_build_blocks = native_apple_build_blocks(release)
+    for label, job in native_jobs:
+        for block_number, block in enumerate(extract_run_blocks(job), start=1):
+            reject_unhandled_bash3_compound_guards(
+                block, f"{label}:run-{block_number}"
+            )
+    for label, block in native_build_blocks:
+        reject_unhandled_bash3_compound_guards(block, label)
+
+    native_sources = native_jobs + native_build_blocks
     for label, job in native_sources:
         explicit_shells = re.findall(r"(?m)^\s+shell:\s*(.+?)\s*$", job)
         unsupported_shells = [shell for shell in explicit_shells if shell != "bash"]
@@ -645,7 +932,7 @@ def bash_major_minor(bash: str) -> str:
 
 
 def write_apple_staging_fixture(
-    case_dir: Path, target: str, *, mutation: str | None
+    case_dir: Path, target: str, *, release_tag: str, mutation: str | None
 ) -> None:
     unsigned = case_dir / "unsigned"
     unsigned.mkdir()
@@ -692,7 +979,7 @@ def write_apple_staging_fixture(
         json.dumps(
             {
                 "dist_version": "0.31.0",
-                "announcement_tag": "v99.99.99",
+                "announcement_tag": release_tag,
                 "upload_files": [archive_name, sidecar_name],
                 "artifacts": {archive_name: {"checksums": {"sha256": digest}}},
             }
@@ -729,18 +1016,21 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
     block = extract_unique_named_run(
         release, APPLE_STAGING_STEP_NAME, RELEASE_WORKFLOW.name
     )
-    for target, mutation, expected_success in (
-        ("aarch64-apple-darwin", None, True),
-        ("x86_64-apple-darwin", None, True),
-        ("aarch64-apple-darwin", "extra", False),
-        ("aarch64-apple-darwin", "symlink", False),
-        ("aarch64-apple-darwin", "sidecar", False),
-        ("aarch64-apple-darwin", "archive-symlink", False),
-        ("aarch64-apple-darwin", "archive-hardlink", False),
+    for target, mutation, release_tag, expected_success in (
+        ("aarch64-apple-darwin", None, "v99.99.99", True),
+        ("x86_64-apple-darwin", None, "v99.99.99", True),
+        ("aarch64-apple-darwin", "extra", "v99.99.99", False),
+        ("aarch64-apple-darwin", "symlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", "sidecar", "v99.99.99", False),
+        ("aarch64-apple-darwin", "archive-symlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", "archive-hardlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", None, "v99.99.99-rc.1", False),
     ):
         with tempfile.TemporaryDirectory(prefix="tr300-apple-staging-") as case_raw:
             case_dir = Path(case_raw)
-            write_apple_staging_fixture(case_dir, target, mutation=mutation)
+            write_apple_staging_fixture(
+                case_dir, target, release_tag=release_tag, mutation=mutation
+            )
             staging = case_dir / "staging"
             environment = os.environ.copy()
             fixture_block = block
@@ -783,7 +1073,7 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
             environment.update(
                 {
                     "APPLE_TARGET": target,
-                    "RELEASE_TAG": "v99.99.99",
+                    "RELEASE_TAG": release_tag,
                     "STAGING_DIRECTORY": str(staging),
                 }
             )
@@ -802,6 +1092,7 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
             if succeeded != expected_success:
                 raise AssertionError(
                     f"Apple staging compatibility target={target} mutation={mutation} "
+                    f"release_tag={release_tag} "
                     f"returned {result.returncode}\nstdout:\n{result.stdout}\n"
                     f"stderr:\n{result.stderr}"
                 )

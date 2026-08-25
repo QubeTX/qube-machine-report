@@ -244,19 +244,20 @@ jobs:
             https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh \
             -o "$installer"
           actual=$(shasum -a 256 "$installer" | awk '{print $1}')
-          [[ "$actual" == e79d87e418b9d2cbe992d014985457c28a5a7c553add3da4ed1047e161c928f4 ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ "$actual" == e79d87e418b9d2cbe992d014985457c28a5a7c553add3da4ed1047e161c928f4 ]] || exit 1
           checksum_bin="$RUNNER_TEMP/cargo-dist-checksum-bin"
           mkdir "$checksum_bin"
           if [[ "$RUNNER_OS" == macOS ]]; then
             checksum_program=/usr/bin/shasum
-            [[ -x "$checksum_program" ]]
+            [[ -x "$checksum_program" ]] || exit 1
             cat > "$checksum_bin/sha256sum" <<'SH'
           #!/bin/sh
           exec /usr/bin/shasum -a 256 "$@"
           SH
           else
             checksum_program=/usr/bin/sha256sum
-            [[ -x "$checksum_program" ]]
+            [[ -x "$checksum_program" ]] || exit 1
             cat > "$checksum_bin/sha256sum" <<'SH'
           #!/bin/sh
           exec /usr/bin/sha256sum "$@"
@@ -264,11 +265,11 @@ jobs:
           fi
           chmod 500 "$checksum_bin/sha256sum"
           checksum_path=$(PATH="$checksum_bin:$PATH" command -v sha256sum)
-          [[ "$checksum_path" == "$checksum_bin/sha256sum" && -f "$checksum_path" && ! -L "$checksum_path" && -x "$checksum_path" ]]
+          [[ "$checksum_path" == "$checksum_bin/sha256sum" && -f "$checksum_path" && ! -L "$checksum_path" && -x "$checksum_path" ]] || exit 1
           PATH="$checksum_bin:$PATH" sh "$installer"
           dist_path=$(command -v dist)
-          [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]]
-          [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]]
+          [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]] || exit 1
+          [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]] || exit 1
       - name: Install pinned cargo-dist on Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -354,7 +355,10 @@ jobs:
             aarch64-apple-darwin|x86_64-apple-darwin) ;;
             *) exit 64 ;;
           esac
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          if ! [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "unsupported Apple signing tag: $RELEASE_TAG" >&2
+            exit 64
+          fi
           archive="tr300-$APPLE_TARGET.tar.xz"
           sidecar="$archive.sha256"
           manifest="$APPLE_TARGET-dist-manifest.json"
@@ -381,9 +385,12 @@ jobs:
           sidecar_size=$(wc -c < "unsigned/$sidecar" | tr -d '[:space:]')
           expected_size=$((${#expected_sidecar} + 1))
           IFS= read -r actual_sidecar < "unsigned/$sidecar"
-          [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
-             "$sidecar_size" == "$expected_size" &&
-             "$actual_sidecar" == "$expected_sidecar" ]]
+          if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
+                  "$sidecar_size" == "$expected_size" &&
+                  "$actual_sidecar" == "$expected_sidecar" ]]; then
+            echo "unsigned Apple checksum sidecar is malformed or does not match" >&2
+            exit 1
+          fi
           jq -e --arg tag "$RELEASE_TAG" --arg archive "$archive" --arg sidecar "$sidecar" --arg hash "$archive_sha" '
             .dist_version == "0.31.0" and
             .announcement_tag == $tag and
@@ -475,12 +482,16 @@ jobs:
             APPLE_SIGNING_IDENTITY APPLE_TEAM_ID
           )
           for name in "${required_vars[@]}"; do
-            [[ -n ${!name:-} ]] || { echo "required Apple credential is unavailable: $name" >&2; exit 78; }
+            if [[ -z ${!name:-} ]]; then
+              echo "required Apple credential is unavailable: $name" >&2
+              exit 78
+            fi
           done
           archive_name="tr300-$APPLE_TARGET.tar.xz"
           archive_root="tr300-$APPLE_TARGET"
           binary="$STAGING_DIRECTORY/$archive_root/tr300"
-          [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || exit 1
 
           work_dir=$(mktemp -d "$RUNNER_TEMP/tr300-notary-$APPLE_TARGET.XXXXXX")
           credential_dir="$work_dir/credentials"
@@ -491,11 +502,15 @@ jobs:
           while IFS= read -r line; do
             keychain_path=${line#*\"}
             keychain_path=${keychain_path%\"*}
-            [[ -z $keychain_path ]] || original_user_keychains+=("$keychain_path")
+            if [[ -n $keychain_path ]]; then
+              original_user_keychains+=("$keychain_path")
+            fi
           done < <(security list-keychains -d user)
           keychain_search_modified=false
           restore_keychain_search() {
-            [[ $keychain_search_modified == true ]] || return 0
+            if [[ $keychain_search_modified != true ]]; then
+              return 0
+            fi
             security list-keychains -d user -s "${original_user_keychains[@]}"
             keychain_search_modified=false
           }
@@ -522,12 +537,12 @@ jobs:
           identity_lines=$(security find-identity -v -p codesigning "$keychain" \
             | grep -E '^[[:space:]]*[0-9]+\) [[:xdigit:]]{40} "[^"]+"$' || true)
           identity_count=$(printf '%s\n' "$identity_lines" | grep -c . || true)
-          [[ $identity_count -eq 1 ]]
+          [[ $identity_count -eq 1 ]] || exit 1
           signing_fingerprint=$(printf '%s\n' "$identity_lines" | awk '{print $2}')
-          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]]
+          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]] || exit 1
           imported_identity=$(printf '%s\n' "$identity_lines" | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
           [[ "$APPLE_SIGNING_IDENTITY" == "$signing_fingerprint" ||
-             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]]
+             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]] || exit 1
 
           security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
           keychain_search_modified=true
@@ -543,7 +558,7 @@ jobs:
           codesign -d --extract-certificates="$certificate_prefix" "$binary" >/dev/null 2>&1
           embedded_fingerprint=$(openssl x509 -inform DER -in "${certificate_prefix}0" \
             -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
-          [[ "$embedded_fingerprint" == "$signing_fingerprint" ]]
+          [[ "$embedded_fingerprint" == "$signing_fingerprint" ]] || exit 1
           grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$signature_details"
           grep -Eq '^Timestamp=.+' <<< "$signature_details"
 
@@ -556,9 +571,11 @@ jobs:
           submission_id=$(jq -r '.id // empty' "$notary_result")
           notary_status=$(jq -r '.status // empty' "$notary_result")
           if [[ "$notary_status" != Accepted ]]; then
-            [[ -z $submission_id ]] || xcrun notarytool log "$submission_id" \
-              --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" \
-              --issuer "$APPLE_API_ISSUER_ID" || true
+            if [[ -n $submission_id ]]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID" || true
+            fi
             exit 1
           fi
 
@@ -573,7 +590,7 @@ jobs:
             else .artifacts[$archive].checksums.sha256 = $sha end
           ' "$manifest" > "$work_dir/dist-manifest.json"
           mv "$work_dir/dist-manifest.json" "$manifest"
-          (cd unsigned && shasum -a 256 -c "$archive_name.sha256")
+          (cd unsigned && shasum -a 256 -c "$archive_name.sha256") || exit 1
 
       - name: Upload the canonical signed cargo-dist artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

@@ -767,12 +767,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          [[ "$RELEASE_VERSION" == "${RELEASE_TAG#v}" ]]
-          [[ "$TRUSTED_INPUT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$(git -C verified-source rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]]
-          [[ -z "$(git -C verified-source status --porcelain=v1 --untracked-files=no)" ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          [[ "$RELEASE_VERSION" == "${RELEASE_TAG#v}" ]] || exit 1
+          [[ "$TRUSTED_INPUT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$(git -C verified-source rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]] || exit 1
+          [[ -z "$(git -C verified-source status --porcelain=v1 --untracked-files=no)" ]] || exit 1
 
           expected=(
             tr300-aarch64-apple-darwin.tar.xz
@@ -807,7 +808,7 @@ jobs:
             IFS= read -r actual_sidecar < "upstream/$archive.sha256"
             [[ "$payload_hash" =~ ^[0-9a-f]{64}$ &&
                "$sidecar_size" == "$expected_size" &&
-               "$actual_sidecar" == "$expected_sidecar" ]]
+               "$actual_sidecar" == "$expected_sidecar" ]] || exit 1
           done
 
           work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-installer-prep.XXXXXXXX")
@@ -908,12 +909,12 @@ jobs:
             > "$OUTPUT_DIRECTORY/PROVENANCE"
           chmod 0644 "$OUTPUT_DIRECTORY/PROVENANCE"
           (
-            cd "$OUTPUT_DIRECTORY"
+            cd "$OUTPUT_DIRECTORY" || exit 1
             shasum -a 256 \
               tr300-universal preinstall PROVENANCE \
-              > SHA256SUMS
-            shasum -a 256 -c SHA256SUMS
-          )
+              > SHA256SUMS || exit 1
+            shasum -a 256 -c SHA256SUMS || exit 1
+          ) || exit 1
           python3 - "$OUTPUT_DIRECTORY" \
             tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'
           import os
@@ -994,10 +995,10 @@ jobs:
             APPLE_TEAM_ID
           )
           for name in "${required_vars[@]}"; do
-            [[ -n ${!name:-} ]] || {
+            if [[ -z ${!name:-} ]]; then
               echo "required Apple Installer credential is unavailable: $name" >&2
               exit 78
-            }
+            fi
           done
 
           work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-installer-preflight.XXXXXXXX")
@@ -1010,7 +1011,9 @@ jobs:
           while IFS= read -r line; do
             keychain_path=${line#*\"}
             keychain_path=${keychain_path%\"*}
-            [[ -z $keychain_path ]] || original_user_keychains+=("$keychain_path")
+            if [[ -n $keychain_path ]]; then
+              original_user_keychains+=("$keychain_path")
+            fi
           done < <(security list-keychains -d user)
           cleanup() {
             security list-keychains -d user -s "${original_user_keychains[@]}" \
@@ -1042,12 +1045,13 @@ jobs:
           identity_lines=$(security find-identity -v -p codesigning "$keychain" \
             | grep -E '^[[:space:]]*[0-9]+\) [[:xdigit:]]{40} "[^"]+"$' || true)
           identity_count=$(printf '%s\n' "$identity_lines" | grep -c . || true)
-          [[ $identity_count -eq 1 ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ $identity_count -eq 1 ]] || exit 1
           signing_fingerprint=$(printf '%s\n' "$identity_lines" | awk '{print $2}')
           imported_identity=$(printf '%s\n' "$identity_lines" | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
-          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]]
+          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]] || exit 1
           [[ "$APPLE_SIGNING_IDENTITY" == "$signing_fingerprint" ||
-             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]]
+             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]] || exit 1
           application_probe="$work_directory/application-credential-preflight"
           cp /usr/bin/true "$application_probe"
           codesign --force --identifier com.qubetx.tr300.application-credential-preflight \
@@ -1126,17 +1130,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$PREPARED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$PREPARED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          [[ "$RELEASE_VERSION" == "${RELEASE_TAG#v}" ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$PREPARED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$PREPARED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          [[ "$RELEASE_VERSION" == "${RELEASE_TAG#v}" ]] || exit 1
 
           work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-prepared-custody.XXXXXXXX")
           trap 'rm -rf "$work_directory"' EXIT
           repository_id=$(gh api "repos/$REPOSITORY" --jq .id)
-          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]] || exit 1
           gh api "repos/$REPOSITORY/actions/artifacts/$PREPARED_ARTIFACT_ID" \
             > "$work_directory/artifact-before.json"
           validate_artifact() {
@@ -1162,7 +1167,7 @@ jobs:
           gh api "repos/$REPOSITORY/actions/artifacts/$PREPARED_ARTIFACT_ID/zip" \
             > "$zip_path"
           zip_hash=$(shasum -a 256 "$zip_path" | awk '{print $1}')
-          [[ "$zip_hash" == "$PREPARED_ARTIFACT_DIGEST" ]]
+          [[ "$zip_hash" == "$PREPARED_ARTIFACT_DIGEST" ]] || exit 1
           mkdir -m 700 "$PREPARED_DIRECTORY"
           expected=(
             tr300-universal
@@ -1240,19 +1245,19 @@ jobs:
           PY
           expected_provenance=$(printf 'source_sha=%s\nrelease_tag=%s\nversion=%s' \
             "$EXPECTED_SOURCE_SHA" "$RELEASE_TAG" "$RELEASE_VERSION")
-          [[ "$(cat "$PREPARED_DIRECTORY/PROVENANCE")" == "$expected_provenance" ]]
+          [[ "$(cat "$PREPARED_DIRECTORY/PROVENANCE")" == "$expected_provenance" ]] || exit 1
           (
-            cd "$PREPARED_DIRECTORY"
-            [[ $(wc -l < SHA256SUMS | tr -d '[:space:]') == 3 ]]
-            shasum -a 256 -c SHA256SUMS
-          )
+            cd "$PREPARED_DIRECTORY" || exit 1
+            [[ $(wc -l < SHA256SUMS | tr -d '[:space:]') == 3 ]] || exit 1
+            shasum -a 256 -c SHA256SUMS || exit 1
+          ) || exit 1
           awk '{print $2}' "$PREPARED_DIRECTORY/SHA256SUMS" | sort | cmp -s - <(
             printf '%s\n' PROVENANCE preinstall tr300-universal
           )
           awk 'length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || NF != 2 { exit 1 }' \
             "$PREPARED_DIRECTORY/SHA256SUMS"
-          [[ $(head -n 1 "$PREPARED_DIRECTORY/preinstall") == '#!/bin/sh' ]]
-          [[ $(wc -c < "$PREPARED_DIRECTORY/preinstall") -le 32768 ]]
+          [[ $(head -n 1 "$PREPARED_DIRECTORY/preinstall") == '#!/bin/sh' ]] || exit 1
+          [[ $(wc -c < "$PREPARED_DIRECTORY/preinstall") -le 32768 ]] || exit 1
           lipo "$PREPARED_DIRECTORY/tr300-universal" -verify_arch arm64 x86_64
 
       - name: Build direct PKG and legacy DMG bridge
@@ -1274,7 +1279,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
           required_vars=(
             APPLE_CERTIFICATE_P12_BASE64
             APPLE_CERTIFICATE_PASSWORD
@@ -1288,14 +1294,14 @@ jobs:
             APPLE_TEAM_ID
           )
           for name in "${required_vars[@]}"; do
-            [[ -n ${!name:-} ]] || {
+            if [[ -z ${!name:-} ]]; then
               echo "required Apple release credential is unavailable: $name" >&2
               exit 78
-            }
+            fi
           done
           for name in tr300-universal preinstall; do
             path="$PREPARED_DIRECTORY/$name"
-            [[ -f "$path" && ! -L "$path" && -s "$path" ]]
+            [[ -f "$path" && ! -L "$path" && -s "$path" ]] || exit 1
           done
 
           work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-macos-installer.XXXXXXXX")
@@ -1308,7 +1314,9 @@ jobs:
           while IFS= read -r line; do
             keychain_path=${line#*\"}
             keychain_path=${keychain_path%\"*}
-            [[ -z $keychain_path ]] || original_user_keychains+=("$keychain_path")
+            if [[ -n $keychain_path ]]; then
+              original_user_keychains+=("$keychain_path")
+            fi
           done < <(security list-keychains -d user)
           cleanup() {
             security list-keychains -d user -s "${original_user_keychains[@]}" \
@@ -1339,12 +1347,12 @@ jobs:
           identity_lines=$(security find-identity -v -p codesigning "$keychain" \
             | grep -E '^[[:space:]]*[0-9]+\) [[:xdigit:]]{40} "[^"]+"$' || true)
           identity_count=$(printf '%s\n' "$identity_lines" | grep -c . || true)
-          [[ $identity_count -eq 1 ]]
+          [[ $identity_count -eq 1 ]] || exit 1
           signing_fingerprint=$(printf '%s\n' "$identity_lines" | awk '{print $2}')
-          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]]
+          [[ "$signing_fingerprint" =~ ^[[:xdigit:]]{40}$ ]] || exit 1
           imported_identity=$(printf '%s\n' "$identity_lines" | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
           [[ "$APPLE_SIGNING_IDENTITY" == "$signing_fingerprint" ||
-             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]]
+             "$APPLE_SIGNING_IDENTITY" == "$imported_identity" ]] || exit 1
           security find-certificate -c "$APPLE_INSTALLER_SIGNING_IDENTITY" \
             "$keychain" >/dev/null
 
@@ -1369,7 +1377,7 @@ jobs:
             codesign -d --extract-certificates="$certificate_prefix" "$path" >/dev/null 2>&1
             embedded_fingerprint=$(openssl x509 -inform DER -in "${certificate_prefix}0" \
               -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
-            [[ "$embedded_fingerprint" == "$signing_fingerprint" ]]
+            [[ "$embedded_fingerprint" == "$signing_fingerprint" ]] || exit 1
           }
           verify_code_signature "$universal" com.qubetx.tr300
 
@@ -1383,9 +1391,11 @@ jobs:
             status=$(jq -r '.status // empty' "$result")
             submission=$(jq -r '.id // empty' "$result")
             if [[ "$status" != Accepted ]]; then
-              [[ -z $submission ]] || xcrun notarytool log "$submission" \
-                --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
-                --issuer "$APPLE_API_ISSUER_ID" || true
+              if [[ -n $submission ]]; then
+                xcrun notarytool log "$submission" \
+                  --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
+                  --issuer "$APPLE_API_ISSUER_ID" || true
+              fi
               echo "Apple notarization failed for $(basename "$artifact"): ${status:-unknown}" >&2
               exit 1
             fi
@@ -1441,7 +1451,7 @@ jobs:
           printf '%s *%s\n' "$package_hash" "$(basename "$direct_package")" \
             > "$direct_package.sha256"
           (cd "$OUTPUT_DIRECTORY" && \
-            shasum -a 256 -c "$(basename "$direct_package").sha256")
+            shasum -a 256 -c "$(basename "$direct_package").sha256") || exit 1
 
           dmg_root="$work_directory/dmg-root"
           mkdir "$dmg_root"
@@ -1470,7 +1480,7 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
           dmg_hash=$(shasum -a 256 "$dmg" | awk '{print $1}')
           printf '%s *%s\n' "$dmg_hash" "$(basename "$dmg")" > "$dmg.sha256"
-          (cd "$OUTPUT_DIRECTORY" && shasum -a 256 -c "$(basename "$dmg").sha256")
+          (cd "$OUTPUT_DIRECTORY" && shasum -a 256 -c "$(basename "$dmg").sha256") || exit 1
           cmp "$direct_package" "$dmg_root/tr300.pkg"
 
       - name: Upload macOS installers for native validation
@@ -1530,31 +1540,32 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$REPOSITORY" == QubeTX/qube-machine-report &&
              "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
              "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
              "$BUILD_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
-             "$BUILD_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$MATRIX_ARCH" == arm64 || "$MATRIX_ARCH" == x86_64 ]]
-          [[ "$(uname -m)" == "$MATRIX_ARCH" ]]
-          [[ "$SOURCE_MANAGED_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+             "$BUILD_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$MATRIX_ARCH" == arm64 || "$MATRIX_ARCH" == x86_64 ]] || exit 1
+          [[ "$(uname -m)" == "$MATRIX_ARCH" ]] || exit 1
+          [[ "$SOURCE_MANAGED_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
           [[ "$SOURCE_MANAGED_INSTALLER_SIZE" =~ ^[1-9][0-9]*$ &&
-             "$SOURCE_MANAGED_INSTALLER_SIZE" -le 1048576 ]]
-          [[ "$SOURCE_DIST_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+             "$SOURCE_MANAGED_INSTALLER_SIZE" -le 1048576 ]] || exit 1
+          [[ "$SOURCE_DIST_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
           [[ "$SOURCE_DIST_INSTALLER_SIZE" =~ ^[1-9][0-9]*$ &&
-             "$SOURCE_DIST_INSTALLER_SIZE" -le 1048576 ]]
+             "$SOURCE_DIST_INSTALLER_SIZE" -le 1048576 ]] || exit 1
           [[ "$SOURCE_AARCH64_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
              "$SOURCE_AARCH64_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
-             "$SOURCE_AARCH64_ARCHIVE_SIZE" -le 67108864 ]]
+             "$SOURCE_AARCH64_ARCHIVE_SIZE" -le 67108864 ]] || exit 1
           [[ "$SOURCE_X86_64_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
              "$SOURCE_X86_64_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
-             "$SOURCE_X86_64_ARCHIVE_SIZE" -le 67108864 ]]
+             "$SOURCE_X86_64_ARCHIVE_SIZE" -le 67108864 ]] || exit 1
           artifact_directory="$RUNNER_TEMP/tr300-native-build-artifact"
           artifact_zip="$RUNNER_TEMP/tr300-native-build-artifact.zip"
           mkdir -m 700 "$artifact_directory"
           repository_id=$(gh api "repos/$REPOSITORY" --jq .id)
-          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]] || exit 1
           validate_build_artifact() {
             local path=$1
             jq -e --argjson id "$BUILD_ARTIFACT_ID" \
@@ -1586,7 +1597,7 @@ jobs:
           gh api "repos/$REPOSITORY/actions/artifacts/$BUILD_ARTIFACT_ID/zip" \
             > "$artifact_zip"
           artifact_zip_sha256=$(shasum -a 256 "$artifact_zip" | awk '{print $1}')
-          [[ "$artifact_zip_sha256" == "$BUILD_ARTIFACT_DIGEST" ]]
+          [[ "$artifact_zip_sha256" == "$BUILD_ARTIFACT_DIGEST" ]] || exit 1
           python3 - "$artifact_zip" "$artifact_directory" <<'PY'
           import os
           import shutil
@@ -1694,7 +1705,7 @@ jobs:
           trap cleanup_native_validation EXIT
 
           (cd "$artifact_directory" && \
-            shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256)
+            shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256) || exit 1
           package_signature=$(pkgutil --check-signature "$pkg" 2>&1)
           printf '%s\n' "$package_signature"
           grep -Fq 'Status: signed by a developer certificate' <<< "$package_signature"
@@ -1708,7 +1719,7 @@ jobs:
           # but install from the direct package used by all current clients.
           dmg="$artifact_directory/tr300-universal-apple-darwin.dmg"
           (cd "$artifact_directory" && \
-            shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
+            shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256) || exit 1
           codesign --verify --deep --strict --verbose=4 "$dmg"
           xcrun stapler validate "$dmg"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
@@ -1815,15 +1826,15 @@ jobs:
              "$baseline_dist_record_size" == "$baseline_dist_size" &&
              "$baseline_archive_id" =~ ^[1-9][0-9]*$ &&
              "$baseline_archive_record_digest" == "sha256:$baseline_archive_digest" &&
-             "$baseline_archive_record_size" == "$baseline_archive_size" ]]
+             "$baseline_archive_record_size" == "$baseline_archive_size" ]] || exit 1
           gh release download v4.2.2 --repo "$REPOSITORY" \
             --pattern tr300-installer.sh --dir "$baseline_managed_directory"
           baseline_managed_installer="$baseline_managed_directory/tr300-installer.sh"
           [[ -f "$baseline_managed_installer" && ! -L "$baseline_managed_installer" && \
-            -s "$baseline_managed_installer" ]]
+            -s "$baseline_managed_installer" ]] || exit 1
           baseline_managed_actual=$(shasum -a 256 "$baseline_managed_installer" | \
             awk '{print $1}')
-          [[ "$baseline_managed_actual" == "$baseline_managed_digest" ]]
+          [[ "$baseline_managed_actual" == "$baseline_managed_digest" ]] || exit 1
           grep -Fq "tr300_tag='v4.2.2'" "$baseline_managed_installer"
           if grep -Fq '@TR300_' "$baseline_managed_installer"; then
             echo 'published v4.2.2 managed wrapper retained a template placeholder' >&2
@@ -1837,17 +1848,17 @@ jobs:
           baseline_checksum_shim="$baseline_checksum_bin/sha256sum"
           mkdir -m 700 "$baseline_checksum_bin"
           (
-            umask 077
-            set -C
-            cat > "$baseline_checksum_shim" <<'SH'
+            umask 077 || exit 1
+            set -C || exit 1
+            cat > "$baseline_checksum_shim" <<'SH' || exit 1
           #!/bin/sh
           set -eu
           exec /usr/bin/shasum -a 256 "$@"
           SH
-          )
+          ) || exit 1
           chmod 0700 "$baseline_checksum_shim"
           [[ -f "$baseline_checksum_shim" && ! -L "$baseline_checksum_shim" &&
-             "$(wc -l < "$baseline_checksum_shim" | tr -d '[:space:]')" == 3 ]]
+             "$(wc -l < "$baseline_checksum_shim" | tr -d '[:space:]')" == 3 ]] || exit 1
           grep -Fqx '#!/bin/sh' "$baseline_checksum_shim"
           grep -Fqx 'set -eu' "$baseline_checksum_shim"
           grep -Fqx 'exec /usr/bin/shasum -a 256 "$@"' "$baseline_checksum_shim"
@@ -1857,9 +1868,9 @@ jobs:
             "$baseline_checksum_shim" -b "$checksum_probe" | awk '{print $1}'
           )
           native_probe=$(/usr/bin/shasum -a 256 "$checksum_probe" | awk '{print $1}')
-          [[ "$shim_probe" =~ ^[0-9a-f]{64}$ && "$shim_probe" == "$native_probe" ]]
+          [[ "$shim_probe" =~ ^[0-9a-f]{64}$ && "$shim_probe" == "$native_probe" ]] || exit 1
           resolved_checksum_shim=$(PATH="$baseline_checksum_bin:$PATH" command -v sha256sum)
-          [[ "$resolved_checksum_shim" == "$baseline_checksum_shim" ]]
+          [[ "$resolved_checksum_shim" == "$baseline_checksum_shim" ]] || exit 1
           PATH="$baseline_checksum_bin:$PATH" sh "$baseline_managed_installer"
           baseline_managed_after="$baseline_managed_directory/release-after.json"
           gh api "repos/$REPOSITORY/releases/tags/v4.2.2" > "$baseline_managed_after"
@@ -1873,7 +1884,7 @@ jobs:
             "$baseline_managed_after" "$baseline_archive_name")
           [[ "$baseline_wrapper_after" == "$baseline_wrapper_before" &&
              "$baseline_dist_after" == "$baseline_dist_before" &&
-             "$baseline_archive_after" == "$baseline_archive_before" ]]
+             "$baseline_archive_after" == "$baseline_archive_before" ]] || exit 1
           rm -f "$checksum_probe" "$baseline_checksum_shim"
           rmdir "$baseline_checksum_bin"
           test "$("$HOME/.cargo/bin/tr300" --version)" = 'tr300 4.2.2'
@@ -1968,15 +1979,15 @@ jobs:
              "$candidate_dist_record_size" == "$SOURCE_DIST_INSTALLER_SIZE" &&
              "$candidate_archive_id" =~ ^[1-9][0-9]*$ &&
              "$candidate_archive_record_digest" == "sha256:$candidate_archive_digest" &&
-             "$candidate_archive_record_size" == "$candidate_archive_size" ]]
+             "$candidate_archive_record_size" == "$candidate_archive_size" ]] || exit 1
           gh release download "$RELEASE_TAG" --repo "$REPOSITORY" \
             --pattern tr300-installer.sh --dir "$managed_directory"
           managed_installer="$managed_directory/tr300-installer.sh"
-          [[ -f "$managed_installer" && ! -L "$managed_installer" && -s "$managed_installer" ]]
+          [[ -f "$managed_installer" && ! -L "$managed_installer" && -s "$managed_installer" ]] || exit 1
           candidate_managed_size=$(wc -c < "$managed_installer" | tr -d '[:space:]')
           candidate_managed_sha256=$(shasum -a 256 "$managed_installer" | awk '{print $1}')
           [[ "$candidate_managed_size" == "$SOURCE_MANAGED_INSTALLER_SIZE" &&
-             "$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256" ]]
+             "$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256" ]] || exit 1
           grep -Fq "tr300_tag='${RELEASE_TAG}'" "$managed_installer"
           grep -Fq "tr300_dist_installer_sha256='${SOURCE_DIST_INSTALLER_SHA256}'" \
             "$managed_installer"
@@ -1998,7 +2009,7 @@ jobs:
             "$candidate_managed_after" "$candidate_archive_name")
           [[ "$candidate_wrapper_after" == "$candidate_wrapper_before" &&
              "$candidate_dist_after" == "$candidate_dist_before" &&
-             "$candidate_archive_after" == "$candidate_archive_before" ]]
+             "$candidate_archive_after" == "$candidate_archive_before" ]] || exit 1
           test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
           jq -e --arg version "$RELEASE_VERSION" '
             .provider.source == "cargo-dist" and .source.app_name == "tr300" and
@@ -2227,7 +2238,7 @@ jobs:
           baseline_pkg_sidecar="$baseline_directory/tr300-universal-apple-darwin.pkg.sha256"
           [[ -f "$baseline_pkg" && ! -L "$baseline_pkg" && -s "$baseline_pkg" &&
              -f "$baseline_pkg_sidecar" && ! -L "$baseline_pkg_sidecar" &&
-             -s "$baseline_pkg_sidecar" ]]
+             -s "$baseline_pkg_sidecar" ]] || exit 1
           baseline_pkg_actual_size=$(wc -c < "$baseline_pkg" | tr -d '[:space:]')
           baseline_pkg_actual_sha256=$(shasum -a 256 "$baseline_pkg" | awk '{print $1}')
           baseline_sidecar_actual_size=$(wc -c < "$baseline_pkg_sidecar" | tr -d '[:space:]')
@@ -2235,9 +2246,9 @@ jobs:
           [[ "$baseline_pkg_actual_size" == "$baseline_pkg_size" &&
              "$baseline_pkg_actual_sha256" == "$baseline_pkg_sha256" &&
              "$baseline_sidecar_actual_size" == "$baseline_pkg_sidecar_size" &&
-             "$baseline_sidecar_actual_sha256" == "$baseline_pkg_sidecar_sha256" ]]
+             "$baseline_sidecar_actual_sha256" == "$baseline_pkg_sidecar_sha256" ]] || exit 1
           (cd "$baseline_directory" && \
-            shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256)
+            shasum -a 256 -c tr300-universal-apple-darwin.pkg.sha256) || exit 1
           baseline_signature=$(pkgutil --check-signature "$baseline_pkg" 2>&1)
           grep -Fq 'Status: signed by a developer certificate' <<< "$baseline_signature"
           grep -Fq -- "$APPLE_INSTALLER_SIGNING_IDENTITY" <<< "$baseline_signature"
@@ -2261,7 +2272,7 @@ jobs:
           grep -Fqx "version: $RELEASE_VERSION" <<< "$package_info"
           grep -Fqx 'volume: /' <<< "$package_info"
           package_location=$(sed -n 's/^location:[[:space:]]*//p' <<< "$package_info")
-          [[ -z "$package_location" || "$package_location" == / ]]
+          [[ -z "$package_location" || "$package_location" == / ]] || exit 1
           pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/tr300'
           file_info=$(pkgutil --file-info /usr/local/bin/tr300)
           grep -Fqx 'path: /usr/local/bin/tr300' <<< "$file_info"
@@ -2306,8 +2317,8 @@ jobs:
             > "$build_artifact_after"
           validate_build_artifact "$build_artifact_after"
           build_record_after=$(build_artifact_record "$build_artifact_after")
-          [[ "$build_record_after" == "$build_record_before" ]]
-          [[ ! -e "$VALIDATION_PROOF" && ! -L "$VALIDATION_PROOF" ]]
+          [[ "$build_record_after" == "$build_record_before" ]] || exit 1
+          [[ ! -e "$VALIDATION_PROOF" && ! -L "$VALIDATION_PROOF" ]] || exit 1
           jq -n \
             --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
             --argjson run "$CURRENT_RUN_ID" \
@@ -2339,7 +2350,7 @@ jobs:
               }
             ' > "$VALIDATION_PROOF"
           [[ -f "$VALIDATION_PROOF" && ! -L "$VALIDATION_PROOF" &&
-             -s "$VALIDATION_PROOF" && "$(wc -c < "$VALIDATION_PROOF")" -le 16384 ]]
+             -s "$VALIDATION_PROOF" && "$(wc -c < "$VALIDATION_PROOF")" -le 16384 ]] || exit 1
 
       - name: Upload exact native validation proof
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -3333,7 +3344,7 @@ jobs:
             --dir baseline \
             --pattern 'tr300-universal-apple-darwin.dmg' \
             --pattern 'tr300-universal-apple-darwin.dmg.sha256'
-          (cd baseline && shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256)
+          (cd baseline && shasum -a 256 -c tr300-universal-apple-darwin.dmg.sha256) || exit 1
           mount="$RUNNER_TEMP/tr300-v413-mount"
           mkdir "$mount"
           hdiutil attach -nobrowse -readonly -mountpoint "$mount" \
@@ -3358,7 +3369,9 @@ jobs:
           expected_version=$RELEASE_VERSION
           for attempt in {1..12}; do
             latest=$(gh api "repos/$REPOSITORY/releases/latest" --jq .tag_name)
-            [[ $latest == "$expected_tag" ]] && break
+            if [[ $latest == "$expected_tag" ]]; then
+              break
+            fi
             if [[ $attempt -eq 12 ]]; then
               echo "latest release is $latest, expected $expected_tag" >&2
               exit 1
