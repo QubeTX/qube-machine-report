@@ -53,14 +53,21 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current published version: `4.2.2`. The working manifest on `main` is `4.3.0`
-  (battery hardening, Windows full-mode latency, thermal reporting). PR #14
+- Current crates.io version: `4.3.0`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.1` (battery hardening, Windows
+  full-mode latency, thermal reporting, and a Windows release-bootstrap fix).
+  PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
   local, hosted, security, review, and benchmark gates; exact-main CI run
-  `32766014047` passed all 19 jobs. v4.2.2 remains the last fully published
-  state until the final release-source merge passes CI, its automatic OIDC
-  crates publication succeeds, and the single tag/private
-  24-to-30-to-validated-to-34 asset chain plus post-public smokes complete.
+  `32766014047` passed all 19 jobs. Publisher PR #17 merged as `c788029d`;
+  exact-main CI `32794371259` and automatic trusted-OIDC run `32794371283`
+  published exact unyanked v4.3.0 with `trustpub_only=true`. Immutable tag
+  `v4.3.0` points to that SHA, but Release run `32795846831` failed before
+  draft creation because its new guard rejected the official cargo-dist
+  installer's normal NTFS hard-linked alias. Do not move or reuse that tag.
+  v4.2.2 remains the last complete GitHub distribution until reviewed v4.3.1
+  passes exact-main CI/OIDC and the automatic private
+  24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
   Windows exposes NVIDIA GPU temperature only through mode-bounded

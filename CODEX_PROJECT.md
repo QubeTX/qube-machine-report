@@ -11,8 +11,10 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
 MIC-1 baseline: managed CLI installers are the recommended default, fresh
 installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
-bridge. v4.3.0 is the merged, not-yet-published performance/battery/thermal and
-release-custody candidate developed through PR #14. Alienware Windows evidence is captured;
+bridge. v4.3.0 is published on crates.io through trusted OIDC but its immutable
+GitHub tag failed closed before draft creation on a Windows release-bootstrap
+guard. v4.3.1 is the reviewed packaging fix-forward for the performance/
+battery/thermal and release-custody work developed through PR #14. Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
@@ -27,7 +29,13 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
   direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
   stable-`latest` audit passed.
-- Working manifest / unreleased candidate: `4.3.0` on `main`, merged through
+- Current crates.io package: `4.3.0`, exact source `c788029d`, published by
+  automatic trusted OIDC run `32794371283` with `trustpub_only=true`. Its
+  immutable tag triggered Release `32795846831`, which failed before creating
+  a draft because a generic link guard rejected the official cargo-dist
+  installer's intended NTFS hard-linked alias.
+- Working manifest / GitHub-distribution fix-forward: `4.3.1`, carrying the
+  product code merged through
   PR #14 as `2f997d2`. It adds
   deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
   `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
@@ -35,7 +43,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   thermals on Windows while CPU stays absent/JSON `null`, and `-f/--full`.
   Seven alternating full runs per version measured 5146.9 ms versus 2120.2 ms
   (~58.8%, 2.43×); 11 fast runs per version measured 257.3 ms versus 260.4 ms
-  (+1.2%), so no fast-mode gain is claimed. It remains unreleased; AMD64 Linux laptop and
+  (+1.2%), so no fast-mode gain is claimed. The v4.3.1 release bootstrap is now
+  shared with a live Windows Server 2022 pre-tag CI job and rejects actual
+  reparse points without rejecting ordinary hard links. AMD64 Linux laptop and
   Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
@@ -70,7 +80,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
   documentation/workflow state reconciled 2026-08-24.
 
-### v4.2.2 published baseline and v4.3.0 candidate
+### v4.2.2 complete-distribution baseline and v4.3.1 fix-forward
 
 - v4.3 Linux battery corroboration accepts standard `_now`/`_avg` voltage,
   current, power, charge, and energy signals, including signed discharge and
@@ -154,8 +164,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   set, exact-SHA CI/crates, disposable Windows managed/native matrices, both
   Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
   update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
-- The v4.3.0 release target remains 34 stable-name assets. Required pending
-  evidence is the release-source PR/local/hosted gate, automatic trusted-OIDC
+- The v4.3.1 release target remains 34 stable-name assets. Required pending
+  evidence is the fix-forward PR/local/hosted gate, automatic trusted-OIDC
   crates publication, private Windows byte/matrix proof, both Apple-native
   lifecycles/finalization, post-public smokes, public-byte audit, and homepage
   update. Physical AMD64 Linux and Pi qualification stay separately open.

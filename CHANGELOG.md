@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-08-24
+
+### Fixed
+- **Windows release packaging now accepts the verified cargo-dist executable
+  created by the official installer's normal hard-linked alias.** The v4.3.0
+  tag stopped safely before creating a GitHub Release because a new path guard
+  mistook that NTFS hard link for a symbolic redirect. The shared bootstrap now
+  rejects actual reparse-point redirection while accepting the regular file, and
+  ordinary pull-request/main CI executes that exact Windows bootstrap before a
+  release tag can be qualified.
+
 ## [4.3.0] - 2026-08-24
 
 ### Added

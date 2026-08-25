@@ -10,17 +10,18 @@
 
 ## Active
 
-- [ ] **Integrate, qualify, and release TR-300 v4.3.0** - finish the no-click credential/automation cutover, then run exact-SHA crates/tag/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+- [ ] **Complete the TR-300 v4.3 release through v4.3.1** - preserve the immutable failed v4.3.0 tag, repair its Windows packaging regression, and finish the no-click exact-SHA crates/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
   - [x] Remediate and independently validate every confirmed release/privilege security finding
   - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
   - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
   - [x] Pass PR #15 exact-head local/hosted/security/native qualification, merge it, and pass exact-main CI
-  - [ ] Finish Apple environment-only reproof and merge removal of the temporary migration workflow
-  - [ ] Merge automatic post-CI OIDC publication, prove v4.3.0 public, then revoke/delete the unused legacy crates token and secret
+  - [x] Finish Apple environment-only reproof and merge removal of the temporary migration workflow
+  - [x] Merge automatic post-CI OIDC publication, prove the v4.3.0 crate and `trustpub_only`, and delete the unused repository secret
   - [x] Merge hardened main into the local PR #14 branch and pass the complete local gate plus controlled benchmark
   - [x] Push the integrated candidate and pass final exact-head hosted, security, and review gates
   - [x] Merge only the accepted candidate and verify exact-main CI
-  - [ ] Push only v4.3.0 and pass the private 24-to-30-to-validated-to-34 publication chain
+  - [x] Push only v4.3.0 and preserve its fail-closed Windows-bootstrap result without moving the immutable tag
+  - [ ] Qualify and merge the v4.3.1 bootstrap fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
   - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
 
 ## Done

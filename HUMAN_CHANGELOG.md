@@ -13,6 +13,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-08-24
+
+### Fixed
+- **Windows release packaging is repaired and now rehearsed before release.**
+  Version 4.3.0 reached crates.io, but its GitHub packaging run stopped safely
+  before publishing downloads because a new file-safety check rejected the
+  official build tool installer's normal hard-linked alias. The check still
+  blocks real path redirection, while every pull request and accepted `main`
+  update now runs the same Windows bootstrap used by a release tag.
+
 ## [4.3.0] - 2026-08-24
 
 ### Added

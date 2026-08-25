@@ -7,10 +7,24 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.0 — Merged release candidate (as of 2026-08-24)
+### v4.3.1 — Windows release-bootstrap fix-forward (as of 2026-08-24)
 
-Release status: v4.2.2 is the last published GitHub/crates.io version. The
-working `4.3.0` manifest is merged to `main` but remains unpublished.
+Release status: active. The immutable v4.3.0 tag cannot consume corrected
+workflow code, and every downstream recovery path correctly requires a
+successful exact upstream Release. The v4.3.1 patch moves the exact pinned
+cargo-dist PowerShell bootstrap into one shared script, accepts the official
+installer's ordinary NTFS hard-linked alias while rejecting reparse-point
+redirection, and adds a Windows Server 2022 CI job that executes the same
+bootstrap before any tag is eligible. Required evidence is the complete local
+gate, reviewed PR head including that live Windows job, exact-main CI and
+automatic OIDC publication, then a fresh `v4.3.1` automatic private/native/
+public chain.
+
+### v4.3.0 — Published crate; failed-closed GitHub packaging
+
+Release status: v4.2.2 remains the last complete GitHub distribution. Exact
+v4.3.0 is publicly available and unyanked on crates.io with
+`trustpub_only=true`, but no v4.3.0 GitHub Release or draft exists.
 Release-chain hardening exact head
 `8ea060f` passed complete local, hosted, security, and native fixture gates and
 merged through PR #15 as `1ffb0cc`; exact-main CI `32759430269` then passed all
@@ -25,11 +39,18 @@ in `32790636744` plus release plan `32790636676`, merged as `75e7092`, and
 exact-main CI `32791121107` passed 19/19. Automatic crates run `32791618652`
 proved the exact-SHA validator, then crates.io rejected the trusted-publishing
 exchange before issuing a crates.io publish token
-because trusted publishing does not support a `workflow_run` event. No v4.3.0
-crate or tag was created. The fix-forward uses a supported `main` push trigger
-whose registry-uncredentialed validator waits for and re-fetches the exact CI success.
-Crates publication, the tag, native artifact chain, public smokes, and
-deployment remain separate release gates.
+because trusted publishing does not support a `workflow_run` event. Publisher
+PR #17 fixed that trigger and merged as `c788029d`; exact-main CI
+`32794371259` attempt 2 passed, and automatic run `32794371283` attempt 2
+published exact v4.3.0 through trusted OIDC. The public checksum is
+`bef6e299d9e29e192a87875867516c38081c8b0f1efb6df5a14e3c7c5c6f0dad` and
+trusted provenance binds the crate to that SHA/run. Fresh Apple identity
+preflight `32795757823` passed on Intel and Apple Silicon with all release work
+skipped. Immutable tag `v4.3.0` then triggered Release `32795846831`; the
+official pinned cargo-dist installer completed, but its normal
+`dist.exe`/`cargo-dist.exe` hard link made `.LinkType` nonempty and the new
+guard rejected it. The run failed before signing, hosting, or draft creation.
+An unchanged rerun is deterministic; v4.3.1 is the required fix-forward.
 
 - **Integrated local qualification — pass through source/test head `8471d95`:**
   locked fmt; warnings-denied workspace/all-target Clippy; 185 library and 22
