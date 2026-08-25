@@ -7,13 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.3.8] - Unreleased
+## [4.3.9] - Unreleased
+
+### Changed
+- **This is a narrow distribution-only fix-forward carrying the unchanged v4.3
+  product behavior.** The immutable v4.3.8 crate, tag, and exact private draft
+  remain preserved. v4.3.9 is the sole active unreleased candidate for the
+  complete cross-platform GitHub download release.
+
+### Fixed
+- **The macOS package input consumer now accepts the same exact six-file
+  inventory produced by its trusted Release-artifact freezer.** The two
+  checksum-bound shell installer sources are deliberate inputs alongside the
+  two signed Apple archives and their sidecars; the downstream preparation job
+  must validate that complete set instead of enforcing its obsolete four-file
+  archive-only contract.
+- **The Windows Inno Setup bootstrap receives read-only GitHub authorization
+  only where its pinned-installer attestation verification requires it.** Build
+  and packaging remain read-only; the repair restores `github.token` to the
+  verification step without granting Release mutation access.
+
+### Security
+- **The failed v4.3.8 GitHub distribution remains private and immutable.** Its
+  exact source and crate passed CI/OIDC, Release created the correct private
+  24-asset draft, and the macOS workflow stopped in an uncredentialed input-
+  preparation job before package build or publication. No public GitHub
+  release was created. The parallel Windows build completed the Corporate MSI,
+  then failed closed before both Inno EXE builds and before any Windows artifact
+  upload or publication because its hardened job did not pass `GH_TOKEN` to
+  `gh release verify-asset`.
+
+## [4.3.8] - 2026-08-25
 
 ### Changed
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
-  behavior.** The immutable v4.3.7 crate and tag remain published, and its
-  exact 24-asset GitHub draft remains private. v4.3.8 is the sole active,
-  unreleased candidate for the complete cross-platform GitHub download release.
+  behavior.** The exact source and unyanked crate are published, and its exact
+  24-asset GitHub draft remains private. The immutable tag is not moved or
+  reused; v4.3.9 fixes forward the next packaging boundary.
 - **The release ledger now records GitHub's draft-visibility contract
   explicitly.** Only callers with push access receive draft releases from the
   releases listing. The read-only downstream tokens used by v4.3.7 therefore
@@ -21,11 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible to the push-access publisher and maintainer.
 
 ### Fixed
-- **The v4.3.8 candidate is scoped to repair automated private-draft visibility
-  and custody.** The working branch now contains the implementation and
-  executable regression coverage. It remains unqualified and unreleased: no
-  publication or completed-fix claim is made until the reviewed candidate
-  passes the complete local, hosted, native, and public release gates.
+- **The v4.3.8 private-draft visibility and custody repair passed its reviewed
+  source gates.** Fresh no-checkout resolver/freezer jobs successfully bound
+  the private Release while checked-out builders and candidate execution stayed
+  read-only.
 - **Private-draft access is isolated from checkout, build, and candidate
   execution.** Fresh no-checkout resolver/freezer jobs receive push-capable
   `contents` access only to enumerate, bind, and freeze the exact private
@@ -34,6 +63,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mutations on the already-bound draft.
 
 ### Security
+- **The v4.3.8 chain created no public GitHub release.** Tag and main resolve to
+  `0b726a854666ed73e42fda675645a097fa887824`. Exact-main CI `32842065507`
+  passed 20/20; trusted-OIDC run `32842065501` published unyanked v4.3.8 with
+  checksum `f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`;
+  native preflight `32842865442` passed. Release `32842969776` passed all 13
+  jobs and created exact private 24-asset draft `376357745`. macOS run
+  `32843468883` then failed deterministically in prepare job `97787965884`:
+  the trusted freezer produced its intended six-file Apple/source inventory,
+  while the consumer still required only four archive files. All macOS build,
+  publish, and smoke jobs skipped. Windows Installers `32843468892` also failed
+  deterministically in build job `97787896541` at `Install the pinned official
+  Inno Setup 6.7.3`: `gh release verify-asset` had no `GH_TOKEN` after build-job
+  hardening. Windows publication skipped, the draft stayed private at exactly
+  24 assets, and nothing became public.
 - **The failed v4.3.7 GitHub distribution remains private and immutable.**
   Crates.io serves unyanked `tr300` v4.3.7 with checksum
   `225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
@@ -52,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behavior.** The immutable v4.3.6 crate and tag remain published, and its
   correct 24-asset GitHub draft remains private. v4.3.7 repaired the checksum
   handoff, reached its own exact private 24-asset draft, and is now immutable;
-  v4.3.8 fixes forward the downstream draft-visibility boundary.
+  v4.3.8 later repaired the downstream draft-visibility boundary before the
+  Apple/Windows stops recorded above.
 
 ### Fixed
 - **The fresh release publisher now reads the managed shell-installer digest
@@ -87,7 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behavior.** Its immutable crate and tag remain published. Its correctly
   assembled 24-asset GitHub draft remains private after the host checksum
   handoff failed. v4.3.7 later repaired that handoff but exposed the downstream
-  draft-visibility boundary; v4.3.8 is now the sole active candidate.
+  draft-visibility boundary; v4.3.8 later repaired that boundary before the
+  subsequent deterministic stops recorded above.
 
 ### Fixed
 - **Every pre-public workflow now identifies private drafts through the
@@ -119,8 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
   behavior.** Its immutable crate and tag remain published. Its correct
   24-asset GitHub draft remains private after the host assertion failed;
-  v4.3.6 was its immediate immutable fix-forward, and v4.3.8 is now the active
-  candidate after the later v4.3.7 stop.
+  v4.3.6 was its immediate immutable fix-forward, and later immutable repairs
+  and their results are recorded in the newer entries above.
 
 ### Fixed
 - **Release metadata validation now preserves the complete cargo-dist manifest.**

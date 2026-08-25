@@ -13,29 +13,63 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [4.3.8] - Unreleased
+## [4.3.9] - Unreleased
 
 ### Changed
 - **This is another packaging-only repair; the report itself is unchanged from
-  the v4.3 line.** Version 4.3.7 remains an immutable crate and exact private
-  draft, while v4.3.8 is the active unreleased candidate for complete downloads.
+  the v4.3 line.** Version 4.3.8 remains an immutable crate, tag, and private
+  draft. Version 4.3.9 is the only active candidate for complete downloads.
+
+### Fixed
+- **The Mac packaging stage now agrees on the exact files handed between its
+  trusted automation steps.** The handoff intentionally includes the two shell
+  installer sources as well as the two Apple archives and their checksums. The
+  next step no longer rejects those valid installer files as unexpected.
+- **The Windows packaging stage again supplies read-only GitHub authorization
+  to the official installer verification step.** That narrowly restores the
+  identity check without allowing the build job to change a Release.
+
+### Security
+- **Version 4.3.8 never became public on GitHub.** Its crate and first-stage
+  private release succeeded, but the Mac stage stopped before package building
+  or publishing when one step expected an older, smaller file set. Windows
+  packaging completed the Corporate MSI, then stopped before both EXE builds
+  and before any Windows upload because the official setup-tool identity check
+  had no GitHub token. Version 4.3.9 fixes both narrow boundaries without
+  changing the report itself.
+
+## [4.3.8] - 2026-08-25
+
+### Changed
+- **This is another packaging-only repair; the report itself is unchanged from
+  the v4.3 line.** Its exact crate and tag are published and its exact private
+  draft remains preserved. Version 4.3.9 fixes the next automated packaging
+  boundary.
 - **The release notes now explain who can see a private GitHub draft.** GitHub
   shows drafts only to callers with permission to push. The automated read-only
   Windows and Mac stages therefore saw no draft even though the publisher had
   created the correct one.
 
 ### Fixed
-- **The candidate carries the changes needed for the automatic release chain to
-  move the private draft through the Windows and Mac stages with the right
-  permission boundary.** The working branch now carries that implementation
-  and its tests, but review and the complete release qualification still have
-  to pass. This is not yet a publication claim.
+- **The private-draft permission repair worked.** Small, fresh automation steps
+  could find and freeze the private draft while build and installer jobs stayed
+  read-only.
 - **Private-draft access stays away from build and installer code.** Small,
   fresh automation steps get only the access needed to find and freeze the
   private draft. Build and installation tests remain read-only, and separate
   fresh publishing steps are the only steps that actually change the draft.
 
 ### Security
+- **Version 4.3.8 never became public on GitHub.** Its exact source passed all
+  20 main CI jobs, trusted publication produced the unyanked crate, Apple
+  credential preflight passed, and the 13-job first-stage Release created the
+  correct private 24-download draft. The Mac stage then rejected its trusted
+  six-file handoff because the next step still expected only four files. Every
+  Mac build, publish, and smoke job skipped. The Windows stage completed its
+  Corporate MSI, then stopped before both EXE builds and artifact upload because
+  its official Inno Setup verification step lacked the read-only GitHub token
+  it requires. Windows publishing skipped, the draft stayed private with
+  exactly 24 downloads, and nothing became public.
 - **Version 4.3.7 never became public on GitHub.** Its crate remains available,
   its complete first-stage release build succeeded, and its exact 24-download
   draft remains private. The Windows and Mac stages stopped at their first
@@ -48,7 +82,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **This is a packaging-only repair; the report itself is unchanged from the
   v4.3 line.** Version 4.3.6 remains an immutable crate and private draft, while
   v4.3.7 repaired the checksum handoff and reached its own exact private draft.
-  It is now immutable, and v4.3.8 fixes the next automated packaging boundary.
+  It is now immutable; v4.3.8 later fixed that boundary before the newer
+  packaging stops recorded above.
 
 ### Fixed
 - **The release publisher now reads the verified installer checksum in the
@@ -76,7 +111,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **This is a packaging-only repair; the report itself is unchanged from the
   v4.3 line.** Its immutable crate and tag remain available. Its correct
   24-download draft remains private. v4.3.7 later reached its own private draft
-  before another safe stop; v4.3.8 is now the active candidate.
+  before another safe stop; later immutable repairs and their results are
+  recorded in the newer entries above.
 
 ### Fixed
 - **The automated release chain can now see its own private draft.** GitHub does
