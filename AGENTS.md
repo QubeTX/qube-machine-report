@@ -5,13 +5,13 @@ Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
 Companion docs:
 - [`CLAUDE.md`](./CLAUDE.md) — edit-time rules, the canonical 7-phase development workflow, CI gates, code patterns.
-- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-08-24: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
+- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-08-25: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-08-24
+Last verified against source: 2026-08-25
 
 ## Task management system
 
@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.1`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.2` (battery hardening, Windows
+- Current crates.io version: `4.3.2`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.3` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -71,9 +71,14 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   Native credential preflight `32800830054` passed, and tagged Release
   `32800944635` passed all six platform builds, but both checkout-free Apple
   signers failed before signing/upload because macOS system Bash 3.2 rejected
-  Bash-4-only `declare -A`/`mapfile`. No v4.3.0 or v4.3.1 GitHub draft exists.
-  Never move, delete, reuse, or rerun either tag unchanged. v4.2.2 remains the
-  last complete GitHub distribution until reviewed v4.3.2 passes exact-main
+  Bash-4-only `declare -A`/`mapfile`. PR #19 fixed that boundary and merged as
+  `c246ded23a93f8c383498989a334268442ec2e57`; exact-main CI `32809616793`,
+  automatic trusted-OIDC crates run `32809616807`, and native preflight
+  `32810343902` passed. Tagged Release `32810420213` built all six targets, but
+  both Apple signers rejected cargo-dist 0.31.0's valid two-LF raw checksum
+  sidecars before credential use. No v4.3.0, v4.3.1, or v4.3.2 GitHub draft
+  exists. Never move, delete, reuse, or rerun those tags unchanged. v4.2.2
+  remains the last complete GitHub distribution until reviewed v4.3.3 passes exact-main
   CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor

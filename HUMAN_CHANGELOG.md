@@ -13,6 +13,27 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.3] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.2 remains available as an immutable crate, while
+  v4.3.3 is the next complete downloadable release candidate.
+
+### Fixed
+- **The release system now understands the exact checksum files produced by
+  its pinned packaging tool.** That tool adds a harmless blank line after its
+  checksum records. The workflow now verifies those bytes exactly, then writes
+  one terminal newline in each public checksum file before any release is
+  assembled. Tests cover
+  missing or extra newlines, Windows line endings, trailing garbage, wrong
+  signed-file formatting, and a changed combined checksum file.
+
+### Security
+- **Version 4.3.2 stopped safely before Mac signing or any partial download
+  release.** Its crate and tag stay untouched. Version 4.3.3 fixes forward
+  through the same automatic review, `main`, signing, and publication chain.
+
 ## [4.3.2] - 2026-08-24
 
 ### Added
@@ -23,6 +44,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the new `--full` flag explicitly chooses the normal complete report.
 
 ### Changed
+- **Version 4.3.2 reached crates.io automatically, but its Mac signer rejected
+  the packaging tool's valid extra blank line before signing or creating a
+  draft.** The immutable tag stays untouched and version 4.3.3 fixes forward.
 - **The full Windows report is substantially faster on the controlled test
   machine.** Its median fell from 5146.9 ms to 2120.2 ms across seven
   alternating runs per version—58.8% less time, or a 2.43× runtime ratio.

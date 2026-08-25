@@ -11,10 +11,12 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
 MIC-1 baseline: managed CLI installers are the recommended default, fresh
 installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
-bridge. v4.3.1 is published on crates.io through trusted OIDC, but both the
-immutable v4.3.0 and v4.3.1 GitHub tags failed closed before draft creation:
-first on a Windows release-bootstrap guard, then on Bash-4-only syntax in fresh
-native Apple signer jobs. v4.3.2 is the only eligible fix-forward for the
+bridge. v4.3.2 is published on crates.io through trusted OIDC, but the
+immutable v4.3.0, v4.3.1, and v4.3.2 GitHub tags failed closed before draft
+creation: first on a Windows release-bootstrap guard, then on Bash-4-only
+syntax in fresh native Apple signer jobs, and finally on a checksum guard that
+did not model cargo-dist 0.31.0's two-LF raw sidecars. v4.3.3 is the only
+eligible fix-forward for the
 performance/battery/thermal and release-custody work developed through PR #14.
 Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
@@ -31,17 +33,17 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   Apple archives, all Windows packages/transitions, native Intel/Apple Silicon
   direct-PKG/compatibility-DMG lifecycles, and the public 34-asset checksum/
   stable-`latest` audit passed.
-- Current crates.io package: `4.3.1`, exact source
-  `07e0e3ae265eb70856eb5ee0602beb11850ea00d`, published by automatic trusted
-  OIDC run `32800131893` after exact-main CI `32800131846`, with
-  `trustpub_only=true`. Immutable tag `v4.3.1` points to the same SHA. Release
-  `32800944635` built all six targets, then both fresh Apple signer jobs failed
-  before signing, upload, hosting, or draft creation because macOS system Bash
-  3.2 does not implement `declare -A` or `mapfile`. The earlier immutable
-  `v4.3.0` tag likewise produced no draft after Release `32795846831` rejected
-  the official cargo-dist installer's intended NTFS hard-linked alias. Neither
-  tag may move, be deleted, or be reused.
-- Working manifest / GitHub-distribution fix-forward: `4.3.2`, carrying the
+- Current crates.io package: `4.3.2`, exact source
+  `c246ded23a93f8c383498989a334268442ec2e57`, published by automatic trusted
+  OIDC run `32809616807` after exact-main CI `32809616793`, with
+  `trustpub_only=true`. Immutable tag `v4.3.2` points to the same SHA. Release
+  `32810420213` built all six targets, then both fresh Apple signer jobs rejected
+  cargo-dist 0.31.0's valid two-LF raw checksum sidecars before signing,
+  notarization, upload, hosting, or draft creation. The earlier immutable
+  `v4.3.0` and `v4.3.1` tags likewise produced no draft after independent
+  Windows hard-link and Apple system-Bash failures. None of the three tags may
+  move, be deleted, or be reused.
+- Working manifest / GitHub-distribution fix-forward: `4.3.3`, carrying the
   product code merged through PR #14 as `2f997d2`. It adds
   deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
   `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
@@ -54,7 +56,9 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   reparse points without rejecting ordinary hard links. v4.3.2 additionally
   removes Bash-4-only staging constructs from native Apple jobs and exercises
   their exact staging/syntax contract under macOS system Bash before any tag is
-  eligible. AMD64 Linux laptop and Raspberry Pi physical acceptance remain open.
+  eligible. v4.3.3 validates cargo-dist's exact raw checksum bytes before
+  canonicalizing the public sidecars and aggregate. AMD64 Linux laptop and
+  Raspberry Pi physical acceptance remain open.
 - Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
   `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
 - Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel
@@ -79,16 +83,16 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   29559148638 with zero annotations; exact-SHA crates run 29559305341 safely
   skipped already-published 4.0.1 without token or publish access.
 - Architecture ledger: `docs/architecture-decisions.md` is reconciled through
-  2026-08-24. It includes the v4.3 collector candidate, preinstall-only Mac
+  2026-08-25. It includes the v4.3 collector candidate, preinstall-only Mac
   managed-conflict refusal and receipt-aware transition, trusted executable/CWD rules, exact stable release provenance,
   protected environments, automatic OIDC crates publishing, and the
   private 24→30→validated→34 publication chain.
 - Release tooling: cargo-dist `0.31.0`
 - Last physical-Mac source verification: 2026-07-15 on a MacBook Pro M2,
   macOS 26.3.1 build 25D2128. Hosted Installer-identity proof and
-  documentation/workflow state reconciled 2026-08-24.
+  documentation/workflow state reconciled 2026-08-25.
 
-### v4.2.2 complete-distribution baseline and v4.3.2 fix-forward
+### v4.2.2 complete-distribution baseline and v4.3.3 fix-forward
 
 - v4.3 Linux battery corroboration accepts standard `_now`/`_avg` voltage,
   current, power, charge, and energy signals, including signed discharge and
@@ -178,7 +182,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   set, exact-SHA CI/crates, disposable Windows managed/native matrices, both
   Apple-native direct-PKG/bridge lifecycles, public-byte audit, and homepage
   update passed. Exact run IDs and hashes are recorded in `TESTING.md`.
-- The v4.3.2 release target remains 34 stable-name assets. Required pending
+- The v4.3.3 release target remains 34 stable-name assets. Required pending
   evidence is the fix-forward PR/local/hosted gate, automatic trusted-OIDC
   crates publication, private Windows byte/matrix proof, both Apple-native
   lifecycles/finalization, post-public smokes, public-byte audit, and homepage
@@ -248,10 +252,10 @@ do not have to infer platform semantics.
 ## Release Contract
 
 1. Preserve `4.2.2` as the last complete GitHub-distribution boundary,
-   `4.3.1` as the current trusted-OIDC crate, and both `v4.3.0` and `v4.3.1` as
-   immutable failed GitHub-distribution tags that produced no draft. Keep
+   `4.3.2` as the current trusted-OIDC crate, and `v4.3.0`, `v4.3.1`, and
+   `v4.3.2` as immutable failed GitHub-distribution tags that produced no draft. Keep
    `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.3.2`; date the release-note blocks on the final
+   synchronized at `4.3.3`; date the release-note blocks on the final
    fix-forward source commit while keeping status ledgers explicit that GitHub
    publication is pending.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
@@ -264,9 +268,9 @@ do not have to infer platform semantics.
 4. Let the exact-main push start `CI` and `crates-publish.yml`; the publisher
    must wait without a registry credential for that exact CI result before exact package bytes
    plus trusted OIDC/public provenance are accepted.
-5. Create and push only tag `v4.3.2` after exact-main CI/crates proof and native
+5. Create and push only tag `v4.3.3` after exact-main CI/crates proof and native
    Apple Bash-3.2 staging preflight. Existing immutable `v*` tags, including
-   failed `v4.3.0` and `v4.3.1`, must not move.
+   failed `v4.3.0`, `v4.3.1`, and `v4.3.2`, must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers
    to produce 30, and private Windows Installer Validation to attest those exact
    bytes and pass every channel/transition gate.
@@ -283,7 +287,12 @@ validation 29664948031. v4.3.0 OIDC/CI evidence is `32794371283`/
 v4.3.1 exact source `07e0e3ae` passed CI `32800131846`, automatic OIDC crates
 run `32800131893`, and native credential preflight `32800830054`; its immutable
 tag then triggered failed Release `32800944635`, which also created no draft.
-The current v4.3.2 candidate has no publication run or tag yet.
+The v4.3.2 exact source `c246ded2` passed CI `32809616793`, automatic trusted-
+OIDC crates publication `32809616807`, and native preflight `32810343902`.
+Its immutable tag then triggered Release `32810420213`; both Apple staging jobs
+failed before credential use because the guard expected one LF instead of the
+pinned producer's two-LF sidecar, and no draft exists. The current v4.3.3
+candidate has no publication run or tag yet.
 
 Never publish locally merely because a credential exists. Never tag before
 exact-current-main CI and its automatic trusted-OIDC crates run settle.
