@@ -124,6 +124,27 @@ workflow-code SHA, protected remote `main`, and resolved tag source SHA to be
 identical before any `apple-signing` credential job can run. Tagless credential
 preflight remains pinned to current protected `main`.
 
+Native Apple workflow shell compatibility is also a pre-tag contract. GitHub's
+macOS runners resolve the system shell to `/bin/bash` 3.2, so affected native
+jobs in `release.yml` and `macos-installer.yml` must not use Bash 4-only
+`declare -A`, `mapfile`, or `readarray`. Fixed Apple artifact inventories must
+fail closed through Python `os.scandir` plus
+`entry.stat(follow_symlinks=False)`: require a real directory, the exact
+expected name set and count, and nonempty regular files; reject hidden extras,
+links, directories, devices, and empty inputs.
+
+Before a tag, both existing `macos-15` and `macos-15-intel` `test` matrix legs
+must run
+`TR300_TEST_BASH=/bin/bash python3 scripts/test-release-workflow-provenance.py --apple-staging-compatibility`.
+That mode must prove the selected shell is Bash 3.2, syntax-check every inline
+run block in the affected native Apple jobs plus every classified Bash block in
+the tag-only cargo-dist build matrix, execute the exact named release-staging
+block for both Apple targets, and execute all three exact macOS-installer
+inventory snippets against clean, missing, extra, empty, directory, and symlink
+fixtures. It must retain fail-closed negatives for bad sidecars and linked
+archive members. These are steps inside the existing matrix legs; the strict CI
+inventory remains 20 jobs.
+
 Then runtime smoke on the freshly-built binary:
 
 ```bash
@@ -211,7 +232,9 @@ gh run watch <run-id>
 Green means all of these passed:
 - `fmt` (cargo fmt --check on Linux)
 - `clippy` (cargo clippy -D warnings on Linux)
-- `test` (Linux AMD64/ARM64, native macOS ARM/Intel, and Windows)
+- `test` (Linux AMD64/ARM64, native macOS ARM/Intel, and Windows; both native
+  Mac legs also execute the exact Apple staging and system-Bash-3.2 syntax
+  compatibility fixture)
 - `build` (release build smoke on those same five platform runners)
 - `speed` (5-run median of `tr300 --fast` < 1500 ms on all three platforms)
 - `audit` (cargo audit, blocking)
@@ -495,6 +518,14 @@ These have all bitten previous releases. They're the load-bearing why-not-this-i
   Apple behavior changes).
 
 - **A newly created signing keychain is not automatically searchable by `codesign`.** Preserve the v4.0.1 script sequence: capture the user search list, temporarily prepend the ephemeral keychain for the fingerprint-based signing call, restore the list immediately and from cleanup, then compare the embedded leaf-certificate fingerprint. Removing that sequence recreates v4.0.0's clean-runner failure even though `security find-identity` succeeds.
+
+- **macOS Actions runners use system Bash 3.2.** Do not introduce `declare -A`,
+  `mapfile`, or `readarray` into the fresh Apple signer or native installer jobs;
+  Bash syntax lint on a newer developer shell does not prove those commands can
+  execute. v4.3.1's immutable tag reached all six platform builds and then both
+  fresh Apple signers failed before signing for exactly this reason. Preserve
+  both native Mac compatibility-fixture legs and the fail-closed Python
+  `os.scandir` inventories when regenerating or editing release workflows.
 
 - **`Cargo.lock` is tracked.** Both local `cargo package --locked` and the CI publish workflow use `--locked`. Keep `Cargo.lock` in git — don't add it to `.gitignore` and don't delete it before a release.
 

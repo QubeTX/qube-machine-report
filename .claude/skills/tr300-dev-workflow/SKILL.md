@@ -88,7 +88,13 @@ credential cutover:
 - **`.github/workflows/ci.yml`** — runs on every push to `main` and every pull request. Jobs:
   - `fmt` — `cargo fmt --check` (Linux only)
   - `clippy` — `cargo clippy --all-targets --workspace -- -D warnings` (Linux only)
-  - `test` — `cargo test --workspace --all-targets` on Linux + macOS ARM + Windows
+  - `test` — `cargo test --workspace --all-targets` on Linux AMD64/ARM64,
+    native macOS ARM/Intel, and Windows. Both native Mac legs additionally run
+    the exact named Apple release-staging block for both Apple targets, execute
+    the exact macOS-installer inventory snippets against positive and negative
+    fixtures, and syntax-check the affected native workflow plus tag-only build
+    matrix blocks with system `/bin/bash` 3.2 through
+    `--apple-staging-compatibility`.
   - `build` — `cargo build --release` smoke test on every platform, plus `--version` and `--fast --json` invocation to verify the binary actually runs
   - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
   - `audit` — blocking `cargo audit` against RustSec advisories; a finding fails CI
@@ -101,6 +107,16 @@ credential cutover:
 - **`.github/workflows/windows-installers.yml`** — adds six exact Windows installer/sidecar assets to the private draft through a separate checkout-free publisher, producing 30 assets.
 - **`.github/workflows/windows-installer-validation.yml`** — freezes those 30 exact bytes and runs pre-public fresh-install plus authenticated direct prior-to-candidate transition/uninstall/takeover checks while public `latest` remains unchanged; after final publication it separately runs the real updater-to-candidate matrix.
 - **`.github/workflows/macos-installer.yml`** — uses data-only prep and fresh `apple-signing` jobs, consumes the exact successful Windows proof, adds the four PKG/DMG assets, verifies the exact 34-asset inventory and every asset byte, and is the sole final publisher.
+
+The Apple compatibility work remains steps inside the existing two Mac `test`
+matrix legs; it does not add a job. The strict CI inventory remains 20 jobs.
+Affected native jobs in `release.yml` and `macos-installer.yml` must remain
+compatible with system Bash 3.2 and therefore must not use `declare -A`,
+`mapfile`, or `readarray`. Their fixed artifact inventories must use
+fail-closed Python `os.scandir` checks with
+`entry.stat(follow_symlinks=False)` to require the exact expected name set and
+nonempty regular files while rejecting hidden extras and linked or non-regular
+entries.
 
 To reproduce the CI gates locally:
 
@@ -125,6 +141,11 @@ release changes.**
 - `.github/workflows/macos-installer.yml` installs and exercises the universal
   PKG-in-DMG on those same architectures before publication.
 - `[workspace.metadata.dist].targets` keeps both Apple target triples.
+- Both native runner labels expose Apple's system `/bin/bash` 3.2 for workflow
+  `bash` steps. Keep the ARM and Intel compatibility fixtures blocking: each
+  executes the exact release-staging path and Bash-3.2 syntax coverage before a
+  tag exists. A successful parse under a newer local Bash does not substitute
+  for those runtime legs.
 
 The old `macos-13` capacity exception and Rosetta-as-primary-Intel proof are
 historical only. Do not remove `macos-15-intel` based on the old queue record;

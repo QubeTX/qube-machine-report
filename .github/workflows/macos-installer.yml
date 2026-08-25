@@ -780,16 +780,24 @@ jobs:
             tr300-x86_64-apple-darwin.tar.xz
             tr300-x86_64-apple-darwin.tar.xz.sha256
           )
-          declare -A remaining=()
-          for name in "${expected[@]}"; do remaining["$name"]=1; done
-          mapfile -d '' -t entries < <(find upstream -mindepth 1 -maxdepth 1 -print0)
-          [[ ${#entries[@]} -eq ${#expected[@]} ]]
-          for path in "${entries[@]}"; do
-            name=${path##*/}
-            [[ -n ${remaining[$name]+present} && -f "$path" && ! -L "$path" && -s "$path" ]]
-            unset 'remaining[$name]'
-          done
-          [[ ${#remaining[@]} -eq 0 ]]
+          python3 - upstream "${expected[@]}" <<'PY'
+          import os
+          import stat
+          import sys
+
+          directory, *expected = sys.argv[1:]
+          if os.path.islink(directory) or not os.path.isdir(directory):
+              raise SystemExit("upstream input is not a real directory")
+          with os.scandir(directory) as scanner:
+              entries = list(scanner)
+          names = [entry.name for entry in entries]
+          if len(names) != len(expected) or set(names) != set(expected):
+              raise SystemExit(f"unexpected upstream inputs: {names!r}")
+          for entry in entries:
+              metadata = entry.stat(follow_symlinks=False)
+              if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+                  raise SystemExit(f"unsafe upstream input: {entry.name!r}")
+          PY
           for target in aarch64-apple-darwin x86_64-apple-darwin; do
             archive="tr300-$target.tar.xz"
             payload_hash=$(shasum -a 256 "upstream/$archive" | awk '{print $1}')
@@ -906,13 +914,25 @@ jobs:
               > SHA256SUMS
             shasum -a 256 -c SHA256SUMS
           )
-          mapfile -d '' -t prepared < <(
-            find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0
-          )
-          [[ ${#prepared[@]} -eq 4 ]]
-          for path in "${prepared[@]}"; do
-            [[ -f "$path" && ! -L "$path" && -s "$path" ]]
-          done
+          python3 - "$OUTPUT_DIRECTORY" \
+            tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'
+          import os
+          import stat
+          import sys
+
+          directory, *expected = sys.argv[1:]
+          if os.path.islink(directory) or not os.path.isdir(directory):
+              raise SystemExit("prepared output is not a real directory")
+          with os.scandir(directory) as scanner:
+              entries = list(scanner)
+          names = [entry.name for entry in entries]
+          if len(names) != len(expected) or set(names) != set(expected):
+              raise SystemExit(f"unexpected prepared outputs: {names!r}")
+          for entry in entries:
+              metadata = entry.stat(follow_symlinks=False)
+              if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+                  raise SystemExit(f"unsafe prepared output: {entry.name!r}")
+          PY
 
       - name: Upload the fixed prepared installer inputs
         id: prepared-upload
@@ -1200,13 +1220,24 @@ jobs:
           validate_artifact "$work_directory/artifact-after.json"
           cmp "$work_directory/artifact-before.json" "$work_directory/artifact-after.json"
 
-          mapfile -d '' -t prepared < <(
-            find "$PREPARED_DIRECTORY" -mindepth 1 -maxdepth 1 -print0
-          )
-          [[ ${#prepared[@]} -eq ${#expected[@]} ]]
-          for path in "${prepared[@]}"; do
-            [[ -f "$path" && ! -L "$path" && -s "$path" ]]
-          done
+          python3 - "$PREPARED_DIRECTORY" "${expected[@]}" <<'PY'
+          import os
+          import stat
+          import sys
+
+          directory, *expected = sys.argv[1:]
+          if os.path.islink(directory) or not os.path.isdir(directory):
+              raise SystemExit("prepared input is not a real directory")
+          with os.scandir(directory) as scanner:
+              entries = list(scanner)
+          names = [entry.name for entry in entries]
+          if len(names) != len(expected) or set(names) != set(expected):
+              raise SystemExit(f"unexpected prepared inputs: {names!r}")
+          for entry in entries:
+              metadata = entry.stat(follow_symlinks=False)
+              if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+                  raise SystemExit(f"unsafe prepared input: {entry.name!r}")
+          PY
           expected_provenance=$(printf 'source_sha=%s\nrelease_tag=%s\nversion=%s' \
             "$EXPECTED_SOURCE_SHA" "$RELEASE_TAG" "$RELEASE_VERSION")
           [[ "$(cat "$PREPARED_DIRECTORY/PROVENANCE")" == "$expected_provenance" ]]
@@ -1215,9 +1246,7 @@ jobs:
             [[ $(wc -l < SHA256SUMS | tr -d '[:space:]') == 3 ]]
             shasum -a 256 -c SHA256SUMS
           )
-          mapfile -t checksum_names < <(awk '{print $2}' "$PREPARED_DIRECTORY/SHA256SUMS" | sort)
-          [[ ${#checksum_names[@]} -eq 3 ]]
-          printf '%s\n' "${checksum_names[@]}" | cmp -s - <(
+          awk '{print $2}' "$PREPARED_DIRECTORY/SHA256SUMS" | sort | cmp -s - <(
             printf '%s\n' PROVENANCE preinstall tr300-universal
           )
           awk 'length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || NF != 2 { exit 1 }' \

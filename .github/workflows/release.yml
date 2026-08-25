@@ -358,17 +358,24 @@ jobs:
           archive="tr300-$APPLE_TARGET.tar.xz"
           sidecar="$archive.sha256"
           manifest="$APPLE_TARGET-dist-manifest.json"
-          expected=("$archive" "$sidecar" "$manifest")
-          declare -A remaining=()
-          for name in "${expected[@]}"; do remaining["$name"]=1; done
-          mapfile -d '' -t entries < <(find unsigned -mindepth 1 -maxdepth 1 -print0)
-          [[ ${#entries[@]} -eq 3 ]]
-          for path in "${entries[@]}"; do
-            name=${path##*/}
-            [[ -n ${remaining[$name]+present} && -f "$path" && ! -L "$path" && -s "$path" ]]
-            unset 'remaining[$name]'
-          done
-          [[ ${#remaining[@]} -eq 0 ]]
+          python3 - unsigned "$archive" "$sidecar" "$manifest" <<'PY'
+          import os
+          import stat
+          import sys
+
+          directory, *expected = sys.argv[1:]
+          if os.path.islink(directory) or not os.path.isdir(directory):
+              raise SystemExit("unsigned input is not a real directory")
+          with os.scandir(directory) as scanner:
+              entries = list(scanner)
+          names = [entry.name for entry in entries]
+          if len(names) != len(expected) or set(names) != set(expected):
+              raise SystemExit(f"unexpected unsigned inputs: {names!r}")
+          for entry in entries:
+              metadata = entry.stat(follow_symlinks=False)
+              if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
+                  raise SystemExit(f"unsafe unsigned input: {entry.name!r}")
+          PY
           archive_sha=$(shasum -a 256 "unsigned/$archive" | awk '{print $1}')
           expected_sidecar="$archive_sha *$archive"
           sidecar_size=$(wc -c < "unsigned/$sidecar" | tr -d '[:space:]')
