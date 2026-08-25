@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.5**.
-The working fix-forward manifest is **4.3.6**. PR #14 merged as
+Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.6**.
+The working fix-forward manifest is **4.3.7**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -91,8 +91,18 @@ exact unyanked v4.3.5 with checksum
 Tagged Release `32824925889` created correct private 24-asset draft
 `376242296`, then host verification failed because GitHub's by-tag endpoint
 returns 404 for draft releases. Downstream workflows skipped; the draft stays
-private. All six tags stay immutable. v4.2.2 remains the complete public
-GitHub-distribution boundary until reviewed v4.3.6 passes the normal
+private. PR #23 head `ebb4f76a` passed Release plan `32829236145` and CI
+`32829236226`, then merged as exact `9ab392f4`. Exact-main CI `32830286853`,
+automatic OIDC run `32830286932`, and native preflight `32830369613` passed;
+crates.io serves exact unyanked v4.3.6 with checksum
+`4ebfb22c54355c489f48f79aa5a6bd5a72f3fc0a7285201885957081ce1bd427`.
+Tagged Release `32831292249` passed all six builds, both Apple signers, global
+assembly, and exact preparation, then host job `97751759346` created private
+24-asset draft `376283574` and failed because default `sha256sum` records the
+managed installer as `tr300-installer.sh` while its lookup expected
+`*tr300-installer.sh`. Downstream workflows skipped; both v4.3.5 and v4.3.6
+drafts remain private. All seven tags stay immutable. v4.2.2 remains the
+complete public GitHub-distribution boundary until reviewed v4.3.7 passes the normal
 automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
@@ -638,9 +648,10 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.6 chain completes, v4.2.2 remains the complete public GitHub
-  distribution. The v4.3.0 through v4.3.5 crates/tags stay published and
-  immutable; only v4.3.5 has a GitHub draft, which remains private. Native Apple workflow blocks must parse
+- Until the v4.3.7 chain completes, v4.2.2 remains the complete public GitHub
+  distribution. The v4.3.0 through v4.3.6 crates/tags stay published and
+  immutable; v4.3.5 and v4.3.6 each have one exact private 24-asset GitHub
+  draft. Native Apple workflow blocks must parse
   under system `/bin/bash` 3.2; both Mac CI legs syntax-check the affected jobs
   and execute the exact checkout-free signer-staging block before tagging.
 

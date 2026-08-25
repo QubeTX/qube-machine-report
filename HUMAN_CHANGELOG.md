@@ -13,12 +13,35 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.7] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.6 remains an immutable crate and private draft, while
+  v4.3.7 is the next complete downloadable release candidate.
+
+### Fixed
+- **The release publisher now reads the verified installer checksum in the
+  same filename format that its checksum tool writes.** The previous workflow
+  looked for an extra star before the filename, found nothing, and stopped
+  after safely creating the private draft. The corrected handoff sends the
+  exact installer identity into the automatic Windows and Mac stages.
+- **Tests now execute the final checksum handoff instead of stopping just before
+  it.** The fixture uses the same spacing and filename emitted in a real release
+  and requires the exact checksum to reach the next workflow.
+
+### Security
+- **Version 4.3.6 never became public.** Its crate, builds, Apple signing and
+  notarization, and exact 24-download draft all succeeded. The checksum lookup
+  typo then stopped the chain before Windows and Mac completion. The tag and
+  private draft remain untouched; v4.3.7 fixes forward.
+
 ## [4.3.6] - 2026-08-25
 
 ### Changed
 - **This is a packaging-only repair; the report itself is unchanged from the
-  v4.3 line.** Version 4.3.5 remains an immutable crate and private draft, while
-  v4.3.6 is the next complete downloadable release candidate.
+  v4.3 line.** Its immutable crate and tag remain available. Its correct
+  24-download draft remains private, and v4.3.7 is the next complete candidate.
 
 ### Fixed
 - **The automated release chain can now see its own private draft.** GitHub does
@@ -32,17 +55,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   public, prerelease, or empty download sets stop before publication.
 
 ### Security
-- **Version 4.3.5 never became public.** It built and signed successfully and
-  created the correct 24-download private draft. Its final verification used
-  the wrong GitHub lookup, received “not found,” and stopped the chain before
-  Windows and Mac completion. The draft remains private; v4.3.6 fixes forward.
+- **Version 4.3.6 never became public.** It built and signed successfully and
+  created the correct 24-download private draft. Its final checksum lookup
+  expected an extra star before the installer filename, found no digest, and
+  stopped the chain before Windows and Mac completion. The draft remains
+  private; v4.3.7 fixes forward.
 
 ## [4.3.5] - 2026-08-25
 
 ### Changed
 - **This is a packaging-only repair; the report itself is unchanged from the
   v4.3 line.** Its immutable crate and tag remain available. Its correct
-  24-download draft remains private, and v4.3.6 is the next complete candidate.
+  24-download draft remains private, and v4.3.6 was its immutable fix-forward.
 
 ### Fixed
 - **Release notes and download metadata now survive their validation step

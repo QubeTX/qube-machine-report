@@ -7,25 +7,61 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.6 — private-draft identity fix-forward (as of 2026-08-25)
+### v4.3.7 — managed-installer digest handoff fix-forward (as of 2026-08-25)
 
-Release status: active packaging-only candidate. GitHub's REST
-`/releases/tags/{tag}` endpoint does not return private drafts, even to the
-authenticated publisher. v4.3.6 resolves the exact private draft through the
-fully paginated authenticated releases collection, requires one matching tag,
-target SHA, stable draft state, title, URL, and asset inventory, then carries
-its positive numeric release ID through Windows packaging, private Windows
-validation, native Mac validation, and final publication. Pre-public reads and
-the final visibility PATCH use `/releases/{id}`; public checks remain tag based.
+Release status: active packaging-only candidate. Tagged v4.3.6 Release run
+`32831292249` created and revalidated its exact private 24-asset draft, then
+failed while extracting the already-verified managed shell-installer digest.
+The prepared checksum manifest uses GNU `sha256sum` text records whose second
+field is `tr300-installer.sh`; the host step incorrectly searched for the
+literal filename `*tr300-installer.sh`, returned an empty value, and failed its
+64-hex assertion. Windows assembly and every later workflow skipped, so the
+v4.3.6 draft remains private.
+
+v4.3.7 changes only that distribution handoff and its regression boundary. The
+publisher now matches the exact plain filename. The executable host fixture
+runs through the previously omitted checksum/output tail with a real two-space
+checksum record and requires the exact digest in `GITHUB_OUTPUT`. The complete
+local gate passed: formatting, Clippy with warnings denied, all 208
+unit/integration/doc tests, release build, RustSec audit, cargo-dist 0.31.0
+plan, actionlint/ShellCheck, the full executable provenance suite, Apple
+staging compatibility, managed-installer transaction fixtures, the 39-file
+package inventory, publish dry-run, and fast/full table, JSON, and ASCII
+smokes. Two independent reviews found no blocker. Seven alternating full-mode
+runs against installed v4.2.2 measured medians of 5140.3 ms and 2102.1 ms
+(59.1% faster; 2.45×). Eleven alternating fast-mode runs measured 241.0 ms and
+242.3 ms (+0.6%, statistically unchanged and not a speedup claim). Windows CPU
+temperature remained absent/JSON `null`; the reported 53 C NVIDIA temperature
+matched direct `nvidia-smi` at 53 C. Exact-head PR checks, exact-main CI/OIDC,
+native preflight, and the automatic 24 → 30 → validated → 34/public chain
+remain required.
+
+### v4.3.6 — Published crate; correct private draft, failed checksum handoff
+
+Release status: exact source and crate publication completed; a second correct
+GitHub draft exists but remains private. PR #23 head
+`ebb4f76a87b7d3eaea7970dce9cb35c68332723c` passed Release plan
+`32829236145` and all 20 PR CI jobs in `32829236226` after one macOS ARM runner
+cleanup rerun. It merged as `9ab392f4df56aa8824f5a8627f940eaee0b62b44`;
+exact-main CI `32830286853` passed 20/20, trusted-OIDC run `32830286932`
+published unyanked v4.3.6 with checksum
+`4ebfb22c54355c489f48f79aa5a6bd5a72f3fc0a7285201885957081ce1bd427`,
+and native Intel/Apple Silicon credential preflight `32830369613` passed.
 
 The executable host fixture extracts the production asset/list/create/list/ID
 sequence and reproduces the real API split: a draft is visible in the
 authenticated collection while the by-tag endpoint returns 404. It accepts one
 exact 24-asset draft and rejects a pre-existing match on page two before any
 creation, duplicate matches, wrong targets, public or prerelease state,
-missing/extra assets, and zero-byte assets. Exact-head PR gates, exact-main
-CI/OIDC, native preflight, and the fresh automatic 24 → 30 → validated →
-34/public chain remain required.
+missing/extra assets, and zero-byte assets. Tagged Release `32831292249` passed
+its plan, all six platform builds, both fresh Apple signing/notarization jobs,
+global assembly, and exact 24-asset preparation. Host job `97751759346`
+created and revalidated private draft ID `376283574` for exact tag/target
+`v4.3.6` / `9ab392f4...`, with all 24 expected nonempty assets. Its final
+checksum lookup expected `*tr300-installer.sh`, while the immutable prepared
+manifest contains `tr300-installer.sh`; the empty result failed the following
+64-hex assertion. Announcement and every downstream workflow skipped. The
+draft stays private and the tag is immutable; v4.3.7 fixes forward.
 
 The corrected local candidate passed formatting, Clippy with warnings denied,
 all 208 unit/integration/doc tests, release build, RustSec audit, cargo-dist

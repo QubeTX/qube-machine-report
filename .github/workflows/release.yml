@@ -1217,7 +1217,7 @@ jobs:
               .html_url == $url and ([.assets[].name] | sort) == $expected_assets and
               ([.assets[].size > 0] | all)
             ' "$RUNNER_TEMP/release-after.json" >/dev/null
-          managed_installer_sha256=$(awk '$2 == "*tr300-installer.sh" { print $1 }' \
+          managed_installer_sha256=$(awk '$2 == "tr300-installer.sh" { print $1 }' \
             "$ASSET_DIRECTORY/__tr300-asset-sha256s")
           [[ "$managed_installer_sha256" =~ ^[0-9a-f]{64}$ ]]
           echo "managed_installer_sha256=$managed_installer_sha256" >> "$GITHUB_OUTPUT"

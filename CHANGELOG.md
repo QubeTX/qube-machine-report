@@ -7,13 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.7] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.6 crate and tag remain published, and its
+  correct 24-asset GitHub draft remains private. v4.3.7 is the sole candidate
+  for the complete cross-platform GitHub download release.
+
+### Fixed
+- **The fresh release publisher now reads the managed shell-installer digest
+  from the checksum manifest using the filename format actually written by
+  `sha256sum`.** GNU text-mode records place `tr300-installer.sh`, without a
+  literal `*`, in field two. The corrected exact-field match propagates the
+  verified 64-hex digest to the downstream Windows and macOS workflows.
+- **The executable release-host fixture now runs through the checksum handoff.**
+  It supplies the real two-space checksum record, executes the production
+  post-create list/by-ID/digest/output tail, and requires the exact managed
+  installer digest in `GITHUB_OUTPUT`, so the v4.3.6 typo fails locally.
+
+### Security
+- **The failed v4.3.6 chain created no public release.** Exact-main CI,
+  trusted-OIDC crate publication, native Apple credential preflight, every
+  platform build, both Apple signing/notarization jobs, global assembly, and
+  fixed 24-asset preparation passed. Hosting created and revalidated the exact
+  private draft, then stopped while extracting the already-verified managed
+  installer digest. All downstream workflows skipped; the private draft and
+  immutable tag remain untouched.
+
 ## [4.3.6] - 2026-08-25
 
 ### Changed
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
-  behavior.** The immutable v4.3.5 crate and tag remain published, and its
-  correctly assembled 24-asset GitHub draft remains private. v4.3.6 is the sole
-  candidate for the complete cross-platform GitHub download release.
+  behavior.** Its immutable crate and tag remain published. Its correctly
+  assembled 24-asset GitHub draft remains private after the host checksum
+  handoff failed; v4.3.7 is the sole complete-download candidate.
 
 ### Fixed
 - **Every pre-public workflow now identifies private drafts through the
@@ -31,12 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and zero-byte assets.
 
 ### Security
-- **The failed v4.3.5 chain created no public release.** Its tagged Release run
+- **The failed v4.3.6 chain created no public release.** Its tagged Release run
   completed every build, both Apple signing/notarization jobs, global assembly,
-  and exact 24-asset preparation. `gh release create` then made the correct
-  private draft, but the post-create assertion used GitHub's draft-blind
-  release-by-tag REST endpoint and received 404. The run failed, downstream
-  workflows skipped, and the draft remains private and immutable evidence.
+  and exact 24-asset preparation. Hosting created and revalidated the correct
+  private draft by numeric ID, then searched a GNU `sha256sum` record for a
+  literal-star filename that the record does not contain. The run failed,
+  downstream workflows skipped, and the draft remains private and immutable
+  evidence.
 
 ## [4.3.5] - 2026-08-25
 
@@ -44,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **This is a distribution-only fix-forward carrying the unchanged v4.3 product
   behavior.** Its immutable crate and tag remain published. Its correct
   24-asset GitHub draft remains private after the host assertion failed;
-  v4.3.6 is the sole complete-download candidate.
+  v4.3.6 was its immutable fix-forward and v4.3.7 is the current candidate.
 
 ### Fixed
 - **Release metadata validation now preserves the complete cargo-dist manifest.**
