@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.11**.
-The working fix-forward manifest is **4.3.12**. PR #14 merged as
+Complete public GitHub distribution and current crates.io package: **4.3.12**.
+The working manifest is **4.3.12**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -137,9 +137,11 @@ v4.3.11 then passed exact-main CI/OIDC, native preflight, Release, and Windows
 assembly and reached exact private 30-asset draft `376514152`. Its signed and
 notarized Mac package passed the managed-install rejection before both native
 jobs stopped while removing a fixture from root-owned `/Users` without
-privilege. All twelve v4.3.0 through v4.3.11 tags stay immutable. v4.2.2
-remains the complete public GitHub-distribution boundary until reviewed
-v4.3.12 passes the normal automated tag chain. Exact v4.2.2 source
+privilege. v4.3.12 then completed the exact-main CI/OIDC, native preflight,
+private 24-to-30 asset assembly, private Windows validation, native Intel/ARM
+PKG lifecycles, exact 34-asset publication, and post-public validation chain at
+source/tag `19246b76f39c53340e6be62a332cedca9bca766c`. All prior v4.3 tags stay
+immutable. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
@@ -175,15 +177,14 @@ exact-SHA plus hosted package matrices. The Alienware's natural Global MSI
 remains v4.1.3 only because the final v4.2.2 UAC prompt was cancelled safely;
 do not represent that personal same-channel transition as passed yet.
 
-Observed distribution state: release source
-`db0f538c82961569a7118b105a20e967b15476f0` passed exact-SHA CI/crates,
-signed Apple archives, every Windows package/transition, and native ARM/Intel
-direct-PKG/legacy-DMG publication. Public 34-asset, checksum, stable `latest`
-URL, and
-crates.io audits passed. Homepage commit
-`4829c4430ee917bcb1508c2ea7ac87988ba5e055` is deployed at
-`https://reports.qubetx.com/`. Exact run IDs, submissions, and hashes live in
-`TESTING.md` and the current tracked handoff.
+Observed distribution state: release source/tag
+`19246b76f39c53340e6be62a332cedca9bca766c` passed exact-main CI, trusted-OIDC
+crates publication, signed Apple artifacts, every Windows package/transition,
+and native ARM/Intel direct-PKG/legacy-DMG publication. Public 34-asset, digest,
+stable `latest` URL, and crates.io audits passed. The live homepage at
+`https://reports.qubetx.com/` already uses versionless `releases/latest` links.
+Exact run IDs, submissions, and hashes live in `TESTING.md` and the current
+tracked handoff.
 
 v4 is intentional: new public Rust record fields and changed public collector
 helper signatures are source-breaking under SemVer even though the CLI and
@@ -687,8 +688,8 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.12 chain completes, v4.2.2 remains the complete public GitHub
-  distribution. The v4.3.0 through v4.3.11 crates/tags stay published and
+- v4.3.12 is the complete public GitHub distribution. The v4.3.0 through
+  v4.3.11 crates/tags stay published and
   immutable; v4.3.5, v4.3.6, v4.3.7, and v4.3.8 each have one exact private 24-asset
   GitHub draft. A read-only downstream token cannot enumerate those drafts
   because GitHub requires push access for draft visibility; the automated

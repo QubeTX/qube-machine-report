@@ -7,10 +7,10 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete public GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.11` / `4.3.12` (all prior tags remain immutable)
-**Active fix-forward branch:** `codex/v4.3.12-release`
-**Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
-**Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
+**Complete public GitHub distribution / crates.io / working version:** `4.3.12` / `4.3.12` / `4.3.12` (all prior tags remain immutable)
+**Release state:** v4.3.12 complete; continuation is the separate physical-hardware queue
+**Release source checkpoint:** `19246b76f39c53340e6be62a332cedca9bca766c`
+**Last complete GitHub release commit:** `19246b76f39c53340e6be62a332cedca9bca766c`
 **Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
 29664688035; native macOS 29664824418; Windows Installers 29664824432; Windows
 transitions 29664948031. v4.3.0 exact-main CI 32794371259; automatic trusted-
@@ -60,7 +60,12 @@ closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
   by Windows 32866237615; private Windows validation 32866624445 passed;
   failed-closed macOS 32866237569 after both signed/
   notarized packages passed the managed-install rejection and the harness
-  lacked privilege only for final `/Users` fixture cleanup.
+  lacked privilege only for final `/Users` fixture cleanup. v4.3.12 PR CI
+  32868424781; Release plan 32868425481; exact-main CI 32869031682; automatic
+  trusted-OIDC crates 32869029189; native preflight 32869891315; successful
+  13-job Release 32869971805; Windows Installers 32870555353; private Windows
+  validation 32870926989; successful macOS finalization 32870555348; and
+  successful post-public Windows/updater validation 32871841072.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
 `#adrlog`, `#v43`, `#v430`, `#r43`
@@ -70,7 +75,7 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-08-24–25 v4.3.0–v4.3.11 publication splits and v4.3.12 fix-forward
+## 2026-08-24–25 v4.3.0–v4.3.11 publication splits and v4.3.12 completion
 
 Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
 published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
@@ -227,12 +232,17 @@ state-preservation checks. They then failed only while deleting their exact
 second-home fixture: unprivileged `rmdir` cannot unlink a child from root-owned
 `/Users`. The publisher and all public smokes skipped; nothing became public.
 
-The supported path is now v4.3.12 through the normal reviewed no-click
-automation on `codex/v4.3.12-release`. Product behavior and installer policy
-remain unchanged. After exact-main CI, automatic OIDC publication, and native
-preflight pass, push only `v4.3.12` and let the private
-24-to-30-to-validated-to-34 chain run. Never move or delete v4.3.0 through
-v4.3.11, hand-assemble any existing draft, or publish a partial release.
+PR #30 exact head `7fe751f8fe39bd4c5764998f3784b26d025936a2` passed all
+20 CI jobs in `32868424781` and Release plan `32868425481`, then merged normally
+as exact source/tag `19246b76f39c53340e6be62a332cedca9bca766c`.
+Exact-main CI `32869031682`, automatic trusted-OIDC publication `32869029189`,
+native preflight `32869891315`, tagged Release `32869971805`, Windows Installers
+`32870555353`, private Windows validation `32870926989`, macOS finalization
+`32870555348`, and post-public Windows/updater validation `32871841072` all
+passed. Public release `376540890` has exactly 34 nonempty digest-bearing assets
+and is `latest`. Product behavior and installer policy remain unchanged. Never
+move or delete v4.3.0 through v4.3.11, hand-assemble any existing draft, or
+publish a partial release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 
@@ -1203,27 +1213,19 @@ This section records observed hosted state, never expectation.
 
 ## What's Next
 
-The v4.3 GitHub distribution and homepage update are not complete. Continue the
-immutable-tag-safe v4.3.12 release before returning to the physical-hardware
+The v4.3.12 crates.io and complete 34-asset GitHub distribution are public and
+audited. The homepage already uses versionless `releases/latest` links, so no
+source deployment was required. Continue only the separate physical-hardware
 queue:
 
-1. Finish review and qualification of the one-line fixture-cleanup repair on
-   `codex/v4.3.12-release`; pass the complete local gate, exact-head PR CI, and
-   Release plan.
-2. Merge only the accepted exact SHA. Require exact-main CI, automatic trusted-
-   OIDC v4.3.12 publication, and native Intel/Apple Silicon credential/staging
-   preflight before pushing only immutable tag `v4.3.12`.
-3. Require the automatic private 24-to-30-to-validated-to-34 asset chain, both
-   native Apple lifecycles, public Windows updater plus Linux/macOS smokes, and
-   the public-byte audit before updating the homepage or closing `#r43`/`#v43`.
-4. Keep `v4.3.0` through `v4.3.11` immutable. The first five produced no draft;
+1. Keep `v4.3.0` through `v4.3.11` immutable. The first five produced no draft;
    v4.3.5, v4.3.6, v4.3.7, and v4.3.8 produced private drafts `376242296`,
    `376283574`, `376309349`, and `376357745`; v4.3.9 produced private 30-asset
    draft `376401700`, v4.3.10 produced private 30-asset draft `376446284`, and
    v4.3.11 produced private 30-asset draft `376514152`.
    Do not delete, move, reuse, or hand-recover any tag or draft.
-5. After release closure, continue the personal Alienware, AMD64 Linux, and
+2. Continue the personal Alienware, AMD64 Linux, and
    Raspberry Pi 4 tasks. Those physical checks remain open and must not be
    inferred from hosted evidence.
-6. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
+3. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
    work is actually ready.
