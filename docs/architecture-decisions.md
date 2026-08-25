@@ -1756,8 +1756,8 @@ their values must never enter this ADR, git, task memory, or logs.
 
 **Status:** Accepted and release-blocking. PR #15 exact head and its merge on
 exact `main` passed the implementation, workflow, provenance, and native
-fixture gates. The v4.3.0 crate and failed tag are immutable; the reviewed
-v4.3.1 exact SHA and tagged end-to-end chain remain required before complete
+fixture gates. The v4.3.0 and v4.3.1 crates/tags are immutable; the reviewed
+v4.3.2 exact SHA and tagged end-to-end chain remain required before complete
 GitHub publication.
 
 Cargo-dist's generic generated workflow recognizes prerelease and alternate tag

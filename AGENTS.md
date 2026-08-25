@@ -1241,6 +1241,8 @@ Core:
 - `unicode-width = "0.2"`
 - `ureq = "2"` (tls, json)
 - `serde_json = "1"`
+- `sha2 = "0.10"`
+- `tempfile = "3"`
 
 Build:
 - `clap = "4.5"` (derive, env)
@@ -1248,8 +1250,8 @@ Build:
 
 Platform-specific:
 - Windows: `wmi = "0.14"`, `serde = "1"`, `winapi = "0.3"`,
-  `winreg = "0.52"`, `sha2 = "0.10"`, `tempfile = "3"`
-- Unix: `libc = "0.2"`, `users = "0.11"`
+  `winreg = "0.52"`
+- Unix: `libc = "0.2"`, `uzers = "0.12"`
 
 Dev:
 - `assert_cmd = "2"`
