@@ -5929,11 +5929,11 @@ def check_structural_contract(
         "[IO.FileAttributes]::ReparsePoint",
         "Windows cargo-dist helper reparse-point guard",
     )
-    forbid(
-        windows_cargo_dist_installer,
-        "\n& $installer\n",
-        "Windows cargo-dist helper must not inherit StrictMode into the official installer",
-    )
+    if "\n& $installer\n" in windows_cargo_dist_installer:
+        raise AssertionError(
+            "Windows cargo-dist helper must not inherit StrictMode into the "
+            "official installer"
+        )
     if ".LinkType" in windows_cargo_dist_installer:
         raise AssertionError(
             "Windows cargo-dist helper must not reject ordinary NTFS hard links"
