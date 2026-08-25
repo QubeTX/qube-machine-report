@@ -160,6 +160,29 @@ tr300_download() {
     fi
 }
 
+tr300_stage_dist_installer() {
+    staged_installer=$1
+    if [ "${TR300_DIST_INSTALLER_PATH+x}" = x ]; then
+        local_installer=$TR300_DIST_INSTALLER_PATH
+        case "$local_installer" in
+            /*) ;;
+            *) tr300_fail 'TR300_DIST_INSTALLER_PATH must be an absolute local path' ;;
+        esac
+        if [ ! -f "$local_installer" ] || [ -L "$local_installer" ] ||
+            [ ! -r "$local_installer" ]; then
+            tr300_fail 'TR300_DIST_INSTALLER_PATH must name a readable regular file, not a symbolic link'
+        fi
+        /bin/cp "$local_installer" "$staged_installer" ||
+            tr300_fail 'could not copy the local cargo-dist installer into private staging'
+        if [ ! -f "$staged_installer" ] || [ -L "$staged_installer" ]; then
+            tr300_fail 'the staged local cargo-dist installer is not a regular file'
+        fi
+    else
+        tr300_download "${tr300_release_base}/tr300-dist-installer.sh" "$staged_installer" ||
+            tr300_fail 'could not download the immutable managed installer'
+    fi
+}
+
 tr300_install_prefix() {
     if [ -n "${TR300_INSTALL_DIR:-}" ]; then
         printf '%s\n' "$TR300_INSTALL_DIR"
@@ -402,8 +425,7 @@ tr300_main() {
     tr300_save_managed_state
     tr300_assert_no_unknown_path_owners
     dist_installer="$tr300_temp/tr300-dist-installer.sh"
-    tr300_download "${tr300_release_base}/tr300-dist-installer.sh" "$dist_installer" \
-        || tr300_fail 'could not download the immutable managed installer'
+    tr300_stage_dist_installer "$dist_installer"
     tr300_verify_dist_installer "$dist_installer"
     tr300_prepare_sha256sum "$dist_installer"
     chmod 700 "$dist_installer" || tr300_fail 'could not protect the managed installer'

@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.6`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.7` (battery hardening, Windows
+- Current crates.io version: `4.3.7`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.8` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -115,11 +115,23 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   draft validation because default `sha256sum` writes `tr300-installer.sh` as
   field two while the managed-installer lookup required
   `*tr300-installer.sh`. Announcement and downstream workflows skipped.
-  No v4.3.0 through v4.3.4 draft exists; v4.3.5 and v4.3.6 each have one exact
-  private 24-asset draft. Never move, delete, reuse, or rerun any v4.3.0 through
-  v4.3.6 tag unchanged.
+  PR #24 exact head `eebce78cb0e62efce1e9d70ec20068316f5c36d5` passed Release
+  plan `32833632174` and all 20 CI jobs in `32833632116`, then merged as exact
+  `b9aa12850720b49c120c6465cefd094a843c5fc4`. Exact-main CI
+  `32834399658`, automatic trusted-OIDC crates run `32834399800`, and native
+  preflight `32835377627` passed. Crates.io serves exact unyanked v4.3.7 with
+  checksum `225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
+  Tagged Release `32835470143` passed all 13 jobs and created exact private
+  24-asset draft `376309349`. The automatic Windows and macOS workflow-run
+  source resolvers then failed in runs `32835918254` and `32835918239`: their
+  read-only GitHub tokens do not have push access, so GitHub's authenticated
+  release collection omits private drafts and both resolvers deterministically
+  saw zero matching releases. Every downstream build/publication job skipped;
+  the exact draft remains private. No v4.3.0 through v4.3.4 draft exists;
+  v4.3.5, v4.3.6, and v4.3.7 each have one exact private 24-asset draft. Never
+  move, delete, reuse, or rerun any v4.3.0 through v4.3.7 tag unchanged.
   v4.2.2 remains the last complete public GitHub distribution until reviewed
-  v4.3.7 passes exact-main CI/OIDC and the automatic private
+  v4.3.8 passes exact-main CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;

@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $oldTestOnly = $env:TR300_MANAGED_INSTALLER_TEST_ONLY
 $oldXdg = $env:XDG_CONFIG_HOME
 $oldInstallDir = $env:TR300_INSTALL_DIR
+$oldDistInstallerPath = $env:TR300_DIST_INSTALLER_PATH
 $oldPath = $env:PATH
 $oldLocation = Get-Location
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("tr300-managed-powershell-test-" + [guid]::NewGuid().ToString('N'))
@@ -171,11 +172,54 @@ try {
     Set-Content -LiteralPath $rawDistInstaller -Value '# exact cargo-dist fixture bytes' -NoNewline
     $Tr300DistInstallerSha256 = Get-Tr300Sha256 -Path $rawDistInstaller
     Assert-Tr300DistInstallerHash -Path $rawDistInstaller
+
+    $localSourceDirectory = Join-Path $fixture 'local source'
+    $localStagingDirectory = Join-Path $fixture 'local staging'
+    New-Item -ItemType Directory -Path $localSourceDirectory, $localStagingDirectory | Out-Null
+    $localDistInstaller = Join-Path $localSourceDirectory 'tr300-dist-installer.ps1'
+    Copy-Item -LiteralPath $rawDistInstaller -Destination $localDistInstaller
+    $stagedDistInstaller = Join-Path $localStagingDirectory 'tr300-dist-installer.ps1'
+    $script:tr300UnexpectedDownload = $false
+    function Invoke-WebRequest {
+        $script:tr300UnexpectedDownload = $true
+        throw 'local override unexpectedly attempted a network download'
+    }
+    try {
+        $env:TR300_DIST_INSTALLER_PATH = $localDistInstaller
+        Copy-Tr300DistInstallerToPrivateStaging -Destination $stagedDistInstaller
+    } finally {
+        Remove-Item -LiteralPath Function:\Invoke-WebRequest
+    }
+    if ($script:tr300UnexpectedDownload -or
+        -not (Test-Path -LiteralPath $stagedDistInstaller -PathType Leaf) -or
+        (Get-Tr300Sha256 -Path $stagedDistInstaller) -cne $Tr300DistInstallerSha256) {
+        throw 'valid local cargo-dist installer was not copied and rebound in private staging'
+    }
+    Assert-Tr300DistInstallerHash -Path $stagedDistInstaller
+
+    $malformedLocalPaths = @('   ', 'relative-installer.ps1', $localSourceDirectory)
+    for ($index = 0; $index -lt $malformedLocalPaths.Count; $index++) {
+        $env:TR300_DIST_INSTALLER_PATH = $malformedLocalPaths[$index]
+        $rejectedDestination = Join-Path $localStagingDirectory "rejected-$index.ps1"
+        $rejected = $false
+        try {
+            Copy-Tr300DistInstallerToPrivateStaging -Destination $rejectedDestination
+        } catch {
+            $rejected = $true
+        }
+        if (-not $rejected -or (Test-Path -LiteralPath $rejectedDestination)) {
+            throw 'malformed local cargo-dist installer path was accepted'
+        }
+    }
+
+    $env:TR300_DIST_INSTALLER_PATH = $localDistInstaller
+    $localMismatchInstaller = Join-Path $localStagingDirectory 'local-mismatch.ps1'
+    Copy-Tr300DistInstallerToPrivateStaging -Destination $localMismatchInstaller
     $Tr300DistInstallerSha256 = '0' * 64
     $mismatchExecutionMarker = Join-Path $fixture 'mismatch-executed'
     $mismatchMessage = $null
     try {
-        Assert-Tr300DistInstallerHash -Path $rawDistInstaller
+        Assert-Tr300DistInstallerHash -Path $localMismatchInstaller
         Set-Content -LiteralPath $mismatchExecutionMarker -Value executed -NoNewline
     } catch {
         $mismatchMessage = $_.Exception.Message
@@ -189,6 +233,7 @@ try {
     $env:TR300_MANAGED_INSTALLER_TEST_ONLY = $oldTestOnly
     $env:XDG_CONFIG_HOME = $oldXdg
     $env:TR300_INSTALL_DIR = $oldInstallDir
+    $env:TR300_DIST_INSTALLER_PATH = $oldDistInstallerPath
     $env:PATH = $oldPath
     Set-Location -LiteralPath $oldLocation
     Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue

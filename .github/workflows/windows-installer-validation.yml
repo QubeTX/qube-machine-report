@@ -52,6 +52,12 @@ jobs:
          github.event.workflow_run.event == 'workflow_run')) &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
+    # Draft releases are omitted from the REST collection unless the caller
+    # has push access. This no-checkout resolver uses the write-scoped token
+    # only to authenticate the exact private release identity.
+    permissions:
+      actions: read
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
@@ -396,6 +402,11 @@ jobs:
     name: Freeze exact release bytes for Windows validation
     needs: resolve
     runs-on: ubuntu-24.04
+    # This no-checkout freezer must read and download the authenticated draft;
+    # later matrix jobs consume only its immutable internal artifact.
+    permissions:
+      actions: read
+      contents: write
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
@@ -483,7 +494,18 @@ jobs:
               "$work_directory/release-before.json" >/dev/null
           fi
 
-          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" --dir "$OUTPUT_DIRECTORY"
+          # Draft browser/tag URLs are intentionally unavailable. Download each
+          # exact asset through its numeric API identity while this no-checkout
+          # freezer holds the narrowly scoped draft-visible token.
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/$REPOSITORY/releases/assets/$asset_id" \
+              > "$OUTPUT_DIRECTORY/$asset_name"
+          done < <(
+            jq -r '.assets | sort_by(.name)[] | [.id, .name] | @tsv' \
+              "$work_directory/release-before.json"
+          )
           mapfile -d '' -t downloaded < <(find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
           [[ ${#downloaded[@]} -eq "$expected_count" ]]
           declare -A expected_by_name=()
@@ -639,6 +661,12 @@ jobs:
     name: ${{ matrix.name }} install / update / uninstall
     needs: [resolve, prepare-validation-inputs]
     runs-on: windows-2022
+    # Candidate entrypoints, raw installers, archives, and native assets are
+    # frozen first. Local-only overrides preserve wrapper/hash semantics while
+    # keeping draft-write authority out of all executed candidate code.
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -848,6 +876,18 @@ jobs:
           # native exit codes explicitly instead of terminating before the
           # contract assertions below can inspect stdout/stderr.
           $PSNativeCommandUseErrorActionPreference = $false
+          $candidateDirectory = (Resolve-Path -LiteralPath candidate).Path
+          $env:TR300_DIST_INSTALLER_PATH = Join-Path $candidateDirectory 'tr300-dist-installer.ps1'
+          if (-not (Test-Path -LiteralPath $env:TR300_DIST_INSTALLER_PATH -PathType Leaf)) {
+            throw 'frozen candidate cargo-dist installer is missing'
+          }
+          $candidateDirectoryUri = [Uri]::new(
+            $candidateDirectory + [IO.Path]::DirectorySeparatorChar
+          )
+          if (-not $candidateDirectoryUri.IsFile) {
+            throw 'frozen candidate directory did not resolve to a local file URI'
+          }
+          $env:TR300_DOWNLOAD_URL = $candidateDirectoryUri.AbsoluteUri.TrimEnd('/')
           $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
           $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
 
@@ -867,46 +907,62 @@ jobs:
 
           function Install-Candidate {
             $asset = if ($env:ASSET) { Join-Path $PWD "candidate\$env:ASSET" } else { $null }
-            switch ($env:KIND) {
-              'msi-global' {
-                for ($attempt = 1; $attempt -le 18; $attempt++) {
-                  $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
-                    -ArgumentList @('/i', $asset, '/qn', '/norestart')
-                  if ($p.ExitCode -eq 0) { break }
-                  if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
-                    throw "candidate Global MSI failed: $($p.ExitCode)"
+            $githubTokenNames = @('TR300_GITHUB_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN')
+            $savedGithubTokens = @{}
+            foreach ($name in $githubTokenNames) {
+              $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+              if ($null -ne $value) { $savedGithubTokens[$name] = $value }
+              [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+            }
+            try {
+              switch ($env:KIND) {
+                'msi-global' {
+                  for ($attempt = 1; $attempt -le 18; $attempt++) {
+                    $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                      -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                    if ($p.ExitCode -eq 0) { break }
+                    if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
+                      throw "candidate Global MSI failed: $($p.ExitCode)"
+                    }
+                    Start-Sleep -Seconds 5
                   }
-                  Start-Sleep -Seconds 5
+                }
+                'msi-corporate' {
+                  for ($attempt = 1; $attempt -le 18; $attempt++) {
+                    $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                      -ArgumentList @('/i', $asset, '/qn', '/norestart')
+                    if ($p.ExitCode -eq 0) { break }
+                    if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
+                      throw "candidate Corporate MSI failed: $($p.ExitCode)"
+                    }
+                    Start-Sleep -Seconds 5
+                  }
+                }
+                'exe-global' {
+                  $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-global-exe.log'
+                  $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+                  if ($p.ExitCode -ne 0) { Get-Content $log -ErrorAction SilentlyContinue; throw "candidate Global EXE failed: $($p.ExitCode)" }
+                }
+                'exe-corporate' {
+                  $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-corporate-exe.log'
+                  $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+                  if ($p.ExitCode -ne 0) { Get-Content $log -ErrorAction SilentlyContinue; throw "candidate Corporate EXE failed: $($p.ExitCode)" }
+                }
+                'powershell' {
+                  & $asset
+                  if (-not $?) { throw 'candidate PowerShell installer failed' }
+                }
+                'cargo' {
+                  cargo install tr300 --version $env:EXPECTED_VERSION --force --locked
+                  if ($LASTEXITCODE -ne 0) { throw 'candidate Cargo install failed' }
                 }
               }
-              'msi-corporate' {
-                for ($attempt = 1; $attempt -le 18; $attempt++) {
-                  $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
-                    -ArgumentList @('/i', $asset, '/qn', '/norestart')
-                  if ($p.ExitCode -eq 0) { break }
-                  if ($p.ExitCode -ne 1618 -or $attempt -eq 18) {
-                    throw "candidate Corporate MSI failed: $($p.ExitCode)"
-                  }
-                  Start-Sleep -Seconds 5
-                }
+            } finally {
+              foreach ($name in $githubTokenNames) {
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
               }
-              'exe-global' {
-                $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-global-exe.log'
-                $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
-                if ($p.ExitCode -ne 0) { Get-Content $log -ErrorAction SilentlyContinue; throw "candidate Global EXE failed: $($p.ExitCode)" }
-              }
-              'exe-corporate' {
-                $log = Join-Path $env:RUNNER_TEMP 'tr300-candidate-corporate-exe.log'
-                $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
-                if ($p.ExitCode -ne 0) { Get-Content $log -ErrorAction SilentlyContinue; throw "candidate Corporate EXE failed: $($p.ExitCode)" }
-              }
-              'powershell' {
-                & $asset
-                if (-not $?) { throw 'candidate PowerShell installer failed' }
-              }
-              'cargo' {
-                cargo install tr300 --version $env:EXPECTED_VERSION --force --locked
-                if ($LASTEXITCODE -ne 0) { throw 'candidate Cargo install failed' }
+              foreach ($entry in $savedGithubTokens.GetEnumerator()) {
+                [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
               }
             }
           }
@@ -1372,6 +1428,12 @@ jobs:
     if: needs.resolve.outputs.validation_mode == 'private'
     needs: [resolve, prepare-validation-inputs]
     runs-on: windows-2022
+    # The exact frozen managed wrapper, raw installer, and archive are executed
+    # through local-only overrides after manifest verification. No checkout or
+    # draft-write authority reaches candidate code.
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -1414,7 +1476,6 @@ jobs:
 
       - name: Install native channel, then make fresh PowerShell intent authoritative
         env:
-          TR300_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NATIVE_ASSET: ${{ matrix.asset }}
           KIND: ${{ matrix.kind }}
           EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
@@ -1431,6 +1492,18 @@ jobs:
           }
           if ($process.ExitCode -ne 0) { throw "native setup failed: $($process.ExitCode)" }
 
+          $candidateDirectory = (Resolve-Path -LiteralPath assets).Path
+          $env:TR300_DIST_INSTALLER_PATH = Join-Path $candidateDirectory 'tr300-dist-installer.ps1'
+          if (-not (Test-Path -LiteralPath $env:TR300_DIST_INSTALLER_PATH -PathType Leaf)) {
+            throw 'frozen candidate cargo-dist installer is missing'
+          }
+          $candidateDirectoryUri = [Uri]::new(
+            $candidateDirectory + [IO.Path]::DirectorySeparatorChar
+          )
+          if (-not $candidateDirectoryUri.IsFile) {
+            throw 'frozen candidate directory did not resolve to a local file URI'
+          }
+          $env:TR300_DOWNLOAD_URL = $candidateDirectoryUri.AbsoluteUri.TrimEnd('/')
           & (Join-Path $PWD 'assets\tr300-installer.ps1')
           if (-not $?) { throw 'managed PowerShell takeover failed' }
 

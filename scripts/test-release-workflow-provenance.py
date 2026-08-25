@@ -2052,7 +2052,12 @@ case "$endpoint" in
         esac
         ;;
     repos/*/actions/artifacts/*)
-        cat "$MOCK_DIRECT_ARTIFACT_JSON"
+        if [[ -n ${MOCK_SOURCE_ARTIFACT_JSON:-} &&
+              $endpoint == */${MOCK_SOURCE_ARTIFACT_ID:-0} ]]; then
+            cat "$MOCK_SOURCE_ARTIFACT_JSON"
+        else
+            cat "$MOCK_DIRECT_ARTIFACT_JSON"
+        fi
         ;;
     repos/*/git/ref/heads/main)
         printf '%s\\n' "$MOCK_DEFAULT_SHA"
@@ -2203,6 +2208,23 @@ import pathlib
 import sys
 
 arguments = sys.argv[1:]
+if len(arguments) == 4 and arguments[:3] == ["-a", "256", "-c"]:
+    sidecar = pathlib.Path(arguments[3])
+    lines = sidecar.read_text(encoding="utf-8").splitlines()
+    if len(lines) != 1:
+        raise SystemExit("fixture shasum requires one checksum record")
+    fields = lines[0].split(maxsplit=1)
+    if len(fields) != 2 or len(fields[0]) != 64:
+        raise SystemExit("fixture shasum rejects malformed checksum record")
+    name = fields[1].removeprefix("*")
+    path = pathlib.Path(name)
+    if path.name != name or not path.is_file():
+        raise SystemExit("fixture shasum rejects unsafe checksum target")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != fields[0]:
+        raise SystemExit(f"{name}: FAILED")
+    print(f"{name}: OK")
+    raise SystemExit(0)
 if len(arguments) != 3 or arguments[:2] != ["-a", "256"]:
     raise SystemExit(f"fixture shasum rejects arguments: {arguments!r}")
 path = pathlib.Path(arguments[2])
@@ -2669,6 +2691,7 @@ def fixture_environment(mock_bin: Path, output: Path, log: Path) -> dict[str, st
             "MOCK_PREVIOUS_TAGS": "v4.2.2",
             "MOCK_CURRENT_ASSETS": "\n".join(
                 (
+                    "dist-manifest.json",
                     "tr300-x86_64-pc-windows-msvc.msi",
                     "tr300-x86_64-pc-windows-msvc-corporate.msi",
                     "tr300-x86_64-pc-windows-msvc-setup.exe",
@@ -3131,6 +3154,8 @@ def run_macos_source_custody_case(
             )
         if expected_success:
             expected = {
+                "tr300-installer.sh",
+                "tr300-dist-installer.sh",
                 "tr300-aarch64-apple-darwin.tar.xz",
                 "tr300-aarch64-apple-darwin.tar.xz.sha256",
                 "tr300-x86_64-apple-darwin.tar.xz",
@@ -3138,6 +3163,23 @@ def run_macos_source_custody_case(
             }
             if {path.name for path in output.iterdir()} != expected:
                 raise AssertionError(f"{name}: normalized inventory changed")
+            for asset_name, digest_key, size_key in (
+                (
+                    "tr300-installer.sh",
+                    "MOCK_PREPARED_WRAPPER_SHA256",
+                    "MOCK_PREPARED_WRAPPER_SIZE",
+                ),
+                (
+                    "tr300-dist-installer.sh",
+                    "MOCK_PREPARED_DIST_SHA256",
+                    "MOCK_PREPARED_DIST_SIZE",
+                ),
+            ):
+                payload = (output / asset_name).read_bytes()
+                if hashlib.sha256(payload).hexdigest() != environment[digest_key]:
+                    raise AssertionError(f"{name}: normalized {asset_name} digest changed")
+                if len(payload) != int(environment[size_key]):
+                    raise AssertionError(f"{name}: normalized {asset_name} size changed")
             expected_outputs = {
                 "managed_installer_sha256": environment[
                     "MOCK_PREPARED_WRAPPER_SHA256"
@@ -3162,6 +3204,51 @@ def run_macos_source_custody_case(
 def write_macos_native_build_artifact_fixture(
     directory: Path, mutation: str | None
 ) -> dict[str, str]:
+    source_directory = directory / "trusted-source-inputs"
+    source_directory.mkdir()
+    source_payloads = {
+        "tr300-installer.sh": b"#!/bin/sh\n# managed source fixture\n",
+        "tr300-dist-installer.sh": b"#!/bin/sh\n# raw cargo-dist source fixture\n",
+        "tr300-aarch64-apple-darwin.tar.xz": b"arm64 source archive fixture\n",
+        "tr300-x86_64-apple-darwin.tar.xz": b"x86_64 source archive fixture\n",
+    }
+    source_digests: dict[str, str] = {}
+    source_sizes: dict[str, int] = {}
+    for asset_name, payload in source_payloads.items():
+        (source_directory / asset_name).write_bytes(payload)
+        source_digests[asset_name] = hashlib.sha256(payload).hexdigest()
+        source_sizes[asset_name] = len(payload)
+    for archive_name in (
+        "tr300-aarch64-apple-darwin.tar.xz",
+        "tr300-x86_64-apple-darwin.tar.xz",
+    ):
+        (source_directory / f"{archive_name}.sha256").write_text(
+            f"{source_digests[archive_name]} *{archive_name}\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    source_zip = directory / "trusted-source-inputs.zip"
+    with zipfile.ZipFile(source_zip, "w", compression=zipfile.ZIP_STORED) as archive:
+        for path in sorted(source_directory.iterdir()):
+            archive.write(path, arcname=path.name)
+    source_artifact_digest = hashlib.sha256(source_zip.read_bytes()).hexdigest()
+    source_artifact_id = 502
+    source_artifact_record: dict[str, object] = {
+        "id": source_artifact_id,
+        "name": "tr300-trusted-apple-release-inputs",
+        "digest": f"sha256:{source_artifact_digest}",
+        "expired": False,
+        "size_in_bytes": source_zip.stat().st_size,
+        "workflow_run": {
+            "id": int(RELEASE_RUN_ID),
+            "repository_id": int(REPOSITORY_ID),
+            "head_repository_id": int(REPOSITORY_ID),
+            "head_sha": TRUSTED_SHA,
+        },
+    }
+    source_metadata = directory / "trusted-source-artifact.json"
+    source_metadata.write_text(json.dumps(source_artifact_record), encoding="utf-8")
+
     artifact_zip = directory / "native-build.zip"
     expected = (
         "tr300-universal-apple-darwin.pkg",
@@ -3174,8 +3261,6 @@ def write_macos_native_build_artifact_fixture(
             archive.writestr(name, f"native build fixture for {name}\n".encode())
         if mutation == "native-extra-member":
             archive.writestr("unexpected", b"unexpected\n")
-        elif mutation == "native-duplicate-member":
-            archive.writestr(expected[0], b"duplicate\n")
         elif mutation == "native-unsafe-path":
             archive.writestr("../escape", b"escape\n")
     zip_digest = hashlib.sha256(artifact_zip.read_bytes()).hexdigest()
@@ -3219,16 +3304,29 @@ def write_macos_native_build_artifact_fixture(
         "MATRIX_ARCH": "x86_64",
         "BUILD_ARTIFACT_ID": "501",
         "BUILD_ARTIFACT_DIGEST": expected_digest,
-        "SOURCE_MANAGED_INSTALLER_SHA256": "1" * 64,
-        "SOURCE_MANAGED_INSTALLER_SIZE": "1024",
-        "SOURCE_DIST_INSTALLER_SHA256": "2" * 64,
-        "SOURCE_DIST_INSTALLER_SIZE": "2048",
-        "SOURCE_AARCH64_ARCHIVE_SHA256": "3" * 64,
-        "SOURCE_AARCH64_ARCHIVE_SIZE": "4096",
-        "SOURCE_X86_64_ARCHIVE_SHA256": "4" * 64,
-        "SOURCE_X86_64_ARCHIVE_SIZE": "8192",
+        "SOURCE_ARTIFACT_ID": str(source_artifact_id),
+        "SOURCE_ARTIFACT_DIGEST": source_artifact_digest,
+        "TRUSTED_SOURCE_DIRECTORY": source_directory.as_posix(),
+        "SOURCE_MANAGED_INSTALLER_SHA256": source_digests["tr300-installer.sh"],
+        "SOURCE_MANAGED_INSTALLER_SIZE": str(source_sizes["tr300-installer.sh"]),
+        "SOURCE_DIST_INSTALLER_SHA256": source_digests["tr300-dist-installer.sh"],
+        "SOURCE_DIST_INSTALLER_SIZE": str(source_sizes["tr300-dist-installer.sh"]),
+        "SOURCE_AARCH64_ARCHIVE_SHA256": source_digests[
+            "tr300-aarch64-apple-darwin.tar.xz"
+        ],
+        "SOURCE_AARCH64_ARCHIVE_SIZE": str(
+            source_sizes["tr300-aarch64-apple-darwin.tar.xz"]
+        ),
+        "SOURCE_X86_64_ARCHIVE_SHA256": source_digests[
+            "tr300-x86_64-apple-darwin.tar.xz"
+        ],
+        "SOURCE_X86_64_ARCHIVE_SIZE": str(
+            source_sizes["tr300-x86_64-apple-darwin.tar.xz"]
+        ),
         "VALIDATION_PROOF": (directory / "native-proof.json").as_posix(),
         "MOCK_DIRECT_ARTIFACT_JSON": metadata.as_posix(),
+        "MOCK_SOURCE_ARTIFACT_ID": str(source_artifact_id),
+        "MOCK_SOURCE_ARTIFACT_JSON": source_metadata.as_posix(),
         "MOCK_PUBLISHER_ARTIFACT_ZIP": artifact_zip.as_posix(),
     }
 
@@ -5877,7 +5975,6 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         ("wrong source SHA", "native-wrong-sha", False),
         ("ZIP digest mismatch", "native-zip-digest-mismatch", False),
         ("extra ZIP member", "native-extra-member", False),
-        ("duplicate ZIP member", "native-duplicate-member", False),
         ("unsafe ZIP path", "native-unsafe-path", False),
     ]
     for name, mutation, succeeds in native_custody_cases:
@@ -5929,6 +6026,68 @@ def check_workflow_contract(path: Path, workflow: str) -> None:
 def check_windows_validation_provenance(workflow: str) -> None:
     label = WINDOWS_VALIDATION_WORKFLOW.name
     resolve = extract_job(workflow, "resolve", label)
+    prepare = extract_job(workflow, "prepare-validation-inputs", label)
+    channels = extract_job(workflow, "channels", label)
+    managed = extract_job(workflow, "managed-cli-choice", label)
+    fresh_format = extract_job(workflow, "fresh-format-choice", label)
+
+    # GitHub omits draft releases from callers without push access. Keep this
+    # tiny model executable so fixtures cannot silently assume that a
+    # read-scoped GITHUB_TOKEN sees private candidates.
+    release_records = [{"tag": "v-test", "draft": True}, {"tag": "v-old", "draft": False}]
+    read_only_visible = [record for record in release_records if not record["draft"]]
+    push_visible = list(release_records)
+    if any(record["draft"] for record in read_only_visible) or not any(
+        record["draft"] for record in push_visible
+    ):
+        raise AssertionError(f"{label}: private-draft visibility model drifted")
+
+    if workflow.count("contents: write") != 2:
+        raise AssertionError(
+            f"{label}: contents:write must be limited to the no-checkout draft "
+            "resolver/freezer"
+        )
+    for job, job_name in (
+        (resolve, "resolve"),
+        (prepare, "prepare-validation-inputs"),
+    ):
+        require(
+            job,
+            "permissions:\n      actions: read\n      contents: write",
+            f"{label} {job_name} draft visibility",
+        )
+        if "actions/checkout" in job:
+            raise AssertionError(
+                f"{label}: write-scoped {job_name} must not check out repository source"
+            )
+    for job, job_name in ((channels, "channels"), (managed, "managed-cli-choice")):
+        require(
+            job,
+            "permissions:\n      actions: read\n      contents: read",
+            f"{label} {job_name} read-only execution",
+        )
+        if "contents: write" in job:
+            raise AssertionError(
+                f"{label}: executed candidate job {job_name} gained release write access"
+            )
+        if "actions/checkout" in job:
+            raise AssertionError(f"{label}: {job_name} unexpectedly checks out source")
+    if "contents: write" in fresh_format:
+        raise AssertionError(f"{label}: offline format-choice job gained release write access")
+    for job, job_name in (
+        (channels, "channels"),
+        (managed, "managed-cli-choice"),
+        (fresh_format, "fresh-format-choice"),
+    ):
+        for forbidden in (
+            'releases/$RELEASE_ID',
+            'releases/$release_id',
+            'gh release download "$RELEASE_TAG"',
+        ):
+            if forbidden in job:
+                raise AssertionError(
+                    f"{label}: read-only {job_name} still queries private release state"
+                )
     require(workflow, "github.event.workflow_run.conclusion == 'success'", label)
     require(
         workflow,
@@ -5984,13 +6143,20 @@ def check_windows_validation_provenance(workflow: str) -> None:
         "private draft leaked into public updater discovery",
     ):
         require(workflow, needle, f"{label} private/public custody")
-    prepare = extract_job(workflow, "prepare-validation-inputs", label)
     attest = extract_job(workflow, "attest-private-validation", label)
     freeze = extract_named_run(
         prepare,
         "Download, verify, and bind the exact release inventory",
         f"{label} frozen release bytes",
     )
+    for needle in (
+        "releases/assets/$asset_id",
+        "Accept: application/octet-stream",
+        "sort_by(.name)[] | [.id, .name] | @tsv",
+    ):
+        require(freeze, needle, f"{label} numeric draft asset download")
+    if 'gh release download "$RELEASE_TAG"' in freeze:
+        raise AssertionError(f"{label}: freezer returned to draft-blind tag downloads")
     downloaded_match_index = freeze.index(
         '[[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]'
     )
@@ -6031,6 +6197,27 @@ def check_windows_validation_provenance(workflow: str) -> None:
         f"{label} private/public channel dispatch",
     )
     for needle in (
+        "TR300_DIST_INSTALLER_PATH",
+        "TR300_DOWNLOAD_URL",
+        "candidateDirectoryUri.IsFile",
+        "@('TR300_GITHUB_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN')",
+        "SetEnvironmentVariable($name, $null, 'Process')",
+    ):
+        require(channel_verify, needle, f"{label} token-free local candidate execution")
+    managed_execution = extract_named_step(
+        managed,
+        "Install native channel, then make fresh PowerShell intent authoritative",
+        label,
+    )
+    for needle in (
+        "TR300_DIST_INSTALLER_PATH",
+        "TR300_DOWNLOAD_URL",
+        "candidateDirectoryUri.IsFile",
+    ):
+        require(managed_execution, needle, f"{label} managed local candidate execution")
+    if "TR300_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in managed_execution:
+        raise AssertionError(f"{label}: managed candidate code still inherits a GitHub token")
+    for needle in (
         "windows-release-assets",
         ".workflow_run.id == $run",
         ".workflow_run.head_sha == $sha",
@@ -6070,29 +6257,34 @@ def check_windows_validation_provenance(workflow: str) -> None:
 
 def check_windows_publish_boundary(workflow: str) -> None:
     label = WINDOWS_WORKFLOW.name
+    resolver = extract_job(workflow, "resolve-release", label)
     build = extract_job(workflow, "build-windows-installers", label)
     publisher = extract_job(workflow, "publish-windows-installers", label)
 
-    if workflow.count("contents: write") != 1:
+    if workflow.count("contents: write") != 2:
         raise AssertionError(
-            f"{label}: contents:write must be granted only to the publisher"
+            f"{label}: contents:write must be limited to the no-checkout "
+            "draft resolver and publisher"
         )
+    require(
+        resolver,
+        "permissions:\n      actions: read\n      contents: write",
+        f"{label} private-draft resolver",
+    )
+    if "actions/checkout" in resolver:
+        raise AssertionError(f"{label}: write-scoped resolver must not check out source")
+    for needle in (
+        'gh api "repos/$EXPECTED_REPOSITORY/releases/$release_id"',
+        "dist-manifest.json",
+        "tr300-x86_64-pc-windows-msvc.msi",
+        "upstream cargo-dist release is incomplete; missing asset",
+    ):
+        require(resolver, needle, f"{label} no-checkout F20 guard")
     require(build, "permissions:\n      contents: read", f"{label} build job")
     if "contents: write" in build or "gh release upload" in build:
         raise AssertionError(f"{label}: build job regained release write capability")
-    for needle in (
-        "RELEASE_ID: ${{ needs.resolve-release.outputs.release_id }}",
-        "EXPECTED_SHA: ${{ needs.resolve-release.outputs.source_sha }}",
-        'gh api "repos/$repo/releases/$releaseId"',
-        "[Int64]$release.id -ne $releaseId",
-        "[string]$release.tag_name -ne $tag",
-        "[string]$release.target_commitish -ne $expectedSha",
-        "[bool]$release.draft -ne $true",
-        "[bool]$release.prerelease -ne $false",
-    ):
-        require(build, needle, f"{label} build private-draft custody")
-    if "gh release view $tag" in build or "releases/tags/$tag" in build:
-        raise AssertionError(f"{label}: build preflight uses a private by-tag lookup")
+    if "releases/" in build or "gh release" in build:
+        raise AssertionError(f"{label}: read-only build job still queries private Release state")
     require(
         build,
         f"uses: {UPLOAD_ARTIFACT_ACTION}",
@@ -6723,10 +6915,38 @@ def check_macos_publish_boundary(workflow: str) -> None:
         f"{label} build resolver dependency",
     )
 
-    if workflow.count("contents: write") != 1:
+    if workflow.count("contents: write") != 2:
         raise AssertionError(
-            f"{label}: contents:write must be granted only to the publisher"
+            f"{label}: contents:write must be limited to the no-checkout "
+            "draft resolver and publisher"
         )
+    require(
+        resolver,
+        "permissions:\n      actions: read\n      contents: write",
+        f"{label} private-draft resolver",
+    )
+    if "actions/checkout" in resolver:
+        raise AssertionError(f"{label}: write-scoped resolver must not check out source")
+    require(
+        validate,
+        "permissions:\n      actions: read\n      contents: read",
+        f"{label} read-only native validator",
+    )
+    if "actions/checkout" in validate:
+        raise AssertionError(f"{label}: native validator unexpectedly checks out source")
+    if "contents: write" in validate:
+        raise AssertionError(f"{label}: native validator regained release write access")
+    for forbidden in (
+        'releases/$RELEASE_ID',
+        'gh release download "$RELEASE_TAG"',
+        'validate_release_identity "$candidate_managed_release"',
+    ):
+        if forbidden in validate:
+            raise AssertionError(
+                f"{label}: read-only native validator still queries private release state"
+            )
+    if "This job keeps the token read-only" in validate:
+        raise AssertionError(f"{label}: native validator token comment contradicts permissions")
     require(
         build,
         "source_sha: ${{ needs.resolve-release.outputs.source_sha }}",
@@ -6793,6 +7013,13 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'echo "aarch64_archive_size=$aarch64_archive_size"',
         'echo "x86_64_archive_sha256=$x86_64_archive_sha256"',
         'echo "x86_64_archive_size=$x86_64_archive_size"',
+        'install -m 0644 "$managed_installer"',
+        '"$OUTPUT_DIRECTORY/tr300-installer.sh"',
+        'install -m 0644 "$dist_installer"',
+        '"$OUTPUT_DIRECTORY/tr300-dist-installer.sh"',
+        '[[ ${#normalized[@]} -eq 6 ]]',
+        "trusted-apple-inputs/tr300-installer.sh",
+        "trusted-apple-inputs/tr300-dist-installer.sh",
     ):
         require(custody, needle, f"{label} managed-wrapper source custody")
     for asset in PREPARED_RELEASE_ARTIFACT_MEMBERS:
@@ -6875,8 +7102,14 @@ def check_macos_publish_boundary(workflow: str) -> None:
         f"{label} native validation",
     )
     require(validate, "needs: [build, source-custody]", f"{label} native wrapper custody needs")
-    if "actions/download-artifact" in validate:
-        raise AssertionError(f"{label}: native validation regained mutable-name download")
+    require(validate, f"uses: {DOWNLOAD_ARTIFACT_ACTION}", f"{label} source input download")
+    require(
+        validate,
+        "artifact-ids: ${{ needs.source-custody.outputs.artifact_id }}",
+        f"{label} immutable source input ID",
+    )
+    if "name: tr300-trusted-apple-release-inputs" in validate:
+        raise AssertionError(f"{label}: native validation uses mutable artifact-name selection")
     if validate.count(f"uses: {UPLOAD_ARTIFACT_ACTION}") != 1:
         raise AssertionError(f"{label}: native validation must emit two matrix proof artifacts")
     for arch in ("arm64", "x86_64"):
@@ -6888,6 +7121,9 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "MATRIX_ARCH: ${{ matrix.arch }}",
         "BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}",
         "BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}",
+        "SOURCE_ARTIFACT_ID: ${{ needs.source-custody.outputs.artifact_id }}",
+        "SOURCE_ARTIFACT_DIGEST: ${{ needs.source-custody.outputs.artifact_digest }}",
+        "TRUSTED_SOURCE_DIRECTORY: ${{ runner.temp }}/tr300-trusted-apple-managed-inputs",
         "VALIDATION_PROOF: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json",
         '[[ "$(uname -m)" == "$MATRIX_ARCH" ]]',
         "validate_build_artifact() {",
@@ -6899,6 +7135,17 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'actions/artifacts/$BUILD_ARTIFACT_ID"',
         'actions/artifacts/$BUILD_ARTIFACT_ID/zip"',
         '[[ "$artifact_zip_sha256" == "$BUILD_ARTIFACT_DIGEST" ]]',
+        "validate_source_artifact() {",
+        '.id == $id and .name == "tr300-trusted-apple-release-inputs"',
+        'actions/artifacts/$SOURCE_ARTIFACT_ID"',
+        'source_record_before=$(source_artifact_record "$source_artifact_before")',
+        'source_record_after=$(source_artifact_record "$source_artifact_after")',
+        '[[ "$source_record_after" == "$source_record_before" ]]',
+        '"tr300-installer.sh",',
+        '"tr300-dist-installer.sh",',
+        '"tr300-aarch64-apple-darwin.tar.xz",',
+        '"tr300-x86_64-apple-darwin.tar.xz",',
+        "unexpected trusted Apple source input inventory",
         "unexpected native-validation artifact members",
         "native-validation artifact expands beyond the custody limit",
         "os.O_EXCL",
@@ -7004,30 +7251,17 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "SOURCE_X86_64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.x86_64_archive_size }}",
         "release_asset_record() {",
         '[.id, .digest, .size] | @tsv',
-        'gh api "repos/$REPOSITORY/releases/$RELEASE_ID"',
-        '.id == $release_id',
         '.tag_name == $tag and .target_commitish == $sha',
         '.draft == $draft and .prerelease == false',
-        'validate_release_identity "$candidate_managed_release" "$RELEASE_TAG"',
-        '"$EXPECTED_SHA" true',
-        'candidate_wrapper_before=$(release_asset_record',
-        '"$candidate_managed_release" tr300-installer.sh)',
-        'candidate_dist_before=$(release_asset_record',
-        '"$candidate_managed_release" tr300-dist-installer.sh)',
-        'candidate_archive_before=$(release_asset_record',
-        '"$candidate_managed_release" "$candidate_archive_name")',
-        '"$candidate_dist_record_digest" == "sha256:$SOURCE_DIST_INSTALLER_SHA256"',
-        '"$candidate_archive_record_digest" == "sha256:$candidate_archive_digest"',
-        'candidate_managed_sha256=$(shasum -a 256 "$managed_installer"',
-        '"$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256"',
-        '"$candidate_managed_size" == "$SOURCE_MANAGED_INSTALLER_SIZE"',
+        'managed_installer="$trusted_managed_installer"',
+        'candidate_dist_installer="$trusted_dist_installer"',
+        'candidate_archive="$TRUSTED_SOURCE_DIRECTORY/$candidate_archive_name"',
+        '[[ -f "$candidate_dist_installer" && ! -L "$candidate_dist_installer"',
+        '[[ -f "$candidate_archive" && ! -L "$candidate_archive"',
         'grep -Fq "tr300_dist_installer_sha256=\'${SOURCE_DIST_INSTALLER_SHA256}\'"',
-        'candidate_managed_after="$managed_directory/release-after.json"',
-        '"$candidate_managed_after" tr300-dist-installer.sh)',
-        '"$candidate_managed_after" "$candidate_archive_name")',
-        '"$candidate_wrapper_after" == "$candidate_wrapper_before"',
-        '"$candidate_dist_after" == "$candidate_dist_before"',
-        '"$candidate_archive_after" == "$candidate_archive_before"',
+        '/usr/bin/env -u TR300_GITHUB_TOKEN -u GITHUB_TOKEN -u GH_TOKEN',
+        'TR300_DIST_INSTALLER_PATH="$candidate_dist_installer"',
+        'TR300_DOWNLOAD_URL="file://$TRUSTED_SOURCE_DIRECTORY"',
     ):
         require(native_validation, needle, f"{label} native package inventory/upgrade")
     native_uint32_uid_index = native_validation.index("custom_fixture_uid=3000000000")
@@ -7056,6 +7290,13 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "path: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json",
     ):
         require(validate, needle, f"{label} native matrix proof upload")
+    source_artifact_before_index = native_validation.index(
+        'actions/artifacts/$SOURCE_ARTIFACT_ID"'
+    )
+    source_byte_index = native_validation.index(
+        '"$SOURCE_MANAGED_INSTALLER_SHA256" ]] || exit 1',
+        source_artifact_before_index,
+    )
     build_artifact_before_index = native_validation.index(
         'actions/artifacts/$BUILD_ARTIFACT_ID"'
     )
@@ -7070,14 +7311,21 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'build_record_after=$(build_artifact_record "$build_artifact_after")',
         package_trust_index,
     )
+    source_artifact_after_index = native_validation.index(
+        'source_record_after=$(source_artifact_record "$source_artifact_after")',
+        build_artifact_after_index,
+    )
     proof_write_index = native_validation.index(
-        "schema_version: 1", build_artifact_after_index
+        "schema_version: 1", source_artifact_after_index
     )
     if not (
-        build_artifact_before_index
+        source_artifact_before_index
+        < source_byte_index
+        < build_artifact_before_index
         < build_zip_index
         < package_trust_index
         < build_artifact_after_index
+        < source_artifact_after_index
         < proof_write_index
     ):
         raise AssertionError(f"{label}: native build custody/proof sequence is out of order")
@@ -7112,20 +7360,13 @@ def check_macos_publish_boundary(workflow: str) -> None:
     managed_refresh_index = native_validation.index(
         'sh "$managed_installer"', managed_rejection_index
     )
-    candidate_release_index = native_validation.index(
-        'gh api "repos/$REPOSITORY/releases/$RELEASE_ID"',
+    candidate_local_path_index = native_validation.index(
+        'managed_installer="$trusted_managed_installer"',
         managed_rejection_index,
     )
-    candidate_byte_index = native_validation.index(
-        '"$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256"',
-        candidate_release_index,
-    )
-    candidate_record_before_index = native_validation.index(
-        'candidate_wrapper_before=$(release_asset_record', candidate_release_index
-    )
-    candidate_record_after_index = native_validation.index(
-        'candidate_managed_after="$managed_directory/release-after.json"',
-        managed_refresh_index,
+    candidate_tokenless_index = native_validation.index(
+        '/usr/bin/env -u TR300_GITHUB_TOKEN -u GITHUB_TOKEN -u GH_TOKEN',
+        candidate_local_path_index,
     )
     managed_complete_index = native_validation.index(
         "printf '2\\ny\\n' | \"$HOME/.cargo/bin/tr300\" uninstall",
@@ -7137,11 +7378,10 @@ def check_macos_publish_boundary(workflow: str) -> None:
     if not (
         managed_baseline_index
         < managed_rejection_index
-        < candidate_release_index
-        < candidate_record_before_index
-        < candidate_byte_index
+        and source_byte_index
+        < candidate_local_path_index
+        < candidate_tokenless_index
         < managed_refresh_index
-        < candidate_record_after_index
         < managed_complete_index
         < fresh_pkg_index
     ):

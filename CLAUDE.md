@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.6**.
-The working fix-forward manifest is **4.3.7**. PR #14 merged as
+Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.7**.
+The working fix-forward manifest is **4.3.8**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -101,8 +101,20 @@ assembly, and exact preparation, then host job `97751759346` created private
 24-asset draft `376283574` and failed because default `sha256sum` records the
 managed installer as `tr300-installer.sh` while its lookup expected
 `*tr300-installer.sh`. Downstream workflows skipped; both v4.3.5 and v4.3.6
-drafts remain private. All seven tags stay immutable. v4.2.2 remains the
-complete public GitHub-distribution boundary until reviewed v4.3.7 passes the normal
+drafts remain private. PR #24 head `eebce78c` passed Release plan
+`32833632174` and 20/20 CI `32833632116`, then merged as exact
+`b9aa12850720b49c120c6465cefd094a843c5fc4`.
+Exact-main CI `32834399658`, automatic OIDC run `32834399800`, and native
+preflight `32835377627` passed; crates.io serves exact unyanked v4.3.7 with
+checksum `225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
+Tagged Release `32835470143` passed all 13 jobs and created exact private
+24-asset draft `376309349`. Windows run `32835918254` and macOS run
+`32835918239` then failed before downstream build/publication because their
+read-only workflow tokens lack push access and GitHub consequently omits
+private drafts from the authenticated release collection; both deterministic
+resolvers saw zero matches. The draft remains private. All eight v4.3.0 through
+v4.3.7 tags stay immutable. v4.2.2 remains the complete public GitHub-
+distribution boundary until reviewed v4.3.8 passes the normal
 automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
@@ -534,9 +546,12 @@ fresh boundaries: no checkout, repository script, or package/dependency code may
 precede or run with Apple secrets or a Release write token. The fresh crates
 publisher is the deliberate exception: it checks out only the exact SHA with
 read-only GitHub authorization and no persisted checkout credential, then runs
-no repository or package code while the short-lived OIDC token exists. Read-only
-prep binds fixed artifact IDs/digests, run attempts, repository, tag/current-main
-SHA, and byte inventories. Keep Xcode 16.4 architecture checks input-first as
+no repository or package code while the short-lived OIDC token exists. Fresh
+no-checkout draft resolvers/freezers may hold `contents: write` only because
+GitHub requires push access for private-draft enumeration/download; checked-out
+builders and candidate execution remain read-only. Provenance prep binds fixed
+artifact IDs/digests, run attempts, repository, tag/current-main SHA, and byte
+inventories. Keep Xcode 16.4 architecture checks input-first as
 `lipo <file> -verify_arch arm64 x86_64` in builder and validator. A second-hop
 `workflow_run` does not retain transitive tag identity; each resolver peels the
 tag and validates the upstream workflow ID/path/event/repository/SHA/attempt and
@@ -648,10 +663,13 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.7 chain completes, v4.2.2 remains the complete public GitHub
-  distribution. The v4.3.0 through v4.3.6 crates/tags stay published and
-  immutable; v4.3.5 and v4.3.6 each have one exact private 24-asset GitHub
-  draft. Native Apple workflow blocks must parse
+- Until the v4.3.8 chain completes, v4.2.2 remains the complete public GitHub
+  distribution. The v4.3.0 through v4.3.7 crates/tags stay published and
+  immutable; v4.3.5, v4.3.6, and v4.3.7 each have one exact private 24-asset
+  GitHub draft. A read-only downstream token cannot enumerate those drafts
+  because GitHub requires push access for draft visibility; the automated
+  chain must carry and rebind an exact release identity across that boundary
+  without weakening the read-only builder scopes. Native Apple workflow blocks must parse
   under system `/bin/bash` 3.2; both Mac CI legs syntax-check the affected jobs
   and execute the exact checkout-free signer-staging block before tagging.
 

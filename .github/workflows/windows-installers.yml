@@ -77,6 +77,12 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    # GitHub exposes draft releases only to callers with push access. This
+    # no-checkout resolver needs write-scoped contents solely to authenticate
+    # the private draft before any repository code is fetched or executed.
+    permissions:
+      actions: read
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
@@ -241,6 +247,33 @@ jobs:
             echo "release $tag must be the private stable draft assembled by Release" >&2
             exit 65
           }
+          # Preserve the F20 torn-release guard in this no-checkout,
+          # draft-authenticated resolver. The checked-out Windows build never
+          # receives a release-write token or reads private Release state.
+          gh api "repos/$EXPECTED_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/windows-private-release.json"
+          jq -e --argjson id "$release_id" --arg tag "$tag" \
+            --arg sha "$source_sha" '
+              .id == $id and .tag_name == $tag and .target_commitish == $sha and
+              .draft == true and .prerelease == false
+            ' "$RUNNER_TEMP/windows-private-release.json" >/dev/null
+          mapfile -t release_assets < <(
+            jq -r '.assets[].name' "$RUNNER_TEMP/windows-private-release.json"
+          )
+          has_release_asset() {
+            local needle=$1
+            local existing
+            for existing in "${release_assets[@]}"; do
+              [[ "$existing" == "$needle" ]] && return 0
+            done
+            return 1
+          }
+          for sentinel in dist-manifest.json tr300-x86_64-pc-windows-msvc.msi; do
+            has_release_asset "$sentinel" || {
+              echo "upstream cargo-dist release is incomplete; missing asset: $sentinel" >&2
+              exit 65
+            }
+          done
           release_run_attempt=$(validate_release_run \
             "$release_run_id" "$tag" "$source_sha" "$expected_attempt")
 
@@ -268,84 +301,6 @@ jobs:
       - name: Enable Windows long paths
         shell: pwsh
         run: git config --global core.longpaths true
-
-      - name: Verify upstream cargo-dist release is complete
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
-          RELEASE_ID: ${{ needs.resolve-release.outputs.release_id }}
-          EXPECTED_SHA: ${{ needs.resolve-release.outputs.source_sha }}
-          REPOSITORY: ${{ github.repository }}
-        shell: pwsh
-        run: |
-          # Guard against a torn upstream release. cargo-dist's release.yml
-          # uses a host-job gate that tolerates skipped matrix entries, so a
-          # partially-failed release can still report conclusion=success.
-          # Without this pre-flight, windows-installers.yml would build 6
-          # assets and attach them to a release missing the Global MSI /
-          # dist-manifest — leaving a torn release that users can't reliably
-          # update from. (audit finding F20, v3.15.3+)
-          #
-          # We probe two sentinels:
-          #   - dist-manifest.json   cargo-dist's own "all phases done"
-          #                          signal, published as the final asset
-          #                          of a complete run. Single-asset
-          #                          contract decouples us from cargo-dist
-          #                          output-naming details.
-          #   - the Global MSI       the asset our 6 Windows installer
-          #                          add-ons are functionally adjacent to.
-          #                          If it's missing, attaching a Corporate
-          #                          MSI would pretend the release is
-          #                          complete when it isn't.
-          $tag = $env:RELEASE_TAG
-          $repo = $env:REPOSITORY
-          $releaseIdText = $env:RELEASE_ID
-          $expectedSha = $env:EXPECTED_SHA
-          if ($releaseIdText -notmatch '^[1-9][0-9]*$') {
-            throw "Private release ID is malformed: $releaseIdText"
-          }
-          if ($expectedSha -notmatch '^[0-9a-f]{40}$') {
-            throw "Expected source SHA is malformed: $expectedSha"
-          }
-          $releaseId = [Int64]$releaseIdText
-          Write-Host "Probing release $tag in $repo for upstream completion sentinels..."
-          # This step runs before checkout, so bind the already-resolved private
-          # draft by its numeric API identity instead of the draft-blind tag
-          # endpoint or local git context.
-          $releaseJson = gh api "repos/$repo/releases/$releaseId"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not read private release ID $releaseId"
-          }
-          $release = $releaseJson | ConvertFrom-Json -Depth 100
-          if (
-            [Int64]$release.id -ne $releaseId -or
-            [string]$release.tag_name -ne $tag -or
-            [string]$release.target_commitish -ne $expectedSha -or
-            [bool]$release.draft -ne $true -or
-            [bool]$release.prerelease -ne $false
-          ) {
-            throw "Release ID $releaseId is not the exact private stable draft for $tag at $expectedSha"
-          }
-          $assets = @($release.assets | ForEach-Object { [string]$_.name })
-          $required = @(
-            "dist-manifest.json",
-            "tr300-x86_64-pc-windows-msvc.msi"
-          )
-          $missing = @()
-          foreach ($r in $required) {
-            if ($assets -notcontains $r) { $missing += $r }
-          }
-          if ($missing.Count -gt 0) {
-            Write-Host "Upstream cargo-dist release is incomplete. Missing assets:"
-            $missing | ForEach-Object { Write-Host "    $_" }
-            Write-Host ""
-            Write-Host "This usually means a target build was skipped or failed in release.yml."
-            Write-Host "Fix the upstream release (re-run release.yml, or attach the missing assets"
-            Write-Host "manually) before re-firing this workflow via:"
-            Write-Host "    gh workflow run 'Windows Installers' -f tag=$tag"
-            exit 1
-          }
-          Write-Host "Upstream release looks complete (dist-manifest.json + Global MSI present)."
 
       - name: Checkout tag
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
