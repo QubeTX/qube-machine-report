@@ -5921,8 +5921,18 @@ def check_structural_contract(
     )
     require(
         windows_cargo_dist_installer,
+        "-NoLogo -NoProfile -NonInteractive -File $installer",
+        "Windows cargo-dist helper fresh installer process",
+    )
+    require(
+        windows_cargo_dist_installer,
         "[IO.FileAttributes]::ReparsePoint",
         "Windows cargo-dist helper reparse-point guard",
+    )
+    forbid(
+        windows_cargo_dist_installer,
+        "\n& $installer\n",
+        "Windows cargo-dist helper must not inherit StrictMode into the official installer",
     )
     if ".LinkType" in windows_cargo_dist_installer:
         raise AssertionError(

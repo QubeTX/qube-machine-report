@@ -14,7 +14,15 @@ if ($actual -cne 'ffec5b52cfbe29465d831150b01f8a254668fc271e5102fab7aea7da5d51ec
     throw "cargo-dist installer checksum mismatch: $actual"
 }
 
-& $installer
+$powerShellHost = (Get-Process -Id $PID).Path
+if (-not (Test-Path -LiteralPath $powerShellHost -PathType Leaf)) {
+    throw 'current PowerShell host executable is unavailable'
+}
+
+# The official installer reads its automatic $Args variable. Run it in a fresh
+# process so this helper's StrictMode does not turn an empty $Args into an
+# unbound-variable failure.
+& $powerShellHost -NoLogo -NoProfile -NonInteractive -File $installer
 if ($LASTEXITCODE) {
     exit $LASTEXITCODE
 }
