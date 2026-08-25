@@ -47,21 +47,55 @@ NATIVE_APPLE_BUILD_STEPS = (
     "Build artifacts",
     "Post-build",
 )
-BASH_4_ONLY_MARKERS = (
-    "declare -A",
-    "typeset -A",
-    "mapfile",
-    "readarray",
-    "declare -g",
-    "typeset -g",
-    "declare -n",
-    "typeset -n",
-    "readonly -A",
-    "local -n",
-    "wait -n",
-    "shopt -s globstar",
-    "shopt -s lastpipe",
+BASH_4_ONLY_PATTERNS = (
+    (
+        re.compile(r"\b(?:declare|typeset|readonly)[ \t]+-[A-Za-z]*A[A-Za-z]*\b"),
+        "associative-array declaration",
+    ),
+    (
+        re.compile(r"\b(?:declare|typeset)[ \t]+-[A-Za-z]*g[A-Za-z]*\b"),
+        "global declaration",
+    ),
+    (
+        re.compile(r"\b(?:declare|typeset|local)[ \t]+-[A-Za-z]*n[A-Za-z]*\b"),
+        "nameref declaration",
+    ),
+    (re.compile(r"\b(?:mapfile|readarray)\b"), "array-reading builtin"),
+    (re.compile(r"\bwait[ \t]+-[A-Za-z]*n[A-Za-z]*\b"), "wait -n"),
+    (
+        re.compile(r"\bshopt[ \t]+-s[^\n]*(?:globstar|lastpipe)\b"),
+        "Bash-4-only shopt",
+    ),
 )
+CI_JOB_IDS = (
+    "release-bootstrap-windows",
+    "fmt",
+    "clippy",
+    "test",
+    "build",
+    "speed",
+    "audit",
+    "dist-plan",
+    "workflow-validation",
+    "windows-installer-sources",
+)
+CI_MATRIX_OSES = {
+    "test": (
+        "ubuntu-latest",
+        "ubuntu-22.04-arm",
+        "macos-15",
+        "macos-15-intel",
+        "windows-latest",
+    ),
+    "build": (
+        "ubuntu-latest",
+        "ubuntu-22.04-arm",
+        "macos-15",
+        "macos-15-intel",
+        "windows-latest",
+    ),
+    "speed": ("ubuntu-latest", "macos-latest", "windows-latest"),
+}
 INNO_MSI_BRIDGE = ROOT / "inno" / "remove-conflicting-msi.pas"
 MANAGED_WINDOWS_INSTALLER = (
     ROOT / "scripts" / "managed-installers" / "tr300-installer.ps1"
@@ -167,6 +201,61 @@ PREPARED_RELEASE_ARTIFACT_MEMBERS = (
 def require(workflow: str, needle: str, label: str) -> None:
     if needle not in workflow:
         raise AssertionError(f"{label}: missing {needle!r}")
+
+
+def require_exact_step(step: str, expected: str, label: str) -> None:
+    actual_lines = textwrap.dedent(step).strip().splitlines()
+    expected_lines = textwrap.dedent(expected).strip().splitlines()
+    actual = "\n".join(line.rstrip() for line in actual_lines)
+    wanted = "\n".join(line.rstrip() for line in expected_lines)
+    if actual != wanted:
+        raise AssertionError(
+            f"{label}: step must match the exact fail-closed contract\n"
+            f"expected:\n{wanted}\nactual:\n{actual}"
+        )
+
+
+def require_exact_line_sequence(text: str, expected: str, label: str) -> None:
+    lines = textwrap.dedent(text).strip().splitlines()
+    wanted = textwrap.dedent(expected).strip().splitlines()
+    matches = sum(
+        lines[index : index + len(wanted)] == wanted
+        for index in range(len(lines) - len(wanted) + 1)
+    )
+    if matches != 1:
+        raise AssertionError(
+            f"{label}: expected one exact active line sequence, found {matches}: "
+            f"{wanted!r}"
+        )
+
+
+def require_direct_step_contract(
+    step: str,
+    expected_fields: tuple[str, ...],
+    exact_scalars: dict[str, str],
+    label: str,
+) -> None:
+    normalized = textwrap.dedent(step).strip()
+    fields = tuple(
+        match.group(1)
+        for line in normalized.splitlines()
+        if (match := re.match(r"^  ([A-Za-z0-9_-]+):", line)) is not None
+    )
+    if fields != expected_fields:
+        raise AssertionError(
+            f"{label}: direct step fields must be {expected_fields!r}, found {fields!r}"
+        )
+    for key, expected in exact_scalars.items():
+        matches = [
+            match.group(1).strip()
+            for line in normalized.splitlines()
+            if (match := re.match(rf"^  {re.escape(key)}:\s*(.*?)\s*$", line))
+            is not None
+        ]
+        if matches != [expected]:
+            raise AssertionError(
+                f"{label}: {key!r} must be exactly {expected!r}, found {matches!r}"
+            )
 
 
 def locate_bash() -> str | None:
@@ -298,7 +387,7 @@ def extract_named_step(workflow: str, step_name: str, label: str) -> str:
             candidate = lines[end]
             if re.match(rf"^\s{{{indentation}}}- (?:name:|uses:)", candidate):
                 break
-            if candidate.strip() and len(candidate) - len(candidate.lstrip()) < indentation:
+            if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= indentation:
                 break
             end += 1
         return "\n".join(lines[index:end]) + "\n"
@@ -328,6 +417,52 @@ def extract_job(workflow: str, job_name: str, label: str) -> str:
     return workflow[match.start() : end]
 
 
+def check_ci_job_inventory(ci: str) -> None:
+    jobs_match = re.search(r"(?m)^jobs:\s*$", ci)
+    if jobs_match is None:
+        raise AssertionError("ci.yml: missing jobs mapping")
+    job_ids = tuple(
+        re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\s*$", ci[jobs_match.end() :])
+    )
+    if job_ids != CI_JOB_IDS:
+        raise AssertionError(
+            f"ci.yml: logical job inventory must be {CI_JOB_IDS!r}, found {job_ids!r}"
+        )
+
+    expanded_jobs = 0
+    for job_id in CI_JOB_IDS:
+        job = extract_job(ci, job_id, CI_WORKFLOW.name)
+        expected_oses = CI_MATRIX_OSES.get(job_id)
+        matrix_lines = re.findall(r"(?m)^      matrix:\s*$", job)
+        if expected_oses is None:
+            if matrix_lines:
+                raise AssertionError(f"ci.yml:{job_id}: unexpected matrix expansion")
+            expanded_jobs += 1
+            continue
+        if len(matrix_lines) != 1:
+            raise AssertionError(
+                f"ci.yml:{job_id}: expected one matrix mapping, found {len(matrix_lines)}"
+            )
+        matrix_start = re.search(r"(?m)^      matrix:\s*$", job)
+        steps_start = re.search(r"(?m)^    steps:\s*$", job)
+        if matrix_start is None or steps_start is None or matrix_start.end() >= steps_start.start():
+            raise AssertionError(f"ci.yml:{job_id}: malformed matrix/steps ordering")
+        matrix = job[matrix_start.end() : steps_start.start()]
+        active_oses = tuple(
+            re.findall(r"(?m)^          - os:\s*([A-Za-z0-9._-]+)\s*$", matrix)
+        )
+        if active_oses != expected_oses:
+            raise AssertionError(
+                f"ci.yml:{job_id}: matrix OS inventory must be {expected_oses!r}, "
+                f"found {active_oses!r}"
+            )
+        expanded_jobs += len(active_oses)
+    if expanded_jobs != 20:
+        raise AssertionError(
+            f"ci.yml: expected exactly 20 expanded jobs, found {expanded_jobs}"
+        )
+
+
 def native_apple_job_bodies(release: str, macos: str) -> list[tuple[str, str]]:
     workflows = {
         "release.yml": release,
@@ -355,20 +490,15 @@ def native_apple_build_blocks(release: str) -> list[tuple[str, str]]:
         "Install pinned cargo-dist on Windows",
         "release.yml:build-local-artifacts",
     )
-    require(
+    require_exact_step(
         windows_install,
-        "if: runner.os == 'Windows'",
+        """
+        - name: Install pinned cargo-dist on Windows
+          if: runner.os == 'Windows'
+          shell: pwsh
+          run: ./scripts/install-pinned-cargo-dist.ps1
+        """,
         "release.yml:build-local-artifacts Windows-only exception",
-    )
-    require(
-        windows_install,
-        "shell: pwsh",
-        "release.yml:build-local-artifacts Windows shell exception",
-    )
-    require(
-        windows_install,
-        "run: ./scripts/install-pinned-cargo-dist.ps1",
-        "release.yml:build-local-artifacts Windows command exception",
     )
     blocks = [
         (
@@ -388,6 +518,36 @@ def native_apple_build_blocks(release: str) -> list[tuple[str, str]]:
 
 
 def check_native_apple_bash_contract(release: str, macos: str) -> None:
+    for workflow_name, workflow in (
+        (RELEASE_WORKFLOW.name, release),
+        (MACOS_WORKFLOW.name, macos),
+    ):
+        if re.search(r"(?m)^defaults:\s*$", workflow):
+            raise AssertionError(
+                f"{workflow_name}: top-level shell defaults require explicit native "
+                "Apple compatibility review"
+            )
+    apple_staging_step = extract_unique_named_step(
+        release, APPLE_STAGING_STEP_NAME, RELEASE_WORKFLOW.name
+    )
+    require_direct_step_contract(
+        apple_staging_step,
+        ("env", "shell", "run"),
+        {"shell": "bash", "run": "|"},
+        "Apple signer staging step",
+    )
+    require_exact_line_sequence(
+        apple_staging_step,
+        """
+        - name: Validate and safely stage the unsigned Apple archive
+          env:
+            APPLE_TARGET: ${{ matrix.target }}
+            RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+            STAGING_DIRECTORY: ${{ runner.temp }}/tr300-apple-signing-input
+          shell: bash
+        """,
+        "Apple signer staging environment",
+    )
     apple_staging = extract_unique_named_run(
         release, APPLE_STAGING_STEP_NAME, RELEASE_WORKFLOW.name
     )
@@ -400,11 +560,18 @@ def check_native_apple_bash_contract(release: str, macos: str) -> None:
     native_sources = native_apple_job_bodies(release, macos)
     native_sources.extend(native_apple_build_blocks(release))
     for label, job in native_sources:
-        for bash_4_only in BASH_4_ONLY_MARKERS:
-            if bash_4_only in job:
+        explicit_shells = re.findall(r"(?m)^\s+shell:\s*(.+?)\s*$", job)
+        unsupported_shells = [shell for shell in explicit_shells if shell != "bash"]
+        if unsupported_shells:
+            raise AssertionError(
+                f"{label}: native macOS run steps must use Bash; found explicit "
+                f"shells {unsupported_shells!r}"
+            )
+        for pattern, description in BASH_4_ONLY_PATTERNS:
+            if match := pattern.search(job):
                 raise AssertionError(
                     f"{label}: native macOS job must run under system Bash 3.2; "
-                    f"found unsupported construct {bash_4_only!r}"
+                    f"found unsupported {description} {match.group(0)!r}"
                 )
 
 
@@ -689,20 +856,24 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
     prepared_array = "expected=(\n" + "\n".join(
         f"  {name}" for name in prepared_names
     ) + "\n)"
-    require(prepare, archive_array, "prepare upstream expected-name binding")
-    require(
+    require_exact_line_sequence(
+        prepare, archive_array, "prepare upstream expected-name binding"
+    )
+    require_exact_line_sequence(
         prepare,
         'python3 - upstream "${expected[@]}" <<\'PY\'',
         "prepare upstream invocation binding",
     )
-    require(
+    require_exact_line_sequence(
         prepare,
         'python3 - "$OUTPUT_DIRECTORY" \\\n'
         "  tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'",
         "prepare output invocation binding",
     )
-    require(build, prepared_array, "build prepared expected-name binding")
-    require(
+    require_exact_line_sequence(
+        build, prepared_array, "build prepared expected-name binding"
+    )
+    require_exact_line_sequence(
         build,
         'python3 - "$PREPARED_DIRECTORY" "${expected[@]}" <<\'PY\'',
         "build prepared invocation binding",
@@ -6431,35 +6602,26 @@ def check_structural_contract(
     windows_cargo_dist_installer: str,
 ) -> None:
     check_native_apple_bash_contract(release, macos)
+    check_ci_job_inventory(ci)
     ci_test = extract_job(ci, "test", CI_WORKFLOW.name)
-    require(ci_test, "- os: macos-15\n", "Apple Silicon test matrix leg")
-    require(ci_test, "- os: macos-15-intel\n", "Intel macOS test matrix leg")
     apple_compatibility = extract_unique_named_step(
         ci_test,
         "Validate Apple release staging under system Bash",
         f"{CI_WORKFLOW.name}:test",
     )
-    require(
+    require_exact_step(
         apple_compatibility,
-        "if: runner.os == 'macOS'",
-        "native Apple staging compatibility condition",
-    )
-    require(
-        apple_compatibility,
-        "TR300_TEST_BASH: /bin/bash",
-        "native Apple system Bash fixture",
-    )
-    require(
-        apple_compatibility,
-        "shell: bash",
-        "native Apple compatibility step shell",
-    )
-    require(
-        apple_compatibility,
-        "run: >-\n"
-        "          python3 scripts/test-release-workflow-provenance.py\n"
-        "          --apple-staging-compatibility",
-        "native Apple staging compatibility exact command",
+        """
+        - name: Validate Apple release staging under system Bash
+          if: runner.os == 'macOS'
+          env:
+            TR300_TEST_BASH: /bin/bash
+          shell: bash
+          run: >-
+            python3 scripts/test-release-workflow-provenance.py
+            --apple-staging-compatibility
+        """,
+        "native Apple staging compatibility step",
     )
 
     for workflow_path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
