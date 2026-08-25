@@ -1612,8 +1612,8 @@ The current release topology is:
 
 ```text
 reviewed PR merge to main
-  -> exact-current-main CI (required contexts)
-  -> automatic Crates.io Publish for that successful CI run (fresh protected OIDC boundary)
+  -> exact-current-main CI plus automatic uncredentialed Crates.io Publish waiter
+  -> exact CI success releases the fresh protected OIDC publisher
   -> explicit stable vX.Y.Z tag
        -> Release creates a private 24-asset draft
        -> Windows Installers assembles 30 private assets
@@ -1623,10 +1623,12 @@ reviewed PR merge to main
 ```
 
 The post-rename `workflow_run` crates chain and its already-published 4.0.1 skip
-remain historical evidence for automatic/idempotent ergonomics. v4.3 retains
-that no-click successful-main-CI trigger while replacing its long-lived-token,
-same-runner design with protected OIDC, exact tested-SHA custody, fresh-runner
-byte reproduction, and post-public provenance adjudication.
+remain historical evidence for automatic/idempotent ergonomics. crates.io now
+rejects trusted OIDC from `workflow_run`, so v4.3 preserves no-click behavior
+with a supported `main` push trigger whose uncredentialed job waits for exact
+CI success. It also replaces the earlier long-lived-token, same-runner design
+with protected OIDC, exact tested-SHA custody, fresh-runner byte reproduction,
+and post-public provenance adjudication.
 
 Tags remain the only binary-release trigger. A branch/workflow/documentation
 change with unchanged `Cargo.toml` does not justify a version bump, retag, or
@@ -1853,10 +1855,12 @@ decision covering crates, MSI version mapping and bounds, macOS package version
 semantics, updater ordering, latest-release behavior, all validators, and the
 complete asset contract; widening one regex is forbidden.
 
-Crates publication automatically consumes a successful same-repository `CI`
-push run on `main`. A read-only job with no registry credential revalidates the
-upstream workflow ID, path, event, repository, branch, run attempt, SHA, and
-conclusion, binds current `main` to that exact successful CI, and performs locked verification plus a default-verifying
+Crates publication starts automatically on a same-repository push to `main`
+because crates.io trusted OIDC accepts `push` but rejects `workflow_run`. A
+read-only job with no registry credential polls for that exact SHA's `CI` push
+run, then re-fetches and validates its workflow ID, path, event, repository,
+branch, run attempt, SHA, and successful conclusion. It binds current `main`
+before and after that proof, then performs locked verification plus a default-verifying
 package/publish dry run with Cargo 1.95. A fresh `crates-io` environment runner
 checks out only that exact SHA with read-only GitHub authorization and persisted
 checkout credentials disabled, rejects symlinks, special or

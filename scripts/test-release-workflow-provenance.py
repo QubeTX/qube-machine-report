@@ -5402,19 +5402,17 @@ def check_crates_token_boundary(workflow: str) -> None:
     label = CRATES_WORKFLOW.name
     trigger = workflow[: workflow.index("permissions:")]
     for needle in (
-        "workflow_run:",
-        'workflows: ["CI"]',
-        "types: [completed]",
+        "push:",
         "branches: [main]",
     ):
-        require(trigger, needle, f"{label} automatic post-CI trigger")
-    if re.search(r"(?m)^\s{2}push:\s*$", trigger):
+        require(trigger, needle, f"{label} automatic main-push trigger")
+    if "workflow_run:" in trigger or "github.event.workflow_run" in workflow:
         raise AssertionError(
-            f"{label}: crates publication must consume the successful CI run, not race it"
+            f"{label}: crates.io trusted OIDC does not support workflow_run events"
         )
     require(
         workflow,
-        "if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository && github.repository == 'QubeTX/qube-machine-report'",
+        "if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report'",
         f"{label} automatic trusted-main publish gate",
     )
     probe_job = extract_job(workflow, "probe-trusted-publisher", label)
@@ -5463,27 +5461,47 @@ def check_crates_token_boundary(workflow: str) -> None:
         raise AssertionError(f"{label}: validation regained a credential")
     for needle in (
         "EVENT_NAME: ${{ github.event_name }}",
-        "UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}",
-        "UPSTREAM_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}",
-        "UPSTREAM_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}",
-        "UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}",
-        "WORKFLOW_SHA: ${{ github.sha }}",
-        '"$EVENT_NAME" == workflow_run',
+        "SOURCE_REF: ${{ github.ref }}",
+        "SOURCE_SHA: ${{ github.sha }}",
+        "PUBLISH_WORKFLOW_RUN_ID: ${{ github.run_id }}",
+        "CI_STATE_PATH: ${{ runner.temp }}/ci-runs.json",
+        '"$EVENT_NAME" == push',
         '"$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report',
+        '"$SOURCE_REF" == refs/heads/main',
+        '"$PUBLISH_WORKFLOW_RUN_ID" =~ ^[1-9][0-9]*$',
         "actions/workflows/ci.yml",
-        "actions/runs/$UPSTREAM_RUN_ID",
-        '"$workflow_id" == "$trusted_workflow_id"',
-        '"$workflow_id" == "$UPSTREAM_WORKFLOW_ID"',
-        '"$event" == push',
+        "runs?event=push&head_sha=$SOURCE_SHA&per_page=100",
+        'select(.workflow_id == $workflow_id and .name == "CI"',
+        '.path == ".github/workflows/ci.yml" and .event == "push"',
+        ".repository.full_name == $repo",
+        ".head_repository.full_name == $repo",
+        '.head_branch == "main" and .head_sha == $sha',
+        "[[ ${#rows[@]} -le 1 ]]",
         '"$status" == completed',
         '"$conclusion" == success',
+        "actions/runs/$ci_run_id",
+        '"$actual_id" == "$ci_run_id"',
+        '"$actual_workflow_id" == "$workflow_id"',
+        '"$run_name" == CI',
+        '"$run_path" == .github/workflows/ci.yml',
+        '"$event" == push',
+        '"$actual_status" == completed',
+        '"$actual_conclusion" == success',
+        '"$repository" == "$EXPECTED_REPOSITORY"',
+        '"$head_repository" == "$EXPECTED_REPOSITORY"',
         '"$head_branch" == main',
-        '"$source_sha" == "$UPSTREAM_SHA"',
-        '"$run_attempt" == "$UPSTREAM_RUN_ATTEMPT"',
-        '"$WORKFLOW_SHA" == "$source_sha"',
+        '"$source_sha" == "$SOURCE_SHA"',
+        '"$actual_run_attempt" == "$run_attempt"',
+        "for attempt in {1..120}",
+        "sleep 15",
+        'echo "source_sha=$SOURCE_SHA"',
+        'echo "workflow_run_id=$PUBLISH_WORKFLOW_RUN_ID"',
+        'echo "ci_run_id=$ci_run_id"',
         'git/ref/heads/main',
     ):
         require(source_gate, needle, f"{label} exact automatic publish gate")
+    if source_gate.count('git/ref/heads/main') != 2:
+        raise AssertionError(f"{label}: current-main bind must occur before and after CI")
     for needle in (
         "rustup toolchain install 1.95",
         "cargo\\ 1\\.95",
