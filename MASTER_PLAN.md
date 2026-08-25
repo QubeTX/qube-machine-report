@@ -5,7 +5,7 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-08-25
-**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.9 / 4.3.10
+**Complete public GitHub distribution / crates.io / working candidate manifest:** 4.2.2 / 4.3.10 / 4.3.11
 (v4.2.2 remains the last complete GitHub distribution. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.
@@ -79,13 +79,15 @@ credential use because cargo-dist's raw checksum files end in two LF bytes,
   exact private 30-asset draft. Its Mac finalizer then stopped before credential
   use on locale-sensitive checksum-name ordering, while private Windows
   validation asked the production Global worker to fetch an intentionally
-  private exact-tag URL. v4.3.10 is the narrow supported fix-forward, and no
+  private exact-tag URL. v4.3.10 repaired those defects and reached a private
+  30-asset draft, but native Mac validation stopped on an incorrect PackageKit
+  message assertion. v4.3.11 is the narrow supported fix-forward, and no
   prior tag may move.)
 **Release scope:** MIC-1 managed-install defaults, safe platform-specific
 fresh-channel transitions, direct native macOS PKG distribution, the immutable-v4.1 DMG bridge,
 hosted ARM/Intel Mac gates, Windows installer matrices, and continued Alienware
 validation. AMD laptop and Pi evidence remain open.
-**In flight (v4.3.10 distribution fix-forward):** Linux battery-selection hardening accepts
+**In flight (v4.3.11 distribution fix-forward):** Linux battery-selection hardening accepts
 well-formed `*_now`/`*_avg` and signed current/power readings while rejecting
 contradictory device/absence evidence; the historical Pi "30%" source remains
 unproven. Linux thermals choose the hottest valid sensor deterministically,
@@ -133,7 +135,8 @@ Physical AMD64 Linux and Raspberry Pi verification is separate and remains open.
 **Repository:** `QubeTX/qube-machine-report`
 
 The active v4.3 GitHub-distribution campaign remains incomplete. Its product
-  code is published on crates.io through v4.3.9; the v4.3.10 packaging fix-forward carries
+code is published on crates.io through v4.3.10; the v4.3.11 packaging
+fix-forward carries
 battery, thermal, and Windows full-mode improvements. A `main` push starts CI
 and the crate-publication workflow together; the registry-uncredentialed
 validator waits for that exact CI run to pass before the fresh protected OIDC
@@ -143,7 +146,7 @@ acceptance proof → macOS-only 34-asset finalization chain. The Apple secrets a
 in `apple-signing`; native ARM/Intel preflight passed, repository copies and the
 temporary migration token are gone, and PR #16 removed the one-time workflow.
 The crates.io publisher tuple, automatic exact-main publication, and
-  `trustpub_only` probe passed for all ten published v4.3 crates. v4.3.10 must repeat
+  `trustpub_only` probe passed for all eleven published v4.3 crates. v4.3.11 must repeat
 that automatic proof and its native Bash-3.2 preflight before its new immutable
 tag is eligible for the native/public chain.
 AMD64 Linux laptop and Raspberry Pi physical qualification remain separate open
@@ -679,13 +682,11 @@ incomplete release/tag/crate remain immutable. The broader
 personal-hardware milestone stays open for AMD Linux and Pi 4 evidence after
 this release, plus the user-approved Alienware v4.1.3 → v4.2.2 UAC ceremony.
 
-The v4.3 release campaign is **not complete**. Do not tag v4.3.10, update the
-homepage, or close the release milestone until the checksum/validation fix-forward
-PR,
+The v4.3 release campaign is **not complete**. Do not tag v4.3.11, update the
+homepage, or close the release milestone until the native-validation fix-forward PR,
 exact-main CI, automatic OIDC crates publication, and native Apple staging
-preflight succeed. Then push only v4.3.10 and require the private 30-asset
+preflight succeed. Then push only v4.3.11 and require the private 30-asset
 Windows proof, macOS-only exact 34-asset publication, and every post-public
 smoke/public-byte audit to pass. Never move or reuse failed tags v4.3.0 through
-v4.3.9; the first five created no draft, the exact v4.3.5 through v4.3.8
-24-asset drafts must remain private, and the exact v4.3.9 30-asset draft must
-remain private.
+v4.3.10; the first five created no draft, the exact v4.3.5 through v4.3.8
+24-asset drafts and exact v4.3.9/v4.3.10 30-asset drafts must remain private.

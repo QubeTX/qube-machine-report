@@ -7,8 +7,8 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete public GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.9` / `4.3.10` (all prior tags remain immutable)
-**Active fix-forward branch:** `codex/v4.3.10-private-gate-fixes`
+**Complete public GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.10` / `4.3.11` (all prior tags remain immutable)
+**Active fix-forward branch:** `codex/v4.3.11-release`
 **Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
@@ -46,6 +46,15 @@ closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
   tagless native preflight 32849403638; successful 13-job Release 32849508590;
   private draft id 376401700 extended to 30 assets by Windows 32850002419;
   failed-closed macOS 32850002313 and private Windows validation 32850359079.
+  v4.3.10 exact-main CI 32854836544; automatic trusted-OIDC crates
+  32854836651; tagless native preflight 32855676983; successful 13-job Release
+  32855768841; private draft id 376446284 extended to 30 assets by Windows
+  32856291489; successful private Windows validation 32856682126; failed-
+  closed native macOS validation 32856291645 after signing/notarization. PR #28
+  exact-head CI 32859056143 and Release plan 32859054543 passed; it merged as
+  e55c71bd35d410cc0abda5419168c5384f92690a and exact-main CI 32859831814
+  passed. Recovery 32860673370 refused the immutable tag/current-main mismatch
+  before credentials.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
 `#adrlog`, `#v43`, `#v430`, `#r43`
@@ -55,7 +64,7 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-08-24–25 v4.3.0–v4.3.9 publication splits and v4.3.10 fix-forward
+## 2026-08-24–25 v4.3.0–v4.3.10 publication splits and v4.3.11 fix-forward
 
 Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
 published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
@@ -185,13 +194,27 @@ comparison depended on locale ordering. Private Windows validation
 fetch an anonymous exact-tag asset while the release was private. Nothing
 became public.
 
-The supported path is now v4.3.10 through the normal reviewed no-click
-automation on `codex/v4.3.10-private-gate-fixes`. Replace only the fragile Mac
-comparison, prove frozen Global repairs privately, and run the network-backed
-Global worker only after publication. After exact-main CI, automatic OIDC
-publication, and native preflight pass, push only `v4.3.10` and let the private
+v4.3.10 then passed exact-main CI `32854836544`, automatic trusted-OIDC
+publication `32854836651`, and native preflight `32855676983`. Immutable tag
+`v4.3.10` points to exact source
+`e8b0bb73f895f3c2b2d2f62fd39df5846db8f526`. Release `32855768841` passed
+all 13 jobs; Windows Installers `32856291489` extended exact private draft
+`376446284` to 30 assets, and private Windows validation `32856682126` passed.
+macOS run `32856291645` built, signed, and notarized the universal PKG and
+compatibility DMG, then both native validation jobs stopped because the harness
+expected PackageKit to repeat the preinstall script's human message. No
+publisher ran and nothing became public. PR #28 repaired only that assertion,
+passed exact-head CI `32859056143` plus Release plan `32859054543`, merged as
+`e55c71bd35d410cc0abda5419168c5384f92690a`, and exact-main CI
+`32859831814` passed. Recovery `32860673370` correctly refused to combine the
+old tag with newer protected-main workflow code before credentials.
+
+The supported path is now v4.3.11 through the normal reviewed no-click
+automation on `codex/v4.3.11-release`. Product behavior and installer policy
+remain unchanged. After exact-main CI, automatic OIDC publication, and native
+preflight pass, push only `v4.3.11` and let the private
 24-to-30-to-validated-to-34 chain run. Never move or delete v4.3.0 through
-v4.3.9, hand-assemble any existing draft, or publish a partial release.
+v4.3.10, hand-assemble any existing draft, or publish a partial release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 
@@ -1163,22 +1186,22 @@ This section records observed hosted state, never expectation.
 ## What's Next
 
 The v4.3 GitHub distribution and homepage update are not complete. Continue the
-immutable-tag-safe v4.3.10 release before returning to the physical-hardware
+immutable-tag-safe v4.3.11 release before returning to the physical-hardware
 queue:
 
-1. Finish review and qualification of the checksum/private-validation repair on
-   `codex/v4.3.10-private-gate-fixes`; pass the complete local gate,
+1. Finish review and qualification of the native-validation release metadata on
+   `codex/v4.3.11-release`; pass the complete local gate,
    independent review, exact-head PR CI, and Release plan.
 2. Merge only the accepted exact SHA. Require exact-main CI, automatic trusted-
-   OIDC v4.3.10 publication, and native Intel/Apple Silicon credential/staging
-   preflight before pushing only immutable tag `v4.3.10`.
+   OIDC v4.3.11 publication, and native Intel/Apple Silicon credential/staging
+   preflight before pushing only immutable tag `v4.3.11`.
 3. Require the automatic private 24-to-30-to-validated-to-34 asset chain, both
    native Apple lifecycles, public Windows updater plus Linux/macOS smokes, and
    the public-byte audit before updating the homepage or closing `#r43`/`#v43`.
-4. Keep `v4.3.0` through `v4.3.9` immutable. The first five produced no draft;
+4. Keep `v4.3.0` through `v4.3.10` immutable. The first five produced no draft;
    v4.3.5, v4.3.6, v4.3.7, and v4.3.8 produced private drafts `376242296`,
    `376283574`, `376309349`, and `376357745`; v4.3.9 produced private 30-asset
-   draft `376401700`.
+   draft `376401700`, and v4.3.10 produced private 30-asset draft `376446284`.
    Do not delete, move, reuse, or hand-recover any tag or draft.
 5. After release closure, continue the personal Alienware, AMD64 Linux, and
    Raspberry Pi 4 tasks. Those physical checks remain open and must not be
