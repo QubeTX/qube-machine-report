@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.3`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.4` (battery hardening, Windows
+- Current crates.io version: `4.3.4`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.5` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -82,10 +82,20 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   `32814328977`, automatic trusted-OIDC crates run `32814329178`, and native
   preflight `32815263338` passed. Tagged Release `32815338720` built all six
   targets, but both Apple signers rejected cargo-dist's safe full POSIX mode
-  encoding (`040755`/`0100755`/`0100644`) before credential use. No v4.3.0,
-  v4.3.1, v4.3.2, or v4.3.3 GitHub draft exists. Never move, delete, reuse, or
-  rerun those tags unchanged. v4.2.2 remains the last complete GitHub
-  distribution until reviewed v4.3.4 passes exact-main CI/OIDC and the automatic private
+  encoding (`040755`/`0100755`/`0100644`) before credential use. PR #21 fixed
+  that boundary at exact head `a631e971786682bc823b3351e4cf3a569afe491f`;
+  PR CI `32819974330` and Release plan `32819974234` passed. It merged as exact
+  `ed22545e444f968296d5a34cbc27a0a205e92ae0`; exact-main CI `32820725614`,
+  automatic trusted-OIDC crates run `32820725583`, and native preflight
+  `32821497928` passed. Crates.io serves exact unyanked v4.3.4 with checksum
+  `b74d1aec64b44f5f7f56d284dcb89dd44f1d6b2aa18400e49adb2acb27cbd304`.
+  Tagged Release `32821575317` passed its plan, all six platform builds, both
+  Apple signer/notary jobs, and global artifacts, then the uncredentialed
+  24-asset preparation failed closed when its jq filter indexed a boolean as
+  the release manifest. Host and every downstream workflow skipped; no draft
+  exists. No v4.3.0 through v4.3.4 GitHub draft exists. Never move, delete,
+  reuse, or rerun those tags unchanged. v4.2.2 remains the last complete GitHub
+  distribution until reviewed v4.3.5 passes exact-main CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
