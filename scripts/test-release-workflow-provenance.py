@@ -25,6 +25,9 @@ MACOS_INSTALLER_BUILDER = ROOT / "scripts" / "build-sign-notarize-macos-installe
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CRATES_WORKFLOW = ROOT / ".github" / "workflows" / "crates-publish.yml"
 PINNED_INNO_INSTALLER = ROOT / "scripts" / "install-pinned-inno-setup.ps1"
+PINNED_WINDOWS_CARGO_DIST_INSTALLER = (
+    ROOT / "scripts" / "install-pinned-cargo-dist.ps1"
+)
 INNO_MSI_BRIDGE = ROOT / "inno" / "remove-conflicting-msi.pas"
 MANAGED_WINDOWS_INSTALLER = (
     ROOT / "scripts" / "managed-installers" / "tr300-installer.ps1"
@@ -5867,6 +5870,7 @@ def check_structural_contract(
     ci: str,
     crates: str,
     windows_validation: str,
+    windows_cargo_dist_installer: str,
 ) -> None:
     for workflow_path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         workflow_text = workflow_path.read_text(encoding="utf-8")
@@ -5895,11 +5899,35 @@ def check_structural_contract(
                 )
 
     require(release, CARGO_DIST_SH_SHA256, "release.yml cargo-dist sh pin")
-    require(release, CARGO_DIST_PS1_SHA256, "release.yml cargo-dist ps1 pin")
     require(ci, CARGO_DIST_SH_SHA256, "ci.yml cargo-dist sh pin")
     for label, workflow_text in (("release.yml", release), ("ci.yml", ci)):
         require(workflow_text, "command -v sha256sum", f"{label} cargo-dist checksum tool")
         require(workflow_text, "cargo-dist 0.31.0", f"{label} cargo-dist version")
+    for label, workflow_text in (("release.yml", release), ("ci.yml", ci)):
+        require(
+            workflow_text,
+            "./scripts/install-pinned-cargo-dist.ps1",
+            f"{label} pinned Windows cargo-dist helper",
+        )
+    require(
+        windows_cargo_dist_installer,
+        CARGO_DIST_PS1_SHA256,
+        "Windows cargo-dist helper ps1 pin",
+    )
+    require(
+        windows_cargo_dist_installer,
+        "cargo-dist 0.31.0",
+        "Windows cargo-dist helper version",
+    )
+    require(
+        windows_cargo_dist_installer,
+        "[IO.FileAttributes]::ReparsePoint",
+        "Windows cargo-dist helper reparse-point guard",
+    )
+    if ".LinkType" in windows_cargo_dist_installer:
+        raise AssertionError(
+            "Windows cargo-dist helper must not reject ordinary NTFS hard links"
+        )
     if "matrix.install_dist.run" in release:
         raise AssertionError(
             "release.yml: generated mutable matrix.install_dist.run execution returned"
@@ -6022,12 +6050,21 @@ def main() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     crates = CRATES_WORKFLOW.read_text(encoding="utf-8")
     windows_validation = WINDOWS_VALIDATION_WORKFLOW.read_text(encoding="utf-8")
+    windows_cargo_dist_installer = PINNED_WINDOWS_CARGO_DIST_INSTALLER.read_text(
+        encoding="utf-8"
+    )
     bash = locate_bash()
     if not bash:
         raise AssertionError("bash is required to execute workflow provenance fixtures")
 
     check_structural_contract(
-        release, windows, macos, ci, crates, windows_validation
+        release,
+        windows,
+        macos,
+        ci,
+        crates,
+        windows_validation,
+        windows_cargo_dist_installer,
     )
     with tempfile.TemporaryDirectory(prefix="tr300-provenance-gh-") as fixture_raw:
         mock_bin = Path(fixture_raw) / "bin"
