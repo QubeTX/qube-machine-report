@@ -65,12 +65,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checks that proof and every accepted download byte before making the complete
   34-file release public. Public updater checks happen only after publication,
   so an unpublished candidate is never mistaken for the public latest release.
-- **Crates.io publishing stays automatic after successful `main` checks while
-  using a short-lived login created for that one run.** The package is fully
-  rehearsed with read-only GitHub access and no registry login, a fresh runner
-  proves it has the same source and package bytes, and only the final upload
-  receives the temporary credential. An already-published version is a clean
-  no-op, so normal documentation-only merges do not require attention.
+- **Crates.io publishing starts automatically with each accepted `main` update
+  and waits for that update's checks to pass.** The package is fully rehearsed
+  with read-only GitHub access and no registry login, a fresh runner proves it
+  has the same source and package bytes, and only the final upload receives a
+  short-lived login created for that one run. An already-published version is a
+  clean no-op, so normal documentation-only merges do not require attention.
 - **Mac signing credentials are isolated from project code.** Both kinds of Mac
   runner prove signing and notarization access through the dedicated
   environment. Credentialed jobs start fresh and receive only fixed package
