@@ -7,25 +7,28 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.0` / `4.3.1` (all prior tags remain immutable)
-**Active fix-forward branch:** `codex/v4.3.1-release-bootstrap-fix`
+**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.1` / `4.3.2` (all prior tags remain immutable)
+**Active fix-forward branch:** `codex/v4.3.2-apple-bash-fix`
 **Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
 29664688035; native macOS 29664824418; Windows Installers 29664824432; Windows
 transitions 29664948031. v4.3.0 exact-main CI 32794371259; automatic trusted-
 OIDC crates 32794371283; final tagless Apple preflight 32795757823; failed-
-closed GitHub Release 32795846831.
+closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
+32799513464; exact-main CI 32800131846; automatic trusted-OIDC crates
+32800131893; tagless native preflight 32800830054; failed-closed GitHub Release
+32800944635.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
-`#adrlog`
+`#adrlog`, `#v43`, `#v430`, `#r43`
 
 This is the exhaustive portable continuation record. The SHAUGHV board source,
 milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-08-24 v4.3.0 publication split and v4.3.1 fix-forward
+## 2026-08-24 v4.3.0/v4.3.1 publication splits and v4.3.2 fix-forward
 
 Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
 published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
@@ -37,13 +40,26 @@ cargo-dist PowerShell installer deliberately hard-links `dist.exe` and
 valid tool. An unchanged rerun uses the same immutable workflow and cannot
 pass; every downstream recovery correctly requires a successful exact Release.
 
-The supported path is v4.3.1 through a reviewed PR and the normal no-click
-automation. One shared pinned PowerShell bootstrap is used by the release
-matrix and a new Windows Server 2022 CI job; it requires a regular leaf and
-rejects reparse-point redirection while accepting the installer's ordinary
-hard-linked alias. After exact-main CI and automatic OIDC publication pass,
-push only `v4.3.1` and let the private 24-to-30-to-validated-to-34 chain run.
-Never move/delete v4.3.0, hand-assemble a draft, or publish a partial release.
+The Windows fix-forward passed its reviewed PR as exact head `4979636`, all 20
+jobs in CI `32799513518`, Release plan `32799513464`, and every review thread.
+PR #18 merged as exact source `07e0e3ae265eb70856eb5ee0602beb11850ea00d`;
+exact-main CI `32800131846`, automatic trusted-OIDC crates run `32800131893`,
+and native credential preflight `32800830054` passed. Crates.io serves exact
+unyanked v4.3.1 with `trustpub_only=true`, and immutable tag `v4.3.1` points to
+that source. Release `32800944635` built all six targets, then both fresh Apple
+signer jobs failed before signing, upload, hosting, or draft creation because
+macOS system Bash 3.2 does not support the Bash-4-only `declare -A` and
+`mapfile` constructs in their staging step. Latent matching constructs in the
+downstream macOS workflow would have failed later as well. An unchanged rerun
+cannot consume corrected workflow code.
+
+The supported path is now v4.3.2 through a reviewed PR and the normal no-click
+automation. It preserves the shared pinned Windows bootstrap, replaces
+Bash-4-only native Apple staging with fail-closed system-Bash-compatible inventory
+checks, and adds exact syntax/staging coverage on both native Mac runners. After
+exact-main CI, automatic OIDC publication, and native preflight pass, push only
+`v4.3.2` and let the private 24-to-30-to-validated-to-34 chain run. Never move
+or delete v4.3.0/v4.3.1, hand-assemble a draft, or publish a partial release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 
@@ -1014,20 +1030,23 @@ This section records observed hosted state, never expectation.
 
 ## What's Next
 
-The release and homepage are complete. The next machine must begin with the
-post-release hardware queue, not reopen or regenerate the Mac release path:
+The v4.3 GitHub distribution and homepage update are not complete. Continue the
+immutable-tag-safe v4.3.2 release before returning to the physical-hardware
+queue:
 
-1. On the personal Alienware, run task `#winhw`: compare full/fast/table/JSON/
-   manual-save output to native Windows tools and exercise the installed
-   edition's updater/installer-origin path. Record evidence and patch forward.
-2. On the personal AMD64 Linux laptop, run the Linux portion of `#plat` against
-   native topology, disk/memory, network/DNS, battery/encryption, login, and
-   elevated/unelevated facts.
-3. On the 64-bit Raspberry Pi 4, finish `#plat` with devicetree CPU/model,
-   frequency, load, filesystem, network, graceful-missing-tool, installer, and
-   fast-budget checks.
-4. Preserve the absolute Mac freeze above. Windows/Linux-only cfg code and
-   tests may change; any shared/dependency/build/dist/workflow/Apple change
-   reopens the stated native arm64 + Rosetta + real notary gates before a tag.
-5. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
+1. Finish the Bash-3.2-compatible Apple staging/provenance implementation on
+   `codex/v4.3.2-apple-bash-fix`; pass the complete local gate, independent
+   review, exact-head PR CI, and Release plan.
+2. Merge only the accepted exact SHA. Require exact-main CI, automatic trusted-
+   OIDC v4.3.2 publication, and native Intel/Apple Silicon credential/staging
+   preflight before pushing only immutable tag `v4.3.2`.
+3. Require the automatic private 24-to-30-to-validated-to-34 asset chain, both
+   native Apple lifecycles, public Windows updater plus Linux/macOS smokes, and
+   the public-byte audit before updating the homepage or closing `#r43`/`#v43`.
+4. Keep `v4.3.0` and `v4.3.1` immutable. Neither produced a GitHub draft; do not
+   delete, move, reuse, or hand-recover either tag.
+5. After release closure, continue the personal Alienware, AMD64 Linux, and
+   Raspberry Pi 4 tasks. Those physical checks remain open and must not be
+   inferred from hosted evidence.
+6. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
    work is actually ready.

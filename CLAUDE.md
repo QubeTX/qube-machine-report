@@ -52,17 +52,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete GitHub distribution: **4.2.2**. Current crates.io package: **4.3.0**.
-The working fix-forward manifest is **4.3.1**. PR #14 merged as
+Complete GitHub distribution: **4.2.2**. Current crates.io package: **4.3.1**.
+The working fix-forward manifest is **4.3.2**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
 `32794371259` and automatic OIDC run `32794371283` published exact v4.3.0 with
-`trustpub_only=true`. Its immutable tag remains at that SHA, but Release run
-`32795846831` stopped before draft creation when a new guard rejected the
-official cargo-dist installer's normal hard-linked alias. v4.2.2 remains the
-complete GitHub-distribution boundary until the reviewed v4.3.1 fix-forward
-passes the normal automated tag chain. Exact v4.2.2 source
+`trustpub_only=true`. Its immutable tag stopped before draft creation in
+Release `32795846831` on the official cargo-dist installer's normal hard-linked
+alias. PR #18 head `4979636` passed 20/20 CI in `32799513518` and Release plan
+`32799513464`, then merged/tagged at exact `07e0e3ae`. Exact-main CI
+`32800131846` and automatic OIDC run `32800131893` published exact v4.3.1;
+native preflight `32800830054` passed. Tagged Release `32800944635` passed all
+six platform builds but stopped before signing/upload/draft when both native
+Apple signers encountered Bash-4-only syntax under macOS system Bash 3.2.
+Neither failed tag has a GitHub draft; both stay immutable. v4.2.2 remains the
+complete GitHub-distribution boundary until reviewed v4.3.2 passes the normal
+automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
@@ -540,6 +546,15 @@ steady-state boundary without recreating repository-scoped Apple secrets or a
 migration workflow. A future credential rotation still requires fresh native
 preflight proof before a tag.
 
+Native Apple signer and installer workflow blocks must parse under the hosted
+system `/bin/bash` 3.2. Do not use associative arrays, `mapfile`, or `readarray`
+in those jobs. Both native Mac CI legs syntax-check the affected inline blocks
+and classified tag-only build-matrix Bash blocks, execute the exact
+checkout-free signer staging, and run the exact installer inventories against
+positive and fail-closed fixtures before a release tag is eligible. Exact
+inventories use non-following Python standard-library file inspection rather
+than requiring a newer shell.
+
 The cargo-dist archives still contain a bare standalone CLI and therefore use
 Apple acceptance plus `codesign --verify --strict`; a bare-binary
 `spctl --type execute` message that the code is valid but not an app is expected.
@@ -598,9 +613,11 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.1 chain completes, v4.2.2 remains the complete GitHub
-  distribution. The v4.3.0 crate/tag stay published and immutable but have no
-  GitHub Release.
+- Until the v4.3.2 chain completes, v4.2.2 remains the complete GitHub
+  distribution. The v4.3.0 and v4.3.1 crates/tags stay published and immutable,
+  but neither tag has a GitHub Release. Native Apple workflow blocks must parse
+  under system `/bin/bash` 3.2; both Mac CI legs syntax-check the affected jobs
+  and execute the exact checkout-free signer-staging block before tagging.
 
 `Cargo.lock` is intentionally tracked; both local verification and the publish
 workflow use locked Cargo publication. The fresh OIDC runner executes no

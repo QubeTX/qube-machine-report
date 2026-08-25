@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import zipfile
@@ -28,6 +30,72 @@ PINNED_INNO_INSTALLER = ROOT / "scripts" / "install-pinned-inno-setup.ps1"
 PINNED_WINDOWS_CARGO_DIST_INSTALLER = (
     ROOT / "scripts" / "install-pinned-cargo-dist.ps1"
 )
+APPLE_STAGING_STEP_NAME = "Validate and safely stage the unsigned Apple archive"
+NATIVE_APPLE_JOBS = (
+    ("release.yml", "sign-apple-artifacts"),
+    ("macos-installer.yml", "prepare-installer-inputs"),
+    ("macos-installer.yml", "credential-preflight"),
+    ("macos-installer.yml", "build"),
+    ("macos-installer.yml", "validate"),
+    ("macos-installer.yml", "legacy-bridge"),
+)
+NATIVE_APPLE_BUILD_STEPS = (
+    "enable windows longpaths",
+    "Reject unreviewed cargo-dist container runners",
+    "Install pinned cargo-dist on Unix",
+    "Install dependencies",
+    "Build artifacts",
+    "Post-build",
+)
+BASH_4_ONLY_PATTERNS = (
+    (
+        re.compile(r"\b(?:declare|typeset|readonly)[ \t]+-[A-Za-z]*A[A-Za-z]*\b"),
+        "associative-array declaration",
+    ),
+    (
+        re.compile(r"\b(?:declare|typeset)[ \t]+-[A-Za-z]*g[A-Za-z]*\b"),
+        "global declaration",
+    ),
+    (
+        re.compile(r"\b(?:declare|typeset|local)[ \t]+-[A-Za-z]*n[A-Za-z]*\b"),
+        "nameref declaration",
+    ),
+    (re.compile(r"\b(?:mapfile|readarray)\b"), "array-reading builtin"),
+    (re.compile(r"\bwait[ \t]+-[A-Za-z]*n[A-Za-z]*\b"), "wait -n"),
+    (
+        re.compile(r"\bshopt[ \t]+-s[^\n]*(?:globstar|lastpipe)\b"),
+        "Bash-4-only shopt",
+    ),
+)
+CI_JOB_IDS = (
+    "release-bootstrap-windows",
+    "fmt",
+    "clippy",
+    "test",
+    "build",
+    "speed",
+    "audit",
+    "dist-plan",
+    "workflow-validation",
+    "windows-installer-sources",
+)
+CI_MATRIX_OSES = {
+    "test": (
+        "ubuntu-latest",
+        "ubuntu-22.04-arm",
+        "macos-15",
+        "macos-15-intel",
+        "windows-latest",
+    ),
+    "build": (
+        "ubuntu-latest",
+        "ubuntu-22.04-arm",
+        "macos-15",
+        "macos-15-intel",
+        "windows-latest",
+    ),
+    "speed": ("ubuntu-latest", "macos-latest", "windows-latest"),
+}
 INNO_MSI_BRIDGE = ROOT / "inno" / "remove-conflicting-msi.pas"
 MANAGED_WINDOWS_INSTALLER = (
     ROOT / "scripts" / "managed-installers" / "tr300-installer.ps1"
@@ -135,6 +203,61 @@ def require(workflow: str, needle: str, label: str) -> None:
         raise AssertionError(f"{label}: missing {needle!r}")
 
 
+def require_exact_step(step: str, expected: str, label: str) -> None:
+    actual_lines = textwrap.dedent(step).strip().splitlines()
+    expected_lines = textwrap.dedent(expected).strip().splitlines()
+    actual = "\n".join(line.rstrip() for line in actual_lines)
+    wanted = "\n".join(line.rstrip() for line in expected_lines)
+    if actual != wanted:
+        raise AssertionError(
+            f"{label}: step must match the exact fail-closed contract\n"
+            f"expected:\n{wanted}\nactual:\n{actual}"
+        )
+
+
+def require_exact_line_sequence(text: str, expected: str, label: str) -> None:
+    lines = textwrap.dedent(text).strip().splitlines()
+    wanted = textwrap.dedent(expected).strip().splitlines()
+    matches = sum(
+        lines[index : index + len(wanted)] == wanted
+        for index in range(len(lines) - len(wanted) + 1)
+    )
+    if matches != 1:
+        raise AssertionError(
+            f"{label}: expected one exact active line sequence, found {matches}: "
+            f"{wanted!r}"
+        )
+
+
+def require_direct_step_contract(
+    step: str,
+    expected_fields: tuple[str, ...],
+    exact_scalars: dict[str, str],
+    label: str,
+) -> None:
+    normalized = textwrap.dedent(step).strip()
+    fields = tuple(
+        match.group(1)
+        for line in normalized.splitlines()
+        if (match := re.match(r"^  ([A-Za-z0-9_-]+):", line)) is not None
+    )
+    if fields != expected_fields:
+        raise AssertionError(
+            f"{label}: direct step fields must be {expected_fields!r}, found {fields!r}"
+        )
+    for key, expected in exact_scalars.items():
+        matches = [
+            match.group(1).strip()
+            for line in normalized.splitlines()
+            if (match := re.match(rf"^  {re.escape(key)}:\s*(.*?)\s*$", line))
+            is not None
+        ]
+        if matches != [expected]:
+            raise AssertionError(
+                f"{label}: {key!r} must be exactly {expected!r}, found {matches!r}"
+            )
+
+
 def locate_bash() -> str | None:
     configured = os.environ.get("TR300_TEST_BASH")
     if configured:
@@ -156,7 +279,7 @@ def extract_run_blocks(workflow: str) -> list[str]:
     blocks: list[str] = []
     index = 0
     while index < len(lines):
-        match = re.match(r"^(\s*)run:\s*\|\s*$", lines[index])
+        match = re.match(r"^(\s*)(?:-\s+)?run:\s*\|[+-]?\s*$", lines[index])
         if match is None:
             index += 1
             continue
@@ -205,6 +328,53 @@ def extract_named_run(workflow: str, step_name: str, label: str) -> str:
     raise AssertionError(f"{label}: named step {step_name!r} has no block run body")
 
 
+def extract_unique_named_run(workflow: str, step_name: str, label: str) -> str:
+    matches = [
+        line
+        for line in workflow.splitlines()
+        if (match := re.match(r"^\s*- name:\s*(.+?)\s*$", line)) is not None
+        and match.group(1) == step_name
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"{label}: expected one named step {step_name!r}, found {len(matches)}"
+        )
+    return extract_named_run(workflow, step_name, label)
+
+
+def extract_unique_id_run(workflow: str, step_id: str, label: str) -> str:
+    lines = workflow.splitlines()
+    matches = [
+        index
+        for index, line in enumerate(lines)
+        if (match := re.match(r"^(\s*)- id:\s*(.+?)\s*$", line)) is not None
+        and match.group(2) == step_id
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"{label}: expected one step id {step_id!r}, found {len(matches)}"
+        )
+    step_index = matches[0]
+    step_indent = len(lines[step_index]) - len(lines[step_index].lstrip())
+    for index in range(step_index + 1, len(lines)):
+        line = lines[index]
+        indentation = len(line) - len(line.lstrip())
+        if line.strip() and indentation <= step_indent:
+            break
+        match = re.match(r"^(\s*)run:\s*\|[+-]?\s*$", line)
+        if match is None:
+            continue
+        run_indent = len(match.group(1))
+        block: list[str] = []
+        for body_line in lines[index + 1 :]:
+            body_indent = len(body_line) - len(body_line.lstrip())
+            if body_line.strip() and body_indent <= run_indent:
+                break
+            block.append(body_line)
+        return textwrap.dedent("\n".join(block)).strip() + "\n"
+    raise AssertionError(f"{label}: step id {step_id!r} has no literal run body")
+
+
 def extract_named_step(workflow: str, step_name: str, label: str) -> str:
     lines = workflow.splitlines()
     for index, line in enumerate(lines):
@@ -217,11 +387,25 @@ def extract_named_step(workflow: str, step_name: str, label: str) -> str:
             candidate = lines[end]
             if re.match(rf"^\s{{{indentation}}}- (?:name:|uses:)", candidate):
                 break
-            if candidate.strip() and len(candidate) - len(candidate.lstrip()) < indentation:
+            if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= indentation:
                 break
             end += 1
         return "\n".join(lines[index:end]) + "\n"
     raise AssertionError(f"{label}: missing named step {step_name!r}")
+
+
+def extract_unique_named_step(workflow: str, step_name: str, label: str) -> str:
+    matches = [
+        line
+        for line in workflow.splitlines()
+        if (match := re.match(r"^\s*- name:\s*(.+?)\s*$", line)) is not None
+        and match.group(1) == step_name
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"{label}: expected one named step {step_name!r}, found {len(matches)}"
+        )
+    return extract_named_step(workflow, step_name, label)
 
 
 def extract_job(workflow: str, job_name: str, label: str) -> str:
@@ -231,6 +415,842 @@ def extract_job(workflow: str, job_name: str, label: str) -> str:
     following = re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", workflow[match.end() :])
     end = len(workflow) if following is None else match.end() + following.start()
     return workflow[match.start() : end]
+
+
+def check_ci_job_inventory(ci: str) -> None:
+    jobs_match = re.search(r"(?m)^jobs:\s*$", ci)
+    if jobs_match is None:
+        raise AssertionError("ci.yml: missing jobs mapping")
+    job_ids = tuple(
+        re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\s*$", ci[jobs_match.end() :])
+    )
+    if job_ids != CI_JOB_IDS:
+        raise AssertionError(
+            f"ci.yml: logical job inventory must be {CI_JOB_IDS!r}, found {job_ids!r}"
+        )
+
+    expanded_jobs = 0
+    for job_id in CI_JOB_IDS:
+        job = extract_job(ci, job_id, CI_WORKFLOW.name)
+        expected_oses = CI_MATRIX_OSES.get(job_id)
+        matrix_lines = re.findall(r"(?m)^      matrix:\s*$", job)
+        if expected_oses is None:
+            if matrix_lines:
+                raise AssertionError(f"ci.yml:{job_id}: unexpected matrix expansion")
+            expanded_jobs += 1
+            continue
+        if len(matrix_lines) != 1:
+            raise AssertionError(
+                f"ci.yml:{job_id}: expected one matrix mapping, found {len(matrix_lines)}"
+            )
+        matrix_start = re.search(r"(?m)^      matrix:\s*$", job)
+        steps_start = re.search(r"(?m)^    steps:\s*$", job)
+        if matrix_start is None or steps_start is None or matrix_start.end() >= steps_start.start():
+            raise AssertionError(f"ci.yml:{job_id}: malformed matrix/steps ordering")
+        matrix = job[matrix_start.end() : steps_start.start()]
+        active_oses = tuple(
+            re.findall(r"(?m)^          - os:\s*([A-Za-z0-9._-]+)\s*$", matrix)
+        )
+        if active_oses != expected_oses:
+            raise AssertionError(
+                f"ci.yml:{job_id}: matrix OS inventory must be {expected_oses!r}, "
+                f"found {active_oses!r}"
+            )
+        expanded_jobs += len(active_oses)
+    if expanded_jobs != 20:
+        raise AssertionError(
+            f"ci.yml: expected exactly 20 expanded jobs, found {expanded_jobs}"
+        )
+
+
+def native_apple_job_bodies(release: str, macos: str) -> list[tuple[str, str]]:
+    workflows = {
+        "release.yml": release,
+        "macos-installer.yml": macos,
+    }
+    return [
+        (
+            f"{workflow_name}:{job_name}",
+            extract_job(workflows[workflow_name], job_name, workflow_name),
+        )
+        for workflow_name, job_name in NATIVE_APPLE_JOBS
+    ]
+
+
+def native_apple_build_blocks(release: str) -> list[tuple[str, str]]:
+    build = extract_job(release, "build-local-artifacts", RELEASE_WORKFLOW.name)
+    declarations = re.findall(r"(?m)^\s+(?:-\s+)?run:\s*.*$", build)
+    if len(declarations) != len(NATIVE_APPLE_BUILD_STEPS) + 1:
+        raise AssertionError(
+            "release.yml:build-local-artifacts: every run step must be classified "
+            "for native Apple Bash compatibility"
+        )
+    windows_install = extract_named_step(
+        build,
+        "Install pinned cargo-dist on Windows",
+        "release.yml:build-local-artifacts",
+    )
+    require_exact_step(
+        windows_install,
+        """
+        - name: Install pinned cargo-dist on Windows
+          if: runner.os == 'Windows'
+          shell: pwsh
+          run: ./scripts/install-pinned-cargo-dist.ps1
+        """,
+        "release.yml:build-local-artifacts Windows-only exception",
+    )
+    blocks = [
+        (
+            f"release.yml:build-local-artifacts:{step_name}",
+            extract_unique_named_run(build, step_name, "release.yml:build-local-artifacts"),
+        )
+        for step_name in NATIVE_APPLE_BUILD_STEPS
+        if step_name != "Post-build"
+    ]
+    blocks.append(
+        (
+            "release.yml:build-local-artifacts:Post-build",
+            extract_unique_id_run(build, "cargo-dist", "release.yml:build-local-artifacts"),
+        )
+    )
+    return blocks
+
+
+def mask_shell_noncode(source: str) -> list[tuple[int, str]]:
+    """Mask quoted strings and here-doc bodies while preserving line positions."""
+    masked_lines: list[tuple[int, str]] = []
+    quote: str | None = None
+    heredoc: str | None = None
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if heredoc is not None:
+            if line.strip() == heredoc:
+                heredoc = None
+            masked_lines.append((line_number, ""))
+            continue
+
+        quote_at_start = quote
+        masked: list[str] = []
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if quote is not None:
+                masked.append(" ")
+                if quote == '"' and char == "\\" and index + 1 < len(line):
+                    index += 1
+                    masked.append(" ")
+                elif char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+                masked.append(" ")
+            elif char == "\\" and index + 1 < len(line):
+                masked.append(char)
+                index += 1
+                masked.append(" ")
+            elif char == "#" and (
+                index == 0 or line[index - 1].isspace() or line[index - 1] in ";|&(){}"
+            ):
+                masked.extend(" " * (len(line) - index))
+                break
+            else:
+                masked.append(char)
+            index += 1
+        masked_lines.append((line_number, "".join(masked)))
+
+        if quote_at_start is None:
+            operator = re.search(r"(?<!<)<<(?!<)-?[ \t]*", masked_lines[-1][1])
+            if operator is not None:
+                marker = re.match(
+                    r"<<-?[ \t]*(['\"])([A-Za-z_][A-Za-z0-9_]*)\1"
+                    r"(?=$|[ \t;|&])",
+                    line[operator.start() :],
+                )
+                if marker is None:
+                    raise AssertionError(
+                        f"line {line_number}: native Apple run blocks require a "
+                        "quoted simple here-doc delimiter; ambiguous << is forbidden"
+                    )
+                heredoc = marker.group(2)
+    return masked_lines
+
+
+def bash_test_closing_suffix(
+    lines: list[tuple[int, str]], start: int, label: str
+) -> str:
+    for _, line in lines[start:]:
+        closing = re.search(r"(?<!\S)\]\](?=$|[ \t;&|])", line)
+        if closing is not None:
+            return line[closing.end() :].strip()
+    raise AssertionError(
+        f"{label}:{lines[start][0]}: unterminated Bash compound command"
+    )
+
+
+def bash_subshell_closing_suffix(
+    lines: list[tuple[int, str]], start: int, label: str
+) -> tuple[str, int, int]:
+    depth = 0
+    for offset, (_, line) in enumerate(lines[start:], start=start):
+        begin = line.find("(") if offset == start else 0
+        for position in range(begin, len(line)):
+            if line[position] == "(":
+                depth += 1
+            elif line[position] == ")":
+                depth -= 1
+                if depth == 0:
+                    return line[position + 1 :].strip(), offset, position
+                if depth < 0:
+                    break
+    raise AssertionError(
+        f"{label}:{lines[start][0]}: unterminated Bash subshell command"
+    )
+
+
+def reject_unhandled_bash3_compound_guards(source: str, label: str) -> None:
+    """Enforce canonical fail-closed compound commands for macOS Bash 3.2."""
+    lines = mask_shell_noncode(source)
+    for index, (line_number, line) in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+
+        control = re.match(
+            r"^(if|elif|while|until)[ \t]+(?:![ \t]+)?(\[\[|\(\()", stripped
+        )
+        if control is not None:
+            if control.group(2) == "((":
+                raise AssertionError(
+                    f"{label}:{line_number}: use [[ ]] for native Apple arithmetic "
+                    "control conditions so the Bash 3.2 contract stays unambiguous"
+                )
+            suffix = bash_test_closing_suffix(lines, index, label)
+            expected = "; then" if control.group(1) in ("if", "elif") else "; do"
+            if suffix != expected:
+                raise AssertionError(
+                    f"{label}:{line_number}: native Apple compound control must end "
+                    f"canonically with `{expected}`"
+                )
+            continue
+
+        if stripped.startswith("[["):
+            suffix = bash_test_closing_suffix(lines, index, label)
+            if suffix != "|| exit 1":
+                raise AssertionError(
+                    f"{label}:{line_number}: standalone Bash compound guard must "
+                    "end with exact `|| exit 1` for macOS Bash 3.2"
+                )
+            continue
+
+        if stripped.startswith("(("):
+            raise AssertionError(
+                f"{label}:{line_number}: standalone Bash arithmetic conditions must "
+                "use explicit if/while control flow for macOS Bash 3.2"
+            )
+
+        if stripped.startswith("("):
+            suffix, closing_index, closing_position = bash_subshell_closing_suffix(
+                lines, index, label
+            )
+            if suffix != "|| exit 1":
+                raise AssertionError(
+                    f"{label}:{line_number}: standalone Bash subshell must end "
+                    "with exact `|| exit 1` for macOS Bash 3.2"
+                )
+            if stripped == "(":
+                for interior_index in range(index + 1, closing_index + 1):
+                    interior = lines[interior_index][1]
+                    if interior_index == closing_index:
+                        interior = interior[:closing_position]
+                    interior = interior.strip()
+                    if not interior or interior.endswith("\\"):
+                        continue
+                    if not interior.endswith("|| exit 1"):
+                        raise AssertionError(
+                            f"{label}:{lines[interior_index][0]}: every complete "
+                            "command in a multiline Bash 3.2 subshell must end "
+                            "with exact `|| exit 1`"
+                        )
+            else:
+                opening_position = line.find("(")
+                if closing_index == index:
+                    fragments = [line[opening_position + 1 : closing_position]]
+                else:
+                    fragments = [line[opening_position + 1 :]]
+                    fragments.extend(
+                        candidate
+                        for _, candidate in lines[index + 1 : closing_index]
+                    )
+                    fragments.append(lines[closing_index][1][:closing_position])
+                interior = "\n".join(fragments)
+                if re.search(r";|\|\||(?<!\|)\|(?!\|)|(?<!&)&(?!&)", interior):
+                    raise AssertionError(
+                        f"{label}:{line_number}: inline Bash 3.2 subshells must "
+                        "contain one command or a status-preserving && list"
+                    )
+            continue
+
+        prefixed_compound = re.search(
+            r"(?:[;|&!]|\{|\)|\bthen|\bdo|\belse)[ \t]*"
+            r"(?:\[\[|\(\(|\((?![<(]))",
+            stripped,
+        )
+        timed_compound = re.search(
+            r"(?:^|[;|&])[ \t]*(?:![ \t]+)*time(?:[ \t]+-p)?"
+            r"(?:[ \t]+!)*[ \t]+"
+            r"(?:\[\[|\(\(|\((?![<(]))",
+            stripped,
+        )
+        if prefixed_compound or timed_compound:
+            raise AssertionError(
+                f"{label}:{line_number}: Bash compound commands must use one "
+                "canonical control or fail-closed command per line"
+            )
+
+
+def check_bash3_compound_guard_scanner() -> None:
+    reject_unhandled_bash3_compound_guards(
+        "if [[ x == x ]]; then\n  :\nfi\n"
+        "while [[ x == x ]]; do\n  break\ndone\n"
+        "value=$((1 + 1))\n"
+        "grep -E '^[[:space:]]+$' input\n"
+        "key=${line#*\\\"}\n"
+        "jq '.value and\n  (.nested | type == \"string\")' input\n"
+        "cat <<'SH'\n[[ ignored ]]\n(ignored)\nSH\n"
+        "(false) || exit 1\n(\n  false || exit 1\n) || exit 1",
+        "scanner valid control-flow fixture",
+    )
+    reject_unhandled_bash3_compound_guards(
+        '[[ "$hash" =~ ^[[:xdigit:]]{40}$ &&\n'
+        '   "$size" == 1 ]] || exit 1',
+        "scanner valid fixture",
+    )
+    invalid = (
+        "[[ x == y ]]",
+        "[[ x == y ]] # bypass\n[[ x == x ]] || exit 1",
+        "[[ x == y ]]; true\n[[ x == x ]] || exit 1",
+        "[[ x ==\n   y ]] # bypass\n[[ x == x ]] || exit 1",
+        "(( 1 == 0 )) || exit 1",
+        ":; [[ x == y ]] || exit 1",
+        "! [[ x == y ]] || exit 1",
+        "{ [[ x == y ]] || exit 1; }",
+        "true && [[ x == y ]] || exit 1",
+        "[[ x == y ]] || exit 256",
+        "if [[ x == x ]]; then :; fi; [[ x == y ]]",
+        "if [[ x == x ]]; then [[ x == y ]]; fi",
+        "while [[ x == x ]]; do [[ x == y ]]; done",
+        "else [[ x == y ]] || exit 1",
+        "case x in x) [[ x == y ]] || exit 1 ;; esac",
+        "(false)",
+        "(\n  false\n)",
+        "true; (false) || exit 1",
+        "(false; true) || exit 1",
+        "(\n  false\n  true\n) || exit 1",
+        "true | [[ x == y ]] || exit 1",
+        "true & [[ x == y ]] || exit 1",
+        "time [[ x == y ]]; true",
+        "time -p (false); true",
+        "! time [[ x == y ]]; true",
+        "! ! time -p (false); true",
+        "printf '%s' '<<EOF'\n[[ x == y ]]",
+        "cat <<EOF-END\nignored\nEOF-END\n[[ x == y ]]",
+        "cat <<EOF.END\nignored\nEOF.END\n[[ x == y ]]",
+        "x=$((1 << BITS))\n[[ x == y ]]",
+        "true;# <<'EOF'\n[[ x == y ]]",
+        "(\n  (\n    false\n  ) || exit 1\n)\ntrue",
+        "(\n  value=$(true) || exit 1\n  false\n)",
+    )
+    for case_number, source in enumerate(invalid, start=1):
+        try:
+            reject_unhandled_bash3_compound_guards(
+                source, f"scanner invalid fixture {case_number}"
+            )
+        except AssertionError:
+            continue
+        raise AssertionError(
+            f"Bash 3.2 compound-guard scanner accepted invalid fixture {case_number}"
+        )
+
+
+def check_native_apple_bash_contract(release: str, macos: str) -> None:
+    check_bash3_compound_guard_scanner()
+    for workflow_name, workflow in (
+        (RELEASE_WORKFLOW.name, release),
+        (MACOS_WORKFLOW.name, macos),
+    ):
+        if re.search(r"(?m)^defaults:\s*$", workflow):
+            raise AssertionError(
+                f"{workflow_name}: top-level shell defaults require explicit native "
+                "Apple compatibility review"
+            )
+    apple_staging_step = extract_unique_named_step(
+        release, APPLE_STAGING_STEP_NAME, RELEASE_WORKFLOW.name
+    )
+    require_direct_step_contract(
+        apple_staging_step,
+        ("env", "shell", "run"),
+        {"shell": "bash", "run": "|"},
+        "Apple signer staging step",
+    )
+    require_exact_line_sequence(
+        apple_staging_step,
+        """
+        - name: Validate and safely stage the unsigned Apple archive
+          env:
+            APPLE_TARGET: ${{ matrix.target }}
+            RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+            STAGING_DIRECTORY: ${{ runner.temp }}/tr300-apple-signing-input
+          shell: bash
+        """,
+        "Apple signer staging environment",
+    )
+    apple_staging = extract_unique_named_run(
+        release, APPLE_STAGING_STEP_NAME, RELEASE_WORKFLOW.name
+    )
+    require(apple_staging, "with os.scandir(directory)", "Apple input file-set scan")
+    require(
+        apple_staging,
+        "stat.S_ISREG(metadata.st_mode)",
+        "Apple input regular-file validation",
+    )
+    require_exact_line_sequence(
+        apple_staging,
+        r"""
+        if ! [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo "unsupported Apple signing tag: $RELEASE_TAG" >&2
+          exit 64
+        fi
+        """,
+        "Apple signer explicit stable-tag rejection",
+    )
+    require_exact_line_sequence(
+        apple_staging,
+        """
+        if ! [[ "$archive_sha" =~ ^[0-9a-f]{64}$ &&
+                "$sidecar_size" == "$expected_size" &&
+                "$actual_sidecar" == "$expected_sidecar" ]]; then
+          echo "unsigned Apple checksum sidecar is malformed or does not match" >&2
+          exit 1
+        fi
+        """,
+        "Apple signer explicit sidecar rejection",
+    )
+    native_jobs = native_apple_job_bodies(release, macos)
+    native_build_blocks = native_apple_build_blocks(release)
+    for label, job in native_jobs:
+        for block_number, block in enumerate(extract_run_blocks(job), start=1):
+            reject_unhandled_bash3_compound_guards(
+                block, f"{label}:run-{block_number}"
+            )
+    for label, block in native_build_blocks:
+        reject_unhandled_bash3_compound_guards(block, label)
+
+    native_sources = native_jobs + native_build_blocks
+    for label, job in native_sources:
+        explicit_shells = re.findall(r"(?m)^\s+shell:\s*(.+?)\s*$", job)
+        unsupported_shells = [shell for shell in explicit_shells if shell != "bash"]
+        if unsupported_shells:
+            raise AssertionError(
+                f"{label}: native macOS run steps must use Bash; found explicit "
+                f"shells {unsupported_shells!r}"
+            )
+        for pattern, description in BASH_4_ONLY_PATTERNS:
+            if match := pattern.search(job):
+                raise AssertionError(
+                    f"{label}: native macOS job must run under system Bash 3.2; "
+                    f"found unsupported {description} {match.group(0)!r}"
+                )
+
+
+def check_native_apple_bash_syntax(release: str, macos: str, bash: str) -> None:
+    check_native_apple_bash_contract(release, macos)
+    for label, job in native_apple_job_bodies(release, macos):
+        blocks = extract_run_blocks(job)
+        if not blocks:
+            raise AssertionError(f"{label}: expected at least one inline run block")
+        declarations = re.findall(r"(?m)^\s+(?:-\s+)?run:\s*.*$", job)
+        if len(blocks) != len(declarations):
+            raise AssertionError(
+                f"{label}: native Apple syntax validation requires every run block "
+                "to use a literal YAML scalar"
+            )
+        for index, block in enumerate(blocks, start=1):
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", "-n", "-s"],
+                input=block,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise AssertionError(
+                    f"{label}: run block {index} is not valid for the selected Bash "
+                    f"(exit {result.returncode})\nstdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+    for label, block in native_apple_build_blocks(release):
+        result = subprocess.run(
+            [bash, "--noprofile", "--norc", "-n", "-s"],
+            input=block,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"{label}: Apple matrix block is not valid for the selected Bash "
+                f"(exit {result.returncode})\nstdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            )
+
+
+def bash_major_minor(bash: str) -> str:
+    result = subprocess.run(
+        [
+            bash,
+            "--noprofile",
+            "--norc",
+            "-c",
+            'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0 or not re.fullmatch(r"[0-9]+\.[0-9]+", result.stdout):
+        raise AssertionError(
+            f"could not identify selected Bash version (exit {result.returncode}): "
+            f"{result.stderr}"
+        )
+    return result.stdout
+
+
+def write_apple_staging_fixture(
+    case_dir: Path, target: str, *, release_tag: str, mutation: str | None
+) -> None:
+    unsigned = case_dir / "unsigned"
+    unsigned.mkdir()
+    archive_name = f"tr300-{target}.tar.xz"
+    archive_path = unsigned / archive_name
+    root = f"tr300-{target}"
+    members = (
+        (f"{root}/LICENSE", b"fixture license\n", 0o644),
+        (f"{root}/CHANGELOG.md", b"fixture changelog\n", 0o644),
+        (f"{root}/README.md", b"fixture readme\n", 0o644),
+        (f"{root}/tr300", b"#!/bin/sh\nexit 0\n", 0o755),
+    )
+    with tarfile.open(archive_path, mode="w:xz", format=tarfile.GNU_FORMAT) as archive:
+        directory = tarfile.TarInfo(root)
+        directory.type = tarfile.DIRTYPE
+        directory.mode = 0o755
+        directory.mtime = 0
+        archive.addfile(directory)
+        for name, contents, mode in members:
+            member = tarfile.TarInfo(name)
+            member.mode = mode
+            member.mtime = 0
+            if mutation in ("archive-symlink", "archive-hardlink") and name.endswith(
+                "/tr300"
+            ):
+                member.type = (
+                    tarfile.SYMTYPE
+                    if mutation == "archive-symlink"
+                    else tarfile.LNKTYPE
+                )
+                member.linkname = f"{root}/README.md"
+                archive.addfile(member)
+                continue
+            member.size = len(contents)
+            archive.addfile(member, io.BytesIO(contents))
+
+    digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    sidecar_name = f"{archive_name}.sha256"
+    (unsigned / sidecar_name).write_text(
+        f"{digest} *{archive_name}\n", encoding="utf-8", newline="\n"
+    )
+    manifest_name = f"{target}-dist-manifest.json"
+    (unsigned / manifest_name).write_text(
+        json.dumps(
+            {
+                "dist_version": "0.31.0",
+                "announcement_tag": release_tag,
+                "upload_files": [archive_name, sidecar_name],
+                "artifacts": {archive_name: {"checksums": {"sha256": digest}}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    if mutation == "extra":
+        (unsigned / ".unexpected").write_text("reject me\n", encoding="utf-8")
+    elif mutation == "symlink":
+        sidecar = unsigned / sidecar_name
+        sidecar.unlink()
+        try:
+            sidecar.symlink_to(archive_name)
+        except OSError:
+            if os.name != "nt":
+                raise
+            # Unprivileged Windows hosts may prohibit symlink creation. A
+            # directory exercises the same non-regular-input rejection locally;
+            # both native macOS CI legs still exercise the real symlink case.
+            sidecar.mkdir()
+    elif mutation == "sidecar":
+        (unsigned / sidecar_name).write_text(
+            f"{'0' * 64} *{archive_name}\n", encoding="utf-8", newline="\n"
+        )
+    elif mutation in ("archive-symlink", "archive-hardlink"):
+        pass
+    elif mutation is not None:
+        raise AssertionError(f"unknown Apple staging mutation: {mutation}")
+
+
+def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
+    block = extract_unique_named_run(
+        release, APPLE_STAGING_STEP_NAME, RELEASE_WORKFLOW.name
+    )
+    for target, mutation, release_tag, expected_success in (
+        ("aarch64-apple-darwin", None, "v99.99.99", True),
+        ("x86_64-apple-darwin", None, "v99.99.99", True),
+        ("aarch64-apple-darwin", "extra", "v99.99.99", False),
+        ("aarch64-apple-darwin", "symlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", "sidecar", "v99.99.99", False),
+        ("aarch64-apple-darwin", "archive-symlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", "archive-hardlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", None, "v99.99.99-rc.1", False),
+    ):
+        with tempfile.TemporaryDirectory(prefix="tr300-apple-staging-") as case_raw:
+            case_dir = Path(case_raw)
+            write_apple_staging_fixture(
+                case_dir, target, release_tag=release_tag, mutation=mutation
+            )
+            staging = case_dir / "staging"
+            environment = os.environ.copy()
+            fixture_block = block
+            if os.name == "nt":
+                compat_bin = case_dir / "bin"
+                compat_bin.mkdir()
+                write_windows_mkdir_compat(compat_bin)
+                write_windows_shasum_compat(compat_bin)
+                write_fixture_jq_compat(compat_bin)
+                conversion_environment = environment.copy()
+                conversion_environment["TR300_COMPAT_BIN"] = str(compat_bin)
+                path_probe = subprocess.run(
+                    [
+                        bash,
+                        "--noprofile",
+                        "--norc",
+                        "-c",
+                        'printf "%s\\n%s" "$(cygpath -u "$TR300_COMPAT_BIN")" "$PATH"',
+                    ],
+                    env=conversion_environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10,
+                    check=False,
+                )
+                converted = path_probe.stdout.splitlines()
+                if path_probe.returncode != 0 or len(converted) != 2:
+                    raise AssertionError(
+                        "could not prepare Git Bash fixture PATH: "
+                        f"{path_probe.stderr}"
+                    )
+                environment["TR300_COMPAT_BIN"] = converted[0]
+                fixture_block = (
+                    'mkdir() { "$TR300_COMPAT_BIN/mkdir" "$@"; }\n'
+                    'shasum() { "$TR300_COMPAT_BIN/shasum" "$@"; }\n'
+                    'jq() { "$TR300_COMPAT_BIN/jq" "$@"; }\n'
+                    + block
+                )
+            environment.update(
+                {
+                    "APPLE_TARGET": target,
+                    "RELEASE_TAG": release_tag,
+                    "STAGING_DIRECTORY": str(staging),
+                }
+            )
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-s"],
+                cwd=case_dir,
+                env=environment,
+                input=fixture_block,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                check=False,
+            )
+            succeeded = result.returncode == 0
+            if succeeded != expected_success:
+                raise AssertionError(
+                    f"Apple staging compatibility target={target} mutation={mutation} "
+                    f"release_tag={release_tag} "
+                    f"returned {result.returncode}\nstdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+            staged_binary = staging / f"tr300-{target}" / "tr300"
+            if expected_success:
+                if not staged_binary.is_file() or not os.access(staged_binary, os.X_OK):
+                    raise AssertionError("Apple staging did not produce an executable binary")
+            elif mutation in ("archive-symlink", "archive-hardlink"):
+                if staged_binary.exists():
+                    raise AssertionError(
+                        "unsafe Apple archive fixture produced a staged binary"
+                    )
+            elif staging.exists():
+                raise AssertionError("rejected Apple staging fixture created output")
+
+
+def extract_unique_python_heredoc(block: str, marker: str, label: str) -> str:
+    matches = [
+        textwrap.dedent(match.group(1)).strip() + "\n"
+        for match in re.finditer(r"<<'PY'\n(.*?)\nPY(?:\n|$)", block, re.DOTALL)
+        if marker in match.group(1)
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"{label}: expected one Python heredoc containing {marker!r}, "
+            f"found {len(matches)}"
+        )
+    return matches[0]
+
+
+def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
+    prepare = extract_unique_named_run(
+        macos,
+        "Safely prepare a fixed data-only universal installer payload",
+        MACOS_WORKFLOW.name,
+    )
+    build = extract_unique_named_run(
+        macos,
+        "Download and revalidate the exact prepared artifact before credential use",
+        MACOS_WORKFLOW.name,
+    )
+    archive_names = (
+        "tr300-aarch64-apple-darwin.tar.xz",
+        "tr300-aarch64-apple-darwin.tar.xz.sha256",
+        "tr300-x86_64-apple-darwin.tar.xz",
+        "tr300-x86_64-apple-darwin.tar.xz.sha256",
+    )
+    prepared_names = ("tr300-universal", "preinstall", "PROVENANCE", "SHA256SUMS")
+    archive_array = "expected=(\n" + "\n".join(
+        f"  {name}" for name in archive_names
+    ) + "\n)"
+    prepared_array = "expected=(\n" + "\n".join(
+        f"  {name}" for name in prepared_names
+    ) + "\n)"
+    require_exact_line_sequence(
+        prepare, archive_array, "prepare upstream expected-name binding"
+    )
+    require_exact_line_sequence(
+        prepare,
+        'python3 - upstream "${expected[@]}" <<\'PY\'',
+        "prepare upstream invocation binding",
+    )
+    require_exact_line_sequence(
+        prepare,
+        'python3 - "$OUTPUT_DIRECTORY" \\\n'
+        "  tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'",
+        "prepare output invocation binding",
+    )
+    require_exact_line_sequence(
+        build, prepared_array, "build prepared expected-name binding"
+    )
+    require_exact_line_sequence(
+        build,
+        'python3 - "$PREPARED_DIRECTORY" "${expected[@]}" <<\'PY\'',
+        "build prepared invocation binding",
+    )
+    scans = (
+        (
+            "prepare upstream inventory",
+            extract_unique_python_heredoc(
+                prepare, "upstream input is not a real directory", "prepare upstream"
+            ),
+            archive_names,
+        ),
+        (
+            "prepare output inventory",
+            extract_unique_python_heredoc(
+                prepare, "prepared output is not a real directory", "prepare output"
+            ),
+            prepared_names,
+        ),
+        (
+            "credentialed build input inventory",
+            extract_unique_python_heredoc(
+                build, "prepared input is not a real directory", "build input"
+            ),
+            prepared_names,
+        ),
+    )
+    for label, program, expected_names in scans:
+        for mutation, expected_success in (
+            (None, True),
+            ("missing", False),
+            ("extra", False),
+            ("empty", False),
+            ("nonregular", False),
+            ("symlink", False),
+            ("root-symlink", False),
+        ):
+            with tempfile.TemporaryDirectory(prefix="tr300-macos-inventory-") as raw:
+                directory = Path(raw) / "inventory"
+                fixture_directory = directory
+                if mutation == "root-symlink":
+                    fixture_directory = Path(raw) / "real-inventory"
+                    fixture_directory.mkdir()
+                    try:
+                        directory.symlink_to(fixture_directory, target_is_directory=True)
+                    except OSError:
+                        if os.name != "nt":
+                            raise
+                        directory.write_bytes(b"not a directory\n")
+                else:
+                    directory.mkdir()
+                for name in expected_names:
+                    (fixture_directory / name).write_bytes(b"fixture\n")
+                if mutation == "extra":
+                    (fixture_directory / ".unexpected").write_bytes(b"reject\n")
+                elif mutation == "missing":
+                    (fixture_directory / expected_names[0]).unlink()
+                elif mutation == "empty":
+                    (fixture_directory / expected_names[0]).write_bytes(b"")
+                elif mutation == "nonregular":
+                    path = fixture_directory / expected_names[0]
+                    path.unlink()
+                    path.mkdir()
+                elif mutation == "symlink":
+                    path = fixture_directory / expected_names[0]
+                    path.unlink()
+                    try:
+                        path.symlink_to(expected_names[1])
+                    except OSError:
+                        if os.name != "nt":
+                            raise
+                        path.mkdir()
+                result = subprocess.run(
+                    [sys.executable, "-", str(directory), *expected_names],
+                    input=program,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10,
+                    check=False,
+                )
+                if (result.returncode == 0) != expected_success:
+                    raise AssertionError(
+                        f"{label} mutation={mutation} returned {result.returncode}\n"
+                        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                    )
 
 
 def write_mock_gh(bin_dir: Path) -> None:
@@ -5872,6 +6892,29 @@ def check_structural_contract(
     windows_validation: str,
     windows_cargo_dist_installer: str,
 ) -> None:
+    check_native_apple_bash_contract(release, macos)
+    check_ci_job_inventory(ci)
+    ci_test = extract_job(ci, "test", CI_WORKFLOW.name)
+    apple_compatibility = extract_unique_named_step(
+        ci_test,
+        "Validate Apple release staging under system Bash",
+        f"{CI_WORKFLOW.name}:test",
+    )
+    require_exact_step(
+        apple_compatibility,
+        """
+        - name: Validate Apple release staging under system Bash
+          if: runner.os == 'macOS'
+          env:
+            TR300_TEST_BASH: /bin/bash
+          shell: bash
+          run: >-
+            python3 scripts/test-release-workflow-provenance.py
+            --apple-staging-compatibility
+        """,
+        "native Apple staging compatibility step",
+    )
+
     for workflow_path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         workflow_text = workflow_path.read_text(encoding="utf-8")
         for line_number, line in enumerate(workflow_text.splitlines(), start=1):
@@ -6076,6 +7119,7 @@ def main() -> None:
         windows_validation,
         windows_cargo_dist_installer,
     )
+    run_macos_inventory_compatibility_fixtures(macos)
     with tempfile.TemporaryDirectory(prefix="tr300-provenance-gh-") as fixture_raw:
         mock_bin = Path(fixture_raw) / "bin"
         mock_bin.mkdir()
@@ -6091,4 +7135,26 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--apple-staging-compatibility"]:
+        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        macos = MACOS_WORKFLOW.read_text(encoding="utf-8")
+        fixture_bash = locate_bash()
+        if not fixture_bash:
+            raise AssertionError("bash is required for Apple staging compatibility")
+        fixture_bash_version = bash_major_minor(fixture_bash)
+        if sys.platform == "darwin" and fixture_bash_version != "3.2":
+            raise AssertionError(
+                "native Apple compatibility must use system Bash 3.2; selected "
+                f"Bash {fixture_bash_version}"
+            )
+        check_native_apple_bash_syntax(release, macos, fixture_bash)
+        run_apple_staging_compatibility_fixture(release, fixture_bash)
+        run_macos_inventory_compatibility_fixtures(macos)
+        print(
+            "Apple release staging and native job syntax are compatible with "
+            f"selected Bash {fixture_bash_version}"
+        )
+    elif sys.argv[1:]:
+        raise SystemExit(f"unsupported arguments: {sys.argv[1:]!r}")
+    else:
+        main()

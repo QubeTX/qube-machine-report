@@ -911,6 +911,15 @@ jobs:
           fixture_phase_log=''
           sudo /bin/sh "$preinstall" package-path / /
 
+      - name: Validate Apple release staging under system Bash
+        if: runner.os == 'macOS'
+        env:
+          TR300_TEST_BASH: /bin/bash
+        shell: bash
+        run: >-
+          python3 scripts/test-release-workflow-provenance.py
+          --apple-staging-compatibility
+
   build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
