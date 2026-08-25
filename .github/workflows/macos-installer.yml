@@ -1290,16 +1290,49 @@ jobs:
           expected_provenance=$(printf 'source_sha=%s\nrelease_tag=%s\nversion=%s' \
             "$EXPECTED_SOURCE_SHA" "$RELEASE_TAG" "$RELEASE_VERSION")
           [[ "$(cat "$PREPARED_DIRECTORY/PROVENANCE")" == "$expected_provenance" ]] || exit 1
+          python3 - "$PREPARED_DIRECTORY/SHA256SUMS" \
+            PROVENANCE preinstall tr300-universal <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          manifest_path, *expected_names = sys.argv[1:]
+          if len(expected_names) != len(set(expected_names)):
+              raise SystemExit("checksum manifest expected names are not unique")
+
+          raw_manifest = Path(manifest_path).read_bytes()
+          try:
+              manifest = raw_manifest.decode("ascii")
+          except UnicodeDecodeError as error:
+              raise SystemExit("checksum manifest is not ASCII") from error
+          if not manifest.endswith("\n") or "\r" in manifest:
+              raise SystemExit("checksum manifest must use canonical LF-terminated lines")
+
+          lines = manifest.split("\n")[:-1]
+          if len(lines) != len(expected_names):
+              raise SystemExit(
+                  "checksum manifest must contain exactly one entry per expected file"
+              )
+
+          entries = {}
+          for line in lines:
+              match = re.fullmatch(r"([0-9a-f]{64})  ([^\r\n]+)", line)
+              if match is None:
+                  raise SystemExit(f"malformed checksum manifest line: {line!r}")
+              digest, name = match.groups()
+              if name in entries:
+                  raise SystemExit(f"duplicate checksum manifest entry: {name!r}")
+              entries[name] = digest
+
+          if set(entries) != set(expected_names):
+              raise SystemExit(
+                  f"unexpected checksum manifest entries: {sorted(entries)!r}"
+              )
+          PY
           (
             cd "$PREPARED_DIRECTORY" || exit 1
-            [[ $(wc -l < SHA256SUMS | tr -d '[:space:]') == 3 ]] || exit 1
             shasum -a 256 -c SHA256SUMS || exit 1
           ) || exit 1
-          awk '{print $2}' "$PREPARED_DIRECTORY/SHA256SUMS" | sort | cmp -s - <(
-            printf '%s\n' PROVENANCE preinstall tr300-universal
-          )
-          awk 'length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || NF != 2 { exit 1 }' \
-            "$PREPARED_DIRECTORY/SHA256SUMS"
           [[ $(head -n 1 "$PREPARED_DIRECTORY/preinstall") == '#!/bin/sh' ]] || exit 1
           [[ $(wc -c < "$PREPARED_DIRECTORY/preinstall") -le 32768 ]] || exit 1
           lipo "$PREPARED_DIRECTORY/tr300-universal" -verify_arch arm64 x86_64

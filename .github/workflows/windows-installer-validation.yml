@@ -1184,6 +1184,59 @@ jobs:
           }
           }
 
+          # Before publication, prove same-version repair with the already-
+          # frozen candidate installer bytes. The live-image worker instead
+          # downloads from the immutable public tag URL, which cannot exist
+          # while the exact candidate is still a private draft. Exercise that
+          # rename/install/verify/cleanup transaction automatically in the
+          # post-public pass, where the exact-tag URL is available. Neither
+          # path can select Corporate or cross formats.
+          if ($env:VALIDATION_MODE -eq 'private' -and $env:KIND -in @('msi-global', 'exe-global')) {
+            Install-Candidate
+            if (-not (Test-TargetVersion)) { throw 'frozen Global same-version repair lost the target version' }
+          }
+          if ($env:VALIDATION_MODE -eq 'public' -and $env:KIND -in @('msi-global', 'exe-global')) {
+            $strategy = if ($env:KIND -eq 'msi-global') { 'msi_global' } else { 'exe_global' }
+            $nonce = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $backup = Join-Path (Split-Path $env:EXE -Parent) ".tr300-update-backup-$PID-$nonce.exe"
+            $workerStdout = Join-Path $env:RUNNER_TEMP "tr300-global-worker-$strategy.stdout.log"
+            $workerStderr = Join-Path $env:RUNNER_TEMP "tr300-global-worker-$strategy.stderr.log"
+            $githubTokenNames = @('TR300_GITHUB_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN')
+            $savedGithubTokens = @{}
+            foreach ($name in $githubTokenNames) {
+              $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+              if ($null -ne $value) { $savedGithubTokens[$name] = $value }
+              [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+            }
+            try {
+              $worker = Start-Process -FilePath $env:EXE -Wait -PassThru -ArgumentList @(
+                'update-worker', '--update-strategy', $strategy,
+                '--update-version', $env:EXPECTED_VERSION,
+                '--update-backup', ('"{0}"' -f $backup)
+              ) -RedirectStandardOutput $workerStdout -RedirectStandardError $workerStderr
+            } finally {
+              foreach ($name in $githubTokenNames) {
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+              }
+              foreach ($entry in $savedGithubTokens.GetEnumerator()) {
+                [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+              }
+            }
+            if ($worker.ExitCode -ne 0) {
+              $workerOutput = [string](Get-Content -LiteralPath $workerStdout -Raw -ErrorAction SilentlyContinue)
+              $workerError = [string](Get-Content -LiteralPath $workerStderr -Raw -ErrorAction SilentlyContinue)
+              throw "Global live-image worker failed same-version repair: $($worker.ExitCode); stdout=$($workerOutput.Trim()); stderr=$($workerError.Trim())"
+            }
+            Remove-Item -LiteralPath $workerStdout, $workerStderr -Force -ErrorAction SilentlyContinue
+            for ($attempt = 1; $attempt -le 100 -and (Test-Path $backup); $attempt++) {
+              Start-Sleep -Milliseconds 100
+            }
+            if (Test-Path $backup) { throw "Global live-image backup was not cleaned: $backup" }
+            if (-not (Test-TargetVersion)) { throw 'Global live-image repair lost the target version' }
+          }
+
+          # All ownership assertions below deliberately run after the private
+          # frozen repair or public live-image transaction.
           $global = "$env:ProgramFiles\tr300\bin\tr300.exe"
           $corporate = "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
           $cargo = "$HOME\.cargo\bin\tr300.exe"
@@ -1214,30 +1267,8 @@ jobs:
               Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
               Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
             ) | Where-Object DisplayName -EQ $display
-            if (@($entries).Count -ne 1) { throw "expected one $display registration" }
-
-            # Exercise the new Global live-image worker as a same-version
-            # repair. A normal updater correctly no-ops when already current,
-            # so this strict hidden action is the release gate that proves the
-            # rename/install/verify/cleanup transaction before a future tag is
-            # available. It cannot select Corporate or cross formats.
-            if ($env:KIND -in @('msi-global', 'exe-global')) {
-              $strategy = if ($env:KIND -eq 'msi-global') { 'msi_global' } else { 'exe_global' }
-              $nonce = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-              $backup = Join-Path (Split-Path $env:EXE -Parent) ".tr300-update-backup-$PID-$nonce.exe"
-              $worker = Start-Process -FilePath $env:EXE -Wait -PassThru -ArgumentList @(
-                'update-worker', '--update-strategy', $strategy,
-                '--update-version', $env:EXPECTED_VERSION,
-                '--update-backup', ('"{0}"' -f $backup)
-              )
-              if ($worker.ExitCode -ne 0) {
-                throw "Global live-image worker failed same-version repair: $($worker.ExitCode)"
-              }
-              for ($attempt = 1; $attempt -le 100 -and (Test-Path $backup); $attempt++) {
-                Start-Sleep -Milliseconds 100
-              }
-              if (Test-Path $backup) { throw "Global live-image backup was not cleaned: $backup" }
-              if (-not (Test-TargetVersion)) { throw 'Global live-image repair lost the target version' }
+            if (@($entries).Count -ne 1 -or $entries[0].DisplayVersion -ne $env:EXPECTED_VERSION) {
+              throw "expected one $display registration at $env:EXPECTED_VERSION"
             }
 
             # Prove the documented legacy recovery path: a very old or damaged

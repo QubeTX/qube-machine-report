@@ -7,21 +7,43 @@ as passed.
 
 ## Per-version verification log
 
+### v4.3.10 — Mac checksum and staged Windows validation fix-forward (as of 2026-08-25)
+
+Release status: active, unreleased packaging-only candidate. It carries the
+unchanged v4.3 report behavior and fixes two acceptance-harness defects exposed
+after the immutable v4.3.9 tag. The Mac finalizer replaces its locale-sensitive
+checksum-name comparison with an order-independent exact parser and executable
+permutation/malformed-manifest fixtures. Private Windows validation proves
+same-version Global repair with the exact frozen MSI/EXE bytes; the real Global
+live-image worker remains in the shared matrix but runs only during the
+automatic post-public pass, when its immutable anonymous tag URL exists.
+Production updater routing and custody are unchanged, and worker output is
+captured for decisive failure diagnostics. Local, PR, exact-main, OIDC, native
+preflight, tag, private 24-to-30-to-validated-to-34, public smoke, and byte-audit
+gates remain open until their exact v4.3.10 evidence is recorded.
+
 ### v4.3.9 — Apple inventory and Windows attestation fix-forward (as of 2026-08-25)
 
-Release status: active, unreleased packaging-only candidate. v4.3.8 proved the
-private-draft visibility/custody repair, but the automatic macOS workflow then
-failed at the next uncredentialed boundary: its trusted artifact contained the
-intentional six-file set (`tr300-installer.sh`, `tr300-dist-installer.sh`, two
-signed Apple archives, and their two checksum sidecars), while the preparation
-consumer still required the obsolete four-file archive-only set. v4.3.9 is
-also scoped to restore the read-only `github.token` only to the Windows step
-whose pinned Inno Setup verification invokes `gh release verify-asset`, then
-remove and verify removal of `GH_TOKEN` before the third-party installer is
-launched; no checked-out build job gains Release mutation access. Review,
-exact-main CI/OIDC, native preflight, a new immutable tag, the complete private
-24-to-30-to-validated-to-34 chain, public-byte audit, smokes, deployment, and
-physical AMD64 Linux/Raspberry Pi evidence all remain open.
+Release status: exact source and crate publication completed; the GitHub draft
+exists but remains private. Tag and main resolve to exact commit
+`a4a75e975ebceba90a585deeb4767a4546504a18`. Exact-main CI `32848574652`
+passed 20/20, trusted-OIDC run `32848574607` published exact unyanked v4.3.9,
+and native Intel/Apple Silicon credential preflight `32849403638` passed.
+Tagged Release `32849508590` passed all 13 jobs and created exact private draft
+`376401700` with 24 assets; Windows Installers `32850002419` passed and
+extended that same draft to exactly 30 assets.
+
+macOS run `32850002313` bound the exact source artifacts, passed both installer-
+identity preflights, prepared the correct signer input, and verified all three
+checksum payloads. Final job `97808652164` then stopped before any Apple
+credential use because a locale-sensitive `sort` comparison expected a
+different capitalization order. Private Windows validation `32850359079`
+passed all other installer, managed, Cargo, portable, transition, rollback,
+registration, PATH, and uninstall cases; only Global MSI and Global EXE failed
+when the hidden production worker tried its anonymous exact-tag URL while the
+release was intentionally private. The private proof attestation and every Mac
+publication/public-smoke job skipped. Nothing became public; v4.3.10 fixes
+forward without moving the tag or mutating the draft.
 
 Current local candidate evidence on 2026-08-25: formatting; warnings-denied
 locked Clippy; 185 unit tests, 22 integration tests, and the doc test; locked

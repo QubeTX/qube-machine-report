@@ -52,8 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.8**.
-The working fix-forward manifest is **4.3.9**. PR #14 merged as
+Complete public GitHub distribution: **4.2.2**. Current crates.io package: **4.3.9**.
+The working fix-forward manifest is **4.3.10**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -124,10 +124,15 @@ jobs and created exact private 24-asset draft `376357745`. macOS run
 four-file consumer inventory. Windows run `32843468892` failed in build job
 `97787896541` because the pinned Inno Setup step's `gh release verify-asset` had
 no `GH_TOKEN`. Both publishers skipped, the draft stayed private at exactly 24
-assets, and nothing became public. v4.3.9 fixes those two narrow contracts. All
-nine v4.3.0 through v4.3.8 tags stay immutable. v4.2.2 remains the complete
-public GitHub-distribution boundary until reviewed v4.3.9 passes the normal
-automated tag chain. Exact v4.2.2 source
+assets, and nothing became public. v4.3.9 fixed those boundaries, published its
+exact crate, created an exact 30-asset private draft, then stopped on a locale-
+sensitive Mac checksum-name comparison and a private Windows test that asked
+the production Global worker to fetch its still-private exact-tag asset.
+v4.3.10 uses an exact order-independent Mac parser, frozen private Windows
+repair bytes, and the existing automatic post-public pass for the real Global
+worker. All ten v4.3.0 through v4.3.9 tags stay immutable. v4.2.2 remains the
+complete public GitHub-distribution boundary until reviewed v4.3.10 passes the
+normal automated tag chain. Exact v4.2.2 source
 `db0f538c82961569a7118b105a20e967b15476f0`
 passed exact-SHA CI/crates, all six release targets, Apple archive signing/
 notarization, the native Intel/ARM direct-PKG plus compatibility-DMG lifecycle,
@@ -675,7 +680,7 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- Until the v4.3.9 chain completes, v4.2.2 remains the complete public GitHub
+- Until the v4.3.10 chain completes, v4.2.2 remains the complete public GitHub
   distribution. The v4.3.0 through v4.3.8 crates/tags stay published and
   immutable; v4.3.5, v4.3.6, v4.3.7, and v4.3.8 each have one exact private 24-asset
   GitHub draft. A read-only downstream token cannot enumerate those drafts
