@@ -58,6 +58,7 @@ jobs:
       previous_tag: ${{ steps.release.outputs.previous_tag }}
       previous_version: ${{ steps.release.outputs.previous_version }}
       source_sha: ${{ steps.release.outputs.source_sha }}
+      release_id: ${{ steps.release.outputs.release_id }}
       validation_mode: ${{ steps.release.outputs.validation_mode }}
       upstream_run_id: ${{ steps.release.outputs.upstream_run_id }}
       upstream_run_attempt: ${{ steps.release.outputs.upstream_run_attempt }}
@@ -164,6 +165,11 @@ jobs:
 
           repo=$EXPECTED_REPOSITORY
           expected_sha=''
+          release_id=''
+          release_target=''
+          release_draft=''
+          release_prerelease=''
+          private_release_pages="$RUNNER_TEMP/windows-private-release-pages.json"
           if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
             [[ "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
                "$ACTOR_ID" == 30877743 && "$WORKFLOW_REF" == refs/heads/main ]]
@@ -217,15 +223,62 @@ jobs:
             upstream_run_id=$UPSTREAM_RUN_ID
             upstream_run_attempt=$validated_run_attempt
             expected_sha=$UPSTREAM_SHA
-            mapfile -t tags < <(
-              gh api "repos/$repo/releases?per_page=100" \
-                --jq ".[] | select(.target_commitish == \"$expected_sha\") | .tag_name"
-            )
-            if [[ ${#tags[@]} -ne 1 ]]; then
-              echo "expected one release targeting upstream SHA $expected_sha; found ${#tags[@]}" >&2
-              exit 65
+            if [[ "$validation_mode" == private ]]; then
+              gh api --paginate --slurp "repos/$repo/releases?per_page=100" \
+                > "$private_release_pages"
+              mapfile -t private_candidates < <(
+                jq -r --arg sha "$expected_sha" '
+                  .[][] |
+                  select(.target_commitish == $sha and .draft == true and
+                         .prerelease == false) |
+                  [.id, .tag_name, .target_commitish, .draft, .prerelease] | @tsv
+                ' "$private_release_pages"
+              )
+              [[ ${#private_candidates[@]} -eq 1 ]] || {
+                echo "expected one private release targeting upstream SHA $expected_sha; found ${#private_candidates[@]}" >&2
+                exit 65
+              }
+              IFS=$'\t' read -r release_id tag release_target release_draft release_prerelease \
+                <<< "${private_candidates[0]}"
+            else
+              mapfile -t tags < <(
+                gh api "repos/$repo/releases?per_page=100" \
+                  --jq ".[] | select(.target_commitish == \"$expected_sha\") | .tag_name"
+              )
+              if [[ ${#tags[@]} -ne 1 ]]; then
+                echo "expected one release targeting upstream SHA $expected_sha; found ${#tags[@]}" >&2
+                exit 65
+              fi
+              tag=${tags[0]}
             fi
-            tag=${tags[0]}
+          fi
+          if [[ "$validation_mode" == private ]]; then
+            if [[ ! -s "$private_release_pages" ]]; then
+              gh api --paginate --slurp "repos/$repo/releases?per_page=100" \
+                > "$private_release_pages"
+            fi
+            mapfile -t private_tag_records < <(
+              jq -r --arg tag "$tag" '
+                .[][] | select(.tag_name == $tag) |
+                [.id, .target_commitish, .draft, .prerelease] | @tsv
+              ' "$private_release_pages"
+            )
+            [[ ${#private_tag_records[@]} -eq 1 ]] || {
+              echo "expected one private release record for $tag; found ${#private_tag_records[@]}" >&2
+              exit 65
+            }
+            IFS=$'\t' read -r release_id release_target release_draft release_prerelease \
+              <<< "${private_tag_records[0]}"
+            [[ "$release_id" =~ ^[1-9][0-9]*$ ]] || {
+              echo "release $tag does not expose a positive numeric ID" >&2
+              exit 65
+            }
+            [[ "$release_target" =~ ^[0-9a-f]{40}$ &&
+               "$release_target" == "$expected_sha" &&
+               "$release_draft" == true && "$release_prerelease" == false ]] || {
+              echo "release $tag is not the exact private stable draft for $expected_sha" >&2
+              exit 65
+            }
           fi
           [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
             echo "invalid stable release tag: $tag" >&2
@@ -236,22 +289,35 @@ jobs:
             echo 'release tag did not resolve to a commit' >&2
             exit 65
           }
-          require_release_target "$tag" "$source_sha"
+          if [[ "$validation_mode" == private ]]; then
+            [[ "$release_target" == "$source_sha" ]] || {
+              echo "release $tag targets $release_target, not tag commit $source_sha" >&2
+              exit 65
+            }
+          else
+            require_release_target "$tag" "$source_sha"
+          fi
           main_sha=$(gh api "repos/$repo/git/ref/heads/main" --jq .object.sha)
           [[ "$main_sha" == "$source_sha" ]]
           if [[ -n "$expected_sha" && "$source_sha" != "$expected_sha" ]]; then
             echo "release tag $tag targets $source_sha, not upstream SHA $expected_sha" >&2
             exit 65
           fi
-          assets=$(gh release view "$tag" --repo "$repo" \
-            --json assets --jq '.assets[].name')
-          IFS=$'\t' read -r release_draft release_prerelease asset_count < <(
-            gh api "repos/$repo/releases/tags/$tag" \
-              --jq '[.draft, .prerelease, (.assets | length)] | @tsv'
-          )
           if [[ "$validation_mode" == private ]]; then
-            [[ "$release_draft" == true && "$release_prerelease" == false && "$asset_count" == 30 ]]
+            gh api "repos/$repo/releases/$release_id" \
+              > "$RUNNER_TEMP/windows-private-release.json"
+            jq -e --argjson id "$release_id" --arg tag "$tag" --arg sha "$source_sha" '
+              .id == $id and .tag_name == $tag and .target_commitish == $sha and
+              .draft == true and .prerelease == false and (.assets | length) == 30
+            ' "$RUNNER_TEMP/windows-private-release.json" >/dev/null
+            assets=$(jq -r '.assets[].name' "$RUNNER_TEMP/windows-private-release.json")
           else
+            assets=$(gh release view "$tag" --repo "$repo" \
+              --json assets --jq '.assets[].name')
+            IFS=$'\t' read -r release_draft release_prerelease asset_count < <(
+              gh api "repos/$repo/releases/tags/$tag" \
+                --jq '[.draft, .prerelease, (.assets | length)] | @tsv'
+            )
             [[ "$release_draft" == false && "$release_prerelease" == false && "$asset_count" == 34 ]]
             [[ "$(gh api "repos/$repo/releases/latest" --jq .tag_name)" == "$tag" ]]
           fi
@@ -320,6 +386,7 @@ jobs:
             echo "previous_tag=$previous_tag"
             echo "previous_version=${previous_tag#v}"
             echo "source_sha=$source_sha"
+            echo "release_id=$release_id"
             echo "validation_mode=$validation_mode"
             echo "upstream_run_id=$upstream_run_id"
             echo "upstream_run_attempt=$upstream_run_attempt"
@@ -342,6 +409,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
           SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+          RELEASE_ID: ${{ needs.resolve.outputs.release_id }}
           VALIDATION_MODE: ${{ needs.resolve.outputs.validation_mode }}
           UPSTREAM_RUN_ID: ${{ needs.resolve.outputs.upstream_run_id }}
           UPSTREAM_RUN_ATTEMPT: ${{ needs.resolve.outputs.upstream_run_attempt }}
@@ -354,6 +422,13 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$UPSTREAM_RUN_ID" =~ ^[1-9][0-9]*$ &&
              "$UPSTREAM_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$VALIDATION_MODE" == private || "$VALIDATION_MODE" == public ]]
+          if [[ "$VALIDATION_MODE" == private ]]; then
+            [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]]
+            release_api="repos/$REPOSITORY/releases/$RELEASE_ID"
+          else
+            [[ -z "$RELEASE_ID" ]]
+            release_api="repos/$REPOSITORY/releases/tags/$RELEASE_TAG"
+          fi
 
           initial_names=(
             dist-manifest.json sha256.sum source.tar.gz source.tar.gz.sha256
@@ -393,14 +468,20 @@ jobs:
           work_directory=$(mktemp -d "$RUNNER_TEMP/tr300-windows-validation-prep.XXXXXXXX")
           trap 'rm -rf "$work_directory"' EXIT
           mkdir -m 700 "$OUTPUT_DIRECTORY"
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$work_directory/release-before.json"
-          jq -e --arg sha "$SOURCE_SHA" --argjson draft "$expected_draft" \
+          gh api "$release_api" > "$work_directory/release-before.json"
+          jq -e --arg tag "$RELEASE_TAG" --arg sha "$SOURCE_SHA" \
+            --argjson draft "$expected_draft" \
             --argjson names "$expected_names_json" '
-              .target_commitish == $sha and .draft == $draft and .prerelease == false and
+              .tag_name == $tag and .target_commitish == $sha and
+              .draft == $draft and .prerelease == false and
               ([.assets[].name] | sort) == $names and
               ([.assets[] | (.id | type == "number") and (.size > 0) and
                 (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
             ' "$work_directory/release-before.json" >/dev/null
+          if [[ "$VALIDATION_MODE" == private ]]; then
+            jq -e --argjson id "$RELEASE_ID" '.id == $id' \
+              "$work_directory/release-before.json" >/dev/null
+          fi
 
           gh release download "$RELEASE_TAG" --repo "$REPOSITORY" --dir "$OUTPUT_DIRECTORY"
           mapfile -d '' -t downloaded < <(find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)
@@ -530,7 +611,7 @@ jobs:
               }
             ' "$work_directory/release-before.json" > "$OUTPUT_DIRECTORY/validation-input-manifest.json"
 
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$work_directory/release-after.json"
+          gh api "$release_api" > "$work_directory/release-after.json"
           jq -S '{id, tag_name, target_commitish, draft, prerelease,
             assets: ([.assets[] | {id, name, size, digest}] | sort_by(.name))}' \
             "$work_directory/release-before.json" > "$work_directory/release-before.normalized.json"

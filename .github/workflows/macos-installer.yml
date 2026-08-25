@@ -57,6 +57,7 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       source_sha: ${{ steps.release.outputs.source_sha }}
+      release_id: ${{ steps.release.outputs.release_id }}
       run_id: ${{ steps.release.outputs.run_id }}
       run_attempt: ${{ steps.release.outputs.run_attempt }}
       custody_required: ${{ steps.release.outputs.custody_required }}
@@ -116,23 +117,30 @@ jobs:
           require_release_target() {
             local tag=$1
             local source_sha=$2
-            local release_target release_draft release_prerelease
-            IFS=$'\t' read -r release_target release_draft release_prerelease < <(
-              gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$tag" \
-                --jq '[.target_commitish, .draft, .prerelease] | @tsv'
+            local release_id
+            release_id=$(
+              gh api --paginate --slurp \
+                "repos/$EXPECTED_REPOSITORY/releases?per_page=100" |
+                jq -er --arg tag "$tag" --arg sha "$source_sha" '
+                  [.[][] | select(.tag_name == $tag)] |
+                  if length != 1 then
+                    error("expected exactly one authenticated release for " + $tag)
+                  else
+                    .[0]
+                  end |
+                  if ((.id | type) == "number" and .id > 0 and
+                      .target_commitish == $sha and .draft == true and
+                      .prerelease == false)
+                  then .id
+                  else error("release is not the exact private stable draft")
+                  end
+                '
             )
-            [[ "$release_target" =~ ^[0-9a-f]{40}$ ]] || {
-              echo "release $tag does not record an immutable target commit" >&2
+            [[ "$release_id" =~ ^[1-9][0-9]*$ ]] || {
+              echo "release $tag has a malformed release ID" >&2
               return 65
             }
-            [[ "$release_target" == "$source_sha" ]] || {
-              echo "release $tag targets $release_target, not tag commit $source_sha" >&2
-              return 65
-            }
-            [[ "$release_draft" == true && "$release_prerelease" == false ]] || {
-              echo "release $tag must be the private stable draft assembled by Release" >&2
-              return 65
-            }
+            printf '%s\n' "$release_id"
           }
 
           validate_release_run() {
@@ -221,6 +229,7 @@ jobs:
               source_sha=$(gh api "repos/$EXPECTED_REPOSITORY/commits/$default_branch" --jq .sha)
               version=''
               build=false
+              release_id=''
               run_id=''
               run_attempt=''
               custody_required=false
@@ -230,7 +239,7 @@ jobs:
                 exit 64
               }
               source_sha=$(resolve_tag_commit "$tag")
-              require_release_target "$tag" "$source_sha"
+              release_id=$(require_release_target "$tag" "$source_sha")
               version=${tag#v}
               custody_required=true
               run_id=$DISPATCH_RUN_ID
@@ -271,7 +280,7 @@ jobs:
               exit 64
             }
             source_sha=$(resolve_tag_commit "$tag")
-            require_release_target "$tag" "$source_sha"
+            release_id=$(require_release_target "$tag" "$source_sha")
             [[ "$source_sha" == "$UPSTREAM_SHA" ]] || {
               echo "release tag $tag targets $source_sha, not upstream SHA $UPSTREAM_SHA" >&2
               exit 65
@@ -287,6 +296,17 @@ jobs:
             echo 'trusted source SHA is malformed' >&2
             exit 65
           }
+          if [[ "$custody_required" == true ]]; then
+            [[ "$release_id" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'private release ID is malformed' >&2
+              exit 65
+            }
+          else
+            [[ -z "$release_id" ]] || {
+              echo 'tagless preflight unexpectedly resolved a release ID' >&2
+              exit 65
+            }
+          fi
           remote_main=$(gh api \
             "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
           [[ "$remote_main" =~ ^[0-9a-f]{40}$ ]] || {
@@ -302,6 +322,7 @@ jobs:
             echo "tag=$tag"
             echo "version=$version"
             echo "source_sha=$source_sha"
+            echo "release_id=$release_id"
             echo "run_id=$run_id"
             echo "run_attempt=$run_attempt"
             echo "custody_required=$custody_required"
@@ -1122,6 +1143,7 @@ jobs:
       tag: ${{ needs.resolve-release.outputs.tag }}
       version: ${{ needs.resolve-release.outputs.version }}
       source_sha: ${{ needs.resolve-release.outputs.source_sha }}
+      release_id: ${{ needs.resolve-release.outputs.release_id }}
       artifact_id: ${{ steps.macos-upload.outputs.artifact-id }}
       artifact_digest: ${{ steps.macos-upload.outputs.artifact-digest }}
     steps:
@@ -1530,6 +1552,7 @@ jobs:
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           EXPECTED_SHA: ${{ needs.build.outputs.source_sha }}
+          RELEASE_ID: ${{ needs.build.outputs.release_id }}
           REPOSITORY: ${{ github.repository }}
           CURRENT_RUN_ID: ${{ github.run_id }}
           CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -1554,6 +1577,7 @@ jobs:
           [[ "$REPOSITORY" == QubeTX/qube-machine-report &&
              "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
              "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
+             "$RELEASE_ID" =~ ^[1-9][0-9]*$ &&
              "$BUILD_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
              "$BUILD_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
           [[ "$MATRIX_ARCH" == arm64 || "$MATRIX_ARCH" == x86_64 ]] || exit 1
@@ -1948,8 +1972,10 @@ jobs:
           # wrapper, then its receipt-aware Complete uninstall removes binary,
           # receipt, and profile block before the PKG is retried.
           candidate_managed_release="$managed_directory/release.json"
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \
             > "$candidate_managed_release"
+          jq -e --argjson release_id "$RELEASE_ID" '.id == $release_id' \
+            "$candidate_managed_release" >/dev/null
           validate_release_identity "$candidate_managed_release" "$RELEASE_TAG" \
             "$EXPECTED_SHA" true
           case "$(uname -m)" in
@@ -2006,8 +2032,10 @@ jobs:
           fi
           sh "$managed_installer"
           candidate_managed_after="$managed_directory/release-after.json"
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \
             > "$candidate_managed_after"
+          jq -e --argjson release_id "$RELEASE_ID" '.id == $release_id' \
+            "$candidate_managed_after" >/dev/null
           validate_release_identity "$candidate_managed_after" "$RELEASE_TAG" \
             "$EXPECTED_SHA" true
           candidate_wrapper_after=$(release_asset_record \
@@ -2383,6 +2411,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           EXPECTED_SHA: ${{ needs.build.outputs.source_sha }}
+          RELEASE_ID: ${{ needs.build.outputs.release_id }}
           REPOSITORY: ${{ github.repository }}
           ASSET_DIRECTORY: ${{ runner.temp }}/macos-release-assets
           CURRENT_RUN_ID: ${{ github.run_id }}
@@ -2440,6 +2469,10 @@ jobs:
           }
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || {
             echo 'expected release SHA is malformed' >&2
+            exit 65
+          }
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo 'private release ID is malformed' >&2
             exit 65
           }
           [[ "$REPOSITORY" == QubeTX/qube-machine-report &&
@@ -3063,9 +3096,10 @@ jobs:
 
           # Prove that the private draft still consists of the exact 30 asset
           # identities and bytes accepted by the Windows matrix.
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \
             > "$work_directory/validated-draft.json"
-          jq -e --arg sha "$EXPECTED_SHA" \
+          jq -e --argjson release_id "$RELEASE_ID" --arg tag "$RELEASE_TAG" \
+            --arg sha "$EXPECTED_SHA" \
             --arg managed_digest "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" \
             --argjson managed_size "$SOURCE_MANAGED_INSTALLER_SIZE" \
             --arg dist_digest "sha256:$SOURCE_DIST_INSTALLER_SHA256" \
@@ -3075,7 +3109,9 @@ jobs:
             --arg intel_digest "sha256:$SOURCE_X86_64_ARCHIVE_SHA256" \
             --argjson intel_size "$SOURCE_X86_64_ARCHIVE_SIZE" \
             --slurpfile manifest "$validation_manifest" '
-              .target_commitish == $sha and .draft == true and .prerelease == false and
+              .id == $release_id and .tag_name == $tag and
+              .target_commitish == $sha and
+              .draft == true and .prerelease == false and
               ([.assets[] | select(.name == "tr300-installer.sh")] | length) == 1 and
               ([.assets[] | select(.name == "tr300-installer.sh")][0] |
                 .digest == $managed_digest and .size == $managed_size) and
@@ -3146,9 +3182,13 @@ jobs:
             tr300-x86_64-unknown-linux-musl.tar.xz tr300-x86_64-unknown-linux-musl.tar.xz.sha256
           )
           expected_before=("${initial_names[@]}" "${windows_names[@]}")
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$work_directory/release-before.json"
-          jq -e --arg sha "$EXPECTED_SHA" --slurpfile manifest "$validation_manifest" '
-              .target_commitish == $sha and .draft == true and .prerelease == false and
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" > "$work_directory/release-before.json"
+          jq -e --argjson release_id "$RELEASE_ID" --arg tag "$RELEASE_TAG" \
+            --arg sha "$EXPECTED_SHA" \
+            --slurpfile manifest "$validation_manifest" '
+              .id == $release_id and .tag_name == $tag and
+              .target_commitish == $sha and
+              .draft == true and .prerelease == false and
               ([.assets[] | {id, name, size, digest}] | sort_by(.name)) ==
                 ($manifest[0].release_assets | sort_by(.name))
             ' \
@@ -3180,10 +3220,14 @@ jobs:
           gh api "repos/$REPOSITORY/actions/artifacts/$validation_input_artifact_id" \
             > "$work_directory/validation-input-artifact-pre-upload.json"
           validate_validation_input_artifact "$work_directory/validation-input-artifact-pre-upload.json"
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \
             > "$work_directory/release-pre-upload.json"
-          jq -e --arg sha "$EXPECTED_SHA" --slurpfile manifest "$validation_manifest" '
-              .target_commitish == $sha and .draft == true and .prerelease == false and
+          jq -e --argjson release_id "$RELEASE_ID" --arg tag "$RELEASE_TAG" \
+            --arg sha "$EXPECTED_SHA" \
+            --slurpfile manifest "$validation_manifest" '
+              .id == $release_id and .tag_name == $tag and
+              .target_commitish == $sha and
+              .draft == true and .prerelease == false and
               ([.assets[] | {id, name, size, digest}] | sort_by(.name)) ==
                 ($manifest[0].release_assets | sort_by(.name))
             ' "$work_directory/release-pre-upload.json" >/dev/null
@@ -3219,12 +3263,14 @@ jobs:
           # draft and never exposes a partial stable release.
           [[ "$(resolve_tag_commit "$RELEASE_TAG")" == "$EXPECTED_SHA" ]]
           [[ "$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$EXPECTED_SHA" ]]
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$work_directory/release-complete.json"
-          release_id=$(jq -r .id "$work_directory/release-complete.json")
-          [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
-          jq -e --arg sha "$EXPECTED_SHA" --argjson names \
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" > "$work_directory/release-complete.json"
+          jq -e --argjson release_id "$RELEASE_ID" --arg tag "$RELEASE_TAG" \
+            --arg sha "$EXPECTED_SHA" \
+            --argjson names \
             "$(printf '%s\n' "${final_names[@]}" | jq -R . | jq -s 'sort')" '
-              .target_commitish == $sha and .draft == true and .prerelease == false and
+              .id == $release_id and .tag_name == $tag and
+              .target_commitish == $sha and
+              .draft == true and .prerelease == false and
               ([.assets[].name] | sort) == $names and ([.assets[].size > 0] | all) and
               ([.assets[].digest | type == "string" and test("^sha256:[0-9a-f]{64}$")] | all)
             ' "$work_directory/release-complete.json" >/dev/null
@@ -3245,7 +3291,7 @@ jobs:
             > "$work_directory/validation-input-artifact-pre-publish.json"
           validate_validation_input_artifact "$work_directory/validation-input-artifact-pre-publish.json"
           set +e
-          gh api --method PATCH "repos/$REPOSITORY/releases/$release_id" \
+          gh api --method PATCH "repos/$REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false -f make_latest=true > "$work_directory/release-patch-response.json"
           patch_status=$?
           set -e

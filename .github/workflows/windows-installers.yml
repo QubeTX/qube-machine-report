@@ -81,6 +81,7 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       source_sha: ${{ steps.release.outputs.source_sha }}
+      release_id: ${{ steps.release.outputs.release_id }}
       release_run_id: ${{ steps.release.outputs.release_run_id }}
       release_run_attempt: ${{ steps.release.outputs.release_run_attempt }}
     steps:
@@ -209,10 +210,25 @@ jobs:
             exit 65
           fi
           [[ "$source_sha" == "$(gh api "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)" ]]
-          IFS=$'\t' read -r release_target release_draft release_prerelease < <(
-            gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$tag" \
-              --jq '[.target_commitish, .draft, .prerelease] | @tsv'
+          gh api --paginate --slurp \
+            "repos/$EXPECTED_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/windows-release-candidates.json"
+          mapfile -t release_records < <(
+            jq -r --arg tag "$tag" '
+              .[][] | select(.tag_name == $tag) |
+              [.id, .target_commitish, .draft, .prerelease] | @tsv
+            ' "$RUNNER_TEMP/windows-release-candidates.json"
           )
+          [[ ${#release_records[@]} -eq 1 ]] || {
+            echo "expected one private release record for $tag; found ${#release_records[@]}" >&2
+            exit 65
+          }
+          IFS=$'\t' read -r release_id release_target release_draft release_prerelease \
+            <<< "${release_records[0]}"
+          [[ "$release_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "release $tag does not expose a positive numeric ID" >&2
+            exit 65
+          }
           [[ "$release_target" =~ ^[0-9a-f]{40}$ ]] || {
             echo "release $tag does not record an immutable target commit" >&2
             exit 65
@@ -232,6 +248,7 @@ jobs:
             echo "tag=$tag"
             echo "version=${tag#v}"
             echo "source_sha=$source_sha"
+            echo "release_id=$release_id"
             echo "release_run_id=$release_run_id"
             echo "release_run_attempt=$release_run_attempt"
           } >> "$GITHUB_OUTPUT"
@@ -256,6 +273,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+          RELEASE_ID: ${{ needs.resolve-release.outputs.release_id }}
+          EXPECTED_SHA: ${{ needs.resolve-release.outputs.source_sha }}
           REPOSITORY: ${{ github.repository }}
         shell: pwsh
         run: |
@@ -280,10 +299,34 @@ jobs:
           #                          complete when it isn't.
           $tag = $env:RELEASE_TAG
           $repo = $env:REPOSITORY
+          $releaseIdText = $env:RELEASE_ID
+          $expectedSha = $env:EXPECTED_SHA
+          if ($releaseIdText -notmatch '^[1-9][0-9]*$') {
+            throw "Private release ID is malformed: $releaseIdText"
+          }
+          if ($expectedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Expected source SHA is malformed: $expectedSha"
+          }
+          $releaseId = [Int64]$releaseIdText
           Write-Host "Probing release $tag in $repo for upstream completion sentinels..."
-          # Pass --repo explicitly: this step runs BEFORE actions/checkout,
-          # so `gh` has no local git context to infer the repo from.
-          $assets = (gh release view $tag --repo $repo --json assets --jq '.assets[].name') -split "`n"
+          # This step runs before checkout, so bind the already-resolved private
+          # draft by its numeric API identity instead of the draft-blind tag
+          # endpoint or local git context.
+          $releaseJson = gh api "repos/$repo/releases/$releaseId"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read private release ID $releaseId"
+          }
+          $release = $releaseJson | ConvertFrom-Json -Depth 100
+          if (
+            [Int64]$release.id -ne $releaseId -or
+            [string]$release.tag_name -ne $tag -or
+            [string]$release.target_commitish -ne $expectedSha -or
+            [bool]$release.draft -ne $true -or
+            [bool]$release.prerelease -ne $false
+          ) {
+            throw "Release ID $releaseId is not the exact private stable draft for $tag at $expectedSha"
+          }
+          $assets = @($release.assets | ForEach-Object { [string]$_.name })
           $required = @(
             "dist-manifest.json",
             "tr300-x86_64-pc-windows-msvc.msi"
@@ -512,6 +555,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
           EXPECTED_SHA: ${{ needs.resolve-release.outputs.source_sha }}
+          RELEASE_ID: ${{ needs.resolve-release.outputs.release_id }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
           ASSET_DIRECTORY: ${{ runner.temp }}/windows-release-assets
           CURRENT_RUN_ID: ${{ github.run_id }}
@@ -561,7 +605,8 @@ jobs:
           }
           [[ "$EXPECTED_REPOSITORY" == QubeTX/qube-machine-report &&
              "$WORKFLOW_SHA" == "$EXPECTED_SHA" ]]
-          [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ &&
+             "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
              "$INTERNAL_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
              "$INTERNAL_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
 
@@ -712,22 +757,16 @@ jobs:
               ' "$work_directory/ci-runs.json"
           )
           [[ ${#ci_runs[@]} -eq 1 && "${ci_runs[0]}" =~ ^[1-9][0-9]*$ ]]
-          IFS=$'\t' read -r release_target release_draft release_prerelease < <(
-            gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$RELEASE_TAG" \
-              --jq '[.target_commitish, .draft, .prerelease] | @tsv'
-          )
-          [[ "$release_target" =~ ^[0-9a-f]{40}$ && "$release_target" == "$EXPECTED_SHA" ]] || {
-            echo "release $RELEASE_TAG no longer targets $EXPECTED_SHA" >&2
-            exit 65
-          }
-          [[ "$release_draft" == true && "$release_prerelease" == false ]] || {
-            echo "release $RELEASE_TAG is not the expected private stable draft" >&2
-            exit 65
-          }
+          gh api "repos/$EXPECTED_REPOSITORY/releases/$RELEASE_ID" \
+            > "$work_directory/release-before.json"
+          jq -e --argjson id "$RELEASE_ID" --arg tag "$RELEASE_TAG" \
+            --arg sha "$EXPECTED_SHA" '
+              .id == $id and .tag_name == $tag and .target_commitish == $sha and
+              .draft == true and .prerelease == false
+            ' "$work_directory/release-before.json" >/dev/null
 
           mapfile -t existing_assets < <(
-            gh release view "$RELEASE_TAG" --repo "$EXPECTED_REPOSITORY" \
-              --json assets --jq '.assets[].name'
+            jq -r '.assets[].name' "$work_directory/release-before.json"
           )
           has_existing_asset() {
             local needle=$1

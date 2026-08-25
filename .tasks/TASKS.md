@@ -10,7 +10,7 @@
 
 ## Active
 
-- [ ] **Complete the TR-300 v4.3 release through v4.3.5** - preserve the immutable failed v4.3.0 through v4.3.4 tags, repair the Windows/Apple/checksum/tar-mode/release-manifest packaging regressions, and finish the no-click exact-SHA crates/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
+- [ ] **Complete the TR-300 v4.3 release through v4.3.6** - preserve the immutable failed v4.3.0 through v4.3.5 tags, repair the Windows/Apple/checksum/tar-mode/release-manifest/draft-lookup packaging regressions, and finish the no-click exact-SHA crates/native/public/deployment gates (needs #v430) (ms #v43) (owner codex) #r43
   - [x] Remediate and independently validate every confirmed release/privilege security finding
   - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
   - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
@@ -25,7 +25,8 @@
   - [x] Qualify and merge the v4.3.2 Apple Bash fix, publish it through OIDC, and preserve its fail-closed raw-sidecar result without moving the immutable tag
   - [x] Qualify and merge the v4.3.3 checksum fix, publish it through OIDC, and preserve its fail-closed raw-tar-mode result without moving the immutable tag
   - [x] Qualify and merge the v4.3.4 tar-mode fix, publish it through OIDC, and preserve its fail-closed release-manifest result without moving the immutable tag
-  - [ ] Qualify and merge the v4.3.5 release-manifest fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
+  - [x] Qualify and merge the v4.3.5 release-manifest fix, publish it through OIDC, and preserve its correct private 24-asset draft plus fail-closed by-tag lookup result
+  - [ ] Qualify and merge the v4.3.6 draft-lookup fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
   - [ ] Audit public bytes and post-public updater/Linux/macOS smokes before homepage deployment
 
 ## Done
