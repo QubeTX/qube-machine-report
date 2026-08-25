@@ -61,12 +61,79 @@ raw_dist_installer="$fixture/tr300-dist-installer.sh"
 printf '%s\n' '# exact cargo-dist fixture bytes' > "$raw_dist_installer"
 tr300_dist_installer_sha256=$(tr300_sha256 "$raw_dist_installer")
 tr300_verify_dist_installer "$raw_dist_installer"
+
+local_source_directory="$fixture/local source"
+local_staging_directory="$fixture/local staging"
+mkdir "$local_source_directory" "$local_staging_directory"
+local_dist_installer="$local_source_directory/tr300-dist-installer.sh"
+cp "$raw_dist_installer" "$local_dist_installer"
+staged_dist_installer="$local_staging_directory/tr300-dist-installer.sh"
+download_marker="$fixture/local-override-downloaded"
+(
+    TR300_DIST_INSTALLER_PATH=$local_dist_installer
+    export TR300_DIST_INSTALLER_PATH
+    tr300_download() {
+        printf '%s\n' called > "$download_marker"
+        return 1
+    }
+    tr300_stage_dist_installer "$staged_dist_installer"
+    cmp "$local_dist_installer" "$staged_dist_installer"
+    [ -f "$staged_dist_installer" ] && [ ! -L "$staged_dist_installer" ]
+    tr300_verify_dist_installer "$staged_dist_installer"
+)
+[ ! -e "$download_marker" ]
+
+for malformed_path in '' relative-installer.sh "$local_source_directory"; do
+    malformed_log="$fixture/malformed-local-path.log"
+    if (
+        TR300_DIST_INSTALLER_PATH=$malformed_path
+        export TR300_DIST_INSTALLER_PATH
+        tr300_stage_dist_installer "$local_staging_directory/rejected-installer.sh"
+    ) 2> "$malformed_log"; then
+        printf '%s\n' 'malformed local cargo-dist installer path was accepted' >&2
+        exit 1
+    fi
+    grep -Fq 'TR-300 managed install failed safely:' "$malformed_log"
+done
+
+local_symlink="$fixture/local-installer-link"
+if ln -s "$local_dist_installer" "$local_symlink" && [ -L "$local_symlink" ]; then
+    if (
+        TR300_DIST_INSTALLER_PATH=$local_symlink
+        export TR300_DIST_INSTALLER_PATH
+        tr300_stage_dist_installer "$local_staging_directory/rejected-link.sh"
+    ) 2> "$fixture/local-symlink.log"; then
+        printf '%s\n' 'symbolic-link cargo-dist installer override was accepted' >&2
+        exit 1
+    fi
+    grep -Fq 'must name a readable regular file, not a symbolic link' \
+        "$fixture/local-symlink.log"
+else
+    rm -f "$local_symlink" "$local_staging_directory/rejected-link.sh"
+fi
+
+expected_dist_installer_sha256=$tr300_dist_installer_sha256
+local_mismatch_execution_marker="$fixture/local-mismatch-executed"
+if (
+    TR300_DIST_INSTALLER_PATH=$local_dist_installer
+    export TR300_DIST_INSTALLER_PATH
+    tr300_dist_installer_sha256=0000000000000000000000000000000000000000000000000000000000000000
+    local_mismatch_staged="$local_staging_directory/local-mismatch.sh"
+    tr300_stage_dist_installer "$local_mismatch_staged"
+    tr300_verify_dist_installer "$local_mismatch_staged"
+    printf '%s\n' executed > "$local_mismatch_execution_marker"
+); then
+    printf '%s\n' 'mismatched local cargo-dist installer was accepted' >&2
+    exit 1
+fi
+[ ! -e "$local_mismatch_execution_marker" ]
+
 tr300_prepare_sha256sum "$raw_dist_installer"
 shim_sha256=$(
     "$tr300_sha256sum_directory/sha256sum" -b "$raw_dist_installer" |
         /usr/bin/awk '{ print $1 }'
 )
-[ "$shim_sha256" = "$tr300_dist_installer_sha256" ]
+[ "$shim_sha256" = "$expected_dist_installer_sha256" ]
 if [ "$(uname -s)" = Darwin ]; then
     # shellcheck disable=SC2016
     grep -Fq 'exec /usr/bin/shasum -a 256 "$1"' \

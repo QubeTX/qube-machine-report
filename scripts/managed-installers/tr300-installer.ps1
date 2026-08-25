@@ -80,6 +80,47 @@ function Assert-Tr300DistInstallerHash {
     }
 }
 
+function Copy-Tr300DistInstallerToPrivateStaging {
+    param([Parameter(Mandatory = $true)][string]$Destination)
+
+    $localInstaller = [Environment]::GetEnvironmentVariable('TR300_DIST_INSTALLER_PATH', 'Process')
+    if ($null -ne $localInstaller) {
+        if ([string]::IsNullOrWhiteSpace($localInstaller) -or
+            $localInstaller -cnotmatch '\A[A-Za-z]:[\\/]' -or
+            $localInstaller.Substring(2).Contains(':')) {
+            throw 'TR300_DIST_INSTALLER_PATH must be an absolute local file path'
+        }
+        $localInstaller = [IO.Path]::GetFullPath($localInstaller)
+        $source = Get-Item -LiteralPath $localInstaller -Force -ErrorAction Stop
+        if (-not ($source -is [IO.FileInfo]) -or
+            (($source.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'TR300_DIST_INSTALLER_PATH must name a regular file, not a reparse point'
+        }
+        Copy-Item -LiteralPath $source.FullName -Destination $Destination -ErrorAction Stop
+        $staged = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+        if (-not ($staged -is [IO.FileInfo]) -or
+            (($staged.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'the staged local cargo-dist installer is not a regular file'
+        }
+        return
+    }
+
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $headers = @{}
+    $token = if ($env:TR300_GITHUB_TOKEN) {
+        $env:TR300_GITHUB_TOKEN
+    } elseif ($env:GITHUB_TOKEN) {
+        $env:GITHUB_TOKEN
+    } elseif ($env:GH_TOKEN) {
+        $env:GH_TOKEN
+    } else {
+        $null
+    }
+    if ($token) { $headers.Authorization = "Bearer $token" }
+    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$Tr300ReleaseBase/tr300-dist-installer.ps1" -OutFile $Destination
+}
+
 function Get-Tr300MsiProducts {
     if (-not ('Tr300.ManagedInstaller.NativeMsi' -as [type])) {
         Add-Type -TypeDefinition @'
@@ -418,20 +459,7 @@ try {
     $managedState = Save-Tr300ManagedState $tempRoot
     Assert-Tr300NoUnknownPathOwners $native $managedState
     $distInstaller = Join-Path $tempRoot 'tr300-dist-installer.ps1'
-    [Net.ServicePointManager]::SecurityProtocol =
-        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $headers = @{}
-    $token = if ($env:TR300_GITHUB_TOKEN) {
-        $env:TR300_GITHUB_TOKEN
-    } elseif ($env:GITHUB_TOKEN) {
-        $env:GITHUB_TOKEN
-    } elseif ($env:GH_TOKEN) {
-        $env:GH_TOKEN
-    } else {
-        $null
-    }
-    if ($token) { $headers.Authorization = "Bearer $token" }
-    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$Tr300ReleaseBase/tr300-dist-installer.ps1" -OutFile $distInstaller
+    Copy-Tr300DistInstallerToPrivateStaging -Destination $distInstaller
     Assert-Tr300DistInstallerHash -Path $distInstaller
 
     $transactionStarted = $true

@@ -52,6 +52,11 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    # GitHub omits drafts from release listings for callers without push
+    # access. This resolver performs no checkout or repository-code execution.
+    permissions:
+      actions: read
+      contents: write
     outputs:
       build: ${{ steps.release.outputs.build }}
       tag: ${{ steps.release.outputs.tag }}
@@ -695,6 +700,10 @@ jobs:
                 ;;
             esac
           done
+          install -m 0644 "$managed_installer" \
+            "$OUTPUT_DIRECTORY/tr300-installer.sh"
+          install -m 0644 "$dist_installer" \
+            "$OUTPUT_DIRECTORY/tr300-dist-installer.sh"
           if grep -Fq '@TR300_' "$managed_installer"; then
             echo 'source-rendered managed wrapper retained a template placeholder' >&2
             exit 65
@@ -723,7 +732,7 @@ jobs:
           mapfile -d '' -t normalized < <(
             find "$OUTPUT_DIRECTORY" -mindepth 1 -maxdepth 1 -print0
           )
-          [[ ${#normalized[@]} -eq 4 ]]
+          [[ ${#normalized[@]} -eq 6 ]]
           {
             echo "managed_installer_sha256=$managed_installer_sha256"
             echo "managed_installer_size=$managed_installer_size"
@@ -735,7 +744,7 @@ jobs:
             echo "x86_64_archive_size=$x86_64_archive_size"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Upload normalized trusted Apple archives
+      - name: Upload normalized trusted Apple managed inputs
         id: trusted-upload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -743,6 +752,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           path: |
+            ${{ runner.temp }}/trusted-apple-inputs/tr300-installer.sh
+            ${{ runner.temp }}/trusted-apple-inputs/tr300-dist-installer.sh
             ${{ runner.temp }}/trusted-apple-inputs/tr300-aarch64-apple-darwin.tar.xz
             ${{ runner.temp }}/trusted-apple-inputs/tr300-aarch64-apple-darwin.tar.xz.sha256
             ${{ runner.temp }}/trusted-apple-inputs/tr300-x86_64-apple-darwin.tar.xz
@@ -1540,25 +1551,39 @@ jobs:
             runner: macos-15-intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
+    # This no-checkout job executes only exact source-custodied candidate bytes.
+    # Local-only overrides preserve wrapper/hash semantics without exposing
+    # draft-write authority to the wrapper, raw installer, archive, or updater.
+    permissions:
+      actions: read
+      contents: read
     steps:
+      - name: Download exact trusted Apple managed inputs
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          artifact-ids: ${{ needs.source-custody.outputs.artifact_id }}
+          path: ${{ runner.temp }}/tr300-trusted-apple-managed-inputs
+
       - name: Validate, install, and exercise the universal package
         shell: bash
         env:
-          # This job keeps the token read-only: gh binds exact release/draft
-          # custody, and the executed managed wrapper/updater receives the same
-          # token for GitHub release discovery. No path prints or persists it.
+          # Public-baseline and Actions-artifact reads use the job's read-only
+          # token. Candidate wrapper/raw/archive bytes come only from the exact
+          # source-custody artifact downloaded above.
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           EXPECTED_SHA: ${{ needs.build.outputs.source_sha }}
-          RELEASE_ID: ${{ needs.build.outputs.release_id }}
           REPOSITORY: ${{ github.repository }}
           CURRENT_RUN_ID: ${{ github.run_id }}
           CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
           MATRIX_ARCH: ${{ matrix.arch }}
           BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
           BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          SOURCE_ARTIFACT_ID: ${{ needs.source-custody.outputs.artifact_id }}
+          SOURCE_ARTIFACT_DIGEST: ${{ needs.source-custody.outputs.artifact_digest }}
+          TRUSTED_SOURCE_DIRECTORY: ${{ runner.temp }}/tr300-trusted-apple-managed-inputs
           VALIDATION_PROOF: ${{ runner.temp }}/tr300-macos-native-validation-${{ matrix.arch }}.json
           SOURCE_MANAGED_INSTALLER_SHA256: ${{ needs.source-custody.outputs.managed_installer_sha256 }}
           SOURCE_MANAGED_INSTALLER_SIZE: ${{ needs.source-custody.outputs.managed_installer_size }}
@@ -1577,9 +1602,10 @@ jobs:
           [[ "$REPOSITORY" == QubeTX/qube-machine-report &&
              "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ &&
              "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ &&
-             "$RELEASE_ID" =~ ^[1-9][0-9]*$ &&
              "$BUILD_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
-             "$BUILD_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
+             "$BUILD_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ &&
+             "$SOURCE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ &&
+             "$SOURCE_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
           [[ "$MATRIX_ARCH" == arm64 || "$MATRIX_ARCH" == x86_64 ]] || exit 1
           [[ "$(uname -m)" == "$MATRIX_ARCH" ]] || exit 1
           [[ "$SOURCE_MANAGED_INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
@@ -1599,6 +1625,80 @@ jobs:
           mkdir -m 700 "$artifact_directory"
           repository_id=$(gh api "repos/$REPOSITORY" --jq .id)
           [[ "$repository_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          validate_source_artifact() {
+            local path=$1
+            jq -e --argjson id "$SOURCE_ARTIFACT_ID" \
+              --argjson run "$CURRENT_RUN_ID" \
+              --argjson repository "$repository_id" \
+              --arg digest "sha256:$SOURCE_ARTIFACT_DIGEST" \
+              --arg sha "$EXPECTED_SHA" '
+                .id == $id and .name == "tr300-trusted-apple-release-inputs" and
+                .expired == false and
+                (.size_in_bytes > 0 and .size_in_bytes <= 268435456) and
+                .digest == $digest and .workflow_run.id == $run and
+                .workflow_run.repository_id == $repository and
+                .workflow_run.head_repository_id == $repository and
+                .workflow_run.head_sha == $sha
+              ' "$path" >/dev/null
+          }
+          source_artifact_record() {
+            jq -r '
+              [.id, .name, .digest, .expired, .size_in_bytes,
+               .workflow_run.id, .workflow_run.repository_id,
+               .workflow_run.head_repository_id, .workflow_run.head_sha] | @tsv
+            ' "$1"
+          }
+          source_artifact_before="$RUNNER_TEMP/tr300-trusted-source-artifact-before.json"
+          gh api "repos/$REPOSITORY/actions/artifacts/$SOURCE_ARTIFACT_ID" \
+            > "$source_artifact_before"
+          validate_source_artifact "$source_artifact_before"
+          source_record_before=$(source_artifact_record "$source_artifact_before")
+          python3 - "$TRUSTED_SOURCE_DIRECTORY" <<'PY'
+          import os
+          import stat
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          expected = {
+              "tr300-installer.sh",
+              "tr300-dist-installer.sh",
+              "tr300-aarch64-apple-darwin.tar.xz",
+              "tr300-aarch64-apple-darwin.tar.xz.sha256",
+              "tr300-x86_64-apple-darwin.tar.xz",
+              "tr300-x86_64-apple-darwin.tar.xz.sha256",
+          }
+          entries = list(root.iterdir())
+          if len(entries) != len(expected) or {entry.name for entry in entries} != expected:
+              raise SystemExit("unexpected trusted Apple source input inventory")
+          for entry in entries:
+              mode = entry.lstat().st_mode
+              if not stat.S_ISREG(mode) or stat.S_ISLNK(mode) or entry.stat().st_size <= 0:
+                  raise SystemExit(f"unsafe trusted Apple source input: {entry.name}")
+          PY
+          trusted_managed_installer="$TRUSTED_SOURCE_DIRECTORY/tr300-installer.sh"
+          trusted_dist_installer="$TRUSTED_SOURCE_DIRECTORY/tr300-dist-installer.sh"
+          [[ "$(wc -c < "$trusted_managed_installer" | tr -d '[:space:]')" == \
+             "$SOURCE_MANAGED_INSTALLER_SIZE" ]] || exit 1
+          [[ "$(shasum -a 256 "$trusted_managed_installer" | awk '{print $1}')" == \
+             "$SOURCE_MANAGED_INSTALLER_SHA256" ]] || exit 1
+          [[ "$(wc -c < "$trusted_dist_installer" | tr -d '[:space:]')" == \
+             "$SOURCE_DIST_INSTALLER_SIZE" ]] || exit 1
+          [[ "$(shasum -a 256 "$trusted_dist_installer" | awk '{print $1}')" == \
+             "$SOURCE_DIST_INSTALLER_SHA256" ]] || exit 1
+          [[ "$(wc -c < "$TRUSTED_SOURCE_DIRECTORY/tr300-aarch64-apple-darwin.tar.xz" | tr -d '[:space:]')" == \
+             "$SOURCE_AARCH64_ARCHIVE_SIZE" ]] || exit 1
+          [[ "$(shasum -a 256 "$TRUSTED_SOURCE_DIRECTORY/tr300-aarch64-apple-darwin.tar.xz" | awk '{print $1}')" == \
+             "$SOURCE_AARCH64_ARCHIVE_SHA256" ]] || exit 1
+          [[ "$(wc -c < "$TRUSTED_SOURCE_DIRECTORY/tr300-x86_64-apple-darwin.tar.xz" | tr -d '[:space:]')" == \
+             "$SOURCE_X86_64_ARCHIVE_SIZE" ]] || exit 1
+          [[ "$(shasum -a 256 "$TRUSTED_SOURCE_DIRECTORY/tr300-x86_64-apple-darwin.tar.xz" | awk '{print $1}')" == \
+             "$SOURCE_X86_64_ARCHIVE_SHA256" ]] || exit 1
+          (
+            cd "$TRUSTED_SOURCE_DIRECTORY" || exit 1
+            shasum -a 256 -c tr300-aarch64-apple-darwin.tar.xz.sha256 || exit 1
+            shasum -a 256 -c tr300-x86_64-apple-darwin.tar.xz.sha256 || exit 1
+          ) || exit 1
           validate_build_artifact() {
             local path=$1
             jq -e --argjson id "$BUILD_ARTIFACT_ID" \
@@ -1971,58 +2071,26 @@ jobs:
           # public managed client is first refreshed through the exact candidate
           # wrapper, then its receipt-aware Complete uninstall removes binary,
           # receipt, and profile block before the PKG is retried.
-          candidate_managed_release="$managed_directory/release.json"
-          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \
-            > "$candidate_managed_release"
-          jq -e --argjson release_id "$RELEASE_ID" '.id == $release_id' \
-            "$candidate_managed_release" >/dev/null
-          validate_release_identity "$candidate_managed_release" "$RELEASE_TAG" \
-            "$EXPECTED_SHA" true
           case "$(uname -m)" in
             arm64)
               candidate_archive_name=tr300-aarch64-apple-darwin.tar.xz
-              candidate_archive_digest=$SOURCE_AARCH64_ARCHIVE_SHA256
-              candidate_archive_size=$SOURCE_AARCH64_ARCHIVE_SIZE
               ;;
             x86_64)
               candidate_archive_name=tr300-x86_64-apple-darwin.tar.xz
-              candidate_archive_digest=$SOURCE_X86_64_ARCHIVE_SHA256
-              candidate_archive_size=$SOURCE_X86_64_ARCHIVE_SIZE
               ;;
             *)
               echo "unsupported native validation architecture: $(uname -m)" >&2
               exit 1
               ;;
           esac
-          candidate_wrapper_before=$(release_asset_record \
-            "$candidate_managed_release" tr300-installer.sh)
-          candidate_dist_before=$(release_asset_record \
-            "$candidate_managed_release" tr300-dist-installer.sh)
-          candidate_archive_before=$(release_asset_record \
-            "$candidate_managed_release" "$candidate_archive_name")
-          IFS=$'\t' read -r candidate_wrapper_id candidate_wrapper_digest \
-            candidate_wrapper_size <<< "$candidate_wrapper_before"
-          IFS=$'\t' read -r candidate_dist_id candidate_dist_record_digest \
-            candidate_dist_record_size <<< "$candidate_dist_before"
-          IFS=$'\t' read -r candidate_archive_id candidate_archive_record_digest \
-            candidate_archive_record_size <<< "$candidate_archive_before"
-          [[ "$candidate_wrapper_id" =~ ^[1-9][0-9]*$ &&
-             "$candidate_wrapper_digest" == "sha256:$SOURCE_MANAGED_INSTALLER_SHA256" &&
-             "$candidate_wrapper_size" == "$SOURCE_MANAGED_INSTALLER_SIZE" &&
-             "$candidate_dist_id" =~ ^[1-9][0-9]*$ &&
-             "$candidate_dist_record_digest" == "sha256:$SOURCE_DIST_INSTALLER_SHA256" &&
-             "$candidate_dist_record_size" == "$SOURCE_DIST_INSTALLER_SIZE" &&
-             "$candidate_archive_id" =~ ^[1-9][0-9]*$ &&
-             "$candidate_archive_record_digest" == "sha256:$candidate_archive_digest" &&
-             "$candidate_archive_record_size" == "$candidate_archive_size" ]] || exit 1
-          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" \
-            --pattern tr300-installer.sh --dir "$managed_directory"
-          managed_installer="$managed_directory/tr300-installer.sh"
+          managed_installer="$trusted_managed_installer"
+          candidate_dist_installer="$trusted_dist_installer"
+          candidate_archive="$TRUSTED_SOURCE_DIRECTORY/$candidate_archive_name"
           [[ -f "$managed_installer" && ! -L "$managed_installer" && -s "$managed_installer" ]] || exit 1
-          candidate_managed_size=$(wc -c < "$managed_installer" | tr -d '[:space:]')
-          candidate_managed_sha256=$(shasum -a 256 "$managed_installer" | awk '{print $1}')
-          [[ "$candidate_managed_size" == "$SOURCE_MANAGED_INSTALLER_SIZE" &&
-             "$candidate_managed_sha256" == "$SOURCE_MANAGED_INSTALLER_SHA256" ]] || exit 1
+          [[ -f "$candidate_dist_installer" && ! -L "$candidate_dist_installer" &&
+             -s "$candidate_dist_installer" ]] || exit 1
+          [[ -f "$candidate_archive" && ! -L "$candidate_archive" &&
+             -s "$candidate_archive" ]] || exit 1
           grep -Fq "tr300_tag='${RELEASE_TAG}'" "$managed_installer"
           grep -Fq "tr300_dist_installer_sha256='${SOURCE_DIST_INSTALLER_SHA256}'" \
             "$managed_installer"
@@ -2030,23 +2098,10 @@ jobs:
             echo 'candidate managed wrapper retained a template placeholder' >&2
             exit 1
           fi
-          sh "$managed_installer"
-          candidate_managed_after="$managed_directory/release-after.json"
-          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \
-            > "$candidate_managed_after"
-          jq -e --argjson release_id "$RELEASE_ID" '.id == $release_id' \
-            "$candidate_managed_after" >/dev/null
-          validate_release_identity "$candidate_managed_after" "$RELEASE_TAG" \
-            "$EXPECTED_SHA" true
-          candidate_wrapper_after=$(release_asset_record \
-            "$candidate_managed_after" tr300-installer.sh)
-          candidate_dist_after=$(release_asset_record \
-            "$candidate_managed_after" tr300-dist-installer.sh)
-          candidate_archive_after=$(release_asset_record \
-            "$candidate_managed_after" "$candidate_archive_name")
-          [[ "$candidate_wrapper_after" == "$candidate_wrapper_before" &&
-             "$candidate_dist_after" == "$candidate_dist_before" &&
-             "$candidate_archive_after" == "$candidate_archive_before" ]] || exit 1
+          /usr/bin/env -u TR300_GITHUB_TOKEN -u GITHUB_TOKEN -u GH_TOKEN \
+            TR300_DIST_INSTALLER_PATH="$candidate_dist_installer" \
+            TR300_DOWNLOAD_URL="file://$TRUSTED_SOURCE_DIRECTORY" \
+            sh "$managed_installer"
           test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
           jq -e --arg version "$RELEASE_VERSION" '
             .provider.source == "cargo-dist" and .source.app_name == "tr300" and
@@ -2337,7 +2392,10 @@ jobs:
           # A fresh managed shell install is equally authoritative. Its wrapper
           # verifies exact receipt/payload/signature evidence before one sudo
           # ceremony removes the PKG payload and receipt.
-          sh "$managed_installer"
+          /usr/bin/env -u TR300_GITHUB_TOKEN -u GITHUB_TOKEN -u GH_TOKEN \
+            TR300_DIST_INSTALLER_PATH="$candidate_dist_installer" \
+            TR300_DOWNLOAD_URL="file://$TRUSTED_SOURCE_DIRECTORY" \
+            sh "$managed_installer"
           test ! -e /usr/local/bin/tr300
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'managed takeover left the package receipt behind' >&2
@@ -2355,6 +2413,12 @@ jobs:
           validate_build_artifact "$build_artifact_after"
           build_record_after=$(build_artifact_record "$build_artifact_after")
           [[ "$build_record_after" == "$build_record_before" ]] || exit 1
+          source_artifact_after="$RUNNER_TEMP/tr300-trusted-source-artifact-after.json"
+          gh api "repos/$REPOSITORY/actions/artifacts/$SOURCE_ARTIFACT_ID" \
+            > "$source_artifact_after"
+          validate_source_artifact "$source_artifact_after"
+          source_record_after=$(source_artifact_record "$source_artifact_after")
+          [[ "$source_record_after" == "$source_record_before" ]] || exit 1
           [[ ! -e "$VALIDATION_PROOF" && ! -L "$VALIDATION_PROOF" ]] || exit 1
           jq -n \
             --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
