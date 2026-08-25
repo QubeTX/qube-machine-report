@@ -1571,6 +1571,242 @@ def run_release_manifest_preservation_fixtures(release: str, bash: str) -> None:
                 )
 
 
+def write_release_host_gh_fixture(bin_dir: Path) -> None:
+    mock = bin_dir / "gh"
+    mock.write_text(
+        r'''#!/usr/bin/env python3
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+arguments = sys.argv[1:]
+config_path = Path(os.environ["MOCK_RELEASE_HOST_CONFIG"])
+log_path = Path(os.environ["MOCK_RELEASE_HOST_LOG"])
+config = json.loads(config_path.read_text(encoding="utf-8"))
+
+with log_path.open("a", encoding="utf-8", newline="\n") as log:
+    log.write(json.dumps(arguments, separators=(",", ":")) + "\n")
+
+if arguments[:2] == ["release", "create"]:
+    created = config.get("created", [])
+    if not created:
+        raise SystemExit(45)
+    pages = config.setdefault("pages", [[]])
+    if not pages:
+        pages.append([])
+    pages[0].extend(created)
+    config_path.write_text(
+        json.dumps(config, separators=(",", ":")), encoding="utf-8", newline="\n"
+    )
+    print(created[0]["html_url"])
+    raise SystemExit(0)
+
+if not arguments or arguments[0] != "api":
+    raise SystemExit(97)
+endpoint = next((value for value in arguments[1:] if value.startswith("repos/")), None)
+if endpoint is None:
+    raise SystemExit(98)
+if endpoint.endswith("/releases?per_page=100"):
+    print(json.dumps(config.get("pages", []), separators=(",", ":")))
+    raise SystemExit(0)
+if "/releases/tags/" in endpoint:
+    # GitHub's REST tag endpoint does not expose private draft releases.
+    raise SystemExit(44)
+match = re.search(r"/releases/([1-9][0-9]*)$", endpoint)
+if match:
+    release_id = int(match.group(1))
+    matches = [
+        release
+        for page in config.get("pages", [])
+        for release in page
+        if release.get("id") == release_id
+    ]
+    if len(matches) != 1:
+        raise SystemExit(45)
+    print(json.dumps(matches[0], separators=(",", ":")))
+    raise SystemExit(0)
+raise SystemExit(99)
+''',
+        encoding="utf-8",
+        newline="\n",
+    )
+    mock.chmod(mock.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def run_release_host_draft_fixtures(release: str, bash: str) -> None:
+    host = extract_job(release, "host", RELEASE_WORKFLOW.name)
+    publisher = extract_named_run(
+        host, "Rebind protected source and publish the fixed 24 assets", RELEASE_WORKFLOW.name
+    )
+    start = publisher.find("public_assets=(")
+    end = publisher.find("managed_installer_sha256=", start)
+    if start < 0 or end < 0:
+        raise AssertionError("release host draft fragment was not extractable")
+    fragment = publisher[start:end]
+    array_end = fragment.find("\n)", fragment.find("public_assets=("))
+    if array_end < 0:
+        raise AssertionError("release host public asset array was not extractable")
+    array_body = fragment[fragment.find("public_assets=(") + len("public_assets=(") : array_end]
+    public_assets = array_body.split()
+    if len(public_assets) != 24 or len(set(public_assets)) != 24:
+        raise AssertionError(f"release host expected 24 unique assets, found {public_assets!r}")
+
+    tag = "v99.99.99"
+    source_sha = "a" * 40
+    title = "99.99.99 - fixture"
+    created_url = "https://github.com/QubeTX/qube-machine-report/releases/tag/untagged-fixture"
+
+    def release_record(release_id: int = 901) -> dict[str, object]:
+        return {
+            "id": release_id,
+            "tag_name": tag,
+            "target_commitish": source_sha,
+            "draft": True,
+            "prerelease": False,
+            "name": title,
+            "html_url": created_url,
+            "assets": [{"name": name, "size": 1} for name in public_assets],
+        }
+
+    def clone(record: dict[str, object]) -> dict[str, object]:
+        return json.loads(json.dumps(record))
+
+    valid = release_record()
+    duplicate = release_record(902)
+    wrong_target = clone(valid)
+    wrong_target["target_commitish"] = "b" * 40
+    public = clone(valid)
+    public["draft"] = False
+    prerelease = clone(valid)
+    prerelease["prerelease"] = True
+    missing_asset = clone(valid)
+    assert isinstance(missing_asset["assets"], list)
+    missing_asset["assets"].pop()
+    extra_asset = clone(valid)
+    assert isinstance(extra_asset["assets"], list)
+    extra_asset["assets"].append({"name": "unexpected.bin", "size": 1})
+    zero_asset = clone(valid)
+    assert isinstance(zero_asset["assets"], list)
+    zero_asset["assets"][0]["size"] = 0
+
+    cases = (
+        ("valid private draft", [[], []], [valid], True, 1),
+        ("preexisting draft on page two", [[], [valid]], [valid], False, 0),
+        ("duplicate created drafts", [[], []], [valid, duplicate], False, 1),
+        ("wrong target", [[], []], [wrong_target], False, 1),
+        ("public release", [[], []], [public], False, 1),
+        ("prerelease", [[], []], [prerelease], False, 1),
+        ("missing asset", [[], []], [missing_asset], False, 1),
+        ("extra asset", [[], []], [extra_asset], False, 1),
+        ("zero-byte asset", [[], []], [zero_asset], False, 1),
+    )
+
+    for name, pages, created, expected_success, expected_creates in cases:
+        with tempfile.TemporaryDirectory(prefix="tr300-release-host-") as case_raw:
+            directory = Path(case_raw)
+            bin_dir = directory / "bin"
+            assets = directory / "assets"
+            runner_temp = directory / "runner"
+            bin_dir.mkdir()
+            assets.mkdir()
+            runner_temp.mkdir()
+            write_release_host_gh_fixture(bin_dir)
+            write_fixture_jq_compat(bin_dir)
+            for asset in public_assets:
+                (assets / asset).write_bytes(b"fixture\n")
+            (assets / "__tr300-release-metadata.json").write_text(
+                json.dumps(
+                    {
+                        "tag": tag,
+                        "source_sha": source_sha,
+                        "title": title,
+                        "body": "fixture release notes",
+                        "prerelease": False,
+                    }
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            (assets / "__tr300-notes.txt").write_text(
+                "fixture release notes\n", encoding="utf-8", newline="\n"
+            )
+            (assets / "__tr300-asset-sha256s").write_text(
+                "fixture custody\n", encoding="utf-8", newline="\n"
+            )
+            config_path = directory / "config.json"
+            log_path = directory / "gh-calls.jsonl"
+            config_path.write_text(
+                json.dumps({"pages": pages, "created": created}, separators=(",", ":")),
+                encoding="utf-8",
+                newline="\n",
+            )
+            log_path.write_text("", encoding="utf-8", newline="\n")
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "ASSET_DIRECTORY": assets.as_posix(),
+                    "RUNNER_TEMP": runner_temp.as_posix(),
+                    "EXPECTED_REPOSITORY": "QubeTX/qube-machine-report",
+                    "RELEASE_TAG": tag,
+                    "EXPECTED_SHA": source_sha,
+                    "GH_TOKEN": "fixture-token",
+                    "MOCK_RELEASE_HOST_CONFIG": config_path.as_posix(),
+                    "MOCK_RELEASE_HOST_LOG": log_path.as_posix(),
+                    "TR300_RELEASE_HOST_BIN": bin_dir.as_posix(),
+                }
+            )
+            environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", "-s"],
+                cwd=directory,
+                env=environment,
+                input=(
+                    ("set -euxo pipefail\n" if os.environ.get("TR300_TEST_XTRACE") == "1" else "set -euo pipefail\n")
+                    + fragment
+                ),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+                check=False,
+            )
+            succeeded = result.returncode == 0
+            calls = [
+                json.loads(line)
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            create_count = sum(call[:2] == ["release", "create"] for call in calls)
+            if succeeded != expected_success or create_count != expected_creates:
+                raise AssertionError(
+                    f"release host draft case={name!r} returned {result.returncode}, "
+                    f"expected_success={expected_success}, creates={create_count}, "
+                    f"expected_creates={expected_creates}\nstdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+            if expected_success:
+                by_tag = subprocess.run(
+                    [
+                        bash,
+                        "--noprofile",
+                        "--norc",
+                        "-c",
+                        'gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$RELEASE_TAG"',
+                    ],
+                    cwd=directory,
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10,
+                    check=False,
+                )
+                if by_tag.returncode == 0:
+                    raise AssertionError("release host fixture exposed a private draft by tag")
+
+
 def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
     prepare = extract_unique_named_run(
         macos,
@@ -1728,6 +1964,9 @@ if [[ ${1:-} == release && ${2:-} == upload && $# -ge 3 ]]; then
 fi
 [[ ${1:-} == api && $# -ge 2 ]] || exit 97
 endpoint=$2
+if [[ $endpoint == --paginate && ${3:-} == --slurp ]]; then
+    endpoint=${4:-}
+fi
 if [[ -n ${MOCK_GH_LOG:-} ]]; then
     printf '%s\\n' "$endpoint" >> "$MOCK_GH_LOG"
 fi
@@ -1814,6 +2053,30 @@ case "$endpoint" in
     repos/*/git/tags/*)
         printf '%s\\t%s\\n' "$MOCK_TAG_TYPE" "$MOCK_TAG_SHA"
         ;;
+    repos/*/releases/[1-9]*)
+        [[ ${MOCK_RELEASE_PRESENT:-true} == true ]] || exit 44
+        requested_id=${endpoint##*/}
+        [[ "$requested_id" == "${MOCK_RELEASE_ID:-777777}" ]] || exit 44
+        printf '{"id":%s,"tag_name":"%s","target_commitish":"%s","draft":%s,"prerelease":%s,"assets":[' \
+            "${MOCK_RELEASE_ID:-777777}" "$MOCK_RELEASE_TAG" "$MOCK_RELEASE_TARGET" \
+            "${MOCK_RELEASE_DRAFT:-true}" "${MOCK_RELEASE_PRERELEASE:-false}"
+        asset_count=${MOCK_RELEASE_ASSET_COUNT:-30}
+        asset_index=0
+        while IFS= read -r asset_name; do
+            [[ -n "$asset_name" ]] || continue
+            asset_index=$((asset_index + 1))
+            [[ $asset_index -eq 1 ]] || printf ','
+            printf '{"id":%s,"name":"%s","size":1,"digest":"sha256:%064d"}' \
+                "$((900000 + asset_index))" "$asset_name" 0
+        done <<< "${MOCK_CURRENT_ASSETS:-}"
+        while ((asset_index < asset_count)); do
+            asset_index=$((asset_index + 1))
+            [[ $asset_index -eq 1 ]] || printf ','
+            printf '{"id":%s,"name":"fixture-%s","size":1,"digest":"sha256:%064d"}' \
+                "$((900000 + asset_index))" "$asset_index" 0
+        done
+        printf ']}\\n'
+        ;;
     repos/*/releases/tags/*)
         [[ ${MOCK_RELEASE_PRESENT:-true} == true ]] || exit 44
         if [[ $* == *'(.assets | length)'* ]]; then
@@ -1830,7 +2093,29 @@ case "$endpoint" in
         printf '%s\\n' "${MOCK_LATEST_TAG:-v4.2.2}"
         ;;
     repos/*/releases\\?per_page=100)
-        if [[ $* == *target_commitish* ]]; then
+        if [[ ${2:-} == --paginate && ${3:-} == --slurp ]]; then
+            printf '[['
+            record_index=0
+            if [[ ${MOCK_RELEASE_PRESENT:-true} == true ]]; then
+                while IFS= read -r release_tag; do
+                    [[ -n "$release_tag" ]] || continue
+                    [[ $record_index -eq 0 ]] || printf ','
+                    printf '{"id":%s,"tag_name":"%s","target_commitish":"%s","draft":%s,"prerelease":%s,"assets":[' \
+                        "$(( ${MOCK_RELEASE_ID:-777777} + record_index ))" "$release_tag" \
+                        "$MOCK_RELEASE_TARGET" "${MOCK_RELEASE_DRAFT:-true}" \
+                        "${MOCK_RELEASE_PRERELEASE:-false}"
+                    asset_count=${MOCK_RELEASE_ASSET_COUNT:-30}
+                    for ((asset_index=1; asset_index<=asset_count; asset_index++)); do
+                        [[ $asset_index -eq 1 ]] || printf ','
+                        printf '{"id":%s,"name":"fixture-%s","size":1,"digest":"sha256:%064d"}' \
+                            "$((900000 + asset_index))" "$asset_index" 0
+                    done
+                    printf ']}'
+                    record_index=$((record_index + 1))
+                done <<< "${MOCK_RELEASE_TAGS_FOR_SHA-$MOCK_RELEASE_TAG}"
+            fi
+            printf ']]\\n'
+        elif [[ $* == *target_commitish* ]]; then
             [[ -z $MOCK_RELEASE_TAGS_FOR_SHA ]] ||
                 printf '%s\\n' "$MOCK_RELEASE_TAGS_FOR_SHA"
         else
@@ -1940,11 +2225,25 @@ sys.stdout.reconfigure(newline="\n")
 arguments = sys.argv[1:]
 variables = {}
 raw = False
+raw_input = False
+slurp = False
 index = 0
 while index < len(arguments):
     argument = arguments[index]
+    if re.fullmatch(r"-[erc]+", argument):
+        raw = raw or "r" in argument
+        index += 1
+        continue
     if argument in ("-e", "-r", "-c"):
         raw = raw or argument == "-r"
+        index += 1
+        continue
+    if argument in ("-R", "--raw-input"):
+        raw_input = True
+        index += 1
+        continue
+    if argument in ("-s", "--slurp"):
+        slurp = True
         index += 1
         continue
     if argument in ("--arg", "--argjson"):
@@ -1959,7 +2258,21 @@ if index >= len(arguments) or index + 2 < len(arguments):
     print(f"fixture jq rejects arguments: {arguments!r}", file=sys.stderr)
     raise SystemExit(3)
 query = arguments[index]
-if index + 1 == len(arguments):
+if raw_input:
+    data = sys.stdin.read()
+elif slurp:
+    contents = sys.stdin.read()
+    decoder = json.JSONDecoder()
+    data = []
+    cursor = 0
+    while cursor < len(contents):
+        while cursor < len(contents) and contents[cursor].isspace():
+            cursor += 1
+        if cursor >= len(contents):
+            break
+        value, cursor = decoder.raw_decode(contents, cursor)
+        data.append(value)
+elif index + 1 == len(arguments):
     data = json.load(sys.stdin)
 else:
     path = arguments[index + 1]
@@ -1980,13 +2293,20 @@ def emit(value):
         print("true" if value else "false")
     elif isinstance(value, (dict, list)):
         print(json.dumps(value, separators=(",", ":")))
+    elif isinstance(value, str) and not raw:
+        print(json.dumps(value, separators=(",", ":")))
     elif value is not None:
         print(value)
 
 def require(condition):
     raise SystemExit(0 if condition else 1)
 
-if (
+if raw_input and normalized == ".":
+    for line in data.splitlines():
+        emit(line)
+elif slurp and normalized == "sort":
+    emit(sorted(data))
+elif (
     "release manifest metadata is malformed" in normalized and
     normalized.startswith("if .announcement_is_prerelease == false and") and
     "then . else error(" in normalized and normalized.endswith("end")
@@ -2013,6 +2333,18 @@ elif (
         "body": data.get("announcement_github_body"),
         "prerelease": data.get("announcement_is_prerelease"),
     })
+elif normalized == (
+    ".tag == $tag and .source_sha == $sha and .prerelease == false and "
+    "(.title | type == \"string\" and length > 0)"
+):
+    require(
+        data.get("tag") == variables.get("tag") and
+        data.get("source_sha") == variables.get("sha") and
+        data.get("prerelease") is False and
+        isinstance(data.get("title"), str) and len(data["title"]) > 0
+    )
+elif normalized == ".title":
+    emit(data.get("title"))
 elif normalized == ".total_count":
     emit(data.get("total_count"))
 elif normalized == ".artifacts | length":
@@ -2141,6 +2473,112 @@ elif normalized == ".assets[].name":
         emit(asset.get("name"))
 elif normalized == ".id":
     emit(data.get("id"))
+elif normalized == "[.[][] | select(.tag_name == $tag)] | length == 0":
+    matches = [
+        release
+        for page in data
+        for release in page
+        if release.get("tag_name") == variables.get("tag")
+    ]
+    require(len(matches) == 0)
+elif "created release is not the unique exact private draft" in normalized:
+    matches = [
+        release
+        for page in data
+        for release in page
+        if release.get("tag_name") == variables.get("tag")
+    ]
+    expected_assets = variables.get("expected_assets")
+    valid = len(matches) == 1
+    if valid:
+        release = matches[0]
+        assets = release.get("assets", [])
+        valid = (
+            isinstance(release.get("id"), int) and release["id"] > 0 and
+            release.get("target_commitish") == variables.get("sha") and
+            release.get("draft") is True and release.get("prerelease") is False and
+            release.get("name") == variables.get("title") and
+            release.get("html_url") == variables.get("url") and
+            sorted(asset.get("name") for asset in assets) == expected_assets and
+            all(asset.get("size", 0) > 0 for asset in assets)
+        )
+    if not valid:
+        raise SystemExit(5)
+    emit(release["id"])
+elif ".id == $id and .tag_name == $tag" in normalized and ".html_url == $url" in normalized:
+    assets = data.get("assets", [])
+    require(
+        data.get("id") == variables.get("id") and
+        data.get("tag_name") == variables.get("tag") and
+        data.get("target_commitish") == variables.get("sha") and
+        data.get("draft") is True and data.get("prerelease") is False and
+        data.get("name") == variables.get("title") and
+        data.get("html_url") == variables.get("url") and
+        sorted(asset.get("name") for asset in assets) == variables.get("expected_assets") and
+        all(asset.get("size", 0) > 0 for asset in assets)
+    )
+elif "expected exactly one authenticated release" in normalized:
+    matches = [
+        release
+        for page in data
+        for release in page
+        if release.get("tag_name") == variables.get("tag")
+    ]
+    if len(matches) != 1:
+        raise SystemExit(5)
+    release = matches[0]
+    if not (
+        isinstance(release.get("id"), int) and release["id"] > 0 and
+        release.get("target_commitish") == variables.get("sha") and
+        release.get("draft") is True and release.get("prerelease") is False
+    ):
+        raise SystemExit(5)
+    emit(release["id"])
+elif ".[][] | select(.tag_name == $tag)" in normalized and "| @tsv" in normalized:
+    for page in data:
+        for release in page:
+            if release.get("tag_name") != variables.get("tag"):
+                continue
+            fields = [release.get("id")]
+            if "[.id, .tag_name," in normalized:
+                fields.append(release.get("tag_name"))
+            fields.extend((
+                release.get("target_commitish"), release.get("draft"),
+                release.get("prerelease"),
+            ))
+            emit("\t".join(
+                str(value).lower() if isinstance(value, bool) else str(value)
+                for value in fields
+            ))
+elif (
+    "select(.target_commitish == $sha" in normalized and
+    "[.id, .tag_name, .target_commitish, .draft, .prerelease] | @tsv" in normalized
+):
+    for page in data:
+        for release in page:
+            if not (
+                release.get("target_commitish") == variables.get("sha") and
+                release.get("draft") is True and release.get("prerelease") is False
+            ):
+                continue
+            emit("\t".join(
+                str(value).lower() if isinstance(value, bool) else str(value)
+                for value in (
+                    release.get("id"), release.get("tag_name"),
+                    release.get("target_commitish"), release.get("draft"),
+                    release.get("prerelease"),
+                )
+            ))
+elif ".id == $id and .tag_name == $tag" in normalized:
+    condition = (
+        data.get("id") == variables.get("id") and
+        data.get("tag_name") == variables.get("tag") and
+        data.get("target_commitish") == variables.get("sha") and
+        data.get("draft") is True and data.get("prerelease") is False
+    )
+    if "(.assets | length) == 30" in normalized:
+        condition = condition and len(data.get("assets", [])) == 30
+    require(condition)
 elif ".target_commitish == $sha" in normalized:
     assets = data.get("assets", [])
     condition = (
@@ -2170,6 +2608,8 @@ def fixture_environment(mock_bin: Path, output: Path, log: Path) -> dict[str, st
             "PATH": str(mock_bin) + os.pathsep + environment.get("PATH", ""),
             "GH_TOKEN": "fixture-token",
             "GITHUB_OUTPUT": str(output),
+            "RUNNER_TEMP": output.parent.as_posix(),
+            "MOCK_GH_STATE_DIR": output.parent.as_posix(),
             "EVENT_NAME": "workflow_run",
             "DISPATCH_MODE": "private",
             "DISPATCH_TAG": "",
@@ -2193,6 +2633,7 @@ def fixture_environment(mock_bin: Path, output: Path, log: Path) -> dict[str, st
             "MOCK_TAG_TYPE": "commit",
             "MOCK_TAG_SHA": TRUSTED_SHA,
             "MOCK_RELEASE_PRESENT": "true",
+            "MOCK_RELEASE_ID": "777777",
             "MOCK_RELEASE_TARGET": TRUSTED_SHA,
             "MOCK_RELEASE_DRAFT": "true",
             "MOCK_RELEASE_PRERELEASE": "false",
@@ -2637,6 +3078,7 @@ def run_macos_source_custody_case(
                 "OUTPUT_DIRECTORY": output.as_posix(),
                 "RELEASE_TAG": "v4.3.0",
                 "EXPECTED_SHA": TRUSTED_SHA,
+                "RELEASE_ID": "777777",
                 "RELEASE_RUN_ID": RELEASE_RUN_ID,
                 "RELEASE_RUN_ATTEMPT": RELEASE_RUN_ATTEMPT,
             }
@@ -2796,6 +3238,7 @@ def run_macos_native_build_custody_case(
         log = directory / "gh-calls"
         environment = fixture_environment(mock_bin, output, log)
         environment.update(write_macos_native_build_artifact_fixture(directory, mutation))
+        environment["RELEASE_ID"] = "777777"
         script = directory / "native-custody.sh"
         script.write_text(block, encoding="utf-8", newline="\n")
         result = subprocess.run(
@@ -2920,6 +3363,7 @@ def run_windows_publisher_case(
             {
                 "RELEASE_TAG": "v4.3.0",
                 "EXPECTED_SHA": TRUSTED_SHA,
+                "RELEASE_ID": "777777",
                 "ASSET_DIRECTORY": extracted.as_posix(),
                 "CURRENT_RUN_ID": current_run_id,
                 "INTERNAL_ARTIFACT_ID": artifact_id,
@@ -3314,7 +3758,9 @@ def write_macos_publisher_jq(bin_dir: Path) -> None:
                   (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
             """)
             validated_draft_query = normalized_query("""
-                .target_commitish == $sha and .draft == true and .prerelease == false and
+                .id == $release_id and .tag_name == $tag and
+                .target_commitish == $sha and
+                .draft == true and .prerelease == false and
                 ([.assets[] | select(.name == "tr300-installer.sh")] | length) == 1 and
                 ([.assets[] | select(.name == "tr300-installer.sh")][0] |
                   .digest == $managed_digest and .size == $managed_size) and
@@ -3333,12 +3779,16 @@ def write_macos_publisher_jq(bin_dir: Path) -> None:
                   ($manifest[0].release_assets | sort_by(.name))
             """)
             release_manifest_query = normalized_query("""
-                .target_commitish == $sha and .draft == true and .prerelease == false and
+                .id == $release_id and .tag_name == $tag and
+                .target_commitish == $sha and
+                .draft == true and .prerelease == false and
                 ([.assets[] | {id, name, size, digest}] | sort_by(.name)) ==
                   ($manifest[0].release_assets | sort_by(.name))
             """)
             draft_final_inventory_query = normalized_query("""
-                .target_commitish == $sha and .draft == true and .prerelease == false and
+                .id == $release_id and .tag_name == $tag and
+                .target_commitish == $sha and
+                .draft == true and .prerelease == false and
                 ([.assets[].name] | sort) == $names and ([.assets[].size > 0] | all) and
                 ([.assets[].digest | type == "string" and test("^sha256:[0-9a-f]{64}$")] | all)
             """)
@@ -3500,7 +3950,9 @@ def write_macos_publisher_jq(bin_dir: Path) -> None:
                 assets = data.get("assets", [])
                 manifest_assets = variables["manifest"][0].get("release_assets", [])
                 condition = (
-                    data.get("target_commitish") == variables.get("sha")
+                    data.get("id") == variables.get("release_id")
+                    and data.get("tag_name") == variables.get("tag")
+                    and data.get("target_commitish") == variables.get("sha")
                     and data.get("draft") is True
                     and data.get("prerelease") is False
                     and artifact_projection(assets) == artifact_projection(manifest_assets)
@@ -3517,7 +3969,9 @@ def write_macos_publisher_jq(bin_dir: Path) -> None:
                 assets = data.get("assets", [])
                 expected_draft = normalized == draft_final_inventory_query
                 require(
-                    data.get("target_commitish") == variables.get("sha")
+                    (not expected_draft or data.get("id") == variables.get("release_id"))
+                    and (not expected_draft or data.get("tag_name") == variables.get("tag"))
+                    and data.get("target_commitish") == variables.get("sha")
                     and data.get("draft") is expected_draft
                     and data.get("prerelease") is False
                     and sorted(record.get("name") for record in assets) == variables.get("names")
@@ -3728,6 +4182,8 @@ def write_macos_publisher_gh(bin_dir: Path) -> None:
                     artifact_bytes(int(artifact_tail.removesuffix("/zip")))
                 else:
                     direct_artifact(int(artifact_tail))
+            elif endpoint == f"{repository_prefix}/releases/{config['release_id']}":
+                write_json(load_release())
             elif endpoint == f"{repository_prefix}/releases/tags/{config['tag']}":
                 write_json(load_release())
             else:
@@ -3799,7 +4255,7 @@ def write_macos_publisher_fixture(
     release_records = release_asset_records(release_payloads, first_id=91000)
     release = {
         "id": release_id,
-        "tag_name": "v4.3.0",
+        "tag_name": "v4.2.2" if mutation == "release-tag-mismatch" else "v4.3.0",
         "target_commitish": TRUSTED_SHA,
         "draft": True,
         "prerelease": False,
@@ -4046,6 +4502,7 @@ def write_macos_publisher_fixture(
         "PUBLISHER_FIXTURE_BIN": fixture_bin.as_posix(),
         "RELEASE_TAG": "v4.3.0",
         "EXPECTED_SHA": TRUSTED_SHA,
+        "RELEASE_ID": str(release_id),
         "REPOSITORY": REPOSITORY,
         "ASSET_DIRECTORY": (directory / "macos-release-assets").as_posix(),
         "CURRENT_RUN_ID": str(current_run_id),
@@ -4161,6 +4618,7 @@ def publisher_gh_read_allowed(arguments: list[str], config: dict[str, object]) -
         ],
         f"{repository_prefix}/git/ref/heads/main": ["--jq", ".object.sha"],
         f"{repository_prefix}/releases/tags/{tag}": [],
+        f"{repository_prefix}/releases/{config['release_id']}": [],
     }
     for workflow in config["workflow_ids"]:
         exact_endpoints[f"{repository_prefix}/actions/workflows/{workflow}"] = [
@@ -4351,7 +4809,7 @@ def run_macos_publisher_case(
             if any("actions/workflows/windows-installers.yml" in endpoint for endpoint in api_endpoints):
                 raise AssertionError(f"{name}: stale proof escaped into Windows custody")
         elif mutation == "manifest-draft-divergence":
-            if not any("/releases/tags/v4.3.0" in endpoint for endpoint in api_endpoints):
+            if not any("/releases/81001" in endpoint for endpoint in api_endpoints):
                 raise AssertionError(f"{name}: divergent manifest did not reach draft equality")
             if download_calls:
                 raise AssertionError(f"{name}: divergent manifest reached draft byte download")
@@ -4611,6 +5069,7 @@ def check_actual_resolvers(
         "tag": "v4.3.0",
         "version": "4.3.0",
         "source_sha": TRUSTED_SHA,
+        "release_id": "777777",
         "release_run_id": RELEASE_RUN_ID,
         "release_run_attempt": RELEASE_RUN_ATTEMPT,
     }
@@ -4747,6 +5206,7 @@ def check_actual_resolvers(
         "previous_tag": "v4.2.2",
         "previous_version": "4.2.2",
         "source_sha": TRUSTED_SHA,
+        "release_id": "777777",
         "validation_mode": "private",
         "upstream_run_id": RELEASE_RUN_ID,
         "upstream_run_attempt": RELEASE_RUN_ATTEMPT,
@@ -4767,6 +5227,7 @@ def check_actual_resolvers(
     }
     public_validation_outputs = {
         **validation_outputs,
+        "release_id": "",
         "validation_mode": "public",
     }
     public_validation_run = {
@@ -5080,6 +5541,7 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
 
     macos_publisher_cases = (
         ("exact 30+4 asset publication", None, True),
+        ("private release tag mutation", "release-tag-mismatch", False),
         ("stale native proof attempt", "stale-native-attempt", False),
         (
             "validation manifest and private draft divergence",
@@ -5105,7 +5567,7 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         )
 
     rejection_reach_marker = (
-        'gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \\\n'
+        'gh api "repos/$REPOSITORY/releases/$RELEASE_ID" \\\n'
         '  > "$work_directory/validated-draft.json"\n'
     )
     if macos_publisher.count(rejection_reach_marker) != 1:
@@ -5140,6 +5602,7 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         "tag": "v4.3.0",
         "version": "4.3.0",
         "source_sha": TRUSTED_SHA,
+        "release_id": "777777",
         "run_id": RELEASE_RUN_ID,
         "run_attempt": RELEASE_RUN_ATTEMPT,
         "custody_required": "true",
@@ -5192,6 +5655,7 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
                 "tag": "",
                 "version": "",
                 "source_sha": TRUSTED_SHA,
+                "release_id": "",
                 "run_id": "",
                 "run_attempt": "",
                 "custody_required": "false",
@@ -5428,7 +5892,9 @@ def check_workflow_contract(path: Path, workflow: str) -> None:
     require(workflow, STABLE_TAG_PATTERN, label)
     require(workflow, "git/ref/tags/$tag", label)
     require(workflow, "git/tags/$source_sha", label)
-    require(workflow, "releases/tags/$tag", label)
+    require(workflow, "gh api --paginate --slurp", label)
+    require(workflow, "releases?per_page=100", label)
+    require(workflow, "release_id", label)
     require(workflow, ".target_commitish", label)
     if "startsWith(github.event.workflow_run.head_branch, 'v')" in workflow:
         raise AssertionError(f"{label}: v-prefix-only workflow gate returned")
@@ -5481,7 +5947,8 @@ def check_windows_validation_provenance(workflow: str) -> None:
     require(workflow, STABLE_TAG_PATTERN, label)
     require(workflow, "git/ref/tags/$tag", label)
     require(workflow, "git/tags/$source_sha", label)
-    require(workflow, "releases/tags/$tag", label)
+    require(workflow, "releases?per_page=100", label)
+    require(workflow, "release_id: ${{ steps.release.outputs.release_id }}", label)
     require(workflow, ".target_commitish", label)
     for needle in (
         "github.ref == 'refs/heads/main'",
@@ -5500,7 +5967,8 @@ def check_windows_validation_provenance(workflow: str) -> None:
         "artifact-ids: ${{ needs.prepare-validation-inputs.outputs.artifact_id }}",
         f"uses: {UPLOAD_ARTIFACT_ACTION}",
         f"uses: {DOWNLOAD_ARTIFACT_ACTION}",
-        '[[ "$release_draft" == true && "$release_prerelease" == false && "$asset_count" == 30 ]]',
+        'gh api "repos/$repo/releases/$release_id"',
+        '.id == $id and .tag_name == $tag and .target_commitish == $sha',
         '[[ "$release_draft" == false && "$release_prerelease" == false && "$asset_count" == 34 ]]',
         "direct authenticated candidate transition",
         "private draft leaked into public updater discovery",
@@ -5602,6 +6070,19 @@ def check_windows_publish_boundary(workflow: str) -> None:
     require(build, "permissions:\n      contents: read", f"{label} build job")
     if "contents: write" in build or "gh release upload" in build:
         raise AssertionError(f"{label}: build job regained release write capability")
+    for needle in (
+        "RELEASE_ID: ${{ needs.resolve-release.outputs.release_id }}",
+        "EXPECTED_SHA: ${{ needs.resolve-release.outputs.source_sha }}",
+        'gh api "repos/$repo/releases/$releaseId"',
+        "[Int64]$release.id -ne $releaseId",
+        "[string]$release.tag_name -ne $tag",
+        "[string]$release.target_commitish -ne $expectedSha",
+        "[bool]$release.draft -ne $true",
+        "[bool]$release.prerelease -ne $false",
+    ):
+        require(build, needle, f"{label} build private-draft custody")
+    if "gh release view $tag" in build or "releases/tags/$tag" in build:
+        raise AssertionError(f"{label}: build preflight uses a private by-tag lookup")
     require(
         build,
         f"uses: {UPLOAD_ARTIFACT_ACTION}",
@@ -5648,14 +6129,15 @@ def check_windows_publish_boundary(workflow: str) -> None:
     require(executable, "EXPECTED_SHA", f"{label} publisher")
     require(executable, "git/ref/tags/$tag", f"{label} publisher")
     require(executable, "git/tags/$source_sha", f"{label} publisher")
-    require(executable, "releases/tags/$RELEASE_TAG", f"{label} publisher")
+    require(executable, "releases/$RELEASE_ID", f"{label} publisher")
+    require(executable, '.id == $id and .tag_name == $tag', f"{label} publisher")
     require(executable, "actions/artifacts/$INTERNAL_ARTIFACT_ID/zip", f"{label} exact artifact ID")
     require(executable, '"sha256:$INTERNAL_ARTIFACT_DIGEST"', f"{label} REST digest")
     require(executable, '[[ "$zip_hash" == "$INTERNAL_ARTIFACT_DIGEST" ]]', f"{label} ZIP digest")
     require(executable, ".workflow_run.id == $run", f"{label} run custody")
     require(executable, 'git/ref/heads/main', f"{label} current main rebind")
     require(executable, 'actions/workflows/ci.yml/runs?event=push', f"{label} exact CI rebind")
-    require(executable, '"$release_draft" == true', f"{label} private draft only")
+    require(executable, ".draft == true", f"{label} private draft only")
     require(executable, "find \"$ASSET_DIRECTORY\"", f"{label} publisher")
     require(executable, "sha256sum -- \"$payload\"", f"{label} publisher")
     require(executable, "gh release upload", f"{label} publisher")
@@ -6512,7 +6994,8 @@ def check_macos_publish_boundary(workflow: str) -> None:
         "SOURCE_X86_64_ARCHIVE_SIZE: ${{ needs.source-custody.outputs.x86_64_archive_size }}",
         "release_asset_record() {",
         '[.id, .digest, .size] | @tsv',
-        'gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG"',
+        'gh api "repos/$REPOSITORY/releases/$RELEASE_ID"',
+        '.id == $release_id',
         '.tag_name == $tag and .target_commitish == $sha',
         '.draft == $draft and .prerelease == false',
         'validate_release_identity "$candidate_managed_release" "$RELEASE_TAG"',
@@ -6620,7 +7103,7 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'sh "$managed_installer"', managed_rejection_index
     )
     candidate_release_index = native_validation.index(
-        'gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG"',
+        'gh api "repos/$REPOSITORY/releases/$RELEASE_ID"',
         managed_rejection_index,
     )
     candidate_byte_index = native_validation.index(
@@ -6783,7 +7266,12 @@ def check_macos_publish_boundary(workflow: str) -> None:
     require(executable, "EXPECTED_SHA", f"{label} publisher")
     require(executable, "git/ref/tags/$tag", f"{label} publisher")
     require(executable, "git/tags/$source_sha", f"{label} publisher")
-    require(executable, "releases/tags/$RELEASE_TAG", f"{label} publisher")
+    require(executable, "releases/$RELEASE_ID", f"{label} publisher")
+    require(
+        executable,
+        ".id == $release_id and .tag_name == $tag",
+        f"{label} publisher",
+    )
     require(executable, "actions/artifacts/$MACOS_ARTIFACT_ID/zip", f"{label} own artifact ID")
     require(executable, '"sha256:$MACOS_ARTIFACT_DIGEST"', f"{label} own REST digest")
     require(executable, '[[ "$macos_zip_hash" == "$MACOS_ARTIFACT_DIGEST" ]]', f"{label} own ZIP digest")
@@ -7022,13 +7510,18 @@ def check_release_token_boundary(workflow: str) -> None:
         STABLE_TAG_PATTERN,
         "git/ref/heads/main",
         "actions/workflows/ci.yml/runs?event=push",
-        "releases/tags/$RELEASE_TAG",
-        "[[ \"$http_status\" == 404 ]]",
+        "gh api --paginate --slurp",
+        "releases?per_page=100",
+        "[.[][] | select(.tag_name == $tag)] | length == 0",
         "gh release create",
         "--draft --verify-tag --target",
+        "created release is not the unique exact private draft",
+        'gh api "repos/$EXPECTED_REPOSITORY/releases/$release_id"',
         "([.assets[].name] | sort) == $expected_assets",
     ):
         require(publisher, needle, f"{label} fixed draft publisher")
+    if "releases/tags/$RELEASE_TAG" in publisher:
+        raise AssertionError(f"{label}: private draft publisher uses draft-blind tag lookup")
     if '"$ASSET_DIRECTORY"/*' in publisher or "--clobber" in publisher:
         raise AssertionError(f"{label}: publisher regained glob/clobber upload")
     if "smoke-published-managed-linux:" in workflow:
@@ -7629,6 +8122,7 @@ def main() -> None:
         windows_cargo_dist_installer,
     )
     run_release_manifest_preservation_fixtures(release, bash)
+    run_release_host_draft_fixtures(release, bash)
     run_release_sidecar_normalization_fixtures(release)
     run_macos_archive_mode_compatibility_fixtures(macos)
     run_macos_inventory_compatibility_fixtures(macos)

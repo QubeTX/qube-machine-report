@@ -1142,12 +1142,15 @@ jobs:
           ' "$ASSET_DIRECTORY/__tr300-release-metadata.json" >/dev/null
           title=$(jq -r .title "$ASSET_DIRECTORY/__tr300-release-metadata.json")
 
-          release_url="https://api.github.com/repos/$EXPECTED_REPOSITORY/releases/tags/$RELEASE_TAG"
-          http_status=$(curl --proto '=https' --tlsv1.2 -sS -o "$RUNNER_TEMP/release-before.json" \
-            -w '%{http_code}' -H 'Accept: application/vnd.github+json' \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "$release_url")
-          [[ "$http_status" == 404 ]]
+          # GitHub's release-by-tag endpoint intentionally does not resolve a
+          # private draft. Use the authenticated, fully paginated collection so
+          # an existing draft cannot be mistaken for an absent release.
+          gh api --paginate --slurp \
+            "repos/$EXPECTED_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases-before.json"
+          jq -e --arg tag "$RELEASE_TAG" '
+            [.[][] | select(.tag_name == $tag)] | length == 0
+          ' "$RUNNER_TEMP/releases-before.json" >/dev/null
 
           # The stable release remains private until the Windows and macOS
           # supplemental workflows have assembled and verified all 34 assets.
@@ -1177,15 +1180,41 @@ jobs:
             "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-gnu.tar.xz" \
             "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-gnu.tar.xz.sha256" \
             "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-musl.tar.xz" \
-            "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-musl.tar.xz.sha256"
+            "$ASSET_DIRECTORY/tr300-x86_64-unknown-linux-musl.tar.xz.sha256" \
+            > "$RUNNER_TEMP/release-created-url.txt"
 
-          gh api "repos/$EXPECTED_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            > "$RUNNER_TEMP/release-after.json"
-          jq -e --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
+          mapfile -t created_urls < <(sed '/^[[:space:]]*$/d' "$RUNNER_TEMP/release-created-url.txt")
+          [[ ${#created_urls[@]} -eq 1 ]]
+          created_url=${created_urls[0]}
+          [[ "$created_url" == "https://github.com/$EXPECTED_REPOSITORY/releases/tag/"* ]]
+
+          gh api --paginate --slurp \
+            "repos/$EXPECTED_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases-after.json"
+          release_id=$(jq -e -r --arg tag "$RELEASE_TAG" --arg sha "$EXPECTED_SHA" \
+            --arg title "$title" --arg url "$created_url" \
             --argjson expected_assets "$(printf '%s\n' "${public_assets[@]}" | jq -R . | jq -s 'sort')" '
-              .tag_name == $tag and .target_commitish == $sha and
-              .draft == true and .prerelease == false and
-              ([.assets[].name] | sort) == $expected_assets and
+              [.[][] | select(.tag_name == $tag)] as $matches |
+              if (($matches | length) == 1 and
+                  ($matches[0].id | type == "number") and $matches[0].id > 0 and
+                  $matches[0].target_commitish == $sha and
+                  $matches[0].draft == true and $matches[0].prerelease == false and
+                  $matches[0].name == $title and $matches[0].html_url == $url and
+                  ([$matches[0].assets[].name] | sort) == $expected_assets and
+                  ([$matches[0].assets[].size > 0] | all))
+              then $matches[0].id
+              else error("created release is not the unique exact private draft")
+              end
+            ' "$RUNNER_TEMP/releases-after.json")
+          [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$EXPECTED_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/release-after.json"
+          jq -e --argjson id "$release_id" --arg tag "$RELEASE_TAG" \
+            --arg sha "$EXPECTED_SHA" --arg title "$title" --arg url "$created_url" \
+            --argjson expected_assets "$(printf '%s\n' "${public_assets[@]}" | jq -R . | jq -s 'sort')" '
+              .id == $id and .tag_name == $tag and .target_commitish == $sha and
+              .draft == true and .prerelease == false and .name == $title and
+              .html_url == $url and ([.assets[].name] | sort) == $expected_assets and
               ([.assets[].size > 0] | all)
             ' "$RUNNER_TEMP/release-after.json" >/dev/null
           managed_installer_sha256=$(awk '$2 == "*tr300-installer.sh" { print $1 }' \
