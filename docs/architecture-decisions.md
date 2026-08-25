@@ -13,8 +13,9 @@
 > **Coverage reconciled through 2026-08-24.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
 > one file per decision. v4.2.2 is the last complete GitHub distribution;
-> v4.3.0 is published on crates.io but its immutable tag failed before GitHub
-> draft creation, and v4.3.1 is the packaging fix-forward.
+> v4.3.1 is the current crates.io package, but the immutable v4.3.0 and v4.3.1
+> tags both failed before GitHub draft creation; v4.3.2 is the packaging
+> fix-forward.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
 > until a later dated section explicitly supersedes them. Historical failure
@@ -22,7 +23,7 @@
 
 ## Table of contents
 
-- [Decision ledger status (v4.2.2 complete distribution; v4.3.1 fix-forward)](#decision-ledger-status-v422-complete-distribution-v431-fix-forward)
+- [Decision ledger status (v4.2.2 complete distribution; v4.3.2 fix-forward)](#decision-ledger-status-v422-complete-distribution-v432-fix-forward)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
   - [v4.2.2 release closure and evidence boundary](#v422-release-closure-and-evidence-boundary)
@@ -75,27 +76,29 @@
   - [Post-install version verification](#post-install-version-verification)
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
-- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.1 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v431-distribution)
+- [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.2 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v432-distribution)
 
 ---
 
-## Decision ledger status (v4.2.2 complete distribution; v4.3.1 fix-forward)
+## Decision ledger status (v4.2.2 complete distribution; v4.3.2 fix-forward)
 
 This reconciliation compared the ledger against current source, all release
 and validation workflows, the v4 thinking record, both Mac/Alienware handoffs,
 the testing ledger, technical and human changelogs, agent guides, and the public
-v4.2.2 release state and the split v4.3 state. v4.3.0 product bytes are
-published on crates.io through exact-main trusted OIDC, but Release
-`32795846831` failed before draft creation. Its tag remains immutable. The
-v4.3.1 rows describe the required packaging fix-forward; its fresh exact-main,
-crate, tag, native installer, and public-byte gates remain independent proof.
+v4.2.2 release state and the split v4.3 state. v4.3.0 and v4.3.1 product bytes
+are published on crates.io through exact-main trusted OIDC, but Releases
+`32795846831` and `32800944635` each failed before draft creation on independent
+Windows-bootstrap and Apple system-Bash defects. Both tags remain immutable.
+The v4.3.2 rows describe the required packaging fix-forward; its fresh
+exact-main, crate, tag, native installer, and public-byte gates remain
+independent proof.
 
 | Decision family | Status | Enforcement / source of truth |
 |---|---|---|
 | One Rust CLI/library with cfg-gated platform adapters | Accepted | `src/collectors/`, `src/install/`, shared `SystemInfo`, report, and JSON paths |
 | Full versus fast collection budgets | Accepted | `CollectMode`; fast may omit slow optional evidence but cannot redefine values |
 | Evidence-backed nullable facts and named value definitions | Accepted | collectors, schema-v1 JSON, table/Markdown renderers, tests |
-| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io as v4.3.0; complete GitHub distribution moves to v4.3.1; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
+| v4.3 Linux thermals/battery, Windows NVIDIA GPU thermal, and bounded-probe behavior | Published on crates.io through v4.3.1; complete GitHub distribution moves to v4.3.2; physical Linux/Pi proof remains open | source/tests, this ADR section, `TESTING.md` |
 | Fixed-width terminal and additive JSON compatibility | Accepted | `unicode-width`, typed `serde_json`, locale/code-page setup before rendering |
 | Read-only ordinary reports; explicit-only Markdown persistence | Accepted | four save aliases; hidden `--no-save` compatibility no-op |
 | Bounded optional probes and fail-safe endpoint-policy updates | Accepted | command helper, randomized staging, `PolicyBlocked`, no force/direct overwrite |
@@ -1786,6 +1789,24 @@ attribute (symbolic-link/junction redirection), but accepts an ordinary NTFS
 hard link, which is still a regular file. Any future Windows bootstrap change
 must pass that live pre-tag job as well as the structural provenance fixture.
 
+The immutable v4.3.1 tag then exposed a separate native-Apple compatibility
+gap. Release planning and all six platform builds passed, but both fresh Apple
+signers run the host's `/bin/bash` 3.2; their Bash-4-only `declare -A` and
+`mapfile` inventory logic failed before signing, upload, or draft creation.
+Several downstream native installer jobs contained the same latent constructs.
+v4.3.2 fixes forward without moving either earlier tag. Every inline block in
+the native signer, installer-input preparation, credential preflight, build,
+validation, and legacy-bridge jobs must parse under system Bash 3.2. Those jobs
+must not depend on associative arrays, `mapfile`, or `readarray`. Exact file
+inventories instead use Python standard-library `os.scandir`, non-following
+metadata, regular-file checks, and exact expected-name sets. Both native Mac CI
+legs assert Bash 3.2, syntax-check all affected inline blocks and classified
+tag-only build-matrix Bash blocks, execute the exact checkout-free signer
+staging for both targets, and run each exact installer inventory with positive
+and fail-closed fixtures before a tag is eligible. Installing a newer shell in the
+signer or checking out a helper beside credentials is rejected: both would
+weaken the runtime and source-custody proof.
+
 Privileged supplemental workflows accept automatic input only from the exact
 successful same-repository run named in their contract. They resolve lightweight
 or annotated tags through the Git object API, require the resulting commit to
@@ -3316,18 +3337,21 @@ contains "tr300" in the name (case-insensitive) — matches the
 synchronous-path heuristic, prevents wiping unrelated dirs in
 unusual portable-install scenarios.
 
-## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.1 distribution)
+## Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.2 distribution)
 
-**Status:** Product code published on crates.io as v4.3.0; complete GitHub
-distribution is the v4.3.1 fix-forward. Final PR #14 head `8f5919b` passed the
+**Status:** Product code is published on crates.io through v4.3.1; complete
+GitHub distribution is the v4.3.2 fix-forward. Final PR #14 head `8f5919b`
+passed the
 complete local gate, controlled benchmark, zero-finding full/delta security
 scans, all 19 CI jobs in `32764677640`, release plan `32764677784`, independent
 reviews, and every review thread. It merged as `2f997d2`; exact-main CI
 `32766014047` passed all 19 jobs. Automatic OIDC later published exact v4.3.0;
-its tag failed before draft creation on the Windows bootstrap guard. Reviewed
-v4.3.1 tagged/public distribution and physical AMD64 Linux/Raspberry Pi
-acceptance remain separate gates. This section records the product contract
-and rationale, not those later results.
+its tag failed before draft creation on the Windows bootstrap guard. PR #18
+repaired that guard, and exact-main trusted OIDC published v4.3.1, but its tag
+failed before draft creation on Apple system-Bash compatibility. Reviewed
+v4.3.2 tagged/public distribution and physical AMD64 Linux/Raspberry Pi
+acceptance remain separate gates. This section records the product contract and
+rationale, not those later results.
 
 **Decision 1 — thermals report only trusted sensors, in both `--fast` and full
 mode.** Linux uses pure sysfs. CPU collection recognizes coretemp, k10temp,

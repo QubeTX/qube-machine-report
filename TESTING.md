@@ -7,18 +7,44 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.1 — Windows release-bootstrap fix-forward (as of 2026-08-24)
+### v4.3.2 — Apple system-Bash fix-forward (as of 2026-08-24)
 
-Release status: active. The immutable v4.3.0 tag cannot consume corrected
-workflow code, and every downstream recovery path correctly requires a
-successful exact upstream Release. The v4.3.1 patch moves the exact pinned
-cargo-dist PowerShell bootstrap into one shared script, accepts the official
-installer's ordinary NTFS hard-linked alias while rejecting reparse-point
-redirection, and adds a Windows Server 2022 CI job that executes the same
-bootstrap before any tag is eligible. Required evidence is the complete local
-gate, reviewed PR head including that live Windows job, exact-main CI and
-automatic OIDC publication, then a fresh `v4.3.1` automatic private/native/
-public chain.
+Release status: active. Both earlier v4.3 tags are immutable and neither
+created a GitHub Release or draft, so only a fresh reviewed `v4.3.2` tag may
+restart the automatic distribution chain. The correction removes Bash-4-only
+file-inventory constructs from the checkout-free Apple signers and every
+affected native `macos-installer.yml` job. Exact inventories remain fail-closed
+through Python standard-library `os.scandir` plus non-following regular-file
+checks. Both native Mac CI legs must prove that `/bin/bash` is version 3.2,
+syntax-check every affected native workflow block plus every classified Bash
+block in the tag-only cargo-dist build matrix, and execute the exact
+signer-staging block for both Apple targets. The three exact macOS-installer
+inventory snippets also run against clean, missing, extra, empty, directory,
+and symlink fixtures; signer fixtures reject hidden extras, corrupt sidecars,
+and symlink/hard-link archive members. The focused compatibility
+harness and complete local provenance fixture suite pass on the working branch;
+the full local gate, reviewed exact-head PR, exact-main CI/OIDC, fresh native
+credential preflight, and automatic tagged 24 → 30 → validated → 34/public
+chain remain required before this log can record release completion.
+
+### v4.3.1 — Published crate; failed-closed Apple packaging
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. PR #18 head
+`497963675d8a4fe08b34cc649ab55b02bbc1c9c2` passed all 20 jobs in CI
+`32799513518` and Release plan `32799513464`. It merged and tagged at exact
+`07e0e3ae265eb70856eb5ee0602beb11850ea00d`; exact-main CI `32800131846`
+passed, automatic trusted-OIDC crates run `32800131893` published unyanked
+v4.3.1, and a fresh download matched crates.io checksum
+`cc7fc5798661b9b77eb7327cdaddbe5f12d2f17c42dafe0badfc992b4ee2624d`.
+Native credential preflight `32800830054` passed on Intel and Apple Silicon.
+Tagged Release `32800944635` then passed its plan and all six platform builds,
+but fresh Apple signer jobs `97662081638` and `97662081687` failed immediately,
+before signing or upload, because macOS `/bin/bash` 3.2 rejected `declare -A`;
+the following `mapfile` was incompatible as well. Hosting, announcement, and
+all downstream publication jobs skipped, and no draft was created. An unchanged
+rerun cannot consume corrected workflow code; v4.3.2 is the required
+immutable-tag-safe fix-forward.
 
 ### v4.3.0 — Published crate; failed-closed GitHub packaging
 
@@ -50,7 +76,9 @@ skipped. Immutable tag `v4.3.0` then triggered Release `32795846831`; the
 official pinned cargo-dist installer completed, but its normal
 `dist.exe`/`cargo-dist.exe` hard link made `.LinkType` nonempty and the new
 guard rejected it. The run failed before signing, hosting, or draft creation.
-An unchanged rerun is deterministic; v4.3.1 is the required fix-forward.
+An unchanged rerun is deterministic. v4.3.1 repaired that Windows bootstrap,
+then exposed the separate Apple system-Bash gap recorded above; v4.3.2 is the
+required final fix-forward.
 
 - **Integrated local qualification — pass through source/test head `8471d95`:**
   locked fmt; warnings-denied workspace/all-target Clippy; 185 library and 22

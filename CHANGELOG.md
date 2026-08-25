@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.3.1] - 2026-08-24
+## [4.3.2] - 2026-08-24
 
 ### Added
-- **This is the first complete GitHub distribution of the v4.3 product
-  changes.** Reports can include deterministic, fault-aware Linux CPU/GPU
+- **This version carries the complete v4.3 product and distribution change
+  set.** Reports can include deterministic, fault-aware Linux CPU/GPU
   temperatures (including `soc_thermal`) and mode-bounded NVIDIA GPU
   temperature on Windows. Windows CPU temperature stays absent/JSON `null`
   because ACPI zones do not establish CPU identity; macOS thermals remain
@@ -20,6 +20,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default full collection mode.
 
 ### Changed
+- **Windows full-mode collection is materially faster on the controlled
+  Alienware benchmark.** Seven alternating runs per version measured medians
+  of 5146.9 ms and 2120.2 ms: 58.8% less elapsed time and a 2.43× runtime
+  ratio. Eleven fast-mode runs measured 257.3 ms and 260.4 ms (+1.2%), which is
+  background-level and supports no fast-mode performance-gain claim.
+- **Managed-to-PKG switching on macOS is an explicit safe sequence:** refresh
+  through the managed installer, choose receipt-aware Complete uninstall, then
+  run the direct PKG. Its preinstall refuses standard managed evidence across
+  `/Users` and eligible local Directory Service homes before payload placement;
+  clean/native upgrades and PKG-to-managed remain supported.
+
+### Fixed
+- **Linux battery selection and macOS fallback parsing are stricter.** Linux
+  accepts well-formed `*_now`/`*_avg` readings, signed/zero current and power,
+  rejects explicit Device/absent/malformed supplies, and selects
+  deterministically. macOS accepts only a recognizable `InternalBattery`
+  record. The historical Raspberry Pi "30%" source remains unverified pending
+  physical sysfs evidence.
+- **The Windows cargo-dist bootstrap accepts the official installer's ordinary
+  NTFS hard-linked alias while still rejecting reparse-point redirection.** The
+  exact shared bootstrap now runs in ordinary Windows CI before a release tag
+  can be qualified.
+- **Every native Apple release path is compatible with macOS system Bash
+  3.2.** Exact input inventories use non-following Python standard-library
+  inspection instead of Bash-4-only associative arrays or `mapfile`; both
+  native Mac CI legs syntax-check every affected inline workflow and tag-only
+  build-matrix block, execute the exact checkout-free signer staging, and run
+  all three exact installer inventories against positive and fail-closed
+  fixtures. Immutable `v4.3.0` and `v4.3.1` stopped before draft
+  creation on the superseded Windows and Apple packaging defects respectively.
+
+### Security
+- **Crate and installer publication use the automatic exact-source custody
+  chain.** Accepted `main` pushes publish crates only through short-lived
+  trusted OIDC after exact CI/package proof. One qualified stable tag then
+  drives the private 24-base → 30-Windows → validated → 34-asset native-Apple
+  chain and post-public smokes without recurring approval clicks or a
+  long-lived crates token. Apple credentialed signers remain fresh and
+  checkout-free.
+
+## [4.3.1] - 2026-08-24
+
+### Added
+- **This crate carries the v4.3 product changes, although its immutable tag did
+  not produce a GitHub download release.** Reports can include deterministic,
+  fault-aware Linux CPU/GPU
+  temperatures (including `soc_thermal`) and mode-bounded NVIDIA GPU
+  temperature on Windows. Windows CPU temperature stays absent/JSON `null`
+  because ACPI zones do not establish CPU identity; macOS thermals remain
+  unavailable. Schema-v1 JSON adds nullable `cpu.temperature_c` and
+  `cpu.gpu_temperature_c`, and `-f/--full` explicitly selects the existing
+  default full collection mode.
+
+### Changed
+- **Distribution status:** exact v4.3.1 passed main CI and published to
+  crates.io through trusted OIDC. All six tagged platform builds then passed,
+  but both fresh Apple signing jobs stopped before signing, upload, or draft
+  creation because macOS system Bash 3.2 rejected Bash-4-only workflow syntax.
+  The tag remains immutable and v4.3.2 fixes forward.
 - **Windows full-mode collection is materially faster on the controlled
   Alienware benchmark.** Seven alternating runs per version measured medians
   of 5146.9 ms and 2120.2 ms: 58.8% less elapsed time and a 2.43× runtime

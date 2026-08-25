@@ -53,20 +53,28 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.0`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.1` (battery hardening, Windows
-  full-mode latency, thermal reporting, and a Windows release-bootstrap fix).
-  PR #14
+- Current crates.io version: `4.3.1`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.2` (battery hardening, Windows
+  full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
+  repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
   local, hosted, security, review, and benchmark gates; exact-main CI run
   `32766014047` passed all 19 jobs. Publisher PR #17 merged as `c788029d`;
   exact-main CI `32794371259` and automatic trusted-OIDC run `32794371283`
-  published exact unyanked v4.3.0 with `trustpub_only=true`. Immutable tag
-  `v4.3.0` points to that SHA, but Release run `32795846831` failed before
-  draft creation because its new guard rejected the official cargo-dist
-  installer's normal NTFS hard-linked alias. Do not move or reuse that tag.
-  v4.2.2 remains the last complete GitHub distribution until reviewed v4.3.1
-  passes exact-main CI/OIDC and the automatic private
+  published exact unyanked v4.3.0 with `trustpub_only=true`. Its immutable tag
+  stopped before draft creation in Release `32795846831` when a guard rejected
+  the official cargo-dist installer's normal NTFS hard-linked alias. PR #18
+  fixed that path at exact head `4979636`; PR CI `32799513518` passed 20/20 and
+  Release plan `32799513464` passed. It merged/tagged as exact
+  `07e0e3ae265eb70856eb5ee0602beb11850ea00d`; exact-main CI `32800131846` and
+  automatic trusted-OIDC run `32800131893` published exact unyanked v4.3.1.
+  Native credential preflight `32800830054` passed, and tagged Release
+  `32800944635` passed all six platform builds, but both checkout-free Apple
+  signers failed before signing/upload because macOS system Bash 3.2 rejected
+  Bash-4-only `declare -A`/`mapfile`. No v4.3.0 or v4.3.1 GitHub draft exists.
+  Never move, delete, reuse, or rerun either tag unchanged. v4.2.2 remains the
+  last complete GitHub distribution until reviewed v4.3.2 passes exact-main
+  CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
@@ -916,6 +924,18 @@ GUI-only defect the hosted runners cannot expose. Windows alone cannot execute
 Apple signing tools, but it can author the workflow and conduct the credential
 ceremony; do not invent a cross-signing workaround.
 
+Every inline `run:` block in the native Apple signer and installer jobs must
+parse under the system `/bin/bash` 3.2. Do not use Bash-4-only associative
+arrays, `mapfile`, or `readarray` in `sign-apple-artifacts` or the native installer prepare,
+credential-preflight, build, validate, and legacy-bridge jobs. Exact file
+inventories use Python standard-library `os.scandir` plus non-following
+regular-file checks. Before a tag is eligible, both native Mac CI legs must
+assert system Bash 3.2, syntax-check every affected inline block plus the
+classified Bash blocks in the tag-only build matrix, execute the exact signer
+staging, and run the exact installer inventory snippets against positive and
+fail-closed fixtures. Keep credentialed Apple signer jobs fresh and
+checkout-free.
+
 `Cargo.toml` (`[workspace.metadata.dist]`):
 - `cargo-dist-version = "0.31.0"`
 - `ci = "github"`
@@ -941,7 +961,10 @@ High-level job flow:
 2. `build-local-artifacts` and `build-global-artifacts` use read-only GitHub
    authorization with no persisted checkout, signing, or publication credential.
 3. `sign-apple-artifacts` consumes fixed unsigned artifacts on fresh,
-   checkout-free `apple-signing` runners and emits canonical signed archives.
+   checkout-free `apple-signing` runners, uses only system-Bash-3.2-compatible
+   staging, and emits canonical signed archives. The ordinary Intel/ARM Mac CI
+   legs execute that exact staging block and syntax-check every native release
+   block before a tag can qualify.
 4. `prepare-host-assets` renders and validates the fixed 24-file base inventory
    without a write token.
 5. `host` is a fresh, checkout-free `release-publishing` job that rebinds tag =
@@ -1098,6 +1121,9 @@ Mac/local/hosted gate below remains blocking for future releases.
    - after shared/Mac/release changes: native Apple Silicon + native Intel tests
      and smokes; after Apple-input changes, real archive, direct-PKG, and
      compatibility-DMG sign/notary/staple/install/checksum round-trips
+   - both native Mac CI legs must assert system `/bin/bash` 3.2, syntax-check
+     every affected signer/installer block, and execute the exact checkout-free
+     signer-staging block before a release tag is eligible
 4. Commit on a focused release branch, open a PR, resolve review threads, and
    wait for all required checks. Merge only the reviewed exact commit.
 5. The `main` push starts `ci.yml` and `crates-publish.yml` together. Require the
