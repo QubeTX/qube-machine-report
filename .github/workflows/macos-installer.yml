@@ -808,6 +808,8 @@ jobs:
           [[ -z "$(git -C verified-source status --porcelain=v1 --untracked-files=no)" ]] || exit 1
 
           expected=(
+            tr300-installer.sh
+            tr300-dist-installer.sh
             tr300-aarch64-apple-darwin.tar.xz
             tr300-aarch64-apple-darwin.tar.xz.sha256
             tr300-x86_64-apple-darwin.tar.xz

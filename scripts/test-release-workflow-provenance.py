@@ -1818,6 +1818,7 @@ def run_release_host_draft_fixtures(release: str, bash: str) -> None:
 
 
 def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
+    custody = extract_job(macos, "source-custody", MACOS_WORKFLOW.name)
     prepare = extract_unique_named_run(
         macos,
         "Safely prepare a fixed data-only universal installer payload",
@@ -1828,21 +1829,23 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
         "Download and revalidate the exact prepared artifact before credential use",
         MACOS_WORKFLOW.name,
     )
-    archive_names = (
+    trusted_input_names = (
+        "tr300-installer.sh",
+        "tr300-dist-installer.sh",
         "tr300-aarch64-apple-darwin.tar.xz",
         "tr300-aarch64-apple-darwin.tar.xz.sha256",
         "tr300-x86_64-apple-darwin.tar.xz",
         "tr300-x86_64-apple-darwin.tar.xz.sha256",
     )
     prepared_names = ("tr300-universal", "preinstall", "PROVENANCE", "SHA256SUMS")
-    archive_array = "expected=(\n" + "\n".join(
-        f"  {name}" for name in archive_names
+    trusted_input_array = "expected=(\n" + "\n".join(
+        f"  {name}" for name in trusted_input_names
     ) + "\n)"
     prepared_array = "expected=(\n" + "\n".join(
         f"  {name}" for name in prepared_names
     ) + "\n)"
     require_exact_line_sequence(
-        prepare, archive_array, "prepare upstream expected-name binding"
+        prepare, trusted_input_array, "prepare upstream expected-name binding"
     )
     require_exact_line_sequence(
         prepare,
@@ -1863,19 +1866,60 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
         'python3 - "$PREPARED_DIRECTORY" "${expected[@]}" <<\'PY\'',
         "build prepared invocation binding",
     )
+
+    trusted_upload = extract_unique_named_step(
+        custody,
+        "Upload normalized trusted Apple managed inputs",
+        f"{MACOS_WORKFLOW.name} source custody",
+    )
+    producer_prefix = "${{ runner.temp }}/trusted-apple-inputs/"
+    producer_names = tuple(
+        match.group(1)
+        for line in trusted_upload.splitlines()
+        if (
+            match := re.fullmatch(
+                rf"\s+{re.escape(producer_prefix)}([A-Za-z0-9._-]+)\s*", line
+            )
+        )
+        is not None
+    )
+    if producer_names != trusted_input_names:
+        raise AssertionError(
+            f"{MACOS_WORKFLOW.name}: source-custody producer inventory must be "
+            f"{trusted_input_names!r}, found {producer_names!r}"
+        )
+
+    consumer_match = re.search(
+        r"(?m)^expected=\(\n((?:  [A-Za-z0-9._-]+\n)+)\)", prepare
+    )
+    if consumer_match is None:
+        raise AssertionError(
+            f"{MACOS_WORKFLOW.name}: missing prepare consumer inventory"
+        )
+    consumer_names = tuple(
+        line.strip() for line in consumer_match.group(1).splitlines()
+    )
+    if consumer_names != trusted_input_names:
+        raise AssertionError(
+            f"{MACOS_WORKFLOW.name}: prepare consumer inventory must be "
+            f"{trusted_input_names!r}, found {consumer_names!r}"
+        )
+
     scans = (
         (
-            "prepare upstream inventory",
+            "source-custody to prepare upstream inventory",
             extract_unique_python_heredoc(
                 prepare, "upstream input is not a real directory", "prepare upstream"
             ),
-            archive_names,
+            producer_names,
+            consumer_names,
         ),
         (
             "prepare output inventory",
             extract_unique_python_heredoc(
                 prepare, "prepared output is not a real directory", "prepare output"
             ),
+            prepared_names,
             prepared_names,
         ),
         (
@@ -1884,9 +1928,10 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
                 build, "prepared input is not a real directory", "build input"
             ),
             prepared_names,
+            prepared_names,
         ),
     )
-    for label, program, expected_names in scans:
+    for label, program, fixture_names, expected_names in scans:
         for mutation, expected_success in (
             (None, True),
             ("missing", False),
@@ -1910,23 +1955,23 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
                         directory.write_bytes(b"not a directory\n")
                 else:
                     directory.mkdir()
-                for name in expected_names:
+                for name in fixture_names:
                     (fixture_directory / name).write_bytes(b"fixture\n")
                 if mutation == "extra":
                     (fixture_directory / ".unexpected").write_bytes(b"reject\n")
                 elif mutation == "missing":
-                    (fixture_directory / expected_names[0]).unlink()
+                    (fixture_directory / fixture_names[0]).unlink()
                 elif mutation == "empty":
-                    (fixture_directory / expected_names[0]).write_bytes(b"")
+                    (fixture_directory / fixture_names[0]).write_bytes(b"")
                 elif mutation == "nonregular":
-                    path = fixture_directory / expected_names[0]
+                    path = fixture_directory / fixture_names[0]
                     path.unlink()
                     path.mkdir()
                 elif mutation == "symlink":
-                    path = fixture_directory / expected_names[0]
+                    path = fixture_directory / fixture_names[0]
                     path.unlink()
                     try:
-                        path.symlink_to(expected_names[1])
+                        path.symlink_to(fixture_names[1])
                     except OSError:
                         if os.name != "nt":
                             raise
@@ -6257,6 +6302,14 @@ def check_windows_validation_provenance(workflow: str) -> None:
 
 def check_windows_publish_boundary(workflow: str) -> None:
     label = WINDOWS_WORKFLOW.name
+    jobs = re.search(r"(?m)^jobs:\s*$", workflow)
+    if jobs is None:
+        raise AssertionError(f"{label}: workflow is missing its jobs boundary")
+    workflow_scope = workflow[: jobs.start()]
+    if "GH_TOKEN" in workflow_scope or "${{ github.token }}" in workflow_scope:
+        raise AssertionError(
+            f"{label}: read-only GitHub token escaped to workflow scope"
+        )
     resolver = extract_job(workflow, "resolve-release", label)
     build = extract_job(workflow, "build-windows-installers", label)
     publisher = extract_job(workflow, "publish-windows-installers", label)
@@ -6285,6 +6338,38 @@ def check_windows_publish_boundary(workflow: str) -> None:
         raise AssertionError(f"{label}: build job regained release write capability")
     if "releases/" in build or "gh release" in build:
         raise AssertionError(f"{label}: read-only build job still queries private Release state")
+    checkout = extract_unique_named_step(build, "Checkout tag", f"{label} build job")
+    require(checkout, f"uses: {CHECKOUT_ACTION}", f"{label} exact checkout")
+    require(checkout, "persist-credentials: false", f"{label} exact checkout")
+
+    inno_install = extract_unique_named_step(
+        build,
+        "Install the pinned official Inno Setup 6.7.3",
+        f"{label} build job",
+    )
+    require(
+        inno_install,
+        "env:\n          GH_TOKEN: ${{ github.token }}",
+        f"{label} Inno attestation step",
+    )
+    if inno_install.count("GH_TOKEN:") != 1:
+        raise AssertionError(
+            f"{label}: Inno attestation step must receive exactly one GitHub token"
+        )
+    steps = re.search(r"(?m)^    steps:\s*$", build)
+    if steps is None:
+        raise AssertionError(f"{label}: build job is missing its steps boundary")
+    if "GH_TOKEN" in build[: steps.start()]:
+        raise AssertionError(f"{label}: build job exposes GH_TOKEN at job scope")
+    if build.count("GH_TOKEN:") != 1 or build.count("${{ github.token }}") != 1:
+        raise AssertionError(
+            f"{label}: read-only GitHub token must be isolated to the Inno "
+            "attestation step"
+        )
+    if "${{ secrets.GITHUB_TOKEN }}" in build:
+        raise AssertionError(
+            f"{label}: Inno attestation must use the job's read-only github.token"
+        )
     require(
         build,
         f"uses: {UPLOAD_ARTIFACT_ACTION}",

@@ -377,6 +377,12 @@ jobs:
           Write-Host "✓ Corporate MSI built"
 
       - name: Install the pinned official Inno Setup 6.7.3
+        # The installer bootstrap verifies GitHub's attestation for the pinned
+        # upstream artifact. Expose only this job's read-only token, only to
+        # this reviewed verification step; later build/packaging steps receive
+        # no token.
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: '& scripts/install-pinned-inno-setup.ps1'
 
