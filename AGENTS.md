@@ -53,8 +53,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version: `4.3.2`; last complete GitHub distribution:
-  `4.2.2`; working fix-forward manifest: `4.3.3` (battery hardening, Windows
+- Current crates.io version: `4.3.3`; last complete GitHub distribution:
+  `4.2.2`; working fix-forward manifest: `4.3.4` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -76,10 +76,16 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   automatic trusted-OIDC crates run `32809616807`, and native preflight
   `32810343902` passed. Tagged Release `32810420213` built all six targets, but
   both Apple signers rejected cargo-dist 0.31.0's valid two-LF raw checksum
-  sidecars before credential use. No v4.3.0, v4.3.1, or v4.3.2 GitHub draft
-  exists. Never move, delete, reuse, or rerun those tags unchanged. v4.2.2
-  remains the last complete GitHub distribution until reviewed v4.3.3 passes exact-main
-  CI/OIDC and the automatic private
+  sidecars before credential use. PR #20 then fixed the checksum producer
+  contract and merged as exact
+  `cf1ac838ac582569bb7d3ea2c76b5773b44a4083`; exact-main CI
+  `32814328977`, automatic trusted-OIDC crates run `32814329178`, and native
+  preflight `32815263338` passed. Tagged Release `32815338720` built all six
+  targets, but both Apple signers rejected cargo-dist's safe full POSIX mode
+  encoding (`040755`/`0100755`/`0100644`) before credential use. No v4.3.0,
+  v4.3.1, v4.3.2, or v4.3.3 GitHub draft exists. Never move, delete, reuse, or
+  rerun those tags unchanged. v4.2.2 remains the last complete GitHub
+  distribution until reviewed v4.3.4 passes exact-main CI/OIDC and the automatic private
   24-to-30-to-validated-to-34 asset chain plus post-public smokes.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;

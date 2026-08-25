@@ -7,9 +7,27 @@ as passed.
 
 ## Per-version verification log
 
-### v4.3.3 — cargo-dist sidecar fix-forward (as of 2026-08-25)
+### v4.3.4 — cargo-dist tar-mode fix-forward (as of 2026-08-25)
 
-Release status: active. The immutable v4.3.2 tag exposed one final deterministic
+Release status: active. Exact v4.3.3 ARM and Intel artifacts from failed Release
+`32815338720` prove that pinned cargo-dist stores full POSIX mode values in raw
+tar headers: root `040755`, binary `0100755`, and documentation `0100644`.
+Both checksum sidecars matched and ended in the now-supported two-LF producer
+form, proving the v4.3.3 checksum repair passed. The v4.3.4 correction accepts
+only the matching full POSIX or permission-only representation in both the
+fresh signer and downstream universal-installer extraction boundaries. It
+continues to reject mismatched embedded types, setuid/special permissions,
+links, traversal, unexpected members, and oversized archives. Extracted-
+workflow fixtures synthesize the real header bytes and exercise both accepted
+forms plus type-confusion, setuid, symlink, and hardlink rejection. The current
+stager also extracted both exact failed-run archives successfully. Complete
+local/hosted review, exact-main CI/OIDC, native preflight, and the fresh
+automatic 24 → 30 → validated → 34/public chain remain required.
+
+### v4.3.3 — Published crate; failed-closed tar-mode staging
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. The immutable v4.3.2 tag exposed a deterministic
 producer-contract mismatch before credential use: pinned cargo-dist 0.31.0
 writes each checksum record followed by a blank line (`LF LF`), while the new
 exact Apple guard modeled one `LF`. The v4.3.3 correction byte-validates that
@@ -25,9 +43,18 @@ full and focused executable provenance fixtures; structural actionlint plus
 direct ShellCheck/Bash syntax; and fast/full table, JSON, and ASCII runtime
 smokes. The release binary reported v4.3.3; sample fast/full table runs were
 236.1 ms and 2108.5 ms, Windows CPU temperature stayed null, and the reported
-53 °C NVIDIA value matched direct `nvidia-smi`. The reviewed exact-head PR,
-exact-main CI/OIDC, native credential preflight, and fresh automatic 24 → 30 →
-validated → 34/public chain remain required.
+53 °C NVIDIA value matched direct `nvidia-smi`. PR #20 exact head
+`a0d6edf1655c441faf6b2e43dbc5dfdb1dcacf1d` passed all 20 CI jobs in
+`32813881136`, Release plan `32813881154`, and independent review. It merged as
+`cf1ac838ac582569bb7d3ea2c76b5773b44a4083`; exact-main CI `32814328977`
+passed, automatic trusted-OIDC run `32814329178` published unyanked v4.3.3,
+and native preflight `32815263338` passed. A fresh crate download matched
+checksum `5490f9329c29869e912aeb1c552c30434fde2e5aae17521ed89334d7d3851b91`.
+Tagged Release `32815338720` then passed its plan and all six platform builds,
+but Apple signer jobs `97703044073` and `97703044100` rejected the producer's
+safe full POSIX tar modes before signing, notarization, upload, or draft
+creation. Every downstream publication workflow skipped. The tag is immutable;
+v4.3.4 fixes forward.
 
 ### v4.3.2 — Published crate; failed-closed checksum staging
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import lzma
 import os
 import re
 import shutil
@@ -938,7 +939,7 @@ def write_apple_staging_fixture(
     case_dir: Path, target: str, *, release_tag: str, mutation: str | None
 ) -> None:
     unsigned = case_dir / "unsigned"
-    unsigned.mkdir()
+    unsigned.mkdir(exist_ok=True)
     archive_name = f"tr300-{target}.tar.xz"
     archive_path = unsigned / archive_name
     root = f"tr300-{target}"
@@ -948,7 +949,8 @@ def write_apple_staging_fixture(
         (f"{root}/README.md", b"fixture readme\n", 0o644),
         (f"{root}/tr300", b"#!/bin/sh\nexit 0\n", 0o755),
     )
-    with tarfile.open(archive_path, mode="w:xz", format=tarfile.GNU_FORMAT) as archive:
+    raw_archive = io.BytesIO()
+    with tarfile.open(fileobj=raw_archive, mode="w", format=tarfile.GNU_FORMAT) as archive:
         directory = tarfile.TarInfo(root)
         directory.type = tarfile.DIRTYPE
         directory.mode = 0o755
@@ -971,6 +973,53 @@ def write_apple_staging_fixture(
                 continue
             member.size = len(contents)
             archive.addfile(member, io.BytesIO(contents))
+
+    raw_bytes = bytearray(raw_archive.getvalue())
+    if mutation != "archive-permission-only-modes":
+        encoded_modes = {root: stat.S_IFDIR | 0o755}
+        encoded_modes.update(
+            {
+                name: stat.S_IFREG | mode
+                for name, _contents, mode in members
+            }
+        )
+        binary_name = f"{root}/tr300"
+        if mutation == "archive-mode-type-mismatch":
+            encoded_modes[binary_name] = stat.S_IFDIR | 0o755
+        elif mutation == "archive-setuid":
+            encoded_modes[binary_name] = stat.S_IFREG | 0o4755
+
+        offset = 0
+        patched_names: set[str] = set()
+        while offset + 512 <= len(raw_bytes):
+            header = raw_bytes[offset : offset + 512]
+            if not any(header):
+                break
+            name = (
+                bytes(header[0:100])
+                .split(b"\0", 1)[0]
+                .decode("utf-8")
+                .rstrip("/")
+            )
+            size_field = bytes(header[124:136]).rstrip(b"\0 ") or b"0"
+            size = int(size_field, 8)
+            if name in encoded_modes:
+                patched_names.add(name)
+                raw_mode = f"{encoded_modes[name]:07o}\0".encode("ascii")
+                if len(raw_mode) != 8:
+                    raise AssertionError(f"fixture mode is not tar-compatible: {raw_mode!r}")
+                raw_bytes[offset + 100 : offset + 108] = raw_mode
+                raw_bytes[offset + 148 : offset + 156] = b"        "
+                checksum = sum(raw_bytes[offset : offset + 512])
+                raw_checksum = f"{checksum:06o}\0 ".encode("ascii")
+                raw_bytes[offset + 148 : offset + 156] = raw_checksum
+            offset += 512 + ((size + 511) // 512) * 512
+        if patched_names != set(encoded_modes):
+            raise AssertionError(
+                f"fixture did not patch every expected tar mode: {patched_names!r}"
+            )
+
+    archive_path.write_bytes(lzma.compress(bytes(raw_bytes), format=lzma.FORMAT_XZ))
 
     digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     sidecar_name = f"{archive_name}.sha256"
@@ -1025,7 +1074,13 @@ def write_apple_staging_fixture(
         (unsigned / sidecar_name).write_bytes(
             f"{digest} *{archive_name}\nX".encode("utf-8")
         )
-    elif mutation in ("archive-symlink", "archive-hardlink"):
+    elif mutation in (
+        "archive-symlink",
+        "archive-hardlink",
+        "archive-permission-only-modes",
+        "archive-mode-type-mismatch",
+        "archive-setuid",
+    ):
         pass
     elif mutation is not None:
         raise AssertionError(f"unknown Apple staging mutation: {mutation}")
@@ -1038,6 +1093,12 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
     for target, mutation, release_tag, expected_success in (
         ("aarch64-apple-darwin", None, "v99.99.99", True),
         ("x86_64-apple-darwin", None, "v99.99.99", True),
+        (
+            "aarch64-apple-darwin",
+            "archive-permission-only-modes",
+            "v99.99.99",
+            True,
+        ),
         ("aarch64-apple-darwin", "extra", "v99.99.99", False),
         ("aarch64-apple-darwin", "symlink", "v99.99.99", False),
         ("aarch64-apple-darwin", "sidecar", "v99.99.99", False),
@@ -1047,6 +1108,8 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
         ("aarch64-apple-darwin", "sidecar-same-length-tail", "v99.99.99", False),
         ("aarch64-apple-darwin", "archive-symlink", "v99.99.99", False),
         ("aarch64-apple-darwin", "archive-hardlink", "v99.99.99", False),
+        ("aarch64-apple-darwin", "archive-mode-type-mismatch", "v99.99.99", False),
+        ("aarch64-apple-darwin", "archive-setuid", "v99.99.99", False),
         ("aarch64-apple-darwin", None, "v99.99.99-rc.1", False),
     ):
         with tempfile.TemporaryDirectory(prefix="tr300-apple-staging-") as case_raw:
@@ -1123,13 +1186,76 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
             if expected_success:
                 if not staged_binary.is_file() or not os.access(staged_binary, os.X_OK):
                     raise AssertionError("Apple staging did not produce an executable binary")
-            elif mutation in ("archive-symlink", "archive-hardlink"):
+            elif mutation in (
+                "archive-symlink",
+                "archive-hardlink",
+                "archive-mode-type-mismatch",
+                "archive-setuid",
+            ):
                 if staged_binary.exists():
                     raise AssertionError(
                         "unsafe Apple archive fixture produced a staged binary"
                     )
             elif staging.exists():
                 raise AssertionError("rejected Apple staging fixture created output")
+
+
+def run_macos_archive_mode_compatibility_fixtures(macos: str) -> None:
+    prepare = extract_unique_named_run(
+        macos,
+        "Safely prepare a fixed data-only universal installer payload",
+        MACOS_WORKFLOW.name,
+    )
+    program = extract_unique_python_heredoc(
+        prepare,
+        'for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):',
+        "macOS universal input archive extraction",
+    )
+    for mutation, expected_success in (
+        (None, True),
+        ("archive-permission-only-modes", True),
+        ("archive-mode-type-mismatch", False),
+        ("archive-setuid", False),
+        ("archive-symlink", False),
+        ("archive-hardlink", False),
+    ):
+        with tempfile.TemporaryDirectory(prefix="tr300-macos-archive-") as case_raw:
+            case_dir = Path(case_raw)
+            for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+                write_apple_staging_fixture(
+                    case_dir,
+                    target,
+                    release_tag="v99.99.99",
+                    mutation=mutation,
+                )
+            output = case_dir / "output"
+            output.mkdir()
+            result = subprocess.run(
+                [sys.executable, "-", str(case_dir / "unsigned"), str(output)],
+                input=program,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                check=False,
+            )
+            succeeded = result.returncode == 0
+            if succeeded != expected_success:
+                raise AssertionError(
+                    f"macOS archive mode mutation={mutation} returned "
+                    f"{result.returncode}, expected_success={expected_success}\n"
+                    f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                )
+            binaries = tuple(output.glob("*/tr300"))
+            if expected_success:
+                if len(binaries) != 2 or not all(path.is_file() for path in binaries):
+                    raise AssertionError(
+                        "macOS archive fixture did not produce both architecture binaries"
+                    )
+            elif binaries:
+                raise AssertionError(
+                    "rejected macOS archive fixture produced an architecture binary"
+                )
 
 
 def extract_unique_python_heredoc(block: str, marker: str, label: str) -> str:
@@ -3923,7 +4049,10 @@ def run_macos_publisher_case(
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=45,
+            # The full publisher performs dozens of fixed archive/hash checks.
+            # Git Bash process startup on Windows can legitimately exceed the
+            # former 45-second fixture budget without reaching a polling wait.
+            timeout=90,
             check=False,
         )
         succeeded = result.returncode == 0
@@ -4170,6 +4299,9 @@ def check_actual_resolvers(
         "Bind exact supplements, upload macOS assets, and publish the draft",
         MACOS_WORKFLOW.name,
     )
+    if macos_publisher.count("sleep 30") != 2:
+        raise AssertionError("macOS publisher polling-delay contract changed")
+    macos_publisher_fixture = macos_publisher.replace("sleep 30", "sleep 0")
     windows_validation_resolver = extract_named_run(
         windows_validation,
         "Resolve tag and require every Windows family",
@@ -4761,7 +4893,7 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
         run_macos_publisher_case(
             bash=bash,
             mock_bin=mock_bin,
-            block=macos_publisher,
+            block=macos_publisher_fixture,
             name=f"macOS full publisher: {name}",
             mutation=mutation,
             expected_success=succeeds,
@@ -4773,7 +4905,7 @@ printf 'attempt=%s\n' "$validation_run_attempt" >> "$GITHUB_OUTPUT"
     )
     if macos_publisher.count(rejection_reach_marker) != 1:
         raise AssertionError("macOS publisher rejection reach marker changed")
-    adversarial_publisher = macos_publisher.replace(
+    adversarial_publisher = macos_publisher_fixture.replace(
         rejection_reach_marker,
         rejection_reach_marker
         + 'gh release delete "$RELEASE_TAG" --repo "$REPOSITORY" --yes\n',
@@ -7292,6 +7424,7 @@ def main() -> None:
         windows_cargo_dist_installer,
     )
     run_release_sidecar_normalization_fixtures(release)
+    run_macos_archive_mode_compatibility_fixtures(macos)
     run_macos_inventory_compatibility_fixtures(macos)
     with tempfile.TemporaryDirectory(prefix="tr300-provenance-gh-") as fixture_raw:
         mock_bin = Path(fixture_raw) / "bin"
@@ -7323,6 +7456,7 @@ if __name__ == "__main__":
         check_native_apple_bash_syntax(release, macos, fixture_bash)
         run_apple_staging_compatibility_fixture(release, fixture_bash)
         run_release_sidecar_normalization_fixtures(release)
+        run_macos_archive_mode_compatibility_fixtures(macos)
         run_macos_inventory_compatibility_fixtures(macos)
         print(
             "Apple release staging and native job syntax are compatible with "

@@ -7,8 +7,8 @@
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.2` / `4.3.3` (all prior tags remain immutable)
-**Active fix-forward branch:** `codex/v4.3.3-cargo-dist-sidecar-fix`
+**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.3.3` / `4.3.4` (all prior tags remain immutable)
+**Active fix-forward branch:** `codex/v4.3.4-tar-mode-fix`
 **Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Last complete GitHub release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
 **Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
@@ -21,6 +21,9 @@ closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
   32800944635. v4.3.2 PR CI 32809107588; Release plan 32809107593;
   exact-main CI 32809616793; automatic trusted-OIDC crates 32809616807;
   tagless native preflight 32810343902; failed-closed Release 32810420213.
+  v4.3.3 PR CI 32813881136; Release plan 32813881154; exact-main CI
+  32814328977; automatic trusted-OIDC crates 32814329178; tagless native
+  preflight 32815263338; failed-closed Release 32815338720.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
 `#adrlog`, `#v43`, `#v430`, `#r43`
@@ -30,7 +33,7 @@ milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
 
-## 2026-08-24–25 v4.3.0/v4.3.1/v4.3.2 publication splits and v4.3.3 fix-forward
+## 2026-08-24–25 v4.3.0–v4.3.3 publication splits and v4.3.4 fix-forward
 
 Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
 published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
@@ -64,14 +67,25 @@ credential use: cargo-dist 0.31.0 emits raw checksum records followed by a
 blank line (`LF LF`), while the new exact guard modeled one LF. No signing,
 notarization, draft, or downstream release occurred.
 
-The supported path is now v4.3.3 through the normal reviewed no-click
-automation. It byte-validates cargo-dist's exact raw sidecars and aggregate,
-then canonicalizes each public checksum file to one terminal LF only after the
-complete set validates; rejected inputs remain unchanged. After
-exact-main CI, automatic OIDC publication, and native preflight pass, push only
-`v4.3.3` and let the private 24-to-30-to-validated-to-34 chain run. Never move
-or delete v4.3.0/v4.3.1/v4.3.2, hand-assemble a draft, or publish a partial
-release.
+PR #20 implemented the checksum repair and passed exact-head CI
+`32813881136`, Release plan `32813881154`, and independent review before merge
+as exact source `cf1ac838ac582569bb7d3ea2c76b5773b44a4083`. Exact-main CI
+`32814328977`, automatic trusted-OIDC v4.3.3 publication `32814329178`, and
+native preflight `32815263338` passed. Immutable Release `32815338720` built
+all six targets and validated both two-LF Apple sidecars, then both signers
+stopped before credential use: pinned cargo-dist preserves matching POSIX file-
+type bits in tar modes (`040755`, `0100755`, and `0100644`), while the custom
+extractor accepted only permission-only `0755`/`0644`. No signing,
+notarization, draft, or downstream publication occurred.
+
+The supported path is now v4.3.4 through the normal reviewed no-click
+automation. Both Apple extraction boundaries accept only the exact safe full
+POSIX or equivalent permission-only modes; mismatched embedded types, special
+permission bits, links, traversal, unexpected members, and oversized expansion
+remain rejected. After exact-main CI, automatic OIDC publication, and native
+preflight pass, push only `v4.3.4` and let the private
+24-to-30-to-validated-to-34 chain run. Never move or delete v4.3.0 through
+v4.3.3, hand-assemble a draft, or publish a partial release.
 
 ## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
 
@@ -1043,19 +1057,19 @@ This section records observed hosted state, never expectation.
 ## What's Next
 
 The v4.3 GitHub distribution and homepage update are not complete. Continue the
-immutable-tag-safe v4.3.3 release before returning to the physical-hardware
+immutable-tag-safe v4.3.4 release before returning to the physical-hardware
 queue:
 
-1. Finish the cargo-dist sidecar/aggregate producer-contract implementation on
-   `codex/v4.3.3-cargo-dist-sidecar-fix`; pass the complete local gate, independent
+1. Finish the cargo-dist tar-mode producer-contract implementation on
+   `codex/v4.3.4-tar-mode-fix`; pass the complete local gate, independent
    review, exact-head PR CI, and Release plan.
 2. Merge only the accepted exact SHA. Require exact-main CI, automatic trusted-
-   OIDC v4.3.3 publication, and native Intel/Apple Silicon credential/staging
-   preflight before pushing only immutable tag `v4.3.3`.
+   OIDC v4.3.4 publication, and native Intel/Apple Silicon credential/staging
+   preflight before pushing only immutable tag `v4.3.4`.
 3. Require the automatic private 24-to-30-to-validated-to-34 asset chain, both
    native Apple lifecycles, public Windows updater plus Linux/macOS smokes, and
    the public-byte audit before updating the homepage or closing `#r43`/`#v43`.
-4. Keep `v4.3.0`, `v4.3.1`, and `v4.3.2` immutable. None produced a GitHub
+4. Keep `v4.3.0` through `v4.3.3` immutable. None produced a GitHub
    draft; do not delete, move, reuse, or hand-recover any tag.
 5. After release closure, continue the personal Alienware, AMD64 Linux, and
    Raspberry Pi 4 tasks. Those physical checks remain open and must not be
