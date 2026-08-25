@@ -16,10 +16,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [4.3.12] - 2026-08-25
 
 ### Changed
-- **This is a packaging-test repair; the report and installer rules are
-  unchanged.** Version 4.3.11 remains preserved as an immutable crate, tag,
-  and private draft. Version 4.3.12 is the only active candidate for complete
-  cross-platform downloads.
+- **This packaging-test repair completed the cross-platform release; the report
+  and installer rules are unchanged.** Version 4.3.11 remains preserved as an
+  immutable crate, tag, and private draft. Version 4.3.12 is now published on
+  crates.io and GitHub with the complete set of 34 Windows, macOS, and Linux
+  release files, and the stable download links point to it.
 
 ### Fixed
 - **Mac testing now uses the permission required to remove its temporary test

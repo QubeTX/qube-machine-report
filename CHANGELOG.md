@@ -10,10 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [4.3.12] - 2026-08-25
 
 ### Changed
-- **This is a distribution-only fix-forward; product behavior and installer
-  policy are unchanged.** The v4.3.11 crate, tag, and exact private 30-asset
-  draft remain immutable. v4.3.12 is the sole active candidate for complete
-  cross-platform GitHub distribution.
+- **This distribution-only fix-forward completed cross-platform publication;
+  product behavior and installer policy are unchanged.** The v4.3.11 crate,
+  tag, and exact private 30-asset draft remain immutable. Exact v4.3.12
+  source/tag `19246b76f39c53340e6be62a332cedca9bca766c` passed trusted-OIDC
+  crates publication, the private 24-to-30-to-validated-to-34 chain, native
+  Intel/Apple Silicon package lifecycles, and post-public validation. The
+  public GitHub release has exactly 34 nonempty digest-bearing assets and is
+  the stable `latest` release.
 
 ### Fixed
 - **Native Mac validation now removes its second-home fixture with the
