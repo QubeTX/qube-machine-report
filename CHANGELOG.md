@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.12] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward; product behavior and installer
+  policy are unchanged.** The v4.3.11 crate, tag, and exact private 30-asset
+  draft remain immutable. v4.3.12 is the sole active candidate for complete
+  cross-platform GitHub distribution.
+
+### Fixed
+- **Native Mac validation now removes its second-home fixture with the
+  privilege required by the root-owned `/Users` parent.** Nested runner-owned
+  directories are removed normally, then only the exact validated top-level
+  fixture directory is removed with `sudo`. Executable provenance coverage
+  rejects the former combined unprivileged cleanup.
+
+### Security
+- **The failed v4.3.11 GitHub distribution remains private and immutable.**
+  Exact source/tag `c88ddc21d902ccf21158585dd60b89d37650424b` passed exact-main
+  CI `32864501691`, trusted-OIDC crates publication `32864502146`, native
+  Apple preflight `32865435959`, Release `32865635948`, and Windows Installers
+  `32866237615`; private Windows validation `32866624445` also passed. Draft
+  `376514152` reached exactly 30 assets. macOS run
+  `32866237569` built, signed, and notarized both native artifacts; both native
+  jobs proved the managed-install rejection and unchanged existing state, then
+  failed while the harness removed its fixture from root-owned `/Users`
+  without privilege. The publisher and public smokes skipped, so no GitHub
+  release became public.
+
 ## [4.3.11] - 2026-08-25
 
 ### Changed

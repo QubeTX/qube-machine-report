@@ -7478,6 +7478,8 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'sh "$managed_installer"',
         'test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"',
         "printf '2\\ny\\n' | \"$HOME/.cargo/bin/tr300\" uninstall",
+        'rmdir "$second_home/.config/tr300" "$second_home/.config"',
+        'sudo rmdir "$second_home"',
         "gh release download v4.2.2",
         "baseline_pkg_sha256=717f233eedfac679a507bc9ce2b16ba195f050e289295665a8c68d83ba10c979",
         "baseline_pkg_size=7571628",
@@ -7536,6 +7538,13 @@ def check_macos_publish_boundary(workflow: str) -> None:
         raise AssertionError(f"{label}: native UInt32 UID fixture is out of order")
     if re.search(r'^sh "\$baseline_managed_installer"$', native_validation, re.MULTILINE):
         raise AssertionError(f"{label}: historical wrapper escaped its checksum shim")
+    old_second_home_cleanup = (
+        'rmdir "$second_home/.config/tr300" "$second_home/.config" "$second_home"'
+    )
+    if old_second_home_cleanup in native_validation:
+        raise AssertionError(
+            f"{label}: a runner-owned fixture cannot remove itself from root-owned /Users"
+        )
     for needle in (
         "name: Upload exact native validation proof",
         "name: tr300-macos-native-validation-${{ matrix.arch }}-${{ github.run_attempt }}",

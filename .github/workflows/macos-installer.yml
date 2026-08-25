@@ -2218,7 +2218,10 @@ jobs:
             exit 1
           fi
           rm -f "$second_receipt"
-          rmdir "$second_home/.config/tr300" "$second_home/.config" "$second_home"
+          rmdir "$second_home/.config/tr300" "$second_home/.config"
+          # Removing a child directly from root-owned /Users requires privilege
+          # even though the fixture directory itself belongs to the runner.
+          sudo rmdir "$second_home"
 
           # A non-console local human account may have a home outside /Users.
           # Prove the exact signed candidate enumerates Directory Service with

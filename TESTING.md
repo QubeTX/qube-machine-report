@@ -7,19 +7,35 @@ as passed.
 
 ## Per-version verification log
 
+### v4.3.12 — Native Mac fixture-cleanup fix-forward (as of 2026-08-25)
+
+Release status: active distribution-only candidate. Product behavior and
+installer policy are unchanged from v4.3.11. The only workflow change removes
+the runner-owned nested fixture directories normally and uses `sudo` solely to
+unlink the exact validated fixture directory from root-owned `/Users`.
+Executable provenance coverage requires the corrected split cleanup and
+rejects the former combined unprivileged `rmdir`.
+
+The v4.3.12 local, exact-head PR, exact-main CI/OIDC, native preflight, tag,
+private 24-to-30-to-validated-to-34, public-smoke, byte-audit, and deployment
+gates remain open until their exact evidence is recorded. The v4.3.11 crate,
+tag, and private draft will not move or be reused.
+
 ### v4.3.11 — Native Mac validation fix-forward (as of 2026-08-25)
 
-Release status: active packaging-only candidate. Product and installer policy
-are unchanged from v4.3.10. The release delta is limited to version/release
-metadata plus the already-merged native Mac harness repair from PR #28: run the
-exact signed-PKG `preinstall` directly to prove its human recovery diagnostic,
-then require real PackageKit to report `PKInstallErrorDomain Code=112` and
-`NSFilePath=./preinstall` while proving the managed binary/receipt are
-unchanged and no native payload/receipt appears. Local, exact-head PR,
-exact-main CI/OIDC, native preflight, tag, private 24-to-30-to-validated-to-34,
-public smoke, byte-audit, and deployment gates remain open until their exact
-v4.3.11 evidence is recorded. The v4.3.10 tag and private draft will not move
-or be reused.
+Release status: exact source and crates.io publication completed; its GitHub
+draft exists but remains private. Tag `v4.3.11` points to exact source
+`c88ddc21d902ccf21158585dd60b89d37650424b`. Exact-main CI `32864501691`,
+automatic trusted-OIDC crates run `32864502146`, native Apple preflight
+`32865435959`, all 13 Release jobs in `32865635948`, and Windows Installers
+`32866237615` passed. Private Windows validation `32866624445` passed every
+channel and transition job. Draft `376514152` reached exactly 30 assets. macOS run
+`32866237569` built, signed, and notarized both artifacts. Both native jobs
+proved the real managed-install rejection and preserved the existing managed
+binary/receipt with no native payload/receipt, then failed only because the
+test harness tried to remove its second-home fixture from root-owned `/Users`
+without privilege. The publisher and public smokes skipped; nothing became
+public. v4.3.12 fixes forward without moving or mutating v4.3.11.
 
 Local release-source evidence on 2026-08-25: formatting; warnings-denied
 workspace/all-target Clippy; 185 unit tests and 22 integration tests; 39-file
