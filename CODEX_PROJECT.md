@@ -235,7 +235,7 @@ do not have to infer platform semantics.
    complete local gate, and merge only after every required check and review
    thread passes. Earlier-head checks are not evidence for the merge result.
 4. Let the exact-main push start `CI` and `crates-publish.yml`; the publisher
-   must wait uncredentialed for that exact CI result before exact package bytes
+   must wait without a registry credential for that exact CI result before exact package bytes
    plus trusted OIDC/public provenance are accepted.
 5. Create and push only tag `v4.3.0` after exact-main CI/crates proof. Existing
    immutable `v*` tags must not move.

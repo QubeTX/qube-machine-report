@@ -1104,7 +1104,7 @@ Mac/local/hosted gate below remains blocking for future releases.
 4. Commit on a focused release branch, open a PR, resolve review threads, and
    wait for all required checks. Merge only the reviewed exact commit.
 5. The `main` push starts `ci.yml` and `crates-publish.yml` together. Require the
-   uncredentialed crates validator to wait for and prove that exact SHA's green
+   registry-uncredentialed crates validator to wait for and prove that exact SHA's green
    CI, then require the fresh publisher's trusted-OIDC/public-byte provenance.
 6. Tag the proven exact-main SHA with `git tag vX.Y.Z`.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the

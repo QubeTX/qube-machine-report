@@ -94,7 +94,7 @@ jobs:
                        .repository.full_name == $repo and
                        .head_repository.full_name == $repo and
                        .head_branch == "main" and .head_sha == $sha) |
-                [.id, .status, (.conclusion // ""), .run_attempt] | @tsv
+                [.id, .status, (.conclusion // "__pending__"), .run_attempt] | @tsv
               ' "$CI_STATE_PATH"
             )
             [[ ${#rows[@]} -le 1 ]] || exit 65

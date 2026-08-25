@@ -590,7 +590,7 @@ and release-asset gates.
 - Commit `release: vX.Y.Z - <summary>` on a branch; merge the PR only after all
   required checks pass and review threads resolve.
 - A same-repository push to `main` automatically triggers both CI and
-  `crates-publish.yml`; the publisher waits uncredentialed for that exact SHA's
+  `crates-publish.yml`; the publisher waits without a registry credential for that exact SHA's
   successful CI result. Require its trusted
   OIDC/public-byte provenance; no manual publication dispatch belongs in the
   normal path.

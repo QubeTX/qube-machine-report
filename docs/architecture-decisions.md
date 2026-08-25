@@ -1612,7 +1612,7 @@ The current release topology is:
 
 ```text
 reviewed PR merge to main
-  -> exact-current-main CI plus automatic uncredentialed Crates.io Publish waiter
+  -> exact-current-main CI plus automatic registry-uncredentialed Crates.io Publish waiter
   -> exact CI success releases the fresh protected OIDC publisher
   -> explicit stable vX.Y.Z tag
        -> Release creates a private 24-asset draft
@@ -1625,7 +1625,7 @@ reviewed PR merge to main
 The post-rename `workflow_run` crates chain and its already-published 4.0.1 skip
 remain historical evidence for automatic/idempotent ergonomics. crates.io now
 rejects trusted OIDC from `workflow_run`, so v4.3 preserves no-click behavior
-with a supported `main` push trigger whose uncredentialed job waits for exact
+with a supported `main` push trigger whose registry-uncredentialed job waits for exact
 CI success. It also replaces the earlier long-lived-token, same-runner design
 with protected OIDC, exact tested-SHA custody, fresh-runner byte reproduction,
 and post-public provenance adjudication.

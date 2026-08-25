@@ -23,10 +23,11 @@ review, and every review thread. PR #14 merged as
 all 19 jobs. Release-automation PR #16 head `57b2597` then passed all 19 CI jobs
 in `32790636744` plus release plan `32790636676`, merged as `75e7092`, and
 exact-main CI `32791121107` passed 19/19. Automatic crates run `32791618652`
-proved the exact-SHA validator, then crates.io refused OIDC before token issue
+proved the exact-SHA validator, then crates.io rejected the trusted-publishing
+exchange before issuing a crates.io publish token
 because trusted publishing does not support a `workflow_run` event. No v4.3.0
 crate or tag was created. The fix-forward uses a supported `main` push trigger
-whose uncredentialed validator waits for and re-fetches the exact CI success.
+whose registry-uncredentialed validator waits for and re-fetches the exact CI success.
 Crates publication, the tag, native artifact chain, public smokes, and
 deployment remain separate release gates.
 

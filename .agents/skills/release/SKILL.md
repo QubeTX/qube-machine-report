@@ -239,7 +239,7 @@ See § 13 for the fix-forward loop.
 ## § 9 Observe automatic crate publication through trusted OIDC
 
 `crates-publish.yml` starts automatically on a same-repository push to `main`.
-Its uncredentialed validator waits for that exact SHA's `CI` push run to pass,
+Its registry-uncredentialed validator waits for that exact SHA's `CI` push run to pass,
 then the fresh publisher publishes the tested SHA. There is no normal manual
 publication step:
 
@@ -434,7 +434,7 @@ If `ci.yml` or the automatic `crates-publish.yml` run fails:
    in § 3.
 3. Push the branch and wait for the protected PR's exact-head checks.
 4. Merge and watch the push-triggered CI and crates runs again from § 8. The
-   crates run must remain uncredentialed until its exact-SHA CI poll succeeds.
+   crates run must remain without a registry credential until its exact-SHA CI poll succeeds.
 
 Repeat until exact-main `ci.yml` and the automatic crates publication are proven,
 then proceed to § 10.
