@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.3.9] - Unreleased
+## [4.3.9] - 2026-08-25
 
 ### Changed
 - **This is a narrow distribution-only fix-forward carrying the unchanged v4.3
   product behavior.** The immutable v4.3.8 crate, tag, and exact private draft
-  remain preserved. v4.3.9 is the sole active unreleased candidate for the
+  remain preserved. v4.3.9 is the sole active release candidate for the
   complete cross-platform GitHub download release.
 
 ### Fixed

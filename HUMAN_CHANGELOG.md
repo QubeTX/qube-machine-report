@@ -13,7 +13,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [4.3.9] - Unreleased
+## [4.3.9] - 2026-08-25
 
 ### Changed
 - **This is another packaging-only repair; the report itself is unchanged from
