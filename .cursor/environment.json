@@ -1,0 +1,20 @@
+{
+  "name": "TR-300 Machine Report",
+  "install": "for p in repos/qube-machine-report/.cursor/install.sh qube-machine-report/.cursor/install.sh .cursor/install.sh /agent/repos/qube-machine-report/.cursor/install.sh; do if [ -f \"$p\" ]; then bash \"$p\"; exit $?; fi; done; echo 'TR-300 install.sh not found' >&2; exit 1",
+  "terminals": [
+    {
+      "name": "homepage-dev",
+      "description": "Vite dev server for the sibling marketing homepage on http://127.0.0.1:5173/. Prints a message and idles when the homepage repo is not checked out.",
+      "command": "for d in repos/qube-machine-report-homepage qube-machine-report-homepage ../qube-machine-report-homepage /agent/repos/qube-machine-report-homepage; do if [ -f \"$d/package.json\" ]; then cd \"$d\" && exec npm run dev -- --host 127.0.0.1 --port 5173; fi; done; echo '[homepage-dev] qube-machine-report-homepage not checked out; nothing to serve.'"
+    }
+  ],
+  "ports": [
+    {
+      "name": "homepage-dev",
+      "port": 5173
+    }
+  ],
+  "repositoryDependencies": [
+    "github.com/QubeTX/qube-machine-report-homepage"
+  ]
+}
