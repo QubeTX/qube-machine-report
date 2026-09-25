@@ -46,6 +46,8 @@ The high-level collection/report APIs remain available.
 - Read-only ordinary reports with explicit, collision-safe Markdown saving via
   `-r`/`--report`/`-s`/`--save`
 - Fast mode (`--fast`) for sub-second auto-run startup
+- A real PATH-level `report` command installed beside `tr300`; both names
+  support the same reporting options and install/update/uninstall actions
 - Thermal reporting (`CPU TEMP` / `GPU TEMP`): Linux reads hwmon package/SoC sensors with a cpu/soc thermal-zone fallback (Raspberry Pi SoC temperature included), Windows reports discrete NVIDIA GPU temperature via the driver tool when an NVIDIA adapter is present; rows appear in both fast and full runs and omit themselves when no trusted sensor exists
 - Positional action syntax (`tr300 update`, `tr300 install`, `tr300 uninstall`) with legacy flag compatibility
 - Origin-preserving self-update: MSI, EXE, Cargo, shell/PowerShell, and macOS
@@ -55,7 +57,7 @@ The high-level collection/report APIs remain available.
   blocks retain the current install, stop additional write-heavy fallbacks, and
   return actionable manual-release guidance
 - Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
-- Self-installation with shell alias and auto-run
+- Optional shell-profile auto-run configuration via `tr300 install`
 
 ## Installation
 
@@ -71,7 +73,7 @@ same way across products, and retain a receipt that `tr300 update` can follow.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.ps1 | iex"
 ```
 
-This installs to `%USERPROFILE%\.cargo\bin\tr300.exe`, prepends that directory
+This installs `tr300.exe` and `report.exe` to `%USERPROFILE%\.cargo\bin`, prepends that directory
 to your user PATH, and records the `powershell-installer` channel. Rust is not
 required. If an exact TR-300 MSI or EXE product is already registered, the
   fresh command verifies its new binary/receipt first, then uses that product's
@@ -86,7 +88,7 @@ required. If an exact TR-300 MSI or EXE product is already registered, the
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-installer.sh | sh
 ```
 
-This installs to `~/.cargo/bin/tr300`, configures your shell PATH, and records
+This installs `tr300` and `report` to `~/.cargo/bin`, configures your shell PATH, and records
 the `shell-installer` channel. On macOS, a fresh shell install can supersede an
   existing TR-300 PKG only after its exact receipt, payload ownership, and
   Developer ID identity agree; it then requests normal administrator approval to
@@ -106,7 +108,7 @@ native format, edition, and scope you chose.
 
 #### Windows — Global Edition
 
-Installs to `C:\Program Files\tr300\bin\tr300.exe` and adds it to **system PATH**
+Installs `tr300.exe` and `report.exe` to `C:\Program Files\tr300\bin` and adds it to **system PATH**
 so every terminal on the machine can find it. **Requires admin (UAC prompt).**
 
 Two equivalent download options — pick the format you want to keep using.
@@ -126,7 +128,7 @@ status.)
 
 #### Windows — Corporate Edition
 
-Installs to `%LocalAppData%\Programs\tr300\bin\tr300.exe` and adds it to your
+Installs `tr300.exe` and `report.exe` to `%LocalAppData%\Programs\tr300\bin` and adds it to your
 **user PATH** only — no admin, no UAC, no system-wide changes. Use this on
 machines managed by Intune / Active Directory / Group Policy when you don't
 have admin rights but still need to install software.
@@ -163,7 +165,8 @@ uses the safer, asymmetric rule described below.
 
 Download [tr300-universal-apple-darwin.pkg](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-universal-apple-darwin.pkg),
 open it, and follow Apple Installer. The universal package supports
-Apple Silicon and Intel, installs `/usr/local/bin/tr300` system-wide, and records
+Apple Silicon and Intel, installs `/usr/local/bin/tr300` and
+`/usr/local/bin/report` system-wide, and records
 the stable `com.qubetx.tr300.pkg` receipt used by `tr300 update`. The updater
 also requires that receipt's version, payload path, per-file ownership, and the
 installed binary's Developer ID product identity to match; a stale receipt is
@@ -174,17 +177,19 @@ managed/Cargo install. Its `preinstall` checks every direct directory entry in
 `/Users`—including dot-prefixed and unregistered residue—plus all eligible local
 Directory Service homes, independent of console or launch environment. For each
 home it performs a bounded, non-recursive inspection of only the exact parent
-levels leading to the standard managed binary at `~/.cargo/bin/tr300` and receipt
+levels leading to the standard managed commands at `~/.cargo/bin/tr300` and
+`~/.cargo/bin/report`, plus the receipt
 at `~/.config/tr300/tr300-receipt.json`; it enumerates each existing parent before
 treating the fixed path as absent. Abnormal entry types, broken links, or an
-unlistable intermediate directory fail closed before `/usr/local/bin/tr300` is
+unlistable intermediate directory fail closed before `/usr/local/bin/tr300` or
+`/usr/local/bin/report` is
 installed. Arbitrary custom cargo-dist prefixes, `CARGO_HOME`, or XDG
 configuration roots are not discoverable from PackageKit; keep using the managed
 installer or explicitly retire that custom owner before launching the PKG. The
 PKG also accepts only the current system volume (`/`). To switch from the managed
 channel, first refresh or reinstall that copy through the v4.3-or-later managed
 installer, run `tr300 uninstall`, choose **Complete**, and then launch the PKG. The
-Complete path removes the running managed binary and its exact matching
+Complete path removes both managed commands and the exact matching
 cargo-dist receipt as one fail-closed transaction. Malformed, foreign, linked,
 or changing receipt evidence is preserved for review. A clean PKG install,
 same-version repair, and native PKG upgrade remain supported. The v4.2.2 PKG
@@ -211,11 +216,11 @@ installs and v4.2.0+ self-updates never mount it.
 To remove the system package and its receipt:
 
 ```bash
-sudo rm -f /usr/local/bin/tr300
+sudo rm -f /usr/local/bin/tr300 /usr/local/bin/report
 sudo pkgutil --forget com.qubetx.tr300.pkg
 ```
 
-The PKG contains only that versionless command. The hosted uninstall gate
+The PKG contains only those two versionless commands. The hosted uninstall gate
 checks the same inventory after every release.
 
 ### Alternative install methods
@@ -224,7 +229,7 @@ checks the same inventory after every release.
 <summary>Windows — bare EXE (no installer, no PATH modification)</summary>
 
 Download [tr300-x86_64-pc-windows-msvc.zip](https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-x86_64-pc-windows-msvc.zip),
-extract `tr300.exe`, place it anywhere you can write to (your Desktop, a
+extract `tr300.exe` and `report.exe`, and keep them together anywhere you can write to (your Desktop, a
 USB stick, `C:\bin`, etc.). Run by typing the full path or by adding the
 containing directory to your PATH manually. Useful for portable use, USB
 sticks, and scenarios where any installer is blocked.
@@ -262,6 +267,17 @@ cargo build --release
 ```bash
 # Display system report without creating a report file (default)
 tr300
+
+# Equivalent PATH command (same full report by default)
+report
+
+# Fast report / JSON / explicit full report
+report --fast
+report --json
+report --full
+
+# Either name supports maintenance
+report update
 
 # Use ASCII characters instead of Unicode
 tr300 --ascii
@@ -347,8 +363,8 @@ exclusive with each other and with the legacy action flags.
 | Action | Description |
 |--------|-------------|
 | `update` | Check for updates and install the latest version |
-| `install` | Add to shell profile with alias and auto-run |
-| `uninstall` | Remove from the shell profile, or choose Complete for the binary and an exact matching managed receipt |
+| `install` | Configure the optional shell-profile auto-run block |
+| `uninstall` | Remove the profile block, or choose Complete for both commands and an exact matching managed receipt |
 
 | Option | Description |
 |--------|-------------|
@@ -361,10 +377,19 @@ exclusive with each other and with the legacy action flags.
 | `-r, -s, --report, --save` | Save this full table report as Markdown in Downloads |
 | `--no-elevation-hint` | Suppress the optional Linux `sudo` detail hint |
 | `--update` | Legacy flag form of `tr300 update` |
-| `--install` | Add to shell profile with alias and auto-run |
+| `--install` | Legacy flag form of `tr300 install` |
 | `--uninstall` | Legacy flag form of `tr300 uninstall` |
 | `-h, --help` | Print help information |
 | `-V, --version` | Print version information |
+
+The packaged `report` command accepts every option and action in this table,
+including install, update, and uninstall. It is a full alias for `tr300` on
+Windows, macOS, and Linux. Keep `report` beside `tr300`; it delegates only to
+that exact adjacent payload, never to a PATH-resolved executable. Both names
+show the same help and version text and propagate the same exit status.
+
+`tr300 config` is not a command. Configuration remains CLI-driven; passing the
+word `config` is rejected as an invalid action.
 
 ## Self-Update
 
@@ -551,8 +576,13 @@ The JSON output exposes this state under top-level keys `elevated` and
 Running `tr300 install` or `tr300 --install` will:
 
 1. **Remove existing TR-300 configuration** (if present)
-2. Add a `report` alias so you can type `report` instead of `tr300`
+2. Remove the legacy TR-300-owned `report` alias from that block
 3. Configure auto-run on new interactive shell sessions
+
+The real `report` command is installed by every v4.4+ package beside `tr300`
+and does not depend on shell profiles. Existing users can rerun `tr300 install`
+once after upgrading to retire an old profile alias; foreign aliases or
+functions named `report` are warned about and preserved.
 
 This means you can safely run `tr300 install` multiple times without duplicating profile blocks.
 
@@ -688,13 +718,16 @@ code may read public fields, but should stop constructing those records with
 external struct literals and should include a wildcard arm when matching public
 enums. The CLI and existing schema-v1 JSON keys do not require migration.
 
-### Man Page (Linux/macOS)
+### Man Pages (Linux/macOS)
 
-A man page is auto-generated during build via `clap_mangen`. After building from source:
+The `tr300(1)` and `report(1)` pages are auto-generated from the
+same clap definitions as `--help`, so their documented actions and options stay
+in sync with each command. After building from source:
 
 ```bash
-sudo cp man/tr300.1 /usr/local/share/man/man1/
+sudo cp man/tr300.1 man/report.1 /usr/local/share/man/man1/
 man tr300
+man report
 ```
 
 ## Contributing

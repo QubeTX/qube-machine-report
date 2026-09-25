@@ -117,10 +117,14 @@ try {
     $oldPrefix = Join-Path $fixture 'managed old'
     $receiptPath = Get-Tr300ReceiptPath
     $oldBinary = Join-Path $oldPrefix 'bin\tr300.exe'
+    $oldReport = Join-Path $oldPrefix 'bin\report.exe'
     $newBinary = Join-Path $env:TR300_INSTALL_DIR 'bin\tr300.exe'
+    $newReport = Join-Path $env:TR300_INSTALL_DIR 'bin\report.exe'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $receiptPath), (Split-Path -Parent $oldBinary), (Split-Path -Parent $newBinary) | Out-Null
     Set-Content -LiteralPath $oldBinary -Value 'old-receipt-binary' -NoNewline
+    Set-Content -LiteralPath $oldReport -Value 'old-receipt-report' -NoNewline
     Set-Content -LiteralPath $newBinary -Value 'old-raw-cargo-binary' -NoNewline
+    Set-Content -LiteralPath $newReport -Value 'old-raw-cargo-report' -NoNewline
     [pscustomobject]@{
         install_prefix = $oldPrefix
         provider = [pscustomobject]@{ source = 'cargo-dist'; version = '0.31.0' }
@@ -130,6 +134,24 @@ try {
 
     $backup = Join-Path $fixture 'backup'
     New-Item -ItemType Directory -Path $backup | Out-Null
+    try {
+        $null = Save-Tr300ManagedState $backup
+        throw 'foreign report destination was accepted'
+    } catch {
+        if ($_.Exception.Message -eq 'foreign report destination was accepted') { throw }
+        if ($_.Exception.Message -notlike '*unowned report command*') { throw }
+    }
+    if ((Get-Content -LiteralPath $newReport -Raw) -ne 'old-raw-cargo-report') {
+        throw 'foreign report destination was changed'
+    }
+    Remove-Item -LiteralPath $newReport
+    $legacyState = Save-Tr300ManagedState $backup
+    if ($legacyState.PriorReportOwned -or @($legacyState.Binaries.Path) -contains $oldReport) {
+        throw 'legacy single-binary receipt claimed a foreign report sibling'
+    }
+    $ownedReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    $ownedReceipt | Add-Member -NotePropertyName binaries -NotePropertyValue @('tr300.exe', 'report.exe')
+    $ownedReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $receiptPath
     $state = Save-Tr300ManagedState $backup
     $env:PATH = Split-Path -Parent $newBinary
     Assert-Tr300NoUnknownPathOwners @() $state
@@ -145,7 +167,9 @@ try {
     }
     $env:PATH = $oldPath
     Set-Content -LiteralPath $newBinary -Value 'candidate' -NoNewline
+    Set-Content -LiteralPath $newReport -Value 'candidate-report' -NoNewline
     Remove-Item -LiteralPath $oldBinary -Force
+    Remove-Item -LiteralPath $oldReport -Force
     Set-Content -LiteralPath $receiptPath -Value 'candidate-receipt' -NoNewline
     Restore-Tr300ManagedState $state
 
@@ -155,9 +179,47 @@ try {
     if ((Get-Content -LiteralPath $newBinary -Raw) -ne 'old-raw-cargo-binary') {
         throw 'prior Cargo-path binary was not restored'
     }
+    if ((Get-Content -LiteralPath $oldReport -Raw) -ne 'old-receipt-report') {
+        throw 'receipt-owned report command was not restored'
+    }
+    if (Test-Path -LiteralPath $newReport) {
+        throw 'candidate report command was not removed during rollback'
+    }
     $restored = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
     if ($restored.version -ne '4.1.3' -or $restored.install_prefix -ne $oldPrefix) {
         throw 'prior managed receipt was not restored'
+    }
+
+    $savedCargoHome = $env:CARGO_HOME
+    $savedInstallDirectory = $env:TR300_INSTALL_DIR
+    $savedXdg = $env:XDG_CONFIG_HOME
+    try {
+        $env:CARGO_HOME = Join-Path $fixture 'raw cargo'
+        $env:TR300_INSTALL_DIR = $env:CARGO_HOME
+        $env:XDG_CONFIG_HOME = Join-Path $fixture 'raw config'
+        New-Item -ItemType Directory -Force -Path (Join-Path $env:CARGO_HOME 'bin') | Out-Null
+        $cargoInventory = Join-Path $env:CARGO_HOME '.crates2.json'
+        foreach ($invalid in @(
+            '{"installs":{"foreign 1.0.0 (registry)":{"bins":["tr300.exe","report.exe"]}}}',
+            '{"installs":{"tr300 4.4.0 (registry)":{"bins":{"0":"tr300.exe","1":"report.exe"}}}}',
+            '{"installs":{"tr300 4.4.0 (registry)":{"bins":["tr300.exe"],"nested":{"bins":["report.exe"]}}}}',
+            '{"installs":{"tr300 4.4.0 (registry)":{"bins":["tr300.exe","report.exe"]}}'
+        )) {
+            Set-Content -LiteralPath $cargoInventory -Value $invalid
+            if (Test-Tr300CargoOwnsReport $env:CARGO_HOME) { throw 'invalid Cargo inventory accepted' }
+        }
+        Set-Content -LiteralPath $cargoInventory -Value '{"installs":{"tr300 4.4.0 (registry+https://github.com/rust-lang/crates.io-index)":{"bins":["tr300.exe","report.exe"]}}}'
+        if (-not (Test-Tr300CargoOwnsReport $env:CARGO_HOME)) { throw 'valid Cargo inventory rejected' }
+        if (Test-Tr300CargoOwnsReport (Join-Path $fixture 'foreign prefix')) { throw 'foreign Cargo prefix accepted' }
+        Set-Content -LiteralPath (Join-Path $env:CARGO_HOME 'bin\report.exe') -Value 'must never execute' -NoNewline
+        $cargoBackup = Join-Path $fixture 'raw backup'
+        New-Item -ItemType Directory -Path $cargoBackup | Out-Null
+        $cargoState = Save-Tr300ManagedState $cargoBackup
+        if ($cargoState.ReceiptExisted) { throw 'Cargo conversion invented a managed receipt' }
+    } finally {
+        $env:CARGO_HOME = $savedCargoHome
+        $env:TR300_INSTALL_DIR = $savedInstallDirectory
+        $env:XDG_CONFIG_HOME = $savedXdg
     }
 
     Set-Content -LiteralPath $receiptPath -Value '{"provider":{"source":"other"},"source":{"app_name":"tr300"},"install_prefix":"C:\\tmp"}'

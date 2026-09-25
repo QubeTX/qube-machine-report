@@ -1333,7 +1333,8 @@ jobs:
           grep -Fq 'Switching TR-300 ownership from $($Product.Channel) to powershell-installer' "$powershell_wrapper"
           grep -Fq 'Restore-Tr300ManagedState' "$powershell_wrapper"
           grep -Fq "ExeCommand='migrate-cleanup --quiet --strict --cargo-copy'" wix/main.wxs wix-corporate/corporate.wxs
-          grep -Fq "ExeCommand='migrate-cleanup --quiet --strict --dry-run --cargo-copy'" wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq "ExeCommand='migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination &quot;[Bin]tr300.exe&quot;'" wix/main.wxs wix-corporate/corporate.wxs
+          grep -Fq "<Custom Action='PreflightCargoOwnership' Before='InstallInitialize'>" wix/main.wxs wix-corporate/corporate.wxs
           grep -Fq "BinaryKey='MigrationProbe'" wix/main.wxs wix-corporate/corporate.wxs
           grep -Fq 'OTHEREDITIONBINARY' wix/main.wxs wix-corporate/corporate.wxs
           grep -Fq "Return='check'" wix/main.wxs wix-corporate/corporate.wxs
@@ -1405,9 +1406,24 @@ jobs:
       - name: Validate managed PowerShell transaction rollback
         shell: pwsh
         run: scripts/test-managed-installer-transaction.ps1
-      - name: Build release binary
+      - name: Build and verify release commands
         shell: pwsh
-        run: cargo build --locked --release --bin tr300
+        run: |
+          cargo build --locked --release --bins
+          if ($LASTEXITCODE -ne 0) { throw 'release command build failed' }
+          foreach ($path in @('target\release\tr300.exe', 'target\release\report.exe')) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "release command is missing: $path"
+            }
+          }
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          if ((& target\release\report.exe --version).Trim() -ne "tr300 $version") {
+            throw 'report command version mismatch'
+          }
+          (& target\release\report.exe --fast --json | ConvertFrom-Json) | Out-Null
+          & target\release\report.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'report help failed' }
+          $global:LASTEXITCODE = 0
       - name: Compile Global and Corporate MSI sources
         shell: pwsh
         run: |
@@ -1427,6 +1443,15 @@ jobs:
               -ext WixUIExtension -out $output $object
             if ($LASTEXITCODE -ne 0) { throw "light failed for $source" }
             if (-not (Test-Path $output)) { throw "missing $output" }
+            $installer = New-Object -ComObject WindowsInstaller.Installer
+            $database = $installer.OpenDatabase([IO.Path]::GetFullPath($output), 0)
+            $view = $database.OpenView("SELECT Text FROM Control WHERE Dialog_ = 'LicenseAgreementDlg' AND Control = 'LicenseText'")
+            $view.Execute()
+            $record = $view.Fetch()
+            if (-not $record -or $record.StringData(1) -cne (Get-Content wix\License.rtf -Raw)) {
+              throw "MSI license control does not contain the PolyForm license: $output"
+            }
+            $view.Close()
           }
           Build-Msi 'wix\main.wxs' 'global-current' $version
           Build-Msi 'wix\main.wxs' 'global-same-version-fixture' $version
@@ -1489,6 +1514,63 @@ jobs:
           foreach ($source in @("inno\global.iss", "inno\corporate.iss")) {
             & $iscc "/DMyAppVersion=$version" $source
             if ($LASTEXITCODE -ne 0) { throw "Inno compile failed for $source" }
+          }
+      - name: Prove native installers preserve foreign report commands before payload
+        shell: pwsh
+        run: |
+          $msiexecDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
+          $msiexecPath = [IO.Path]::GetFullPath((Join-Path $msiexecDirectory 'msiexec.exe'))
+          $cases = @(
+            @{ Name = 'global'; Display = 'tr300'; Root = "$env:ProgramFiles\tr300"; Setup = 'tr300-x86_64-pc-windows-msvc-setup.exe' },
+            @{ Name = 'corporate'; Display = 'tr300 (Corporate Edition)'; Root = "$env:LOCALAPPDATA\Programs\tr300"; Setup = 'tr300-x86_64-pc-windows-msvc-corporate-setup.exe' }
+          )
+          function ProductEntries([string]$display) {
+            @(
+              Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+              Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
+            ) | Where-Object DisplayName -EQ $display
+          }
+          foreach ($case in $cases) {
+            $binary = Join-Path $case.Root 'bin\tr300.exe'
+            $report = Join-Path $case.Root 'bin\report.exe'
+            if (@(ProductEntries $case.Display).Count -ne 0 -or
+                (Test-Path -LiteralPath $binary) -or (Test-Path -LiteralPath $report)) {
+              throw "foreign-report fixture requires a clean $($case.Name) installation"
+            }
+            New-Item -ItemType Directory -Force -Path (Split-Path $report -Parent) | Out-Null
+            foreach ($format in @('msi', 'exe')) {
+              [IO.File]::WriteAllText($report, "foreign report fixture: $($case.Name) $format")
+              $expectedHash = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash
+              $log = Join-Path $env:RUNNER_TEMP "tr300-foreign-report-$($case.Name)-$format.log"
+              if ($format -eq 'msi') {
+                $package = (Resolve-Path "target\wix-ci\$($case.Name)-current.msi").Path
+                $process = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -WindowStyle Hidden -Wait -PassThru `
+                  -ArgumentList @('/i', ('"{0}"' -f $package), '/qn', '/norestart', '/L*v', ('"{0}"' -f $log))
+                if ($process.ExitCode -ne 1603 -or
+                    -not (Select-String -LiteralPath $log -SimpleMatch 'PreflightCargoOwnership' -Quiet)) {
+                  Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+                  throw "MSI did not reject the foreign report at ownership preflight: $($process.ExitCode)"
+                }
+              } else {
+                $package = (Resolve-Path "inno\Output\$($case.Setup)").Path
+                $process = Start-Process -FilePath $package -WindowStyle Hidden -Wait -PassThru `
+                  -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+                if ($process.ExitCode -eq 0 -or
+                    -not (Select-String -LiteralPath $log -SimpleMatch 'Setup stopped before changing anything' -Quiet)) {
+                  Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+                  throw "Inno did not reject the foreign report at ownership preflight: $($process.ExitCode)"
+                }
+              }
+              if (-not (Test-Path -LiteralPath $report -PathType Leaf) -or
+                  (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash -ne $expectedHash -or
+                  (Test-Path -LiteralPath $binary) -or @(ProductEntries $case.Display).Count -ne 0) {
+                throw "$($case.Name) $format mutated the foreign report, installed its payload, or registered the product"
+              }
+              # Remove only this hash-verified fixture; successful installs in
+              # the next step prove rejection was specific to the collision.
+              Remove-Item -LiteralPath $report -Force
+            }
           }
       - name: Prove current MSI and Inno formats take over bidirectionally
         shell: pwsh

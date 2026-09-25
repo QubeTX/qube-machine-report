@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+The v4.4.0 candidate packages a full-alias `report` command beside `tr300`,
+with identical options and maintenance actions. Both Windows MSI editions embed the
+shared `wix/License.rtf` rendering of `LICENSE`; EXEs already use `LICENSE`,
+and the macOS component PKG/compatibility DMG has no EULA screen. Keep RTF
+text in sync with the complete license and Required Notice. The CI MSI build
+checks the actual LicenseAgreementDlg text in every compiled fixture.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **Companion file:** The canonical architecture decision ledger through
@@ -53,7 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
 Complete public GitHub distribution and current crates.io package: **4.3.12**.
-The working manifest is **4.3.12**. PR #14 merged as
+The working manifest is **4.4.0**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI

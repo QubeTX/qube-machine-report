@@ -1254,7 +1254,7 @@ fn cleanup_stale_windows_update_backups() {
         if entry
             .file_name()
             .to_str()
-            .is_some_and(is_windows_update_backup_name)
+            .is_some_and(is_windows_any_update_backup_name)
         {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -1265,6 +1265,7 @@ fn cleanup_stale_windows_update_backups() {
 struct WindowsLiveImageHandoff {
     original: std::path::PathBuf,
     backup: std::path::PathBuf,
+    report: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
 #[cfg(windows)]
@@ -1289,7 +1290,12 @@ impl WindowsLiveImageHandoff {
             std::process::id()
         ));
         validate_windows_update_backup(&original, &backup)?;
-        Ok(Self { original, backup })
+        let report = Self::plan_report(&original, &backup)?;
+        Ok(Self {
+            original,
+            backup,
+            report,
+        })
     }
 
     fn begin() -> Result<Self, StrategyError> {
@@ -1303,11 +1309,39 @@ impl WindowsLiveImageHandoff {
             ))
         })?;
         validate_windows_update_backup(&original, backup)?;
+        let report = Self::plan_report(&original, backup)?;
         Self {
             original,
             backup: backup.to_path_buf(),
+            report,
         }
         .rename_live_image()
+    }
+
+    fn plan_report(
+        original: &std::path::Path,
+        backup: &std::path::Path,
+    ) -> Result<Option<(std::path::PathBuf, std::path::PathBuf)>, StrategyError> {
+        let report = crate::migrate::owned_report_sibling(original)
+            .map_err(|error| StrategyError::Preflight(error.to_string()))?;
+        let Some(report) = report else {
+            return Ok(None);
+        };
+        let name = backup
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| StrategyError::Preflight("invalid update backup name".to_string()))?;
+        let report_backup = backup.with_file_name(name.replacen(
+            ".tr300-update-backup-",
+            ".tr300-report-update-backup-",
+            1,
+        ));
+        if std::fs::symlink_metadata(&report_backup).is_ok() {
+            return Err(StrategyError::Preflight(
+                "report update backup already exists".to_string(),
+            ));
+        }
+        Ok(Some((report, report_backup)))
     }
 
     fn rename_live_image(self) -> Result<Self, StrategyError> {
@@ -1323,6 +1357,14 @@ impl WindowsLiveImageHandoff {
                 StrategyError::Runtime(message)
             }
         })?;
+        if let Some((report, backup)) = &self.report {
+            if let Err(error) = std::fs::rename(report, backup) {
+                let restoration = std::fs::rename(&self.backup, &self.original);
+                return Err(StrategyError::Runtime(format!(
+                    "could not stage the report companion before updating: {error}; restoring tr300: {restoration:?}"
+                )));
+            }
+        }
         Ok(self)
     }
 
@@ -1340,7 +1382,7 @@ impl WindowsLiveImageHandoff {
             Err(error) => match self.rollback() {
                 Ok(()) => Err(error.append("the renamed old executable was restored")),
                 Err(rollback) => Err(error.append(format!(
-                    "automatic rollback also failed: {rollback}; the old executable remains at {}",
+                    "automatic rollback was incomplete: {rollback}; verify the installation before retrying. Any unrestored old executable is retained at {}",
                     self.backup.display()
                 ))),
             },
@@ -1348,26 +1390,56 @@ impl WindowsLiveImageHandoff {
     }
 
     fn rollback(&self) -> std::io::Result<()> {
-        if self.original.exists() {
-            std::fs::remove_file(&self.original)?;
+        let restore = |original: &std::path::Path, backup: &std::path::Path| {
+            match std::fs::remove_file(original) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            std::fs::rename(backup, original)
+        };
+        // Attempt both restores even when one encounters a locked replacement.
+        let tr300_result = restore(&self.original, &self.backup);
+        let report_result = self
+            .report
+            .as_ref()
+            .map(|(original, backup)| restore(original, backup))
+            .unwrap_or_else(|| {
+                let report = self.original.with_file_name("report.exe");
+                match std::fs::symlink_metadata(&report) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error),
+                    Ok(_) => Err(std::io::Error::other(format!(
+                        "report was absent before the update, but {} now exists; preserved the unproven new file. Rollback is incomplete; resolve this companion before retrying",
+                        report.display()
+                    ))),
+                }
+            });
+        match (tr300_result, report_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(first), Err(second)) => Err(std::io::Error::other(format!("{first}; {second}"))),
         }
-        std::fs::rename(&self.backup, &self.original)
     }
 
     fn spawn_cleanup(&self) -> std::io::Result<()> {
         use std::os::windows::process::CommandExt;
 
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let mut command = Command::new(&self.original);
-        command
-            .arg("update-cleanup")
-            .arg("--update-backup")
-            .arg(&self.backup)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW);
-        command.spawn().map(|_| ())
+        for backup in
+            std::iter::once(&self.backup).chain(self.report.as_ref().map(|(_, backup)| backup))
+        {
+            Command::new(&self.original)
+                .arg("update-cleanup")
+                .arg("--update-backup")
+                .arg(backup)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()?;
+        }
+        Ok(())
     }
 }
 
@@ -1392,7 +1464,7 @@ pub fn cleanup_windows_update_backup(backup: &std::path::Path) -> i32 {
     let valid_name = backup
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(is_windows_update_backup_name);
+        .is_some_and(is_windows_any_update_backup_name);
     let current_is_product = current
         .file_name()
         .and_then(|name| name.to_str())
@@ -1409,6 +1481,16 @@ pub fn cleanup_windows_update_backup(backup: &std::path::Path) -> i32 {
         }
     }
     2
+}
+
+#[cfg(any(windows, test))]
+fn is_windows_any_update_backup_name(name: &str) -> bool {
+    is_windows_update_backup_name(name)
+        || name
+            .strip_prefix(".tr300-report-update-backup-")
+            .is_some_and(|suffix| {
+                is_windows_update_backup_name(&format!(".tr300-update-backup-{suffix}"))
+            })
 }
 
 #[cfg(any(windows, test))]
@@ -1876,19 +1958,7 @@ fn post_install_version_ok(installed: &str, expected: &str) -> bool {
 /// process errors, or the output doesn't parse. Cross-platform — used by both
 /// the Windows installer verify and the cargo-path verify.
 fn reexec_installed_version() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    #[cfg(windows)]
-    let exe = {
-        let mut exe = exe;
-        if exe
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(is_windows_update_backup_name)
-        {
-            exe.set_file_name("tr300.exe");
-        }
-        exe
-    };
+    let exe = installed_tr300_path()?;
     let output = Command::new(&exe).arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
@@ -1906,6 +1976,109 @@ fn reexec_installed_version() -> Option<String> {
     }
 }
 
+fn installed_tr300_path() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    let exe = {
+        let mut exe = exe;
+        if exe
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_windows_update_backup_name)
+        {
+            exe.set_file_name("tr300.exe");
+        }
+        exe
+    };
+    Some(exe)
+}
+
+fn verify_report_post_install(expected: &str, label: &str) -> Result<(), StrategyError> {
+    let tr300 = installed_tr300_path().ok_or_else(|| {
+        StrategyError::Runtime(format!(
+            "{label} reported success but the installed TR-300 path could not be resolved"
+        ))
+    })?;
+    #[cfg(windows)]
+    let report = tr300.with_file_name("report.exe");
+    #[cfg(not(windows))]
+    let report = tr300.with_file_name("report");
+
+    let metadata = std::fs::symlink_metadata(&report).map_err(|error| {
+        StrategyError::Runtime(format!(
+            "{label} reported success but the packaged report command is missing at {}: {error}",
+            report.display()
+        ))
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(StrategyError::Runtime(format!(
+            "{label} reported success but the packaged report command is not a regular file: {}",
+            report.display()
+        )));
+    }
+
+    let output = Command::new(&report)
+        .arg("--version")
+        .output()
+        .map_err(|error| {
+            StrategyError::Runtime(format!(
+                "{label} reported success but `{}` could not be run: {error}",
+                report.display()
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(StrategyError::Runtime(format!(
+            "{label} reported success but `report --version` exited with {}",
+            output.status
+        )));
+    }
+    let version_output = String::from_utf8_lossy(&output.stdout);
+    if !report_version_output_ok(&version_output, expected) {
+        return Err(StrategyError::Runtime(format!(
+            "{label} reported success but `report --version` did not identify the report companion at v{expected}"
+        )));
+    }
+
+    // Verify the alias through read-only operations, never a nested update.
+    let help_output = Command::new(&report)
+        .arg("--help")
+        .output()
+        .map_err(|error| {
+            StrategyError::Runtime(format!(
+                "{label} reported success but the alias help could not be checked: {error}"
+            ))
+        })?;
+    if !help_output.status.success()
+        || !report_help_output_ok(&String::from_utf8_lossy(&help_output.stdout))
+    {
+        return Err(StrategyError::Runtime(
+            "the packaged report command did not expose the complete TR-300 CLI".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn report_version_output_ok(output: &str, expected: &str) -> bool {
+    let fields: Vec<_> = output.split_whitespace().collect();
+    matches!(fields.as_slice(), ["tr300", version] if post_install_version_ok(version, expected))
+}
+
+fn report_help_output_ok(output: &str) -> bool {
+    [
+        "Usage: tr300",
+        "[ACTION]",
+        "--fast",
+        "--full",
+        "--json",
+        "--report",
+        "--install",
+        "--update",
+        "--uninstall",
+    ]
+    .iter()
+    .all(|flag| output.contains(flag))
+}
+
 /// Confirm a pinned `cargo install tr300 --version ... --force --locked`
 /// update actually landed.
 ///
@@ -1915,7 +2088,9 @@ fn reexec_installed_version() -> Option<String> {
 /// a mismatch fails this channel without falling into another one.
 fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
     match reexec_installed_version() {
-        Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
+        Some(installed) if post_install_version_ok(&installed, expected) => {
+            verify_report_post_install(expected, "cargo install")
+        }
         Some(installed) => Err(StrategyError::Runtime(format!(
             "cargo install reported success but `tr300 --version` still reports v{installed} (expected v{expected}). Another tr300 may be earlier on PATH; this Cargo-channel update stopped without switching installers."
         ))),
@@ -1930,7 +2105,9 @@ fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
 /// PATH conflict or locked destination can leave the old executable in place.
 fn verify_installer_post_install(expected: &str, label: &str) -> Result<(), StrategyError> {
     match reexec_installed_version() {
-        Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
+        Some(installed) if post_install_version_ok(&installed, expected) => {
+            verify_report_post_install(expected, label)
+        }
         Some(installed) => Err(StrategyError::Runtime(format!(
             "{label} reported success but the running install still reports v{installed} (expected v{expected})"
         ))),
@@ -1956,7 +2133,11 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
     let installed = reexec_installed_version()
         .ok_or_else(|| "Failed to run `tr300 --version` to confirm the install".to_string())?;
     if post_install_version_ok(&installed, expected) {
-        Ok(())
+        verify_report_post_install(expected, "Windows installer").map_err(|error| match error {
+            StrategyError::Preflight(message)
+            | StrategyError::Runtime(message)
+            | StrategyError::PolicyBlocked(message) => message,
+        })
     } else {
         Err(format!(
             "Installer exited successfully but `tr300 --version` still reports v{} (expected v{}). The installed binary may be locked by another process — close other tr300 windows / shells and re-run, or reboot to let Windows finish a deferred file replace.",
@@ -2834,6 +3015,123 @@ fn is_corporate_install_path(exe_path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    fn paired_handoff_fixture(directory: &std::path::Path) -> WindowsLiveImageHandoff {
+        let original = directory.join("tr300.exe");
+        let report = directory.join("report.exe");
+        std::fs::write(&original, b"old tr300").unwrap();
+        std::fs::write(&report, b"old report").unwrap();
+        WindowsLiveImageHandoff {
+            original,
+            backup: directory.join(".tr300-update-backup-1-2.exe"),
+            report: Some((
+                report,
+                directory.join(".tr300-report-update-backup-1-2.exe"),
+            )),
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn update_rollback_reports_a_new_unproven_report_without_deleting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("tr300.exe");
+        let report = directory.path().join("report.exe");
+        std::fs::write(&original, b"old tr300").unwrap();
+        let handoff = WindowsLiveImageHandoff {
+            original: original.clone(),
+            backup: directory.path().join(".tr300-update-backup-1-2.exe"),
+            report: None,
+        }
+        .rename_live_image()
+        .unwrap();
+        std::fs::write(&original, b"new tr300").unwrap();
+        std::fs::write(&report, b"new unproven report").unwrap();
+        let error = handoff.rollback().unwrap_err();
+        assert!(error.to_string().contains("Rollback is incomplete"));
+        assert_eq!(std::fs::read(&original).unwrap(), b"old tr300");
+        assert_eq!(std::fs::read(&report).unwrap(), b"new unproven report");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_update_handoff_restores_both_payloads_after_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let handoff = paired_handoff_fixture(directory.path())
+            .rename_live_image()
+            .unwrap();
+        assert!(!handoff.original.exists());
+        let report = &handoff.report.as_ref().unwrap().0;
+        assert!(!report.exists());
+        std::fs::write(&handoff.original, b"new tr300").unwrap();
+        std::fs::write(report, b"new report").unwrap();
+        handoff.rollback().unwrap();
+        assert_eq!(std::fs::read(&handoff.original).unwrap(), b"old tr300");
+        assert_eq!(std::fs::read(report).unwrap(), b"old report");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_update_handoff_restores_report_even_if_tr300_restore_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let handoff = paired_handoff_fixture(directory.path())
+            .rename_live_image()
+            .unwrap();
+        std::fs::create_dir(&handoff.original).unwrap();
+        assert!(handoff.rollback().is_err());
+        assert_eq!(
+            std::fs::read(&handoff.report.as_ref().unwrap().0).unwrap(),
+            b"old report"
+        );
+        assert_eq!(std::fs::read(&handoff.backup).unwrap(), b"old tr300");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_update_handoff_restores_tr300_when_report_staging_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let handoff = paired_handoff_fixture(directory.path());
+        std::fs::remove_file(&handoff.report.as_ref().unwrap().0).unwrap();
+        assert!(handoff.rename_live_image().is_err());
+        assert_eq!(
+            std::fs::read(directory.path().join("tr300.exe")).unwrap(),
+            b"old tr300"
+        );
+    }
+
+    #[test]
+    fn cleanup_accepts_only_strict_report_backup_names() {
+        assert!(is_windows_any_update_backup_name(
+            ".tr300-report-update-backup-1-2.exe"
+        ));
+        for name in [
+            "report.exe",
+            ".tr300-report-update-backup-x-2.exe",
+            ".tr300-report-update-backup-1-2.cmd",
+            "../.tr300-report-update-backup-1-2.exe",
+        ] {
+            assert!(!is_windows_any_update_backup_name(name));
+        }
+    }
+
+    #[test]
+    fn report_verification_requires_the_delegated_tr300_version() {
+        assert!(report_version_output_ok("tr300 4.4.0\n", "4.4.0"));
+        for output in ["report 4.4.0", "tr300 4.3.12", "other tr300 4.4.0", "tr300"] {
+            assert!(!report_version_output_ok(output, "4.4.0"));
+        }
+    }
+
+    #[test]
+    fn report_verification_requires_maintenance_help_without_running_actions() {
+        let help =
+            "Usage: tr300 [ACTION] --fast --full --json --report --install --update --uninstall";
+        assert!(report_help_output_ok(help));
+        for action in ["[ACTION]", "--install", "--update", "--uninstall"] {
+            assert!(!report_help_output_ok(&help.replace(action, "")));
+        }
+    }
 
     #[test]
     fn release_asset_urls_pin_the_resolved_tag_without_versioning_the_filename() {

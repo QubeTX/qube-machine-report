@@ -1,6 +1,6 @@
 //! Unix/macOS installation utilities
 //!
-//! Adds TR-300 alias and auto-run to shell profiles.
+//! Adds TR-300 auto-run to shell profiles.
 
 use crate::error::{AppError, Result};
 use std::env;
@@ -33,8 +33,6 @@ use super::shared::{MARKER_END, MARKER_START};
 /// `super::check_marker_balance` pre-write sanity check. The test
 /// `shell_additions_contains_shared_markers` below pins this contract.
 const SHELL_ADDITIONS: &str = r#"# TR-300 Machine Report
-alias report='tr300'
-
 # Auto-run on interactive shell; guards prevent spam-on-every-prompt
 # when the binary is missing, and recursion in nested shells.
 case "$-" in *i*)
@@ -66,9 +64,8 @@ pub fn install() -> Result<()> {
     let home =
         dirs::home_dir().ok_or_else(|| AppError::platform("Could not determine home directory"))?;
 
-    // F17 (v3.15.3+): heads-up if the user already has a `report` defined.
-    // Best-effort heuristic — scans common rc files and PATH for a
-    // pre-existing definition that the install is about to shadow. Read-only,
+    // Heads-up if another definition will shadow the packaged `report`
+    // command. Best-effort heuristic — scans common rc files and PATH. Read-only,
     // no subprocess, so it can't trigger rc-file side effects (fastfetch,
     // tmux auto-attach, etc.).
     warn_if_report_already_defined(&home);
@@ -116,8 +113,8 @@ pub fn install() -> Result<()> {
     Ok(())
 }
 
-/// Warn (to stderr) when `report` is already defined in the user's shell
-/// environment so the install doesn't silently shadow it.
+/// Warn (to stderr) when another `report` definition will shadow the packaged
+/// command in the user's shell environment.
 ///
 /// Read-only heuristic: scans `~/.bashrc`, `~/.bash_profile`, `~/.zshrc`,
 /// `~/.profile`, and `~/.bash_aliases` for `alias report=` /
@@ -131,8 +128,7 @@ pub fn install() -> Result<()> {
 /// fragment files, sourced configs, or pre-built shell environment
 /// modules. False negatives are acceptable — the warning is a courtesy,
 /// not a contract. False positives are also acceptable — worst case the
-/// user sees a one-time install-time message about a `report` they were
-/// fine shadowing.
+/// user sees a one-time install-time message about a definition they intended.
 fn warn_if_report_already_defined(home: &Path) {
     let mut hits: Vec<String> = Vec::new();
 
@@ -174,8 +170,8 @@ fn warn_if_report_already_defined(home: &Path) {
         }
     }
 
-    // Filesystem scan. A file at one of these well-known paths that's
-    // executable would also be shadowed by our alias.
+    // Filesystem scan. A foreign file at one of these well-known paths could
+    // resolve instead of the packaged command.
     let bin_candidates = [
         home.join(".local").join("bin").join("report"),
         home.join("bin").join("report"),
@@ -197,22 +193,16 @@ fn warn_if_report_already_defined(home: &Path) {
     for h in &hits {
         eprintln!("    {}", h);
     }
-    eprintln!("TR-300 is about to add `alias report='tr300'` to your shell profile,");
-    eprintln!("which will shadow the existing definition for new interactive shells.");
-    eprintln!("If you want to keep your existing `report`, edit the TR-300 block out");
-    eprintln!("of your shell profile after install (search for `# TR-300 Machine Report`).");
+    eprintln!("That definition may shadow TR-300's packaged `report` command.");
+    eprintln!("Remove or rename the existing definition if you want `report` to resolve");
+    eprintln!("to the full-alias TR-300 command on PATH.");
     eprintln!();
 }
 
-/// Treat our own installed `report` executable (when the user has previously
-/// installed via a build that placed a `report` symlink/binary alongside
-/// tr300) as not-a-conflict. TR-300 has never shipped a `report` binary —
-/// it's always been an alias — so this is mostly defensive. Returns true
-/// only when the file is clearly part of a TR-300 install.
-fn is_our_install(_path: &Path) -> bool {
-    // TR-300 has only ever installed an alias, never a `report` binary.
-    // Any `report` file we find is genuinely the user's, not ours.
-    false
+/// Treat a `report` payload beside `tr300` as our own packaged command.
+fn is_our_install(path: &Path) -> bool {
+    path.parent()
+        .is_some_and(|parent| parent.join("tr300").is_file())
 }
 
 /// Refuse to run `tr300 install` as root.
@@ -1269,6 +1259,7 @@ pub fn remove_binary(binary_path: &PathBuf) -> Result<()> {
 /// only by [`uninstall_complete_prepared`].
 pub struct CompleteUninstallPreview {
     binary_path: Option<PathBuf>,
+    report_path: Option<PathBuf>,
     receipt_path: Option<PathBuf>,
     cargo_plan: Option<crate::migrate::CurrentCargoUninstallPlan>,
     binary_plan: Option<crate::migrate::CurrentBinaryUninstallPlan>,
@@ -1278,6 +1269,10 @@ pub struct CompleteUninstallPreview {
 impl CompleteUninstallPreview {
     pub fn binary_path(&self) -> Option<&Path> {
         self.binary_path.as_deref()
+    }
+
+    pub fn report_path(&self) -> Option<&Path> {
+        self.report_path.as_deref()
     }
 
     pub fn receipt_path(&self) -> Option<&Path> {
@@ -1324,10 +1319,20 @@ fn prepare_complete_uninstall_with(
         .as_ref()
         .and_then(crate::migrate::CurrentCargoUninstallPlan::receipt_path)
         .map(Path::to_path_buf);
+    let report_path = cargo_plan
+        .as_ref()
+        .and_then(crate::migrate::CurrentCargoUninstallPlan::report_path)
+        .or_else(|| {
+            binary_plan
+                .as_ref()
+                .and_then(crate::migrate::CurrentBinaryUninstallPlan::report_path)
+        })
+        .map(Path::to_path_buf);
     let profile_plan = prepare_profile_cleanup()?;
 
     Ok(CompleteUninstallPreview {
         binary_path,
+        report_path,
         receipt_path,
         cargo_plan,
         binary_plan,
@@ -1392,6 +1397,9 @@ pub fn uninstall_complete_prepared(preview: CompleteUninstallPreview) -> Result<
             if let Some(path) = outcome.binary_path {
                 println!("Removed binary: {}", path.display());
             }
+            if let Some(path) = outcome.report_path {
+                println!("Removed report command: {}", path.display());
+            }
             if let Some(path) = outcome.receipt_path {
                 println!("Removed cargo-dist receipt: {}", path.display());
             }
@@ -1429,7 +1437,7 @@ mod tests {
         prepare_profile_cleanup_for_home, remove_from_profile, update_shell_profile, MARKER_END,
         MARKER_START, SHELL_ADDITIONS,
     };
-    use crate::install::shared::{ALIAS_NAME, AUTORUN_SENTINEL_VAR, BINARY_NAME};
+    use crate::install::shared::{AUTORUN_SENTINEL_VAR, BINARY_NAME};
 
     #[test]
     fn shell_additions_contains_shared_markers() {
@@ -1439,7 +1447,7 @@ mod tests {
         // uninstall-time cleanup path.
         assert!(SHELL_ADDITIONS.contains(MARKER_START));
         assert!(SHELL_ADDITIONS.contains(MARKER_END));
-        assert!(SHELL_ADDITIONS.contains(ALIAS_NAME));
+        assert!(!SHELL_ADDITIONS.contains("alias report="));
         assert!(SHELL_ADDITIONS.contains(BINARY_NAME));
     }
 

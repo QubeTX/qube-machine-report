@@ -894,7 +894,16 @@ jobs:
           function Invoke-Updater([string] $label) {
             $stdoutPath = Join-Path $env:RUNNER_TEMP "update-$label-stdout.txt"
             $stderrPath = Join-Path $env:RUNNER_TEMP "update-$label-stderr.txt"
-            $process = Start-Process -FilePath $env:EXE -Wait -PassThru `
+            # Immutable old releases have no report executable. Exercise the
+            # new alias for candidate/current/recovered maintenance calls.
+            $updater = $env:EXE
+            if ($label -in @('private-candidate', 'current', 'recovered')) {
+              $updater = Join-Path (Split-Path $env:EXE -Parent) 'report.exe'
+              if (-not (Test-Path -LiteralPath $updater -PathType Leaf)) {
+                throw 'report alias is missing after candidate installation'
+              }
+            }
+            $process = Start-Process -FilePath $updater -WindowStyle Hidden -Wait -PassThru `
               -ArgumentList @('update', '--json') `
               -RedirectStandardOutput $stdoutPath `
               -RedirectStandardError $stderrPath
@@ -970,7 +979,17 @@ jobs:
           function Test-TargetVersion {
             if (-not (Test-Path $env:EXE)) { return $false }
             try {
-              return ((& $env:EXE --version).Trim() -eq "tr300 $env:EXPECTED_VERSION")
+              if ((& $env:EXE --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
+                return $false
+              }
+              $report = Join-Path (Split-Path $env:EXE -Parent) 'report.exe'
+              if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { return $false }
+              if ((& $report --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
+                return $false
+              }
+              (& $report --fast --json | ConvertFrom-Json) | Out-Null
+              & $report --help | Out-Null
+              return ($LASTEXITCODE -eq 0)
             } catch {
               return $false
             }
@@ -1043,9 +1062,19 @@ jobs:
                 throw 'frozen candidate portable archive did not contain exactly one binary'
               }
               $candidateExecutable = $candidateExecutables[0].FullName
+              $candidateReport = Join-Path (Split-Path $candidateExecutable -Parent) 'report.exe'
+              if (-not (Test-Path -LiteralPath $candidateReport -PathType Leaf)) {
+                throw 'frozen candidate portable archive did not contain report.exe beside tr300.exe'
+              }
               if ((& $candidateExecutable --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
                 throw 'frozen candidate portable version mismatch'
               }
+              if ((& $candidateReport --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
+                throw 'frozen candidate report command version mismatch'
+              }
+              (& $candidateReport --fast --json | ConvertFrom-Json) | Out-Null
+              & $candidateReport --help | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'frozen candidate report help failed' }
               (& $candidateExecutable --fast --json | ConvertFrom-Json) | Out-Null
               & $candidateExecutable --fast --ascii | Out-Null
             } else {
@@ -1299,6 +1328,7 @@ jobs:
           EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
         shell: pwsh
         run: |
+          $report = Join-Path (Split-Path $env:EXE -Parent) 'report.exe'
           if ($env:KIND -like 'msi-*') {
             $display = if ($env:KIND -eq 'msi-corporate') { 'tr300 (Corporate Edition)' } else { 'tr300' }
             $entry = @(
@@ -1319,6 +1349,7 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "EXE uninstall failed: $($p.ExitCode)" }
           } elseif ($env:KIND -eq 'powershell') {
             Remove-Item -LiteralPath $env:EXE -Force
+            Remove-Item -LiteralPath $report -Force
             Remove-Item -LiteralPath "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Force -ErrorAction SilentlyContinue
           } elseif ($env:KIND -eq 'cargo') {
             $registered = @(cargo install --list | Select-String '^tr300 v([^:]+):$')
@@ -1330,6 +1361,9 @@ jobs:
           }
           if ($env:KIND -ne 'portable' -and (Test-Path $env:EXE)) {
             throw "binary remains after uninstall: $env:EXE"
+          }
+          if ($env:KIND -ne 'portable' -and (Test-Path -LiteralPath $report)) {
+            throw "report command remains after uninstall: $report"
           }
           if ($env:KIND -match '^(msi|exe)-') {
             $scope = if ($env:KIND -like '*-global') { 'Machine' } else { 'User' }
@@ -1539,10 +1573,18 @@ jobs:
           if (-not $?) { throw 'managed PowerShell takeover failed' }
 
           $managed = "$HOME\.cargo\bin\tr300.exe"
+          $managedReport = "$HOME\.cargo\bin\report.exe"
           if (-not (Test-Path -LiteralPath $managed)) { throw 'managed binary is missing' }
+          if (-not (Test-Path -LiteralPath $managedReport)) { throw 'managed report command is missing' }
           if ((& $managed --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
             throw 'managed binary version mismatch'
           }
+          if ((& $managedReport --version).Trim() -ne "tr300 $env:EXPECTED_VERSION") {
+            throw 'managed report command version mismatch'
+          }
+          (& $managedReport --fast --json | ConvertFrom-Json) | Out-Null
+          & $managedReport --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'managed report help failed' }
           $receipt = Get-Content "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Raw | ConvertFrom-Json
           if ($receipt.provider.source -ne 'cargo-dist' -or $receipt.version -ne $env:EXPECTED_VERSION) {
             throw 'managed receipt does not identify the exact release'
@@ -1556,7 +1598,9 @@ jobs:
           if (@($entries).Count -ne 0) { throw "native registration remains: $($entries.DisplayName)" }
           foreach ($path in @(
             "$env:ProgramFiles\tr300\bin\tr300.exe",
-            "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe"
+            "$env:ProgramFiles\tr300\bin\report.exe",
+            "$env:LOCALAPPDATA\Programs\tr300\bin\tr300.exe",
+            "$env:LOCALAPPDATA\Programs\tr300\bin\report.exe"
           )) {
             if (Test-Path -LiteralPath $path) { throw "native binary remains: $path" }
           }
@@ -1578,6 +1622,7 @@ jobs:
           }
 
           Remove-Item -LiteralPath $managed -Force
+          Remove-Item -LiteralPath $managedReport -Force
           Remove-Item -LiteralPath "$env:LOCALAPPDATA\tr300\tr300-receipt.json" -Force
 
   attest-private-validation:

@@ -11,7 +11,14 @@ Companion docs:
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-08-25
+Last verified against source: 2026-09-24
+
+Current candidate: v4.4.0 adds a real full-alias `report` executable beside
+`tr300` in every distribution and replaces both Windows MSI placeholder EULAs
+with the shared `wix/License.rtf` rendering of `LICENSE`. Public distribution
+remains v4.3.12 until the protected release chain completes. Both names support all install/update/uninstall actions through the canonical
+`tr300` implementation. See the final ADR entry for
+paired payload ownership and compatibility requirements.
 
 ## Task management system
 
@@ -54,7 +61,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Cargo package name: `tr300`
 - Library import path: `tr300`
 - Current crates.io version and complete GitHub distribution: `4.3.12`;
-  working manifest: `4.3.12` (battery hardening, Windows
+  working manifest: `4.4.0` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed

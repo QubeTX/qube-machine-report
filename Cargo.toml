@@ -1,6 +1,6 @@
 [package]
 name = "tr300"
-version = "4.3.12"
+version = "4.4.0"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -35,6 +35,10 @@ eula = false
 [[bin]]
 name = "tr300"
 path = "src/main.rs"
+
+[[bin]]
+name = "report"
+path = "src/bin/report.rs"
 
 [dependencies]
 sysinfo = "0.32"

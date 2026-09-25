@@ -77,6 +77,7 @@
   - [WMI hard-timeout pattern](#wmi-hard-timeout-pattern)
   - [Windows self-EXE delete via detached cleanup](#windows-self-exe-delete-via-detached-cleanup)
 - [Thermal reporting, battery hardening, and bounded concurrent probes (v4.3.0 product; v4.3.12 distribution)](#thermal-reporting-battery-hardening-and-bounded-concurrent-probes-v430-product-v4312-distribution)
+- [PATH-level report companion and lifecycle ownership (v4.4.0)](#path-level-report-companion-and-lifecycle-ownership-v440)
 
 ---
 
@@ -3574,3 +3575,45 @@ fast-mode performance-gain claim. The full local and final pushed exact-head
 hosted/security/review gates are recorded in `TESTING.md`. Neither result
 establishes tagged release acceptance or independent AMD64 Linux/Raspberry Pi
 physical acceptance.
+
+---
+
+## PATH-level report alias and lifecycle ownership (v4.4.0)
+
+**Decision (2026-09-24):** Install a real `report` executable beside `tr300`
+on Windows, macOS, Linux, and every supported distribution channel. The user
+explicitly superseded the earlier report-only proposal: both names support
+all CLI flags and actions, including install, update, and uninstall.
+
+`report` forwards the original argument vector to the exact adjacent `tr300`
+without a shell or PATH lookup. The canonical child implements parsing,
+collection, output, help, version, and maintenance, preserving origin detection
+and one implementation of lifecycle behavior. The wrapper propagates its exit
+status. This avoids making a launcher path look like a distinct product owner.
+
+Cargo and archives, managed shell/PowerShell installers, Windows MSI/EXE,
+and the signed macOS PKG/compatibility DMG carry both executables. Existing
+stable asset names and the 34-asset publication inventory remain unchanged.
+Both Apple binaries require Developer ID signatures and notarization.
+
+Install, update, rollback, migration, and Complete uninstall must use positive
+ownership evidence for each payload. A historical one-binary receipt does not
+own a neighboring `report`; an unrelated file must be preserved or cause
+preflight refusal before mutation. Unprovable cleanup must fail closed and
+direct users to their package uninstaller or explicit manual resolution.
+Tests cover old single-binary to paired upgrades and foreign sibling files.
+Windows updates through the waiting alias must account for its loaded image;
+success requires both command versions after replacement.
+
+Optional profile installation retires the old TR-300-owned shell alias while
+preserving foreign definitions. Existing users may refresh the owned profile
+block by running either `tr300 install` or `report install` after upgrade.
+Package installation does not silently edit profiles.
+
+`tr300 config` remains outside scope. Both names reject unsupported arguments
+through the canonical parser.
+
+**Rejected alternatives:** keeping only a profile alias (unavailable in clean
+shells), a PATH-resolved wrapper (wrong-executable risk), duplicated maintenance
+implementations (behavior and ownership drift), and report-only parsing
+(explicitly superseded by the user's full-alias requirement).

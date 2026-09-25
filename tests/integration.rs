@@ -1,7 +1,7 @@
 //! Integration tests for TR-300
 //
-// These tests invoke the compiled `tr300` binary via the `CARGO_BIN_EXE_tr300`
-// environment variable that cargo sets automatically for integration tests.
+// These tests invoke the compiled `tr300` and `report` binaries via the
+// `CARGO_BIN_EXE_*` environment variables that cargo sets automatically.
 // We avoid `assert_cmd::Command::cargo_bin` because it was deprecated in
 // assert_cmd 2.x as incompatible with custom build dirs.
 
@@ -11,6 +11,185 @@ use serde_json::Value;
 
 fn tr300() -> Command {
     Command::new(env!("CARGO_BIN_EXE_tr300"))
+}
+
+fn report() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_report"))
+}
+
+fn help_stdout(mut command: Command, flag: &str) -> String {
+    let assertion = command.arg(flag).assert().success();
+    String::from_utf8(assertion.get_output().stdout.clone())
+        .expect("command help should be valid UTF-8")
+}
+
+#[test]
+fn tr300_short_and_long_help_cover_the_complete_visible_surface() {
+    for flag in ["-h", "--help"] {
+        let help = help_stdout(tr300(), flag);
+        for expected in [
+            "[ACTION]",
+            "update",
+            "install",
+            "uninstall",
+            "--ascii",
+            "--json",
+            "--install",
+            "--uninstall",
+            "--update",
+            "--title",
+            "--no-color",
+            "--fast",
+            "--full",
+            "--no-elevation-hint",
+            "--report",
+            "--save",
+            "--help",
+            "--version",
+        ] {
+            assert!(
+                help.contains(expected),
+                "tr300 {flag} omitted visible surface {expected:?}\n{help}"
+            );
+        }
+    }
+}
+
+#[test]
+fn report_help_and_version_exactly_match_tr300() {
+    for flag in ["-h", "--help", "-V", "--version"] {
+        assert_eq!(help_stdout(report(), flag), help_stdout(tr300(), flag));
+    }
+}
+
+#[test]
+fn report_forwards_all_actions_and_preserves_exit_status() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = std::path::Path::new(env!("CARGO_BIN_EXE_report"));
+    let launcher = directory.path().join(source.file_name().unwrap());
+    std::fs::copy(source, &launcher).unwrap();
+    let stub_source = directory.path().join("stub.rs");
+    std::fs::write(
+        &stub_source,
+        r#"
+fn main() {
+    if let Ok(directory) = std::env::var("TR300_ALIAS_TEST_WAIT") {
+        let directory = std::path::Path::new(&directory);
+        std::fs::write(directory.join("ready"), b"ready").unwrap();
+        for _ in 0..1000 {
+            if directory.join("release").exists() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    for arg in std::env::args_os().skip(1) {
+        println!("{}", arg.to_string_lossy());
+    }
+    std::process::exit(37);
+}
+"#,
+    )
+    .unwrap();
+    let sibling = directory.path().join(
+        std::path::Path::new(env!("CARGO_BIN_EXE_tr300"))
+            .file_name()
+            .unwrap(),
+    );
+    let compile = std::process::Command::new("rustc")
+        .arg(&stub_source)
+        .arg("-o")
+        .arg(&sibling)
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    for action in [
+        "install",
+        "update",
+        "uninstall",
+        "--install",
+        "--update",
+        "--uninstall",
+        "migrate-cleanup",
+        "update-worker",
+    ] {
+        Command::new(&launcher)
+            .args([action, "--title", "Lab & %PATH% '$()'"])
+            .assert()
+            .code(37)
+            .stdout(format!("{action}\n--title\nLab & %PATH% '$()'\n"));
+    }
+    #[cfg(windows)]
+    {
+        // The real launcher remains loaded while its child waits. Staging the
+        // loaded image must free the original filename for the new package.
+        let mut child = std::process::Command::new(&launcher)
+            .arg("update")
+            .env("TR300_ALIAS_TEST_WAIT", directory.path())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        while !directory.path().join("ready").exists() && started.elapsed().as_secs() < 5 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(directory.path().join("ready").exists());
+        std::fs::rename(
+            &launcher,
+            directory.path().join(".tr300-report-update-backup-1-2.exe"),
+        )
+        .unwrap();
+        std::fs::copy(source, &launcher).unwrap();
+        std::fs::write(directory.path().join("release"), b"release").unwrap();
+        assert_eq!(child.wait().unwrap().code(), Some(37));
+    }
+}
+
+#[test]
+fn report_fast_json_delegates_to_the_adjacent_tr300() {
+    let output = report()
+        .args(["--fast", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value =
+        serde_json::from_slice(&output).expect("report --fast --json output should parse");
+    assert_eq!(value["collection_mode"], "fast");
+}
+
+#[test]
+fn isolated_report_never_falls_back_to_tr300_on_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = std::path::Path::new(env!("CARGO_BIN_EXE_report"));
+    let launcher = directory.path().join(source.file_name().unwrap());
+    std::fs::copy(source, &launcher).unwrap();
+    let tr300_directory = std::path::Path::new(env!("CARGO_BIN_EXE_tr300"))
+        .parent()
+        .unwrap();
+
+    Command::new(&launcher)
+        .env("PATH", tr300_directory)
+        .args(["--fast", "--json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "adjacent TR-300 executable is unavailable",
+        ));
+}
+
+#[test]
+fn report_forwards_title_as_one_literal_argument() {
+    let title = "Lab & %PATH% '$()'";
+    report()
+        .args(["--fast", "--ascii", "--title", title])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(title));
 }
 
 #[test]
@@ -209,6 +388,29 @@ fn test_help_documents_positional_actions() {
         .stdout(predicate::str::contains(
             "- uninstall: Open the uninstall menu for profile-only or Complete removal",
         ));
+}
+
+#[test]
+fn generated_man_pages_match_their_command_boundaries() {
+    let tr300_man = include_str!("../man/tr300.1");
+    let report_man = include_str!("../man/report.1");
+
+    assert!(tr300_man.contains(".TH tr300 1"));
+    assert!(tr300_man.contains("\\-\\-install"));
+    assert!(tr300_man.contains("\\-\\-update"));
+    assert!(tr300_man.contains("\\-\\-uninstall"));
+    assert!(tr300_man.contains("aliases: \\-s, \\-\\-save"));
+    assert!(tr300_man.contains(".SH SEE ALSO\nreport(1)"));
+
+    assert!(report_man.contains(".TH report 1"));
+    for expected in ["\\-\\-fast", "\\-\\-full", "\\-\\-json", "\\-\\-report"] {
+        assert!(report_man.contains(expected));
+    }
+    assert!(report_man.contains("aliases: \\-s, \\-\\-save"));
+    assert!(report_man.contains(".SH SEE ALSO\ntr300(1)"));
+    for expected in ["\\-\\-install", "\\-\\-update", "\\-\\-uninstall"] {
+        assert!(report_man.contains(expected));
+    }
 }
 
 // --- v3.11.0 additions ---

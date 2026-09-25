@@ -135,6 +135,10 @@ namespace Tr300.ManagedInstaller {
             uint reserved,
             uint productIndex,
             StringBuilder productCode);
+        [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+        public static extern int MsiGetComponentPath(
+            string productCode, string componentCode,
+            StringBuilder path, ref uint length);
     }
 }
 '@
@@ -144,10 +148,14 @@ namespace Tr300.ManagedInstaller {
         [pscustomobject]@{
             UpgradeCode = '{5CD540A8-AD16-4B0F-8CE4-51FF641DE181}'; Channel = 'msi-global'; Elevated = $true
             Binary = (Join-Path $env:ProgramFiles 'tr300\bin\tr300.exe')
+            Report = (Join-Path $env:ProgramFiles 'tr300\bin\report.exe')
+            ReportComponent = '{8281A044-4A65-476C-890B-EF7A012E5F25}'
         },
         [pscustomobject]@{
             UpgradeCode = '{93F465CB-7F66-4930-A773-FDA017E8FD64}'; Channel = 'msi-corporate'; Elevated = $false
             Binary = (Join-Path $env:LOCALAPPDATA 'Programs\tr300\bin\tr300.exe')
+            Report = (Join-Path $env:LOCALAPPDATA 'Programs\tr300\bin\report.exe')
+            ReportComponent = '{2EB04231-F655-42C0-863E-D5ED46E6C41B}'
         }
     )
     $products = @()
@@ -164,6 +172,12 @@ namespace Tr300.ManagedInstaller {
             if ($result -ne 0) {
                 throw "MsiEnumRelatedProducts failed for $($family.Channel) with code $result"
             }
+            $componentPath = New-Object System.Text.StringBuilder 32768
+            [uint32]$componentLength = $componentPath.Capacity
+            $componentState = [Tr300.ManagedInstaller.NativeMsi]::MsiGetComponentPath(
+                $productCode.ToString(), $family.ReportComponent, $componentPath, [ref]$componentLength)
+            $reportOwned = $componentState -eq 3 -and
+                $componentPath.ToString().Equals($family.Report, [StringComparison]::OrdinalIgnoreCase)
             $products += [pscustomobject]@{
                 Kind = 'msi'
                 Channel = $family.Channel
@@ -171,6 +185,8 @@ namespace Tr300.ManagedInstaller {
                 ProductCode = $productCode.ToString()
                 Uninstaller = Get-Tr300TrustedMsiExecPath
                 Binary = $family.Binary
+                Report = $family.Report
+                ReportOwned = $reportOwned
             }
         }
     }
@@ -229,6 +245,9 @@ function Get-Tr300InnoProducts {
         }
         if (-not $seen.ContainsKey($full.ToLowerInvariant())) {
             $seen[$full.ToLowerInvariant()] = $true
+            $installedVersion = $null
+            $reportOwned = [version]::TryParse([string]$entry.DisplayVersion, [ref]$installedVersion) -and
+                $installedVersion -ge [version]'4.4.0'
             $products += [pscustomobject]@{
                 Kind = 'inno'
                 Channel = $family.Channel
@@ -236,6 +255,8 @@ function Get-Tr300InnoProducts {
                 ProductCode = $null
                 Uninstaller = $full
                 Binary = (Join-Path $family.Root 'bin\tr300.exe')
+                Report = (Join-Path $family.Root 'bin\report.exe')
+                ReportOwned = $reportOwned
             }
         }
     }
@@ -316,9 +337,28 @@ function Get-Tr300InstallPrefix {
     return [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.cargo'))
 }
 
+function Test-Tr300CargoOwnsReport([string]$IntendedPrefix) {
+    $cargoPrefix = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+    if (-not ([IO.Path]::GetFullPath($cargoPrefix).Equals(
+        [IO.Path]::GetFullPath($IntendedPrefix), [StringComparison]::OrdinalIgnoreCase))) { return $false }
+    $inventoryPath = Join-Path $cargoPrefix '.crates2.json'
+    if (-not (Test-Path -LiteralPath $inventoryPath -PathType Leaf)) { return $false }
+    if ((Get-Item -LiteralPath $inventoryPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    try { $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { return $false }
+    foreach ($package in $inventory.installs.PSObject.Properties) {
+        if ($package.Name -cmatch '^tr300 [^ ]+ \([^()]+\)$' -and
+            $package.Value.bins -is [array] -and
+            @($package.Value.bins) -ccontains 'tr300.exe' -and
+            @($package.Value.bins) -ccontains 'report.exe') { return $true }
+    }
+    return $false
+}
+
 function Save-Tr300ManagedState([string]$BackupRoot) {
     $receiptPath = Get-Tr300ReceiptPath
     $priorPrefix = $null
+    $priorReportOwned = $false
     $receiptExisted = Test-Path -LiteralPath $receiptPath -PathType Leaf
     if ($receiptExisted) {
         $priorReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
@@ -328,11 +368,29 @@ function Save-Tr300ManagedState([string]$BackupRoot) {
             throw 'the existing TR-300 managed receipt is ambiguous; preserving it'
         }
         $priorPrefix = [IO.Path]::GetFullPath([string]$priorReceipt.install_prefix)
+        $priorReportOwned = @($priorReceipt.binaries) -ccontains 'report.exe'
         Copy-Item -LiteralPath $receiptPath -Destination (Join-Path $BackupRoot 'receipt.json')
     }
 
-    $binaryPaths = @((Join-Path (Get-Tr300InstallPrefix) 'bin\tr300.exe'))
-    if ($priorPrefix) { $binaryPaths += (Join-Path $priorPrefix 'bin\tr300.exe') }
+    $intendedPrefix = Get-Tr300InstallPrefix
+    $intendedReport = Join-Path $intendedPrefix 'bin\report.exe'
+    if (Test-Path -LiteralPath $intendedReport) {
+        $samePrefix = $priorPrefix -and $intendedPrefix.Equals($priorPrefix, [StringComparison]::OrdinalIgnoreCase)
+        $cargoOwned = -not $receiptExisted -and (Test-Tr300CargoOwnsReport $intendedPrefix)
+        $reportItem = Get-Item -LiteralPath $intendedReport -Force
+        if ((-not ($samePrefix -and $priorReportOwned) -and -not $cargoOwned) -or $reportItem.PSIsContainer -or
+            ($reportItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'an unowned report command occupies the intended install path; preserving it'
+        }
+    }
+    $binaryPaths = @(
+        (Join-Path $intendedPrefix 'bin\tr300.exe'),
+        (Join-Path $intendedPrefix 'bin\report.exe')
+    )
+    if ($priorPrefix) {
+        $binaryPaths += (Join-Path $priorPrefix 'bin\tr300.exe')
+        if ($priorReportOwned) { $binaryPaths += (Join-Path $priorPrefix 'bin\report.exe') }
+    }
     $seen = @{}
     $binaries = @()
     foreach ($candidate in $binaryPaths) {
@@ -354,6 +412,7 @@ function Save-Tr300ManagedState([string]$BackupRoot) {
         ReceiptExisted = $receiptExisted
         ReceiptBackup = (Join-Path $BackupRoot 'receipt.json')
         PriorPrefix = $priorPrefix
+        PriorReportOwned = $priorReportOwned
         Binaries = $binaries
     }
 }
@@ -441,6 +500,26 @@ function Get-Tr300ManagedBinary {
     if ($LASTEXITCODE -ne 0 -or $reported -ne "tr300 $Tr300Version") {
         throw "managed TR-300 binary did not report the expected version $Tr300Version"
     }
+    $report = Join-Path $actualPrefix 'bin\report.exe'
+    if (-not (Test-Path -LiteralPath $report -PathType Leaf)) {
+        throw "managed report command is missing: $report"
+    }
+    $reportVersion = (& $report --version | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $reportVersion -ne "tr300 $Tr300Version") {
+        throw "managed report command did not report the expected version $Tr300Version"
+    }
+    $null = & $report --fast --json
+    if ($LASTEXITCODE -ne 0) {
+        throw 'managed report command could not delegate to adjacent tr300'
+    }
+    $reportHelp = (& $report --help) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'managed report help failed'
+    }
+    $canonicalHelp = (& $binary --help) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $reportHelp -cne $canonicalHelp) {
+        throw 'report help differs from TR-300'
+    }
     return $binary
 }
 
@@ -489,6 +568,9 @@ try {
         if (Test-Path -LiteralPath $product.Binary -PathType Leaf) {
             throw "native installer takeover left its executable behind: $($product.Binary)"
         }
+        if ($product.ReportOwned -and (Test-Path -LiteralPath $product.Report -PathType Leaf)) {
+            throw "native installer takeover left its report command behind: $($product.Report)"
+        }
     }
 
     if ($native.Count -gt 0) {
@@ -499,12 +581,21 @@ try {
     }
     if ($managedState.PriorPrefix) {
         $priorBinary = Join-Path $managedState.PriorPrefix 'bin\tr300.exe'
+        $priorReport = Join-Path $managedState.PriorPrefix 'bin\report.exe'
         $sameBinary = [IO.Path]::GetFullPath($priorBinary).Equals(
             [IO.Path]::GetFullPath($binary),
             [StringComparison]::OrdinalIgnoreCase
         )
         if (-not $sameBinary -and (Test-Path -LiteralPath $priorBinary -PathType Leaf)) {
             Remove-Item -LiteralPath $priorBinary -Force -ErrorAction Stop
+        }
+        $currentReport = Join-Path (Split-Path -Parent $binary) 'report.exe'
+        $sameReport = [IO.Path]::GetFullPath($priorReport).Equals(
+            [IO.Path]::GetFullPath($currentReport),
+            [StringComparison]::OrdinalIgnoreCase
+        )
+        if ($managedState.PriorReportOwned -and -not $sameReport -and (Test-Path -LiteralPath $priorReport -PathType Leaf)) {
+            Remove-Item -LiteralPath $priorReport -Force -ErrorAction Stop
         }
     }
     $binary = Get-Tr300ManagedBinary
