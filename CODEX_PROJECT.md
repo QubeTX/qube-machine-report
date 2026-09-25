@@ -117,8 +117,8 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   pass. The automated
   PR-to-public chain and its least-privilege boundaries remain intact. AMD64
   Linux laptop and Raspberry Pi physical acceptance remain open.
-- Website 1.21.7 commit `ecbca8a49fe2954b79a02a19767076ad89277f58` is live at
-  `https://reports.qubetx.com/` via production run `6652250774`. All four routes
+- Website 1.21.8 commit `f137414f442e67bee5d3a79ad52e46bc84ab0e0f` is live at
+  `https://reports.qubetx.com/` via production run `6652671791`. All four routes
   and Global/Corporate MSI-before-EXE ordering passed actual Chrome checks;
   download links remain versionless.
 - Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel
@@ -339,7 +339,7 @@ do not have to infer platform semantics.
    finalizer adds four assets and solely publishes 34. Then require public
    Windows updater and published Linux/macOS smokes plus the public-byte audit.
 8. Update the homepage only when its source needs a release-specific change;
-   its versionless `releases/latest` links remain in the verified website 1.21.7
+   its versionless `releases/latest` links remain in the verified website 1.21.8
    production deployment. Keep AMD/Pi physical tasks open and patch forward from findings.
 
 Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,

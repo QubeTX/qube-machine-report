@@ -20,7 +20,7 @@ Post-public Windows run `36087344916` passed all nine jobs; `#r44` is complete.
 Next: merge the protected documentation follow-up and verify its
 main/idempotent publisher checks. Keep `#q44` and milestone `#v44` open until
 those remaining gates pass. Implementation and published MSI EULA proof are complete.
-The website's 1.21.7 production deployment passed all four routes and actual
+The website's 1.21.8 production deployment passed all four routes and actual
 Chrome MSI-before-EXE ordering checks; no further website change is pending.
 Physical AMD64 Linux/Pi acceptance and the personal Alienware UAC update remain
 open under `#hw4`.

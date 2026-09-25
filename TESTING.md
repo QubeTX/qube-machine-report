@@ -57,8 +57,8 @@ closure and its protected documentation PR remain open.
   runtime/migration/package reviews. Cargo-dist includes both commands for
   all six archive targets. Earlier five-run alias timing of 244.5–292.7 ms is
   smoke evidence only, not a before/after performance claim.
-- The related website is deployed as 1.21.7 from
-  `ecbca8a49fe2954b79a02a19767076ad89277f58`, production run `6652250774`.
+- The related website is deployed as 1.21.8 from
+  `f137414f442e67bee5d3a79ad52e46bc84ab0e0f`, production run `6652671791`.
   All four routes and MSI-before-EXE ordering for Global/Corporate choices
   passed actual Chrome verification. Versionless latest download links remain.
 
