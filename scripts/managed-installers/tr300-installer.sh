@@ -357,10 +357,11 @@ tr300_save_managed_state() {
     fi
 
     if [ -e "$tr300_intended_report" ] || [ -L "$tr300_intended_report" ]; then
-        { [ "$tr300_prior_report" = "$tr300_intended_report" ] ||
-          { [ "$tr300_receipt_existed" -eq 0 ] && tr300_cargo_owns_report; }; } &&
-            [ -f "$tr300_intended_report" ] && [ ! -L "$tr300_intended_report" ] ||
+        if ! { [ "$tr300_prior_report" = "$tr300_intended_report" ] ||
+          { [ "$tr300_receipt_existed" -eq 0 ] && tr300_cargo_owns_report; }; } ||
+            [ ! -f "$tr300_intended_report" ] || [ -L "$tr300_intended_report" ]; then
             tr300_fail 'an unowned report command occupies the intended install path; preserving it'
+        fi
     fi
 
     if [ -f "$tr300_intended_binary" ]; then
