@@ -501,8 +501,9 @@ done < "$accounts_file"
 # report is a generic command name. A pre-v4.4 package receipt owns only
 # tr300 and must never authorize replacing another product's report command.
 if [ -e /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
-    [ -f /usr/local/bin/report ] && [ ! -L /usr/local/bin/report ] ||
+    if [ ! -f /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
         fail_closed 'an unowned report command occupies /usr/local/bin/report; preserving it.'
+    fi
     report_files=$(/usr/sbin/pkgutil --files com.qubetx.tr300.pkg 2>/dev/null) ||
         fail_closed 'could not prove ownership of /usr/local/bin/report; preserving it.'
     printf '%s\n' "$report_files" | /usr/bin/sed 's#^\./##;s#^/##' |
