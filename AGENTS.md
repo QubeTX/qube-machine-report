@@ -901,8 +901,9 @@ Behavior:
   private sibling, installs/verifies the replacement at `tr300.exe`, restores
   the old image on strategy failure, and asks only the verified new binary to
   delete the backup after the old process exits. The hidden cleanup action
-  accepts only an absolute same-parent numeric private name; another update
-  best-effort removes a stale backup left by an interrupted helper.
+  accepts only an absolute same-parent numeric private name. Later updates
+  preserve prior recovery files; only their verified-success transaction may
+  schedule cleanup. Interrupted cleanup can leave a retained private backup.
 - on Windows Global MSI/EXE, the non-elevated parent resolves and pins the
   exact channel/version, then uses native `ShellExecuteExW` `runas` with a
   returned process handle for one UAC prompt. The hidden worker accepts only

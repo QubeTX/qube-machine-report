@@ -3617,3 +3617,11 @@ through the canonical parser.
 shells), a PATH-resolved wrapper (wrong-executable risk), duplicated maintenance
 implementations (behavior and ownership drift), and report-only parsing
 (explicitly superseded by the user's full-alias requirement).
+
+**Windows recovery addendum (2026-09-24):** The v4.4 updater supersedes the
+earlier stale-backup sweep. Only a verified successful transaction schedules
+cleanup of its exact backups. A later transaction cannot distinguish an
+interrupted successful cleanup from incomplete rollback by process lifetime,
+file locks, age, or paired-file presence. Preserve all prior recovery files;
+an interrupted cleanup may therefore leave a small private backup. Regression
+fixtures verify both failed payload restorations survive a later update.
