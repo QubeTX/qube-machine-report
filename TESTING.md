@@ -9,47 +9,64 @@ as passed.
 
 ### v4.4.0 — PATH report command and MSI license (2026-09-24)
 
-Status: candidate under qualification; public latest remains v4.3.12.
-The release combines the previously unfinished companion command
-with the operator-requested PolyForm Noncommercial 1.0.0 MSI EULA repair.
+Status: **published v4.4.0** at immutable source/tag
+`f49d50a256842ac6c677d1c743c553b3dd92717f`. Stable release
+[396235243](https://github.com/QubeTX/qube-machine-report/releases/tag/v4.4.0)
+was published at `2026-09-25T02:41:06Z` (September 24 in America/Chicago) with
+exactly 34 nonempty assets. Post-public Windows run `36087344916` passed all nine jobs; release-ledger
+closure and its protected documentation PR remain open.
 
-PR #32 merged as `64486fa46790e4a4ecaaca847bfcc626280b3746` after
-exact-head CI `36081617442` passed all 20 jobs and independent review cleared
-the final commit. Exact-main CI `36082260014` also passed all 20 jobs, and
-native Apple identity preflight `36082271439` passed both architectures.
-Crates publisher `36082259983` stopped before credential use or upload because
-its fixed source policy still expected only the historical `tr300` target and
-forbade `src/bin`. The registry returned 404 for 4.4.0; no tag was pushed.
-The same-version follow-up updates the exact paired-target policy and executes
-the real candidate/historical manifest guards against positive and negative
-fixtures before retrying through the normal reviewed-main publication path.
+- PR #32 merged as `64486fa46790e4a4ecaaca847bfcc626280b3746` after reviewed
+  exact-head qualification. Publisher run `36082259983` stopped before any
+  registry credential/upload because its fixed source policy still expected
+  one binary and prohibited `src/bin`. No v4.4.0 crate or tag existed then.
+  PR #33 repaired only that policy and merged as the final source above;
+  extracted current and immutable v4.3.12 manifest guards passed positive and
+  negative target/default-run/source-inventory fixtures.
+- Exact-main CI `36084969867`, attempt 2, passed all 20 jobs. The first
+  Windows PowerShell attempt hit an existing 10-second timing boundary; five
+  local reproductions and the unchanged-code hosted retry passed. Automatic
+  trusted-OIDC crates run `36084969841`, attempt 2, published exact unyanked
+  v4.4.0 with checksum
+  `f9b47301f2e02db3b51221bd93af7530f7dfd770e20fb0d9dca1d9eb619d5402`.
+- Apple identity preflight `36082271439` passed both architectures. Tagged
+  Release `36085847270` passed all 13 jobs and created the private 24-asset
+  draft; Windows assembly `36086249950` passed and expanded it to 30 assets.
+- Private Windows validation `36086484931`, attempt 2, passed all 16 jobs.
+  The first attempt received a transient empty JSON download; all 30 API asset
+  records were read and verified before retrying without source changes.
+- macOS workflow `36086249996` passed all 12 jobs: both native Intel/Apple
+  Silicon signed/notarized PKG lifecycles, the DMG bridge, Linux smoke, and
+  sole final publication of all 34 assets. Both packaged commands are signed.
+- Public audit `target/public-v4.4.0-audit.json` passed all 34 GitHub SHA-256
+  digests/sizes, 13 sidecars, eight aggregate records, six paired-command
+  archives, compatibility aliases, source-rendered wrapper bindings, and
+  immutable source/latest-release identity. The audit executes no payload.
+- Read-only public MSI database proof in
+  `target/public-v4.4.0-msi-proof.json` verifies exact complete PolyForm
+  Noncommercial 1.0.0 RTF, including Required Notice, and both command files in
+  Global and Corporate editions. macOS has no EULA screen: the component PKG
+  and compatibility DMG contain no placeholder license resource.
+- Downloaded Windows release commands both report `tr300 4.4.0`, expose
+  identical full help, parse fast JSON, and render full ASCII reports.
+  Installer tests cover prior-version transitions, foreign destination
+  preservation, paired receipts, rollback, and loaded-image handling.
+- Local qualification passed formatting, all-target Clippy, all 234 tests,
+  dependency audit, release/package/publish dry-run, workflow/ShellCheck and
+  extracted preinstall checks, managed transaction fixtures, and independent
+  runtime/migration/package reviews. Cargo-dist includes both commands for
+  all six archive targets. Earlier five-run alias timing of 244.5–292.7 ms is
+  smoke evidence only, not a before/after performance claim.
+- The related website is deployed as 1.21.7 from
+  `ecbca8a49fe2954b79a02a19767076ad89277f58`, production run `6652250774`.
+  All four routes and MSI-before-EXE ordering for Global/Corporate choices
+  passed actual Chrome verification. Versionless latest download links remain.
 
-- The complete RTF decodes through Windows RichTextBox to the LICENSE text,
-  including Required Notice, after removal of Markdown presentation syntax.
-- Both MSI templates compiled/linked against fixture payloads, and read-only
-  Windows Installer database queries verified exact RTF content in
-  LicenseAgreementDlg/LicenseText. This establishes embedded EULA content,
-  not release-binary or installation acceptance.
-- macOS source inspection found no EULA surface: pkgbuild creates a component
-  PKG; the compatibility DMG contains that PKG and README. No placeholder
-  license text or license resources exist there.
-- Local candidate gate: formatting, all-target workspace Clippy, 203 library
-  tests, 2 alias unit tests, 29 integration tests, release build, package
-  inventory, publish dry run, dependency audit, workflow/ShellCheck lint,
-  extracted Mac preinstall lint, and managed transaction tests under Git Bash,
-  PowerShell 7, and Windows PowerShell 5.1 passed. Cargo-dist plans both
-  executables in all six platform archives.
-- Real candidate Global/Corporate MSIs compiled with both executables and exact
-  license-control readback; both Inno installers compiled. These were not
-  installed over the operator's existing installation.
-- Both names report `tr300 4.4.0`, have identical help, parse fast JSON, and
-  render ASCII reports. Five local alias fast runs measured 244.5–292.7 ms;
-  this is a smoke result, not a before/after performance claim.
-- Independent runtime, migration, and packaging reviews resolved compile,
-  rollback, foreign-file ownership, live-image, and inventory parsing defects.
-- Full release-provenance fixtures passed. Hosted/native/public qualification
-  remains pending. Windows recovery files are removed only by their own
-  verified-success transaction; incomplete rollback bytes survive later updates.
+Open acceptance: protected follow-up documentation PR and its
+main/idempotent-publisher checks. Personal
+AMD64 Linux laptop, Raspberry Pi 4, and the Alienware's natural Global MSI
+UAC transition remain separate open rows; hosted results and downloaded
+binary smoke do not establish those physical/operator outcomes.
 
 ### v4.3.12 — Native Mac fixture-cleanup fix-forward (as of 2026-08-25)
 

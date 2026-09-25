@@ -11,7 +11,9 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
 MIC-1 baseline: managed CLI installers are the recommended default, fresh
 installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
-bridge. v4.3.12 is the current complete trusted-OIDC/GitHub distribution. The
+bridge. v4.4.0 is the current complete trusted-OIDC/GitHub distribution,
+with full `report`/`tr300` aliases and complete PolyForm license text in both
+Windows MSI editions. v4.3.12 is the previous complete baseline. The
 immutable v4.3.0 through v4.3.11 tags failed to complete GitHub distribution:
 first on a Windows release-bootstrap guard, then on Bash-4-only
 syntax in fresh native Apple signer jobs, then on a checksum guard that did not
@@ -52,13 +54,23 @@ Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
-[`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md),
+[`the v4.4.0 publication handoff`](./docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
 ## Current Status
 
-- Cargo package / binary / library import: `tr300`
-- Current crates.io package and complete GitHub distribution: `4.3.12`, exact
+- Cargo package / canonical binary / library import: `tr300`; packaged full alias: `report`.
+- Current package, manifest, and public GitHub release: **4.4.0** at immutable
+  `f49d50a256842ac6c677d1c743c553b3dd92717f`, release `396235243`, 34 audited
+  assets. Exact-main CI `36084969867` attempt 2 and trusted-OIDC publication
+  `36084969841` attempt 2 passed; crate checksum is
+  `f9b47301f2e02db3b51221bd93af7530f7dfd770e20fb0d9dca1d9eb619d5402`.
+  Release `36085847270`, Windows assembly `36086249950`, private validation
+  `36086484931` attempt 2, and Mac finalizer `36086249996` passed. Public
+  asset hashes, paired archives, wrapper bindings, and exact MSI licenses pass.
+  Post-public Windows `36087344916` passed all nine jobs; protected closure
+  PR/main checks remain pending. Physical hardware and personal UAC gates stay open.
+- Previous complete v4.3.12 distribution, exact
   source/tag `19246b76f39c53340e6be62a332cedca9bca766c`. Exact-main CI
   `32869031682`, trusted-OIDC publication `32869029189`, native preflight
   `32869891315`, Release `32869971805`, Windows Installers `32870555353`,
@@ -70,7 +82,7 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   own private drafts `376242296` and `376283574`; v4.3.7 owns `376309349`.
   None of the prior twelve tags may
   move, be deleted, or be reused.
-- Working manifest and current release: `4.3.12`, carrying the
+- Historical v4.3.12 product baseline carried the
   product code merged through PR #14 as `2f997d2`. It adds
   deterministic fault-aware hottest-valid Linux CPU/GPU thermals (including
   `soc_thermal`), `*_avg` plus valid signed/zero Linux battery corroboration,
@@ -105,8 +117,10 @@ then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
   pass. The automated
   PR-to-public chain and its least-privilege boundaries remain intact. AMD64
   Linux laptop and Raspberry Pi physical acceptance remain open.
-- Homepage commit `4829c4430ee917bcb1508c2ea7ac87988ba5e055` is live at
-  `https://reports.qubetx.com/` with the v4.2.2 managed/native distribution.
+- Website 1.21.7 commit `ecbca8a49fe2954b79a02a19767076ad89277f58` is live at
+  `https://reports.qubetx.com/` via production run `6652250774`. All four routes
+  and Global/Corporate MSI-before-EXE ordering passed actual Chrome checks;
+  download links remain versionless.
 - Personal-fleet evidence: Alienware report/hardware and v4.1.3 same-channel
   evidence are real; the natural v4.1.3 → v4.2.2 UAC update remains open. Never
   claim the AMD laptop or Pi 4 is verified until its board task contains real
@@ -297,13 +311,13 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
-1. Preserve `4.3.12` as the current complete GitHub/crates boundary and
+1. Preserve `4.4.0` as the current complete GitHub/crates boundary and
    `v4.3.0` through `v4.3.11` as immutable failed GitHub-distribution tags. The
    first five produced no draft; v4.3.5 through v4.3.8 produced exact private
    24-asset drafts, and v4.3.9/v4.3.10/v4.3.11 produced exact private 30-asset
    drafts. Keep
    `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.3.12`; date the release-note blocks on the final
+   synchronized at `4.4.0`; date the release-note blocks on the final
    release source commit while keeping status ledgers explicit.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
@@ -317,7 +331,7 @@ do not have to infer platform semantics.
    plus trusted OIDC/public provenance are accepted.
 5. For a future release, create and push only its new tag after exact-main
    CI/crates proof and native Apple Bash-3.2 staging preflight. Existing
-   immutable `v*` tags, including v4.3.12, must not move.
+   immutable `v*` tags, including v4.4.0 and v4.3.12, must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers
    to produce 30, and private Windows Installer Validation to attest those exact
    bytes and pass every channel/transition gate.
@@ -325,8 +339,8 @@ do not have to infer platform semantics.
    finalizer adds four assets and solely publishes 34. Then require public
    Windows updater and published Linux/macOS smokes plus the public-byte audit.
 8. Update the homepage only when its source needs a release-specific change;
-   its current versionless `releases/latest` links required no v4.3.12 source
-   deployment. Keep AMD/Pi physical tasks open and patch forward from findings.
+   its versionless `releases/latest` links remain in the verified website 1.21.7
+   production deployment. Keep AMD/Pi physical tasks open and patch forward from findings.
 
 Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,
 native macOS 29664824418, Windows packaging 29664824432, and Windows transition

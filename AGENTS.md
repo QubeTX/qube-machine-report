@@ -13,12 +13,16 @@ Companion docs:
 
 Last verified against source: 2026-09-24
 
-Current candidate: v4.4.0 adds a real full-alias `report` executable beside
-`tr300` in every distribution and replaces both Windows MSI placeholder EULAs
-with the shared `wix/License.rtf` rendering of `LICENSE`. Public distribution
-remains v4.3.12 until the protected release chain completes. Both names support all install/update/uninstall actions through the canonical
-`tr300` implementation. See the final ADR entry for
-paired payload ownership and compatibility requirements.
+Current published release: **v4.4.0**, immutable source/tag
+`f49d50a256842ac6c677d1c743c553b3dd92717f`. Public release `396235243`
+has 34 audited assets and the exact unyanked crate. Both `report` and `tr300`
+support the full CLI, including install/update/uninstall, through the canonical
+implementation. Both Windows MSI editions embed the complete PolyForm license;
+macOS has no EULA screen. The public-byte and published MSI-control audits pass.
+Post-public Windows run `36087344916` passed all nine jobs; the protected
+closure-docs PR remains pending. Do not close that task or claim personal hardware/UAC
+acceptance from hosted results. Start continuation with
+[`the v4.4.0 handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
 
 ## Task management system
 
@@ -60,8 +64,11 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version and complete GitHub distribution: `4.3.12`;
-  working manifest: `4.4.0` (battery hardening, Windows
+- Current crates.io version, complete GitHub distribution, and working
+  manifest: `4.4.0`. CI `36084969867` and crates `36084969841` attempt 2,
+  Release `36085847270`, Windows `36086249950`, private validation
+  `36086484931` attempt 2, and Mac publication `36086249996` passed.
+- Prior v4.3.12 distribution ledger: working manifest was `4.3.12` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -172,7 +179,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   publication, post-public Windows/updater validation, and public smokes.
   No production updater custody is weakened. Never move, delete, reuse, or
   rerun an immutable v4.3.0 through v4.3.11 tag unchanged.
-  v4.3.12 is the current complete public GitHub distribution with exactly 34
+  v4.3.12 is the prior complete public GitHub distribution with exactly 34
   nonempty stable-name assets; v4.2.2 remains the prior complete baseline.
   The v4.3 candidate's Linux thermals select the hottest valid sensor
   deterministically, honor hwmon fault state, and include `soc_thermal`;
@@ -212,7 +219,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   A managed user must first refresh through the managed installer, then run
   receipt-aware Complete uninstall before switching to PKG. PKG-to-managed
   remains supported.
-- Last fully published distribution state: release source/tag
+- Previous v4.3.12 fully published distribution state: release source/tag
   `19246b76f39c53340e6be62a332cedca9bca766c` passed exact-main CI, trusted-OIDC
   crates publication, all Windows packaging/transitions, and the native
   Intel/ARM universal direct-PKG/legacy-DMG workflow. The public v4.3.12 release
