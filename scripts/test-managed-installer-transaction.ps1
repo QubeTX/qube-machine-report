@@ -149,10 +149,58 @@ try {
     if ($legacyState.PriorReportOwned -or @($legacyState.Binaries.Path) -contains $oldReport) {
         throw 'legacy single-binary receipt claimed a foreign report sibling'
     }
+    $legacyReceiptText = Get-Content -LiteralPath $receiptPath -Raw
+    $savedIntendedPrefix = $env:TR300_INSTALL_DIR
+    foreach ($malformedInventory in @(
+        '"report.exe"',
+        '{"0":"tr300.exe","1":"report.exe"}',
+        '[["tr300.exe","report.exe"]]',
+        '[{"binaries":["tr300.exe","report.exe"]}]',
+        '["report.exe"]',
+        '["tr300.exe"]',
+        'null'
+    )) {
+        $malformedReceipt = $legacyReceiptText.TrimEnd()
+        $malformedReceipt = $malformedReceipt.Substring(0, $malformedReceipt.Length - 1) +
+            ',"binaries":' + $malformedInventory + '}'
+        Set-Content -LiteralPath $receiptPath -Value $malformedReceipt
+        $malformedState = Save-Tr300ManagedState $backup
+        if ($malformedState.PriorReportOwned -or @($malformedState.Binaries.Path) -contains $oldReport) {
+            throw "malformed receipt inventory authorized old report deletion: $malformedInventory"
+        }
+        $env:TR300_INSTALL_DIR = $oldPrefix
+        try {
+            $null = Save-Tr300ManagedState $backup
+            throw 'malformed receipt inventory authorized report overwrite'
+        } catch {
+            if ($_.Exception.Message -notlike '*unowned report command*') { throw }
+        } finally {
+            $env:TR300_INSTALL_DIR = $savedIntendedPrefix
+        }
+        if ((Get-Content -LiteralPath $oldReport -Raw) -ne 'old-receipt-report' -or
+            (Get-Content -LiteralPath $oldBinary -Raw) -ne 'old-receipt-binary') {
+            throw 'malformed receipt fixture modified existing payload'
+        }
+    }
+    Set-Content -LiteralPath $receiptPath -Value $legacyReceiptText
     $ownedReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
     $ownedReceipt | Add-Member -NotePropertyName binaries -NotePropertyValue @('tr300.exe', 'report.exe')
     $ownedReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $receiptPath
     $state = Save-Tr300ManagedState $backup
+    if (-not $state.PriorReportOwned -or @($state.Binaries.Path) -notcontains $oldReport) {
+        throw 'paired receipt inventory did not authorize its owned report'
+    }
+    $env:TR300_INSTALL_DIR = $oldPrefix
+    try {
+        $samePrefixBackup = Join-Path $fixture 'same-prefix-backup'
+        New-Item -ItemType Directory -Path $samePrefixBackup | Out-Null
+        $ownedSamePrefixState = Save-Tr300ManagedState $samePrefixBackup
+        if (-not $ownedSamePrefixState.PriorReportOwned) {
+            throw 'paired receipt inventory did not authorize same-prefix replacement'
+        }
+    } finally {
+        $env:TR300_INSTALL_DIR = $savedIntendedPrefix
+    }
     $env:PATH = Split-Path -Parent $newBinary
     Assert-Tr300NoUnknownPathOwners @() $state
     $unknownDir = Join-Path $fixture 'portable'

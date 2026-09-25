@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   companion; older single-binary receipts cannot authorize deleting an
   unrelated `report`. Native installers reject collisions before payload
   mutation, and managed wrappers validate Cargo/receipt inventories.
+- Concurrent Windows updates preserve recovery files belonging to active transactions.
 - Windows updates stage both loaded executables and restore both on failure.
   Ambiguous partial rollback preserves unproven files and reports recovery
   paths instead of claiming complete restoration. Unix `report` replaces

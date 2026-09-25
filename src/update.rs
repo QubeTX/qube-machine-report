@@ -1247,18 +1247,75 @@ fn cleanup_stale_windows_update_backups() {
     let Some(parent) = current.parent() else {
         return;
     };
+    cleanup_stale_windows_update_backups_in(parent);
+}
+
+#[cfg(windows)]
+fn cleanup_stale_windows_update_backups_in(parent: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return;
     };
-    for entry in entries.flatten() {
-        if entry
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|entry| {
+        entry
             .file_name()
-            .to_str()
-            .is_some_and(is_windows_any_update_backup_name)
-        {
-            let _ = std::fs::remove_file(entry.path());
+            .to_string_lossy()
+            .starts_with(".tr300-report-update-backup-")
+    });
+    for entry in entries {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !windows_update_backup_owner(name).is_some_and(windows_update_owner_exited) {
+            continue;
         }
+        if let Some(suffix) = name.strip_prefix(".tr300-report-update-backup-") {
+            let paired = parent.join(format!(".tr300-update-backup-{suffix}"));
+            // An elevated worker can outlive its waiting parent. Its loaded
+            // tr300 backup remains locked; retain the report recovery with it.
+            if !matches!(std::fs::symlink_metadata(paired), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+            {
+                continue;
+            }
+        }
+        let _ = std::fs::remove_file(entry.path());
     }
+}
+
+#[cfg(windows)]
+fn windows_update_backup_owner(name: &str) -> Option<u32> {
+    if !is_windows_any_update_backup_name(name) {
+        return None;
+    }
+    name.strip_prefix(".tr300-update-backup-")
+        .or_else(|| name.strip_prefix(".tr300-report-update-backup-"))?
+        .split_once('-')?
+        .0
+        .parse()
+        .ok()
+        .filter(|pid| *pid != 0)
+}
+
+#[cfg(windows)]
+fn windows_update_owner_exited(pid: u32) -> bool {
+    use winapi::shared::winerror::ERROR_INVALID_PARAMETER;
+    use winapi::um::errhandlingapi::GetLastError;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::OpenProcess;
+    use winapi::um::synchapi::WaitForSingleObject;
+    use winapi::um::winbase::WAIT_OBJECT_0;
+    use winapi::um::winnt::SYNCHRONIZE;
+
+    // A report backup may be unloaded while its paired tr300 update is still
+    // active. The name records the waiting transaction owner's PID, including
+    // for an elevated worker. Preserve on access errors and PID reuse; neither
+    // is evidence that the transaction has finished its rollback or commit.
+    let process = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+    if process.is_null() {
+        return unsafe { GetLastError() } == ERROR_INVALID_PARAMETER;
+    }
+    let state = unsafe { WaitForSingleObject(process, 0) };
+    unsafe { CloseHandle(process) };
+    state == WAIT_OBJECT_0
 }
 
 #[cfg(windows)]
@@ -1398,8 +1455,9 @@ impl WindowsLiveImageHandoff {
             }
             std::fs::rename(backup, original)
         };
+        // Keep the paired tr300 backup present until report restoration is
+        // attempted, so concurrent stale cleanup cannot remove report recovery.
         // Attempt both restores even when one encounters a locked replacement.
-        let tr300_result = restore(&self.original, &self.backup);
         let report_result = self
             .report
             .as_ref()
@@ -1415,6 +1473,7 @@ impl WindowsLiveImageHandoff {
                     ))),
                 }
             });
+        let tr300_result = restore(&self.original, &self.backup);
         match (tr300_result, report_result) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
@@ -3015,6 +3074,71 @@ fn is_corporate_install_path(exe_path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn stale_cleanup_preserves_unloaded_backups_of_an_active_transaction() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = std::process::id();
+        let live_tr300 = directory
+            .path()
+            .join(format!(".tr300-update-backup-{owner}-1.exe"));
+        let live_report = directory
+            .path()
+            .join(format!(".tr300-report-update-backup-{owner}-1.exe"));
+        // Ordinary files intentionally hold no loaded-image lock. A second
+        // updater must preserve them based on transaction lifetime alone.
+        std::fs::write(&live_tr300, b"prior tr300").unwrap();
+        std::fs::write(&live_report, b"prior report").unwrap();
+        cleanup_stale_windows_update_backups_in(directory.path());
+        assert_eq!(std::fs::read(&live_tr300).unwrap(), b"prior tr300");
+        assert_eq!(std::fs::read(&live_report).unwrap(), b"prior report");
+
+        // Keep a handle to a completed child, giving deterministic exited
+        // process evidence without relying on an invented unused PID.
+        let mut exited = Command::new(std::env::current_exe().unwrap())
+            .arg("--list")
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(exited.wait().unwrap().success());
+        let stale_tr300 = directory
+            .path()
+            .join(format!(".tr300-update-backup-{}-2.exe", exited.id()));
+        let stale_report = directory
+            .path()
+            .join(format!(".tr300-report-update-backup-{}-2.exe", exited.id()));
+        std::fs::write(&stale_tr300, b"stale tr300").unwrap();
+        std::fs::write(&stale_report, b"stale report").unwrap();
+        // Simulate an elevated worker's loaded image surviving its owner.
+        // Denying delete sharing also deterministically denies backup removal.
+        use std::os::windows::fs::OpenOptionsExt;
+        let worker_image = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1 | 2)
+            .open(&stale_tr300)
+            .unwrap();
+        cleanup_stale_windows_update_backups_in(directory.path());
+        assert_eq!(std::fs::read(&stale_tr300).unwrap(), b"stale tr300");
+        assert_eq!(std::fs::read(&stale_report).unwrap(), b"stale report");
+        drop(worker_image);
+        cleanup_stale_windows_update_backups_in(directory.path());
+        assert!(!stale_tr300.exists());
+        assert!(!stale_report.exists());
+        assert_eq!(std::fs::read(&live_tr300).unwrap(), b"prior tr300");
+        assert_eq!(std::fs::read(&live_report).unwrap(), b"prior report");
+        let original = directory.path().join("tr300.exe");
+        let report = directory.path().join("report.exe");
+        WindowsLiveImageHandoff {
+            original: original.clone(),
+            backup: live_tr300,
+            report: Some((report.clone(), live_report)),
+        }
+        .rollback()
+        .unwrap();
+        assert_eq!(std::fs::read(original).unwrap(), b"prior tr300");
+        assert_eq!(std::fs::read(report).unwrap(), b"prior report");
+    }
 
     #[cfg(windows)]
     fn paired_handoff_fixture(directory: &std::path::Path) -> WindowsLiveImageHandoff {

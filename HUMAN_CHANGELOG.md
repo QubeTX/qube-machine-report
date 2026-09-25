@@ -21,6 +21,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the Mac installer has no license dialog.
 - Installs and upgrades protect unrelated commands named `report`, including
   when upgrading from an older TR-300 installation.
+- Overlapping Windows updates preserve each other’s recovery files.
 - Updating through either command handles running Windows executables safely.
   If recovery cannot finish, the error explains which files were preserved.
 

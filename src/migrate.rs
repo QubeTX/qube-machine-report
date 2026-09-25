@@ -585,6 +585,7 @@ fn receipt_matches_cargo_home(contents: &str, cargo_home: &Path) -> bool {
 
 #[cfg(any(windows, unix))]
 fn receipt_owns_report(contents: &str, cargo_home: &Path) -> bool {
+    let binary = if cfg!(windows) { "tr300.exe" } else { "tr300" };
     let report = if cfg!(windows) {
         "report.exe"
     } else {
@@ -599,7 +600,11 @@ fn receipt_owns_report(contents: &str, cargo_home: &Path) -> bool {
                     .and_then(|bins| bins.as_array())
                     .cloned()
             })
-            .is_some_and(|bins| bins.iter().any(|bin| bin.as_str() == Some(report)))
+            .is_some_and(|bins| {
+                [binary, report]
+                    .iter()
+                    .all(|name| bins.iter().any(|bin| bin.as_str() == Some(*name)))
+            })
 }
 
 #[cfg(any(windows, unix))]
@@ -2883,6 +2888,35 @@ mod tests {
 
     #[cfg(any(windows, unix))]
     #[test]
+    fn receipt_companion_ownership_requires_a_paired_array() {
+        let (_root, opts, _binary, receipt) = strict_fixture();
+        let contents = write_exact_receipt(&opts, &receipt);
+        let prefix = resolve_cargo_home(&opts).unwrap();
+        assert!(receipt_owns_report(
+            std::str::from_utf8(&contents).unwrap(),
+            &prefix
+        ));
+        let binary = if cfg!(windows) { "tr300.exe" } else { "tr300" };
+        let report = if cfg!(windows) {
+            "report.exe"
+        } else {
+            "report"
+        };
+        for inventory in [
+            serde_json::json!(report),
+            serde_json::json!([report]),
+            serde_json::json!([[binary, report]]),
+            serde_json::json!({"0": binary, "1": report}),
+            serde_json::json!([{"binaries": [binary, report]}]),
+        ] {
+            let mut malformed: serde_json::Value = serde_json::from_slice(&contents).unwrap();
+            malformed["binaries"] = inventory;
+            assert!(!receipt_owns_report(&malformed.to_string(), &prefix));
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
     fn report_sibling_requires_inventory_ownership() {
         let (_root, opts, binary, _receipt) = strict_fixture();
         let report = binary.with_file_name(if cfg!(windows) {
@@ -3070,7 +3104,7 @@ mod tests {
                 "provider": { "source": "cargo-dist" },
                 "source": { "app_name": "tr300" },
                 "install_prefix": cargo_home.display().to_string(),
-                "binaries": [if cfg!(windows) { "report.exe" } else { "report" }],
+                "binaries": if cfg!(windows) { vec!["tr300.exe", "report.exe"] } else { vec!["tr300", "report"] },
             })
             .to_string(),
         )
@@ -3136,7 +3170,7 @@ mod tests {
             "provider": { "source": "cargo-dist" },
             "source": { "app_name": "tr300" },
             "install_prefix": resolve_cargo_home(opts).unwrap().display().to_string(),
-            "binaries": [if cfg!(windows) { "report.exe" } else { "report" }],
+            "binaries": if cfg!(windows) { vec!["tr300.exe", "report.exe"] } else { vec!["tr300", "report"] },
         })
         .to_string()
         .into_bytes();

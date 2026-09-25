@@ -75,6 +75,9 @@ tr300_transaction_started=0
 tr300_committed=1
 # Only the top-level, unambiguous receipt inventory owns a report sibling.
 for invalid in \
+    '{"binaries":["report"]}' \
+    '{"binaries":"report"}' \
+    '{"binaries":[["tr300","report"]]}' \
     '{"binaries":["tr300"],"extra":{"binaries":["report"]}}' \
     '{"binaries":{"0":"report"}}' \
     '{"binaries":["report"],"binaries":["tr300"]}' \

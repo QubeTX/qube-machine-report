@@ -310,8 +310,9 @@ tr300_inventory_owns_report() {
             }
         } else if(c=="\"") {
             v=str(0); n=split(path,parts,SUBSEP)
-            if(mode=="receipt" && n==3 && parts[2]=="binaries" && arrays[SUBSEP "binaries"] && v=="report") {
-                mainbin["receipt"]=1; reportbin["receipt"]=1
+            if(mode=="receipt" && n==3 && parts[2]=="binaries" && arrays[SUBSEP "binaries"]) {
+                if(v=="tr300") mainbin["receipt"]=1
+                if(v=="report") reportbin["receipt"]=1
             }
             if(mode=="cargo" && n==5 && parts[2]=="installs" && parts[3] ~ /^tr300 [^ ]+ \([^()]+\)$/ && parts[4]=="bins" && arrays[parts[1] SUBSEP parts[2] SUBSEP parts[3] SUBSEP parts[4]]) {
                 if(v=="tr300") mainbin[parts[3]]=1

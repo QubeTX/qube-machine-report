@@ -368,7 +368,9 @@ function Save-Tr300ManagedState([string]$BackupRoot) {
             throw 'the existing TR-300 managed receipt is ambiguous; preserving it'
         }
         $priorPrefix = [IO.Path]::GetFullPath([string]$priorReceipt.install_prefix)
-        $priorReportOwned = @($priorReceipt.binaries) -ccontains 'report.exe'
+        $priorReportOwned = $priorReceipt.binaries -is [array] -and
+            $priorReceipt.binaries -ccontains 'tr300.exe' -and
+            $priorReceipt.binaries -ccontains 'report.exe'
         Copy-Item -LiteralPath $receiptPath -Destination (Join-Path $BackupRoot 'receipt.json')
     }
 
