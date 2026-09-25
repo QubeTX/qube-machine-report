@@ -3,5 +3,5 @@
 - [x] **TR-300 v4.1.3 origin-preserving fix-forward** - installer-first macOS, safe channel-preserving updates including Global Program Files handoff, and 30-asset release proof (completed 2026-07-18) #v41
 - [x] **TR-300 v4.2 managed installation contract** - managed CLI defaults, authoritative fresh intent, direct universal PKG, legacy DMG bridge, and 34-asset hosted proof (completed 2026-07-18) #v42
 - [x] **TR-300 v4.3 battery, latency, thermals** - v4.3.12 completed trusted-OIDC crates publication and the exact 34-asset public GitHub distribution at source/tag `19246b76`; AMD64 Linux and Raspberry Pi physical evidence remain independently open under `#hw4` (completed 2026-08-25) #v43
-- [ ] **TR-300 v4.4 path-level report command** - ship `report` beside `tr300` across supported install, update, uninstall, archive, and native-package channels, then prove the public distribution (target 2026-08-26) #v44
+- [ ] **TR-300 v4.4 path-level report command** - ship `report` beside `tr300` across supported install, update, uninstall, archive, and native-package channels, v4.4.0 is public and audited; post-public Windows verification passed; protected documentation closure remains open (target 2026-09-24) #v44
 - [ ] **Personal hardware continuation** - real Windows, AMD64 Linux, and Raspberry Pi 4 verification #hw4

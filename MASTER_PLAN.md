@@ -5,8 +5,28 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-09-24
-**Complete public GitHub distribution / crates.io / working manifest:** 4.3.12 / 4.3.12 / 4.4.0
-(v4.2.2 remains the prior complete GitHub distribution. Release-chain hardening merged
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.0 / 4.4.0
+
+Current release: immutable `v4.4.0` at
+`f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,
+34 audited assets. PR #32 plus fixed-target publisher PR #33 completed the
+protected CI/OIDC/private 24-to-30-to-validated-to-34 chain. Both `report` and
+`tr300` expose the full CLI across supported platforms; both Windows MSI
+editions embed the complete PolyForm license. Exact evidence and retry context
+are in the v4.4.0 entry of `TESTING.md` and
+[`2026-09-24-v4.4.0-publication-and-closure.md`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
+
+Post-public Windows run `36087344916` passed all nine jobs; `#r44` is complete.
+Next: merge the protected documentation follow-up and verify its
+main/idempotent publisher checks. Keep `#q44` and milestone `#v44` open until
+those remaining gates pass. Implementation and published MSI EULA proof are complete.
+The website's 1.21.8 production deployment passed all four routes and actual
+Chrome MSI-before-EXE ordering checks; no further website change is pending.
+Physical AMD64 Linux/Pi acceptance and the personal Alienware UAC update remain
+open under `#hw4`.
+
+Historical v4.3 distribution ledger (v4.3.12 is the prior complete baseline):
+(v4.2.2 was its earlier complete GitHub distribution. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.
 Exact-main CI run `32766014047` passed all 19 jobs. Release-automation PR #16

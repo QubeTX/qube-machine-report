@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-The v4.4.0 candidate packages a full-alias `report` command beside `tr300`,
+The published v4.4.0 release packages a full-alias `report` command beside `tr300`,
 with identical options and maintenance actions. Both Windows MSI editions embed the
 shared `wix/License.rtf` rendering of `LICENSE`; EXEs already use `LICENSE`,
 and the macOS component PKG/compatibility DMG has no EULA screen. Keep RTF
@@ -59,8 +59,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution and current crates.io package: **4.3.12**.
-The working manifest is **4.4.0**. PR #14 merged as
+Complete public GitHub distribution, crates.io package, and working manifest:
+**4.4.0**, immutable source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`.
+Release `396235243` contains 34 audited assets. The protected CI/OIDC chain,
+private Windows validation, native Intel/ARM Apple lifecycles, public byte audit,
+and published MSI EULA readback passed. Post-public Windows run `36087344916`
+passed all nine jobs; closure documentation PR/main checks remain pending. See
+[`the current handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md)
+and `TESTING.md` for exact evidence. Personal hardware/UAC rows remain open.
+
+Historical v4.3 release ledger (previous complete baseline v4.3.12):
+PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -184,7 +193,7 @@ exact-SHA plus hosted package matrices. The Alienware's natural Global MSI
 remains v4.1.3 only because the final v4.2.2 UAC prompt was cancelled safely;
 do not represent that personal same-channel transition as passed yet.
 
-Observed distribution state: release source/tag
+Previous v4.3.12 distribution state: release source/tag
 `19246b76f39c53340e6be62a332cedca9bca766c` passed exact-main CI, trusted-OIDC
 crates publication, signed Apple artifacts, every Windows package/transition,
 and native ARM/Intel direct-PKG/legacy-DMG publication. Public 34-asset, digest,
@@ -712,7 +721,7 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- v4.3.12 is the complete public GitHub distribution. The v4.3.0 through
+- v4.4.0 is the complete public GitHub distribution; v4.3.12 is the prior baseline. The v4.3.0 through
   v4.3.11 crates/tags stay published and
   immutable; v4.3.5, v4.3.6, v4.3.7, and v4.3.8 each have one exact private 24-asset
   GitHub draft. A read-only downstream token cannot enumerate those drafts
