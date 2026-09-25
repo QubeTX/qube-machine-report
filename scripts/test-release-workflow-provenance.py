@@ -8078,6 +8078,68 @@ def check_release_token_boundary(workflow: str) -> None:
     require(announce, "Confirm private draft handoff", f"{label} private handoff")
 
 
+def run_crates_manifest_target_fixtures(
+    workflow: str, historical_manifest: str | None = None
+) -> None:
+    """Execute the actual pre-OIDC source guards, including historical policy."""
+    import tomllib
+
+    current = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    version = tomllib.loads(current)["package"]["version"]
+    report_block = r'\[\[bin\]\]\s*\nname = "report"\s*\npath = "src/bin/report.rs"\s*\n'
+    historical = historical_manifest or re.sub(
+        report_block, "", current.replace(f'version = "{version}"', 'version = "4.3.12"', 1)
+    ).replace('default-run = "tr300"\n', "")
+    historical_version = tomllib.loads(historical)["package"]["version"]
+    guards = (
+        ("candidate", "Repackage without execution and prove exact candidate bytes", "Cargo binary target policy changed"),
+        ("published", "Recheck immutable crates.io state", "published tag binary target policy changed"),
+    )
+    for kind, step, marker in guards:
+        block = extract_named_run(workflow, step, CRATES_WORKFLOW.name)
+        program = extract_unique_python_heredoc(block, marker, f"crates {kind} source guard")
+        cases = [
+            ("current", current, version, True, None),
+            ("extra-target", current + '\n[[bin]]\nname = "extra"\npath = "src/extra.rs"\n', version, False, None),
+            ("changed-main-path", current.replace('path = "src/main.rs"', 'path = "src/other.rs"'), version, False, None),
+            ("changed-report-path", current.replace('path = "src/bin/report.rs"', 'path = "src/other.rs"'), version, False, None),
+            ("missing-report-target", re.sub(report_block, "", current), version, False, None),
+            ("missing-default", current.replace('default-run = "tr300"\n', ""), version, False, None),
+            ("wrong-default", current.replace('default-run = "tr300"', 'default-run = "report"'), version, False, None),
+            ("missing-report-source", current, version, False, "missing-report-source"),
+            ("automatic-extra", current, version, False, "automatic-extra"),
+        ]
+        if kind == "published":
+            cases.extend([
+                ("historical", historical, historical_version, True, None),
+                ("historical-extra", historical + '\n[[bin]]\nname = "report"\npath = "src/bin/report.rs"\n', historical_version, False, None),
+                ("historical-default", historical.replace('[package]\n', '[package]\ndefault-run = "tr300"\n', 1), historical_version, False, None),
+                ("historical-automatic", historical, historical_version, False, "automatic-extra"),
+            ])
+        for label, manifest, package_version, expected, mutation in cases:
+            with tempfile.TemporaryDirectory(prefix="tr300-crates-policy-") as raw:
+                root = Path(raw)
+                (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
+                (root / "src").mkdir()
+                (root / "src" / "main.rs").write_text("// data-only fixture\n", encoding="utf-8")
+                if package_version == version or mutation == "automatic-extra":
+                    (root / "src" / "bin").mkdir()
+                if package_version == version and mutation != "missing-report-source":
+                    (root / "src" / "bin" / "report.rs").write_text("// data-only fixture\n", encoding="utf-8")
+                if mutation == "automatic-extra":
+                    (root / "src" / "bin" / "extra.rs").write_text("// forbidden target\n", encoding="utf-8")
+                identity = f"tr300-{package_version}.crate" if kind == "candidate" else package_version
+                result = subprocess.run(
+                    [sys.executable, "-", str(root), identity], input=program,
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=30, check=False,
+                )
+                if (result.returncode == 0) != expected:
+                    raise AssertionError(
+                        f"crates {kind} {label} returned {result.returncode}, expected_success={expected}\n{result.stderr}"
+                    )
+
+
 def check_crates_token_boundary(workflow: str) -> None:
     label = CRATES_WORKFLOW.name
     trigger = workflow[: workflow.index("permissions:")]
@@ -8221,7 +8283,9 @@ def check_crates_token_boundary(workflow: str) -> None:
         'package.get("readme") != "README.md"',
         '"license-file" in package',
         'package.get("build") not in (None, "build.rs")',
-        'manifest.get("bin") != [{"name": "tr300", "path": "src/main.rs"}]',
+        'manifest.get("bin") != expected_bins or package.get("default-run") != "tr300"',
+        '{"name": "report", "path": "src/bin/report.rs"}',
+        'entry.name for entry in binary_directory.iterdir()} != {"report.rs"}',
         'pure.is_absolute() or ".." in pure.parts',
         '"$SOURCE_DIRECTORY/.cargo/config"',
         '"$ancestor/.cargo/config.toml"',
@@ -8698,6 +8762,7 @@ def main() -> None:
         windows_validation,
         windows_cargo_dist_installer,
     )
+    run_crates_manifest_target_fixtures(crates)
     run_release_manifest_preservation_fixtures(release, bash)
     run_release_host_draft_fixtures(release, bash)
     run_release_sidecar_normalization_fixtures(release)

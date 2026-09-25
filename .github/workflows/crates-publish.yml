@@ -305,8 +305,14 @@ jobs:
               raise SystemExit("Cargo readme or license-file policy changed")
           if package.get("build") not in (None, "build.rs"):
               raise SystemExit("Cargo build script path escapes the fixed package root")
-          if manifest.get("bin") != [{"name": "tr300", "path": "src/main.rs"}]:
+          expected_bins = [
+              {"name": "tr300", "path": "src/main.rs"},
+              {"name": "report", "path": "src/bin/report.rs"},
+          ]
+          if manifest.get("bin") != expected_bins or package.get("default-run") != "tr300":
               raise SystemExit("Cargo binary target policy changed")
+          if any(not (root / target["path"]).is_file() for target in expected_bins):
+              raise SystemExit("Cargo binary target source is missing")
           if manifest.get("test") or manifest.get("example") or manifest.get("bench"):
               raise SystemExit("explicit Cargo test/example/bench targets are not allowed")
           lib_path = manifest.get("lib", {}).get("path")
@@ -322,8 +328,9 @@ jobs:
                   pure = PurePosixPath(path_value)
                   if pure.is_absolute() or ".." in pure.parts:
                       raise SystemExit(f"external Cargo target path: {path_value!r}")
-          if (root / "src" / "bin").exists():
-              raise SystemExit("automatic src/bin targets are not part of the publish policy")
+          binary_directory = root / "src" / "bin"
+          if not binary_directory.is_dir() or {entry.name for entry in binary_directory.iterdir()} != {"report.rs"}:
+              raise SystemExit("unexpected automatic src/bin target at publish boundary")
           for current, directories, files in os.walk(root, topdown=True, followlinks=False):
               directories[:] = [name for name in directories if name not in {".git", "target"}]
               for name in [*directories, *files]:
@@ -528,8 +535,15 @@ jobs:
               raise SystemExit("published tag readme or license-file policy changed")
           if package.get("build") not in (None, "build.rs"):
               raise SystemExit("published tag build script path changed")
-          if manifest.get("bin") != [{"name": "tr300", "path": "src/main.rs"}]:
+          paired_commands = tuple(map(int, expected_version.split("."))) >= (4, 4, 0)
+          expected_bins = [{"name": "tr300", "path": "src/main.rs"}]
+          if paired_commands:
+              expected_bins.append({"name": "report", "path": "src/bin/report.rs"})
+          expected_default_run = "tr300" if paired_commands else None
+          if manifest.get("bin") != expected_bins or package.get("default-run") != expected_default_run:
               raise SystemExit("published tag binary target policy changed")
+          if any(not (root / target["path"]).is_file() for target in expected_bins):
+              raise SystemExit("published tag binary target source is missing")
           if manifest.get("test") or manifest.get("example") or manifest.get("bench"):
               raise SystemExit("published tag explicit target policy changed")
           lib_path = manifest.get("lib", {}).get("path")
@@ -545,8 +559,12 @@ jobs:
                   pure = PurePosixPath(path_value)
                   if pure.is_absolute() or ".." in pure.parts:
                       raise SystemExit(f"published tag external target path: {path_value!r}")
-          if (root / "src" / "bin").exists():
-              raise SystemExit("published tag automatic src/bin targets are forbidden")
+          binary_directory = root / "src" / "bin"
+          if paired_commands:
+              if not binary_directory.is_dir() or {entry.name for entry in binary_directory.iterdir()} != {"report.rs"}:
+                  raise SystemExit("unexpected published tag automatic src/bin target")
+          elif binary_directory.exists():
+              raise SystemExit("historical published tag automatic src/bin targets are forbidden")
           for current, directories, files in os.walk(root, topdown=True, followlinks=False):
               directories[:] = [name for name in directories if name not in {".git", "target"}]
               for name in [*directories, *files]:

@@ -13,6 +13,17 @@ Status: candidate under qualification; public latest remains v4.3.12.
 The release combines the previously unfinished companion command
 with the operator-requested PolyForm Noncommercial 1.0.0 MSI EULA repair.
 
+PR #32 merged as `64486fa46790e4a4ecaaca847bfcc626280b3746` after
+exact-head CI `36081617442` passed all 20 jobs and independent review cleared
+the final commit. Exact-main CI `36082260014` also passed all 20 jobs, and
+native Apple identity preflight `36082271439` passed both architectures.
+Crates publisher `36082259983` stopped before credential use or upload because
+its fixed source policy still expected only the historical `tr300` target and
+forbade `src/bin`. The registry returned 404 for 4.4.0; no tag was pushed.
+The same-version follow-up updates the exact paired-target policy and executes
+the real candidate/historical manifest guards against positive and negative
+fixtures before retrying through the normal reviewed-main publication path.
+
 - The complete RTF decodes through Windows RichTextBox to the LICENSE text,
   including Required Notice, after removal of Markdown presentation syntax.
 - Both MSI templates compiled/linked against fixture payloads, and read-only
