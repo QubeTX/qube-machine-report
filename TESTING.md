@@ -22,7 +22,7 @@ with the operator-requested PolyForm Noncommercial 1.0.0 MSI EULA repair.
 - macOS source inspection found no EULA surface: pkgbuild creates a component
   PKG; the compatibility DMG contains that PKG and README. No placeholder
   license text or license resources exist there.
-- Local candidate gate: formatting, all-target workspace Clippy, 201 library
+- Local candidate gate: formatting, all-target workspace Clippy, 203 library
   tests, 2 alias unit tests, 29 integration tests, release build, package
   inventory, publish dry run, dependency audit, workflow/ShellCheck lint,
   extracted Mac preinstall lint, and managed transaction tests under Git Bash,
@@ -36,7 +36,9 @@ with the operator-requested PolyForm Noncommercial 1.0.0 MSI EULA repair.
   this is a smoke result, not a before/after performance claim.
 - Independent runtime, migration, and packaging reviews resolved compile,
   rollback, foreign-file ownership, live-image, and inventory parsing defects.
-- Final provenance fixtures and hosted/native/public qualification are pending.
+- Full release-provenance fixtures passed. Hosted/native/public qualification
+  remains pending. Windows recovery files are removed only by their own
+  verified-success transaction; incomplete rollback bytes survive later updates.
 
 ### v4.3.12 — Native Mac fixture-cleanup fix-forward (as of 2026-08-25)
 
