@@ -200,6 +200,15 @@
                                     Source='$(var.CargoTargetBinDir)\tr300.exe'
                                     KeyPath='yes'/>
                             </Component>
+                            <!-- Permanent report payload ownership identity; shared with migrate.rs. -->
+                            <Component Id='binaryReport' Guid='2EB04231-F655-42C0-863E-D5ED46E6C41B'>
+                                <File
+                                    Id='exeReport'
+                                    Name='report.exe'
+                                    DiskId='1'
+                                    Source='$(var.CargoTargetBinDir)\report.exe'
+                                    KeyPath='yes'/>
+                            </Component>
                         </Directory>
                     </Directory>
                 </Directory>
@@ -217,6 +226,7 @@
             Absent='disallow'>
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='binaryReport'/>
             <ComponentRef Id='InstallSourceMarker'/>
 
             <Feature
@@ -234,7 +244,7 @@
         <Binary Id='MigrationProbe' SourceFile='$(var.CargoTargetBinDir)\tr300.exe'/>
         <CustomAction Id='PreflightCargoOwnership'
             BinaryKey='MigrationProbe'
-            ExeCommand='migrate-cleanup --quiet --strict --dry-run --cargo-copy'
+            ExeCommand='migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination &quot;[Bin]tr300.exe&quot;'
             Execute='immediate'
             Impersonate='yes'
             Return='check'/>
@@ -258,7 +268,7 @@
             Impersonate='yes'
             Return='check'/>
         <InstallExecuteSequence>
-            <Custom Action='PreflightCargoOwnership' Before='RemoveConflictingInno'>
+            <Custom Action='PreflightCargoOwnership' Before='InstallInitialize'>
                 <![CDATA[NOT Installed]]>
             </Custom>
             <Custom Action='RemoveConflictingInno' Before='InstallFiles'>
@@ -275,6 +285,7 @@
             <UIRef Id='WixUI_FeatureTree'/>
 
         </UI>
+        <WixVariable Id='WixUILicenseRtf' Value='$(sys.SOURCEFILEDIR)..\wix\License.rtf'/>
 
     </Product>
 

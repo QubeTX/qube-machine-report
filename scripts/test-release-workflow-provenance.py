@@ -948,6 +948,7 @@ def write_apple_staging_fixture(
         (f"{root}/LICENSE", b"fixture license\n", 0o644),
         (f"{root}/CHANGELOG.md", b"fixture changelog\n", 0o644),
         (f"{root}/README.md", b"fixture readme\n", 0o644),
+        (f"{root}/report", b"#!/bin/sh\nexit 0\n", 0o755),
         (f"{root}/tr300", b"#!/bin/sh\nexit 0\n", 0o755),
     )
     raw_archive = io.BytesIO()
@@ -1184,9 +1185,15 @@ def run_apple_staging_compatibility_fixture(release: str, bash: str) -> None:
                     f"stderr:\n{result.stderr}"
                 )
             staged_binary = staging / f"tr300-{target}" / "tr300"
+            staged_report = staging / f"tr300-{target}" / "report"
             if expected_success:
-                if not staged_binary.is_file() or not os.access(staged_binary, os.X_OK):
-                    raise AssertionError("Apple staging did not produce an executable binary")
+                if not all(
+                    path.is_file() and os.access(path, os.X_OK)
+                    for path in (staged_binary, staged_report)
+                ):
+                    raise AssertionError(
+                        "Apple staging did not produce both executable commands"
+                    )
             elif mutation in (
                 "archive-symlink",
                 "archive-hardlink",
@@ -1248,10 +1255,15 @@ def run_macos_archive_mode_compatibility_fixtures(macos: str) -> None:
                     f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
                 )
             binaries = tuple(output.glob("*/tr300"))
+            reports = tuple(output.glob("*/report"))
             if expected_success:
-                if len(binaries) != 2 or not all(path.is_file() for path in binaries):
+                if (
+                    len(binaries) != 2
+                    or len(reports) != 2
+                    or not all(path.is_file() for path in (*binaries, *reports))
+                ):
                     raise AssertionError(
-                        "macOS archive fixture did not produce both architecture binaries"
+                        "macOS archive fixture did not produce both commands for both architectures"
                     )
             elif binaries:
                 raise AssertionError(
@@ -1838,7 +1850,13 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
         "tr300-x86_64-apple-darwin.tar.xz",
         "tr300-x86_64-apple-darwin.tar.xz.sha256",
     )
-    prepared_names = ("tr300-universal", "preinstall", "PROVENANCE", "SHA256SUMS")
+    prepared_names = (
+        "report-universal",
+        "tr300-universal",
+        "preinstall",
+        "PROVENANCE",
+        "SHA256SUMS",
+    )
     trusted_input_array = "expected=(\n" + "\n".join(
         f"  {name}" for name in trusted_input_names
     ) + "\n)"
@@ -1856,7 +1874,7 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
     require_exact_line_sequence(
         prepare,
         'python3 - "$OUTPUT_DIRECTORY" \\\n'
-        "  tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'",
+        "  report-universal tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'",
         "prepare output invocation binding",
     )
     require_exact_line_sequence(
@@ -1870,11 +1888,16 @@ def run_macos_inventory_compatibility_fixtures(macos: str) -> None:
     require_exact_line_sequence(
         build,
         'python3 - "$PREPARED_DIRECTORY/SHA256SUMS" \\\n'
-        "  PROVENANCE preinstall tr300-universal <<'PY'",
+        "  PROVENANCE preinstall report-universal tr300-universal <<'PY'",
         "build checksum manifest invocation binding",
     )
 
-    manifest_names = ("PROVENANCE", "preinstall", "tr300-universal")
+    manifest_names = (
+        "PROVENANCE",
+        "preinstall",
+        "report-universal",
+        "tr300-universal",
+    )
     manifest_program = extract_unique_python_heredoc(
         build,
         "checksum manifest must contain exactly one entry per expected file",
@@ -8646,9 +8669,9 @@ if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Va
     msi_launches += check_msiexec_contract(
         WINDOWS_VALIDATION_WORKFLOW, windows_validation
     )
-    if msi_launches != 16:
+    if msi_launches != 17:
         raise AssertionError(
-            f"expected 16 trusted MSI process launches, found {msi_launches}"
+            f"expected 17 trusted MSI process launches, found {msi_launches}"
         )
 
 

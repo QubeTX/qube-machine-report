@@ -315,9 +315,23 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
-      - name: Build tr300.exe (release)
+      - name: Build and verify both release commands
         shell: pwsh
-        run: cargo build --release --locked
+        run: |
+          cargo build --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'release build failed' }
+          foreach ($path in @('target\release\tr300.exe', 'target\release\report.exe')) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "release command is missing: $path"
+            }
+          }
+          if ((& target\release\report.exe --version).Trim() -ne "tr300 ${{ needs.resolve-release.outputs.version }}") {
+            throw 'report command version mismatch'
+          }
+          (& target\release\report.exe --fast --json | ConvertFrom-Json) | Out-Null
+          & target\release\report.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'report help failed' }
+          $global:LASTEXITCODE = 0
 
       - name: Build Corporate MSI via bare candle + light
         env:

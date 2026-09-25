@@ -109,25 +109,39 @@ COPYFILE_DISABLE=1 tar -xJf "$arm_archive" -C "$arm_dir"
 COPYFILE_DISABLE=1 tar -xJf "$x86_archive" -C "$x86_dir"
 arm_binary=$(find "$arm_dir" -type f -name tr300 -perm -111 -print -quit)
 x86_binary=$(find "$x86_dir" -type f -name tr300 -perm -111 -print -quit)
-if [[ -z $arm_binary || -z $x86_binary ]]; then
-    echo "could not locate both architecture-specific tr300 binaries" >&2
+arm_report=$(find "$arm_dir" -type f -name report -perm -111 -print -quit)
+x86_report=$(find "$x86_dir" -type f -name report -perm -111 -print -quit)
+if [[ -z $arm_binary || -z $x86_binary || -z $arm_report || -z $x86_report ]]; then
+    echo "could not locate both architecture-specific tr300 and report binaries" >&2
     exit 65
 fi
 
 universal="${work_dir}/tr300"
+universal_report="${work_dir}/report"
 lipo -create "$arm_binary" "$x86_binary" -output "$universal"
+lipo -create "$arm_report" "$x86_report" -output "$universal_report"
 chmod 755 "$universal"
+chmod 755 "$universal_report"
 # Xcode 16.4 requires the input file before -verify_arch. Keep this ordering
 # in lockstep with every post-install validation call in the hosted workflow.
 lipo "$universal" -verify_arch arm64 x86_64
+lipo "$universal_report" -verify_arch arm64 x86_64
 codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
     --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$universal"
+codesign --force --identifier com.qubetx.tr300.report --options runtime --timestamp \
+    --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$universal_report"
 codesign --verify --strict --verbose=4 "$universal"
+codesign --verify --strict --verbose=4 "$universal_report"
 details=$(codesign -d --verbose=4 "$universal" 2>&1)
 grep -Fqx 'Identifier=com.qubetx.tr300' <<< "$details"
 grep -Fqx "TeamIdentifier=${APPLE_TEAM_ID}" <<< "$details"
 grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$details"
 grep -Eq '^Timestamp=.+' <<< "$details"
+report_details=$(codesign -d --verbose=4 "$universal_report" 2>&1)
+grep -Fqx 'Identifier=com.qubetx.tr300.report' <<< "$report_details"
+grep -Fqx "TeamIdentifier=${APPLE_TEAM_ID}" <<< "$report_details"
+grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$report_details"
+grep -Eq '^Timestamp=.+' <<< "$report_details"
 
 notarize() {
     local artifact=$1
@@ -163,13 +177,17 @@ verify_pkg_signature() {
     grep -Fq "(${APPLE_TEAM_ID})" <<< "$signature"
 }
 
+binary_notary_payload="${work_dir}/tr300-universal-notary"
+mkdir "$binary_notary_payload"
+cp "$universal" "$universal_report" "$binary_notary_payload/"
 binary_zip="${work_dir}/tr300-universal-notary.zip"
-/usr/bin/ditto -c -k --keepParent "$universal" "$binary_zip"
+/usr/bin/ditto -c -k --keepParent "$binary_notary_payload" "$binary_zip"
 notarize "$binary_zip"
 
 payload="${work_dir}/payload"
 install -d -m 755 "${payload}/usr/local/bin"
 install -m 755 "$universal" "${payload}/usr/local/bin/tr300"
+install -m 755 "$universal_report" "${payload}/usr/local/bin/report"
 pkg_scripts="${work_dir}/pkg-scripts"
 mkdir -m 755 "$pkg_scripts"
 cat > "${pkg_scripts}/preinstall" <<'PREINSTALL'
@@ -354,6 +372,8 @@ managed_state_present() {
     home=$1
     standard_leaf_present "$home" '.cargo' 'bin' 'tr300' \
         'managed binary' ||
+        standard_leaf_present "$home" '.cargo' 'bin' 'report' \
+            'managed report command' ||
         standard_leaf_present "$home" '.config' 'tr300' \
             'tr300-receipt.json' 'managed receipt'
 }
@@ -478,6 +498,30 @@ while IFS= read -r account; do
     inspect_home_once "$account_home" "$inspection_required"
 done < "$accounts_file"
 
+# report is a generic command name. A pre-v4.4 package receipt owns only
+# tr300 and must never authorize replacing another product's report command.
+if [ -e /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
+    if [ ! -f /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
+        fail_closed 'an unowned report command occupies /usr/local/bin/report; preserving it.'
+    fi
+    report_files=$(/usr/sbin/pkgutil --files com.qubetx.tr300.pkg 2>/dev/null) ||
+        fail_closed 'could not prove ownership of /usr/local/bin/report; preserving it.'
+    printf '%s\n' "$report_files" | /usr/bin/sed 's#^\./##;s#^/##' |
+        /usr/bin/grep -Fxq 'usr/local/bin/report' ||
+        fail_closed 'the installed package does not own /usr/local/bin/report; preserving it.'
+    report_info=$(/usr/sbin/pkgutil --file-info /usr/local/bin/report 2>/dev/null) ||
+        fail_closed 'could not verify the report command package owner.'
+    printf '%s\n' "$report_info" | /usr/bin/grep -Eq '^(pkgid|package-id):[[:space:]]*com\.qubetx\.tr300\.pkg$' ||
+        fail_closed 'the report command has a conflicting package owner.'
+    /usr/bin/codesign --verify --strict /usr/local/bin/report >/dev/null 2>&1 ||
+        fail_closed 'the installed report command has an invalid signature.'
+    report_signature=$(/usr/bin/codesign -d --verbose=4 /usr/local/bin/report 2>&1) ||
+        fail_closed 'could not verify the report command identity.'
+    printf '%s\n' "$report_signature" | /usr/bin/grep -Fxq 'Identifier=com.qubetx.tr300.report' ||
+        fail_closed 'the report command has a conflicting signing identity.'
+    printf '%s\n' "$report_signature" | /usr/bin/grep -Fxq 'TeamIdentifier=M9D5379H93' ||
+        fail_closed 'the report command has a conflicting signing team.'
+fi
 exit 0
 PREINSTALL
 chmod 755 "${pkg_scripts}/preinstall"
@@ -520,7 +564,7 @@ https://github.com/QubeTX/qube-machine-report/releases/latest/download/tr300-uni
 
 This disk image remains available so TR-300 v4.1.x can update safely. It
 contains the exact same signed package, which installs the versionless `tr300`
-command system-wide at /usr/local/bin/tr300.
+and equivalent `report` commands system-wide under /usr/local/bin.
 
 If installation is blocked or cancelled, open the latest release:
 https://github.com/QubeTX/qube-machine-report/releases/latest

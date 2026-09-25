@@ -7,6 +7,39 @@ as passed.
 
 ## Per-version verification log
 
+### v4.4.0 — PATH report command and MSI license (2026-09-24)
+
+Status: candidate under qualification; public latest remains v4.3.12.
+The release combines the previously unfinished companion command
+with the operator-requested PolyForm Noncommercial 1.0.0 MSI EULA repair.
+
+- The complete RTF decodes through Windows RichTextBox to the LICENSE text,
+  including Required Notice, after removal of Markdown presentation syntax.
+- Both MSI templates compiled/linked against fixture payloads, and read-only
+  Windows Installer database queries verified exact RTF content in
+  LicenseAgreementDlg/LicenseText. This establishes embedded EULA content,
+  not release-binary or installation acceptance.
+- macOS source inspection found no EULA surface: pkgbuild creates a component
+  PKG; the compatibility DMG contains that PKG and README. No placeholder
+  license text or license resources exist there.
+- Local candidate gate: formatting, all-target workspace Clippy, 203 library
+  tests, 2 alias unit tests, 29 integration tests, release build, package
+  inventory, publish dry run, dependency audit, workflow/ShellCheck lint,
+  extracted Mac preinstall lint, and managed transaction tests under Git Bash,
+  PowerShell 7, and Windows PowerShell 5.1 passed. Cargo-dist plans both
+  executables in all six platform archives.
+- Real candidate Global/Corporate MSIs compiled with both executables and exact
+  license-control readback; both Inno installers compiled. These were not
+  installed over the operator's existing installation.
+- Both names report `tr300 4.4.0`, have identical help, parse fast JSON, and
+  render ASCII reports. Five local alias fast runs measured 244.5–292.7 ms;
+  this is a smoke result, not a before/after performance claim.
+- Independent runtime, migration, and packaging reviews resolved compile,
+  rollback, foreign-file ownership, live-image, and inventory parsing defects.
+- Full release-provenance fixtures passed. Hosted/native/public qualification
+  remains pending. Windows recovery files are removed only by their own
+  verified-success transaction; incomplete rollback bytes survive later updates.
+
 ### v4.3.12 — Native Mac fixture-cleanup fix-forward (as of 2026-08-25)
 
 Release status: complete. Product behavior and installer policy are unchanged

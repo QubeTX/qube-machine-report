@@ -73,6 +73,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; PrepareToInstall temporarily extracts this same compiled payload for the
 ; non-mutating strict ownership preflight.
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion noencryption
+Source: "..\target\release\report.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 [Registry]
 ; Install-source marker. tr300 update reads HKCU\Software\TR300\InstallSource
@@ -97,7 +98,8 @@ begin
   Result := '';
   ExtractTemporaryFile('{#MyAppExeName}');
   Binary := ExpandConstant('{tmp}\{#MyAppExeName}');
-  if not Exec(Binary, 'migrate-cleanup --quiet --strict --dry-run --cargo-copy',
+  if not Exec(Binary, 'migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination "' +
+      ExpandConstant('{app}\bin\{#MyAppExeName}') + '"',
       ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
   begin
     Result := 'Could not start the TR-300 managed/Cargo ownership preflight. ' +

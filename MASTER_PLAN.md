@@ -4,8 +4,8 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-08-25
-**Complete public GitHub distribution / crates.io / working manifest:** 4.3.12 / 4.3.12 / 4.3.12
+**Last updated:** 2026-09-24
+**Complete public GitHub distribution / crates.io / working manifest:** 4.3.12 / 4.3.12 / 4.4.0
 (v4.2.2 remains the prior complete GitHub distribution. Release-chain hardening merged
 to `main` as `1ffb0cc`; PR #14 exact head `8f5919b` passed the complete local,
 hosted, security, review, and benchmark gates before merge as `2f997d2`.

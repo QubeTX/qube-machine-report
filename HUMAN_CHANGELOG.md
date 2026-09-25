@@ -13,6 +13,48 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-09-24
+
+### Fixed
+- Windows MSI installers now show the PolyForm Noncommercial 1.0.0 license
+  instead of placeholder text. Windows EXE installers already show this license;
+  the Mac installer has no license dialog.
+- Installs and upgrades protect unrelated commands named `report`, including
+  when upgrading from an older TR-300 installation.
+- Overlapping Windows updates preserve each other’s recovery files.
+- Updating through either command handles running Windows executables safely.
+  If recovery cannot finish, the error explains which files were preserved.
+
+### Added
+- **You can now type `report` in any terminal after installing TR-300.** It is
+  a real command included in every Windows, Mac, Linux, managed, and Cargo
+  install—not a PowerShell or shell-profile shortcut. It supports the normal
+  full report plus fast, JSON, ASCII, custom-title, and save options.
+- **Both names do the same thing.** `report update`, `report install`, and
+  `report uninstall` work just like the corresponding `tr300` commands.
+- **Both commands now come with matching terminal documentation.** `man tr300`
+  and `man report` explain the same reporting and maintenance options.
+  Both `-h` and `--help` are checked before release so their
+  command and option lists stay current.
+
+### Changed
+- **Upgrading no longer depends on a fragile profile alias.** If you previously
+  ran `tr300 install`, running it once after the upgrade removes TR-300's old
+  alias from the auto-run block. Any unrelated command or function that you
+  named `report` is preserved and called out as a possible conflict.
+- **Both commands now travel together through install, update, repair,
+  rollback, and uninstall.** The automated Windows and Mac package tests check
+  that `report` has the right version, exposes the same commands,
+  and disappears with the rest of TR-300.
+- **There still is no `tr300 config` command.** Settings are supplied as
+  command-line options; typing `tr300 config` returns an argument error.
+
+### Security
+- Update the secure-connection library to fix a recently disclosed TLS issue.
+- **Windows cleanup now uses the copy of `cmd.exe` owned by Windows itself.**
+  This prevents a different program earlier on PATH from being selected for
+  deferred uninstall cleanup.
+
 ## [4.3.12] - 2026-08-25
 
 ### Changed

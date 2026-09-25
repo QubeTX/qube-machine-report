@@ -11,7 +11,14 @@ Companion docs:
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-08-25
+Last verified against source: 2026-09-24
+
+Current candidate: v4.4.0 adds a real full-alias `report` executable beside
+`tr300` in every distribution and replaces both Windows MSI placeholder EULAs
+with the shared `wix/License.rtf` rendering of `LICENSE`. Public distribution
+remains v4.3.12 until the protected release chain completes. Both names support all install/update/uninstall actions through the canonical
+`tr300` implementation. See the final ADR entry for
+paired payload ownership and compatibility requirements.
 
 ## Task management system
 
@@ -54,7 +61,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Cargo package name: `tr300`
 - Library import path: `tr300`
 - Current crates.io version and complete GitHub distribution: `4.3.12`;
-  working manifest: `4.3.12` (battery hardening, Windows
+  working manifest: `4.4.0` (battery hardening, Windows
   full-mode latency, thermal reporting, and Windows/Apple release-bootstrap
   repairs). PR #14
   merged as `2f997d2e1a1dac764ca170abd0c227264858a8c9` after its exact head passed
@@ -215,7 +222,9 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   evidence is in `TESTING.md` and the current handoff.
 - MSRV: `1.95` (declared in both `Cargo.toml` `rust-version` AND `rust-toolchain.toml` `channel` — the two-place pin is required; see "Toolchain pinning" below)
 - Binary name: `tr300`
-- Convenience alias installed by `--install`: `report`
+- Packaged full command alias: `report` (`report.exe` on Windows), installed
+  beside `tr300` by every v4.4+ distribution. `--install` configures optional
+  shell auto-run; the command itself does not depend on a shell profile.
 - License: PolyForm-Noncommercial-1.0.0
 - Repo: `https://github.com/QubeTX/qube-machine-report`
 - Default branch: `main` (renamed atomically from `master` on 2026-07-17;
@@ -230,11 +239,12 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
   checkout.
 - Release tooling: cargo-dist `0.31.0`
 
-The crate exposes both:
-- a binary in `src/main.rs`
+The crate exposes:
+- the canonical binary in `src/main.rs`
+- the full command alias in `src/bin/report.rs`
 - a library in `src/lib.rs`, including `generate_report()`, `generate_report_with_config()`, `format_bytes()`, `CollectMode`, `SystemInfo`, `Config`, `AppError`, and `Result`
 
-Keep both surfaces working when refactoring.
+Keep both executable entry points and the library working when refactoring.
 
 For v4 migration notes, distinguish Rust source compatibility from CLI/JSON
 compatibility. Direct external struct literals or exhaustive patterns over
@@ -272,6 +282,7 @@ man/
 src/
   cli.rs                      # clap CLI definition shared by main.rs and build.rs
   main.rs                     # binary entrypoint and action dispatch
+  bin/report.rs               # forwards all arguments to the exact adjacent tr300
   lib.rs                      # public library exports and helpers
   config.rs                   # config flags, widths, box char sets
   error.rs                    # AppError + Result alias
@@ -370,7 +381,7 @@ Because `build.rs` uses `include!("src/cli.rs")`, `src/cli.rs` must use normal `
 Current supported flags:
 - `--ascii` -> ASCII table + `#`/`.` bars
 - `--json` -> JSON output
-- `--install` -> install alias + shell auto-run block
+- `--install` -> configure the optional shell auto-run block
 - `--uninstall` -> interactive uninstall path
 - `--update` -> self-update from GitHub releases
 - `-t, --title <TITLE>` -> custom title
@@ -385,7 +396,7 @@ Current supported flags:
 
 Current supported positional actions:
 - `update` -> self-update from GitHub releases
-- `install` -> install alias + shell auto-run block
+- `install` -> configure the optional shell auto-run block
 - `uninstall` -> interactive uninstall path
 
 These are optional positional values, not clap subcommands. They intentionally
@@ -423,7 +434,10 @@ After collection it:
 
 `--fast` is intended for shell startup auto-run and avoids slow subprocess-heavy checks where possible.
 
-Install profile auto-run uses `tr300 --fast`; the `report` alias still runs full mode. Exact skipped work varies by platform collector, so check `src/collectors/platform/{linux,macos,windows}.rs` before changing fast-mode behavior.
+Install profile auto-run uses `tr300 --fast`. Both bare `report` and bare
+`tr300` use full mode; either command accepts `--fast`. Exact skipped work
+varies by platform collector, so check
+`src/collectors/platform/{linux,macos,windows}.rs` before changing fast-mode behavior.
 
 v4.3 thermal/battery tripwires: Linux's pure-sysfs thermal scan runs in both
 modes, chooses the hottest valid sensor deterministically within the preferred
@@ -704,17 +718,29 @@ Entry points in `src/install/mod.rs`:
 - `uninstall_complete()`
 - prompt helpers re-exported from `prompt.rs`
 
+`report` is a packaged executable that forwards every argument to the exact
+adjacent `tr300`, including install, update, and uninstall. It preserves the
+canonical help/version output, streams, and exit status without searching PATH
+or invoking a shell. Native packages, managed installers, and Cargo install both
+commands. Profile configuration is optional; `tr300 install` and `report install`
+write only the guarded auto-run block. Rewriting an owned legacy block retires
+its old `report` alias. Foreign aliases/functions remain untouched and may
+shadow the packaged command; installation warns about detected conflicts.
+
 ### Interactive uninstall (`--uninstall`)
 
 Prompt options:
 - profile-only cleanup
-- complete uninstall (profile + binary + exact matching cargo-dist receipt, when present)
+- complete uninstall (profile + owned command payloads + exact matching
+  cargo-dist receipt, when present)
 - cancel
 
 Complete uninstall requires explicit confirmation and shows every ownership
 path before deletion. On Unix, it must preflight an exact managed receipt before
-profile mutation and remove the running managed binary/receipt pair
-transactionally; malformed, foreign, linked, or changing evidence fails closed.
+profile mutation and remove the owned `tr300`/`report` payloads and receipt
+transactionally. A historical single-binary receipt does not authorize deleting
+an unrelated `report` sibling; malformed, foreign, linked, or changing evidence
+fails closed.
 Do not bypass the prompt unless implementing a clearly requested
 non-interactive variant.
 
@@ -729,8 +755,6 @@ Injected block:
 
 ```bash
 # TR-300 Machine Report
-alias report='tr300'
-
 # Auto-run on interactive shell; guards prevent spam-on-every-prompt
 # when the binary is missing, and recursion in nested shells.
 case "$-" in *i*)
@@ -762,9 +786,9 @@ Injected block:
 
 ```powershell
 # TR-300 Machine Report
-Set-Alias -Name report -Value tr300
-
-# Auto-run on interactive shell; also guard missing binaries and recursion.
+# Auto-run on interactive shell; guards prevent error spam when the
+# binary is missing, recursion in nested shells, and rendering in
+# scripted (non-interactive) invocations.
 if (
     (Get-Command tr300 -ErrorAction SilentlyContinue) -and
     -not $env:TR300_AUTORUN_RAN -and
@@ -779,7 +803,9 @@ if (
 Behavior:
 - performs the conservative CurrentUser execution-policy preflight, then uses
   the same marker-balance/backup/atomic-write pipeline as Unix
-- complete uninstall deletes the binary and attempts to remove an empty parent directory when path contains `tr300`
+- complete uninstall validates ownership of both command paths before profile
+  mutation, schedules their exact paths for deferred removal, and attempts to
+  remove an empty product parent directory when its path contains `tr300`
 
 ### Managed installer contract (MIC-1)
 
@@ -875,8 +901,9 @@ Behavior:
   private sibling, installs/verifies the replacement at `tr300.exe`, restores
   the old image on strategy failure, and asks only the verified new binary to
   delete the backup after the old process exits. The hidden cleanup action
-  accepts only an absolute same-parent numeric private name; another update
-  best-effort removes a stale backup left by an interrupted helper.
+  accepts only an absolute same-parent numeric private name. Later updates
+  preserve prior recovery files; only their verified-success transaction may
+  schedule cleanup. Interrupted cleanup can leave a retained private backup.
 - on Windows Global MSI/EXE, the non-elevated parent resolves and pins the
   exact channel/version, then uses native `ShellExecuteExW` `runas` with a
   returned process handle for one UAC prompt. The hidden worker accepts only

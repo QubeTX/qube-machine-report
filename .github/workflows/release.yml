@@ -416,6 +416,7 @@ jobs:
               f"{root}/LICENSE",
               f"{root}/CHANGELOG.md",
               f"{root}/README.md",
+              f"{root}/report",
               f"{root}/tr300",
           }
           output = Path(output_path)
@@ -439,7 +440,7 @@ jobs:
                           raise SystemExit("unexpected archive directory metadata")
                       destination.mkdir(mode=0o755)
                       continue
-                  expected_mode = 0o755 if member.name == f"{root}/tr300" else 0o644
+                  expected_mode = 0o755 if member.name in (f"{root}/tr300", f"{root}/report") else 0o644
                   if (
                       not member.isfile()
                       or member.size <= 0
@@ -464,6 +465,8 @@ jobs:
           PY
           test -f "$STAGING_DIRECTORY/tr300-$APPLE_TARGET/tr300"
           test -x "$STAGING_DIRECTORY/tr300-$APPLE_TARGET/tr300"
+          test -f "$STAGING_DIRECTORY/tr300-$APPLE_TARGET/report"
+          test -x "$STAGING_DIRECTORY/tr300-$APPLE_TARGET/report"
 
       - name: Sign, notarize, and rehash the staged Apple archive
         timeout-minutes: 30
@@ -497,9 +500,11 @@ jobs:
           done
           archive_name="tr300-$APPLE_TARGET.tar.xz"
           archive_root="tr300-$APPLE_TARGET"
-          binary="$STAGING_DIRECTORY/$archive_root/tr300"
+          tr300_binary="$STAGING_DIRECTORY/$archive_root/tr300"
+          report_binary="$STAGING_DIRECTORY/$archive_root/report"
           # Bash 3.2 does not apply errexit to bare [[ ]]; keep every guard explicit.
-          [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || exit 1
+          [[ -f "$tr300_binary" && ! -L "$tr300_binary" && -x "$tr300_binary" ]] || exit 1
+          [[ -f "$report_binary" && ! -L "$report_binary" && -x "$report_binary" ]] || exit 1
 
           work_dir=$(mktemp -d "$RUNNER_TEMP/tr300-notary-$APPLE_TARGET.XXXXXX")
           credential_dir="$work_dir/credentials"
@@ -555,23 +560,36 @@ jobs:
           security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
           keychain_search_modified=true
           codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
-            --keychain "$keychain" --sign "$signing_fingerprint" "$binary"
+            --keychain "$keychain" --sign "$signing_fingerprint" "$tr300_binary"
+          codesign --force --identifier com.qubetx.tr300.report --options runtime --timestamp \
+            --keychain "$keychain" --sign "$signing_fingerprint" "$report_binary"
           restore_keychain_search
-          codesign --verify --strict --verbose=4 "$binary"
-          signature_details=$(codesign -d --verbose=4 "$binary" 2>&1)
-          grep -Fqx 'Identifier=com.qubetx.tr300' <<< "$signature_details"
-          grep -Fqx "TeamIdentifier=$APPLE_TEAM_ID" <<< "$signature_details"
-          grep -Fqx "Authority=$imported_identity" <<< "$signature_details"
-          certificate_prefix="$work_dir/embedded-signing-certificate"
-          codesign -d --extract-certificates="$certificate_prefix" "$binary" >/dev/null 2>&1
-          embedded_fingerprint=$(openssl x509 -inform DER -in "${certificate_prefix}0" \
-            -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
-          [[ "$embedded_fingerprint" == "$signing_fingerprint" ]] || exit 1
-          grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$signature_details"
-          grep -Eq '^Timestamp=.+' <<< "$signature_details"
+          verify_signed_binary() {
+            local binary_path=$1
+            local expected_identifier=$2
+            local certificate_label=$3
+            local signature_details certificate_prefix embedded_fingerprint
+            codesign --verify --strict --verbose=4 "$binary_path"
+            signature_details=$(codesign -d --verbose=4 "$binary_path" 2>&1)
+            grep -Fqx "Identifier=$expected_identifier" <<< "$signature_details"
+            grep -Fqx "TeamIdentifier=$APPLE_TEAM_ID" <<< "$signature_details"
+            grep -Fqx "Authority=$imported_identity" <<< "$signature_details"
+            certificate_prefix="$work_dir/embedded-signing-certificate-$certificate_label"
+            codesign -d --extract-certificates="$certificate_prefix" "$binary_path" >/dev/null 2>&1
+            embedded_fingerprint=$(openssl x509 -inform DER -in "${certificate_prefix}0" \
+              -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+            [[ "$embedded_fingerprint" == "$signing_fingerprint" ]] || exit 1
+            grep -Eq '^CodeDirectory .*flags=.*\(runtime\)' <<< "$signature_details"
+            grep -Eq '^Timestamp=.+' <<< "$signature_details"
+          }
+          verify_signed_binary "$tr300_binary" com.qubetx.tr300 tr300
+          verify_signed_binary "$report_binary" com.qubetx.tr300.report report
 
           notary_zip="$work_dir/$archive_root-notary.zip"
-          /usr/bin/ditto -c -k --keepParent "$binary" "$notary_zip"
+          notary_payload="$work_dir/$archive_root-notary"
+          mkdir "$notary_payload"
+          cp "$tr300_binary" "$report_binary" "$notary_payload/"
+          /usr/bin/ditto -c -k --keepParent "$notary_payload" "$notary_zip"
           notary_result="$work_dir/notary-result.json"
           xcrun notarytool submit "$notary_zip" --key "$api_key_path" \
             --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \

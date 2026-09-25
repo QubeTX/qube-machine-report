@@ -321,6 +321,20 @@ pub fn find_binary_location() -> Option<PathBuf> {
     }
 }
 
+/// Resolve the exact packaged `report` sibling when the platform supports it.
+pub fn adjacent_report_location(binary_path: &std::path::Path) -> Result<Option<PathBuf>> {
+    #[cfg(windows)]
+    {
+        windows::adjacent_report_location(binary_path)
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = binary_path;
+        Ok(None)
+    }
+}
+
 /// Get the parent directory of the binary (for cleanup on Windows)
 pub fn get_binary_parent_dir(binary_path: &std::path::Path) -> Option<PathBuf> {
     #[cfg(unix)]

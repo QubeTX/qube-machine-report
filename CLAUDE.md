@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+The v4.4.0 candidate packages a full-alias `report` command beside `tr300`,
+with identical options and maintenance actions. Both Windows MSI editions embed the
+shared `wix/License.rtf` rendering of `LICENSE`; EXEs already use `LICENSE`,
+and the macOS component PKG/compatibility DMG has no EULA screen. Keep RTF
+text in sync with the complete license and Required Notice. The CI MSI build
+checks the actual LicenseAgreementDlg text in every compiled fixture.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **Companion file:** The canonical architecture decision ledger through
@@ -53,7 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
 Complete public GitHub distribution and current crates.io package: **4.3.12**.
-The working manifest is **4.3.12**. PR #14 merged as
+The working manifest is **4.4.0**. PR #14 merged as
 `2f997d2e1a1dac764ca170abd0c227264858a8c9` after exact-head local, hosted,
 security, review, and benchmark qualification; exact-main CI run `32766014047`
 passed all 19 jobs. Publisher PR #17 merged as `c788029d`; exact-main CI
@@ -213,10 +220,23 @@ cross-machine push, update both the board and the exhaustive tracked handoff
 under `docs/agents/handoff/`.
 
 **Crate name:** `tr300` (lowercase, no hyphen — used by `cargo install tr300` and as the library import path `tr300`)
-**Binary name:** `tr300` (no hyphen — set via `[[bin]] name = "tr300"`)
-**Convenience alias:** `report` (created by `--install`)
+**Canonical binary:** `tr300` (no hyphen — set via `[[bin]] name = "tr300"`)
+**Packaged full command alias:** `report` (`src/bin/report.rs`), installed beside
+`tr300` by every v4.4+ distribution, including Cargo. It forwards every argument
+to that exact sibling and preserves canonical help/version output, streams, and
+exit status. Both names support all maintenance actions.
 
-The crate exposes both a binary (`src/main.rs`) and a library (`src/lib.rs` with public `generate_report()`, `format_bytes()`, etc.) — keep both surfaces working when refactoring.
+The crate exposes the canonical binary (`src/main.rs`), the forwarding binary,
+and a library (`src/lib.rs` with public `generate_report()`, `format_bytes()`,
+etc.) — keep all surfaces working when refactoring.
+
+`tr300 install` and `report install` configure optional guarded shell auto-run;
+neither is required to make `report` available on PATH. Current profile blocks
+contain the `tr300 --fast` auto-run and no alias definition. Rewriting an owned
+legacy TR-300 block retires its old alias, while foreign aliases/functions are
+preserved and produce a shadowing warning when detected. Complete uninstall
+removes both commands only with matching ownership evidence; an old
+single-binary receipt never authorizes deleting a generic `report` sibling.
 
 ### Skill routing and current guidance
 
@@ -256,7 +276,7 @@ cargo run -- --save              # Same save action
 cargo run -- -s                  # Same save action
 cargo run -- update              # Self-update from GitHub releases
 cargo run -- --update            # Self-update from GitHub releases
-cargo run -- install             # Add shell profile alias + auto-run
+cargo run -- install             # Configure optional shell profile auto-run
 cargo run -- uninstall           # Interactive profile/binary cleanup
 ```
 
@@ -307,7 +327,11 @@ Windows-specific accuracy rules are extensive — load the **`windows-accuracy`*
 
 ### Fast Mode (`CollectMode::Fast`)
 
-`--fast` skips many slow optional probes for sub-second startup. Auto-run uses `tr300 --fast`; the `report` alias runs full mode. What gets skipped varies by platform — see the table in each platform collector. `-f/--full` is the explicit counterpart to `--fast` (full collection is already the default; the two flags conflict).
+`--fast` skips many slow optional probes for sub-second startup. Auto-run uses
+`tr300 --fast`; bare `tr300` and `report` both use full mode, and either accepts
+`--fast`. What gets skipped varies by platform — see the table in each platform
+collector. `-f/--full` is the explicit counterpart to `--fast` (full collection
+is already the default; the two flags conflict).
 
 Thermal rows (`CPU TEMP` / `GPU TEMP`) render in both modes when trusted data
 exists. Linux uses pure sysfs, chooses the hottest valid sensor deterministically
@@ -367,7 +391,7 @@ skill didn't trigger. Deep rationale for every rule: [`docs/architecture-decisio
 
 | If you're editing… | Load skill | Load-bearing tripwires (full rules in the skill) |
 |---|---|---|
-| `src/install/**` (alias / rc-file, exec-policy, uninstall) | `windows-install` | `atomic_write` never `std::fs::write` (and resolves a symlinked rc target so the link survives, E3); `check_marker_balance` before any mutation; exec-policy preflight before `$PROFILE`; `fail_install` for fs errors |
+| `src/install/**` (auto-run / rc-file, exec-policy, uninstall) | `windows-install` | `atomic_write` never `std::fs::write` (and resolves a symlinked rc target so the link survives, E3); `check_marker_balance` before any mutation; exec-policy preflight before `$PROFILE`; `fail_install` for fs errors |
 | `src/collectors/platform/windows.rs` (any Windows field) | `windows-accuracy` | WMI on a fresh worker thread (COM init); PSCore version by `(u64,u64,u64)` tuple, not string sort; Win11 = `CurrentBuild >= 22000`; no `net user` for last-login |
 | `wix/**`, `wix-corporate/**`, `inno/**`, `windows-installers.yml`, `release.yml`, `src/update.rs`, `src/migrate.rs` | `windows-distribution-and-update` | the four product GUIDs are PERMANENT; registry `InstallSource` marker strings in lockstep (installer / `update.rs` / JSON); keep SHA256 + post-install verify; preserve both checked-in `release.yml` customizations (legacy aliases + fail-closed Apple trust) |
 | `CHANGELOG.md`, `HUMAN_CHANGELOG.md` | `tr300-changelog` | update both in the **same commit** (strip technical noise from the human mirror) |

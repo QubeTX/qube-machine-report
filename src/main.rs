@@ -46,6 +46,9 @@ fn main() -> Result<()> {
         // Hidden, installer-internal: consolidate to a single install. Legacy
         // calls remain advisory; current native packages pass `--strict` and
         // require complete convergence before reporting installation success.
+        if let Some(destination) = cli.native_destination.as_deref() {
+            tr300::migrate::preflight_native_destination(destination)?;
+        }
         let mut opts = tr300::migrate::MigrateOptions::default();
         opts.cargo_copy = cli.cargo_copy;
         opts.other_edition = cli.other_edition;
@@ -149,8 +152,8 @@ fn run_install() -> Result<()> {
     println!("Installation complete!");
     println!();
     println!("The following changes were made:");
-    println!("  - Added 'report' alias for tr300");
-    println!("  - Added auto-run on new interactive shells");
+    println!("  - Configured auto-run on new interactive shells");
+    println!("  - Refreshed the TR-300 profile block (legacy 'report' aliases are retired)");
     println!();
     #[cfg(target_os = "macos")]
     println!("Please restart your shell or run 'source ~/.zshrc' (or the profile shown above)");
@@ -187,6 +190,7 @@ fn run_uninstall() -> Result<()> {
                 let preview = install::prepare_complete_uninstall()?;
                 if !install::confirm_complete_uninstall_paths(
                     preview.binary_path(),
+                    preview.report_path(),
                     None,
                     preview.receipt_path(),
                 ) {
@@ -210,9 +214,19 @@ fn run_uninstall() -> Result<()> {
                 let parent_dir = binary_path
                     .as_ref()
                     .and_then(|p| install::get_binary_parent_dir(p.as_path()));
+                let report_path = binary_path
+                    .as_deref()
+                    .map(install::adjacent_report_location)
+                    .transpose()?
+                    .flatten();
 
                 if let Some(ref path) = binary_path {
-                    if !install::confirm_complete_uninstall(path, parent_dir.as_deref()) {
+                    if !install::confirm_complete_uninstall_paths(
+                        Some(path),
+                        report_path.as_deref(),
+                        parent_dir.as_deref(),
+                        None,
+                    ) {
                         println!();
                         println!("Uninstall cancelled.");
                         return Ok(());

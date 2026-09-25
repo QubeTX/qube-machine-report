@@ -864,6 +864,7 @@ jobs:
                   f"{root}/LICENSE",
                   f"{root}/CHANGELOG.md",
                   f"{root}/README.md",
+                  f"{root}/report",
                   f"{root}/tr300",
               }
               destination_root = output_dir / target
@@ -886,7 +887,11 @@ jobs:
                           ):
                               raise SystemExit("unexpected archive directory metadata")
                           continue
-                      expected_mode = 0o755 if member.name == f"{root}/tr300" else 0o644
+                      expected_mode = (
+                          0o755
+                          if member.name in (f"{root}/report", f"{root}/tr300")
+                          else 0o644
+                      )
                       if (
                           not member.isfile()
                           or member.size <= 0
@@ -894,12 +899,12 @@ jobs:
                           not in (expected_mode, stat.S_IFREG | expected_mode)
                       ):
                           raise SystemExit(f"unexpected archive file metadata: {member.name!r}")
-                      if member.name != f"{root}/tr300":
+                      if member.name not in (f"{root}/report", f"{root}/tr300"):
                           continue
                       extracted = source.extractfile(member)
                       if extracted is None:
                           raise SystemExit("could not read the architecture binary")
-                      binary = destination_root / "tr300"
+                      binary = destination_root / PurePosixPath(member.name).name
                       flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
                       if hasattr(os, "O_NOFOLLOW"):
                           flags |= os.O_NOFOLLOW
@@ -919,6 +924,12 @@ jobs:
             -output "$OUTPUT_DIRECTORY/tr300-universal"
           chmod 0755 "$OUTPUT_DIRECTORY/tr300-universal"
           lipo "$OUTPUT_DIRECTORY/tr300-universal" -verify_arch arm64 x86_64
+          lipo -create \
+            "$work_directory/aarch64-apple-darwin/report" \
+            "$work_directory/x86_64-apple-darwin/report" \
+            -output "$OUTPUT_DIRECTORY/report-universal"
+          chmod 0755 "$OUTPUT_DIRECTORY/report-universal"
+          lipo "$OUTPUT_DIRECTORY/report-universal" -verify_arch arm64 x86_64
 
           python3 - verified-source/scripts/build-sign-notarize-macos-installer.sh \
             "$OUTPUT_DIRECTORY/preinstall" <<'PY'
@@ -954,12 +965,12 @@ jobs:
           (
             cd "$OUTPUT_DIRECTORY" || exit 1
             shasum -a 256 \
-              tr300-universal preinstall PROVENANCE \
+              report-universal tr300-universal preinstall PROVENANCE \
               > SHA256SUMS || exit 1
             shasum -a 256 -c SHA256SUMS || exit 1
           ) || exit 1
           python3 - "$OUTPUT_DIRECTORY" \
-            tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'
+            report-universal tr300-universal preinstall PROVENANCE SHA256SUMS <<'PY'
           import os
           import stat
           import sys
@@ -986,6 +997,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           path: |
+            ${{ runner.temp }}/tr300-prepared-installer-inputs/report-universal
             ${{ runner.temp }}/tr300-prepared-installer-inputs/tr300-universal
             ${{ runner.temp }}/tr300-prepared-installer-inputs/preinstall
             ${{ runner.temp }}/tr300-prepared-installer-inputs/PROVENANCE
@@ -1214,6 +1226,7 @@ jobs:
           [[ "$zip_hash" == "$PREPARED_ARTIFACT_DIGEST" ]] || exit 1
           mkdir -m 700 "$PREPARED_DIRECTORY"
           expected=(
+            report-universal
             tr300-universal
             preinstall
             PROVENANCE
@@ -1291,7 +1304,7 @@ jobs:
             "$EXPECTED_SOURCE_SHA" "$RELEASE_TAG" "$RELEASE_VERSION")
           [[ "$(cat "$PREPARED_DIRECTORY/PROVENANCE")" == "$expected_provenance" ]] || exit 1
           python3 - "$PREPARED_DIRECTORY/SHA256SUMS" \
-            PROVENANCE preinstall tr300-universal <<'PY'
+            PROVENANCE preinstall report-universal tr300-universal <<'PY'
           import re
           import sys
           from pathlib import Path
@@ -1335,6 +1348,7 @@ jobs:
           ) || exit 1
           [[ $(head -n 1 "$PREPARED_DIRECTORY/preinstall") == '#!/bin/sh' ]] || exit 1
           [[ $(wc -c < "$PREPARED_DIRECTORY/preinstall") -le 32768 ]] || exit 1
+          lipo "$PREPARED_DIRECTORY/report-universal" -verify_arch arm64 x86_64
           lipo "$PREPARED_DIRECTORY/tr300-universal" -verify_arch arm64 x86_64
 
       - name: Build direct PKG and legacy DMG bridge
@@ -1433,11 +1447,16 @@ jobs:
           security find-certificate -c "$APPLE_INSTALLER_SIGNING_IDENTITY" \
             "$keychain" >/dev/null
 
-          universal="$work_directory/tr300"
-          install -m 0755 "$PREPARED_DIRECTORY/tr300-universal" "$universal"
-          lipo "$universal" -verify_arch arm64 x86_64
+          tr300_universal="$work_directory/tr300"
+          report_universal="$work_directory/report"
+          install -m 0755 "$PREPARED_DIRECTORY/tr300-universal" "$tr300_universal"
+          install -m 0755 "$PREPARED_DIRECTORY/report-universal" "$report_universal"
+          lipo "$tr300_universal" -verify_arch arm64 x86_64
+          lipo "$report_universal" -verify_arch arm64 x86_64
           codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
-            --keychain "$keychain" --sign "$signing_fingerprint" "$universal"
+            --keychain "$keychain" --sign "$signing_fingerprint" "$tr300_universal"
+          codesign --force --identifier com.qubetx.tr300.report --options runtime --timestamp \
+            --keychain "$keychain" --sign "$signing_fingerprint" "$report_universal"
 
           verify_code_signature() {
             local path=$1
@@ -1456,7 +1475,8 @@ jobs:
               -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
             [[ "$embedded_fingerprint" == "$signing_fingerprint" ]] || exit 1
           }
-          verify_code_signature "$universal" com.qubetx.tr300
+          verify_code_signature "$tr300_universal" com.qubetx.tr300
+          verify_code_signature "$report_universal" com.qubetx.tr300.report
 
           notarize() {
             local artifact=$1
@@ -1487,13 +1507,18 @@ jobs:
             grep -Fq -- "($APPLE_TEAM_ID)" <<< "$signature"
           }
 
+          notary_payload="$work_directory/notary-payload"
+          mkdir -m 0700 "$notary_payload"
+          install -m 0755 "$tr300_universal" "$notary_payload/tr300"
+          install -m 0755 "$report_universal" "$notary_payload/report"
           binary_zip="$work_directory/tr300-universal-notary.zip"
-          /usr/bin/ditto -c -k --keepParent "$universal" "$binary_zip"
+          /usr/bin/ditto -c -k --keepParent "$notary_payload" "$binary_zip"
           notarize "$binary_zip"
 
           payload="$work_directory/payload"
           install -d -m 0755 "$payload/usr/local/bin"
-          install -m 0755 "$universal" "$payload/usr/local/bin/tr300"
+          install -m 0755 "$tr300_universal" "$payload/usr/local/bin/tr300"
+          install -m 0755 "$report_universal" "$payload/usr/local/bin/report"
           package_scripts="$work_directory/pkg-scripts"
           mkdir -m 0755 "$package_scripts"
           install -m 0755 "$PREPARED_DIRECTORY/preinstall" "$package_scripts/preinstall"
@@ -1899,7 +1924,7 @@ jobs:
           cmp "$pkg" "$mount/tr300.pkg"
 
           # Inspect the signed package itself before any install. The BOM may
-          # contain only the native binary, and Scripts may contain only the
+          # contain only the two native commands, and Scripts may contain only the
           # regular, non-link preinstall gate prepared from reviewed source.
           expanded_pkg="$RUNNER_TEMP/tr300-direct-pkg-expanded"
           case "$expanded_pkg" in
@@ -1918,7 +1943,8 @@ jobs:
           test ! -L "$expanded_pkg/Bom"
           payload_inventory="$RUNNER_TEMP/tr300-direct-pkg-payload-inventory"
           lsbom -s -f "$expanded_pkg/Bom" | sed 's#^\./##' > "$payload_inventory"
-          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 1 ] ||
+          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 2 ] ||
+            ! grep -Fqx 'usr/local/bin/report' "$payload_inventory" ||
             ! grep -Fqx 'usr/local/bin/tr300' "$payload_inventory"; then
             echo 'unexpected direct-PKG payload inventory' >&2
             exit 1
@@ -2114,7 +2140,8 @@ jobs:
             echo 'rejected package changed the managed receipt' >&2
             exit 1
           fi
-          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ]; then
+          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ] ||
+             [ -e /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
             echo 'rejected package left its payload behind' >&2
             exit 1
           fi
@@ -2159,6 +2186,10 @@ jobs:
             TR300_DOWNLOAD_URL="file://$TRUSTED_SOURCE_DIRECTORY" \
             sh "$managed_installer"
           test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
+          test "$("$HOME/.cargo/bin/report" --version)" = "tr300 $RELEASE_VERSION"
+          "$HOME/.cargo/bin/report" --fast --json | jq -e \
+            '.schema_version == 1 and .collection_mode == "fast"' >/dev/null
+          test "$("$HOME/.cargo/bin/report" --help)" = "$("$HOME/.cargo/bin/tr300" --help)"
           jq -e --arg version "$RELEASE_VERSION" '
             .provider.source == "cargo-dist" and .source.app_name == "tr300" and
             .version == $version
@@ -2171,6 +2202,8 @@ jobs:
           printf '2\ny\n' | "$HOME/.cargo/bin/tr300" uninstall
           test ! -e "$HOME/.cargo/bin/tr300"
           test ! -L "$HOME/.cargo/bin/tr300"
+          test ! -e "$HOME/.cargo/bin/report"
+          test ! -L "$HOME/.cargo/bin/report"
           test ! -e "$HOME/.config/tr300/tr300-receipt.json"
           test ! -L "$HOME/.config/tr300/tr300-receipt.json"
           for profile in "$HOME/.bashrc" "$HOME/.zshrc"; do
@@ -2209,7 +2242,8 @@ jobs:
           fi
           test "$(shasum -a 256 "$second_receipt" | awk '{print $1}')" = \
             "$second_receipt_hash"
-          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ]; then
+          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ] ||
+             [ -e /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
             echo 'second-home rejection left its payload behind' >&2
             exit 1
           fi
@@ -2288,7 +2322,8 @@ jobs:
           fi
           test "$(shasum -a 256 "$custom_fixture_receipt" | awk '{print $1}')" = \
             "$custom_fixture_hash"
-          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ]; then
+          if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ] ||
+             [ -e /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; then
             echo 'custom-home rejection left the signed payload behind' >&2
             exit 1
           fi
@@ -2330,6 +2365,8 @@ jobs:
           test ! -e "$missing_receipt"
           test ! -e /usr/local/bin/tr300
           test ! -L /usr/local/bin/tr300
+          test ! -e /usr/local/bin/report
+          test ! -L /usr/local/bin/report
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'broken-link rejection left a package receipt behind' >&2
             exit 1
@@ -2338,15 +2375,31 @@ jobs:
           # Exact fixture cleanup leaves no managed evidence. First prove a
           # genuinely fresh candidate install, then reset only its exact native
           # payload/receipt so the published v4.2.2 native upgrade can run.
-          rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
+          rm -f "$HOME/.cargo/bin/report" "$HOME/.cargo/bin/tr300" \
+            "$HOME/.config/tr300/tr300-receipt.json"
+          # A generic preexisting report command is not TR-300 ownership.
+          # Prove preinstall preserves it before PackageKit writes either file.
+          foreign_report="$RUNNER_TEMP/tr300-foreign-report"
+          printf '%s\n' '#!/bin/sh' 'echo foreign-report-command' > "$foreign_report"
+          sudo install -m 0755 "$foreign_report" /usr/local/bin/report
+          if sudo installer -pkg "$pkg" -target /; then
+            echo 'package overwrote an unowned report command' >&2
+            exit 1
+          fi
+          cmp "$foreign_report" /usr/local/bin/report
+          test ! -e /usr/local/bin/tr300
+          sudo rm /usr/local/bin/report
           sudo installer -pkg "$pkg" -target /
           test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
+          test "$(/usr/local/bin/report --version)" = "tr300 $RELEASE_VERSION"
           grep -Fqx "version: $RELEASE_VERSION" \
             < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
-          sudo rm -f /usr/local/bin/tr300
+          sudo rm -f /usr/local/bin/report /usr/local/bin/tr300
           sudo pkgutil --forget com.qubetx.tr300.pkg >/dev/null
           test ! -e /usr/local/bin/tr300
           test ! -L /usr/local/bin/tr300
+          test ! -e /usr/local/bin/report
+          test ! -L /usr/local/bin/report
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'fresh-install fixture reset left a package receipt behind' >&2
             exit 1
@@ -2412,6 +2465,10 @@ jobs:
           grep -Fqx 'package-id: com.qubetx.tr300.pkg' <<< "$baseline_package_info"
           grep -Fqx 'version: 4.2.2' <<< "$baseline_package_info"
           pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/tr300'
+          if pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/report'; then
+            echo 'immutable v4.2.2 baseline unexpectedly contains report' >&2
+            exit 1
+          fi
 
           sudo installer -pkg "$pkg" -target /
           test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
@@ -2425,25 +2482,42 @@ jobs:
           package_location=$(sed -n 's/^location:[[:space:]]*//p' <<< "$package_info")
           [[ -z "$package_location" || "$package_location" == / ]] || exit 1
           pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/tr300'
+          pkgutil --files com.qubetx.tr300.pkg | grep -Fqx 'usr/local/bin/report'
           file_info=$(pkgutil --file-info /usr/local/bin/tr300)
           grep -Fqx 'path: /usr/local/bin/tr300' <<< "$file_info"
           grep -Fqx 'volume: /' <<< "$file_info"
           grep -Fqx 'pkgid: com.qubetx.tr300.pkg' <<< "$file_info"
           grep -Fqx "pkg-version: $RELEASE_VERSION" <<< "$file_info"
+          report_file_info=$(pkgutil --file-info /usr/local/bin/report)
+          grep -Fqx 'path: /usr/local/bin/report' <<< "$report_file_info"
+          grep -Fqx 'volume: /' <<< "$report_file_info"
+          grep -Fqx 'pkgid: com.qubetx.tr300.pkg' <<< "$report_file_info"
+          grep -Fqx "pkg-version: $RELEASE_VERSION" <<< "$report_file_info"
           test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
+          test "$(/usr/local/bin/report --version)" = "tr300 $RELEASE_VERSION"
           codesign --verify --strict --verbose=4 /usr/local/bin/tr300
           installed_details=$(codesign -d --verbose=4 /usr/local/bin/tr300 2>&1)
           grep -Fqx 'Identifier=com.qubetx.tr300' <<< "$installed_details"
           grep -Fqx -- "TeamIdentifier=$APPLE_TEAM_ID" <<< "$installed_details"
           grep -Fq 'Authority=Developer ID Application:' <<< "$installed_details"
+          codesign --verify --strict --verbose=4 /usr/local/bin/report
+          report_installed_details=$(codesign -d --verbose=4 /usr/local/bin/report 2>&1)
+          grep -Fqx 'Identifier=com.qubetx.tr300.report' <<< "$report_installed_details"
+          grep -Fqx -- "TeamIdentifier=$APPLE_TEAM_ID" <<< "$report_installed_details"
+          grep -Fq 'Authority=Developer ID Application:' <<< "$report_installed_details"
           # Xcode 16.4 requires the input file before -verify_arch. This must
           # match the builder's lifecycle check.
           lipo /usr/local/bin/tr300 -verify_arch arm64 x86_64
+          lipo /usr/local/bin/report -verify_arch arm64 x86_64
           /usr/local/bin/tr300 --fast --json | jq -e '.schema_version == 1'
+          /usr/local/bin/report --fast --json | jq -e \
+            '.schema_version == 1 and .collection_mode == "fast"'
           /usr/local/bin/tr300 --ascii --fast >/dev/null
           native_hash=$(shasum -a 256 /usr/local/bin/tr300 | awk '{print $1}')
+          report_native_hash=$(shasum -a 256 /usr/local/bin/report | awk '{print $1}')
           sudo installer -pkg "$pkg" -target /
           test "$(shasum -a 256 /usr/local/bin/tr300 | awk '{print $1}')" = "$native_hash"
+          test "$(shasum -a 256 /usr/local/bin/report | awk '{print $1}')" = "$report_native_hash"
           test "$(/usr/local/bin/tr300 --version)" = "tr300 $RELEASE_VERSION"
           grep -Fqx "version: $RELEASE_VERSION" \
             < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
@@ -2456,12 +2530,15 @@ jobs:
             TR300_DOWNLOAD_URL="file://$TRUSTED_SOURCE_DIRECTORY" \
             sh "$managed_installer"
           test ! -e /usr/local/bin/tr300
+          test ! -e /usr/local/bin/report
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'managed takeover left the package receipt behind' >&2
             exit 1
           fi
           test "$("$HOME/.cargo/bin/tr300" --version)" = "tr300 $RELEASE_VERSION"
-          rm -f "$HOME/.cargo/bin/tr300" "$HOME/.config/tr300/tr300-receipt.json"
+          test "$("$HOME/.cargo/bin/report" --version)" = "tr300 $RELEASE_VERSION"
+          rm -f "$HOME/.cargo/bin/report" "$HOME/.cargo/bin/tr300" \
+            "$HOME/.config/tr300/tr300-receipt.json"
 
           # Seal this architecture's success to the exact build artifact and
           # source-produced wrapper/raw/archive byte identities. The publisher
@@ -3492,7 +3569,9 @@ jobs:
           test -f "$CARGO_HOME/env"
           # shellcheck disable=SC2016
           grep -Fq '. "$HOME/.cargo/env"' "$HOME/.profile"
-          update=$("$CARGO_HOME/bin/tr300" update --json)
+          test "$("$CARGO_HOME/bin/report" --version)" = "tr300 ${RELEASE_TAG#v}"
+          test "$("$CARGO_HOME/bin/report" --help)" = "$("$CARGO_HOME/bin/tr300" --help)"
+          update=$("$CARGO_HOME/bin/report" update --json)
           jq -e '
             .success == true and .update_available == false and
             .install_channel == "shell-installer" and .requires_user_action == false
@@ -3587,14 +3666,23 @@ jobs:
             .requires_user_action == false
           ' <<< "$update"
           test "$(/usr/local/bin/tr300 --version)" = "tr300 $expected_version"
+          test "$(/usr/local/bin/report --version)" = "tr300 $expected_version"
+          alias_update=$(/usr/local/bin/report update --json)
+          jq -e '
+            .success == true and .update_available == false and
+            .install_channel == "macos-dmg-pkg" and .requires_user_action == false
+          ' <<< "$alias_update"
           package_info=$(pkgutil --pkg-info com.qubetx.tr300.pkg)
           grep -Fqx "version: $expected_version" <<< "$package_info"
           test "$(command -v tr300)" = /usr/local/bin/tr300
+          test "$(command -v report)" = /usr/local/bin/report
           test ! -e "$HOME/.cargo/bin/tr300"
+          test ! -e "$HOME/.cargo/bin/report"
 
       - name: Remove the validation package
         shell: bash
         run: |
-          sudo rm -f /usr/local/bin/tr300
+          sudo rm -f /usr/local/bin/report /usr/local/bin/tr300
           sudo pkgutil --forget com.qubetx.tr300.pkg
           test ! -e /usr/local/bin/tr300
+          test ! -e /usr/local/bin/report

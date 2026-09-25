@@ -23,11 +23,11 @@ pub fn prompt_uninstall_option() -> UninstallOption {
     println!("TR-300 Uninstall Options:");
     println!();
     println!("  1. Remove auto-run only");
-    println!("     Removes shell profile modifications (alias and auto-run)");
-    println!("     The tr300 binary will remain installed");
+    println!("     Removes TR-300 shell profile modifications");
+    println!("     The tr300 and report commands will remain installed");
     println!();
     println!("  2. Uninstall TR300 entirely");
-    println!("     Removes shell profile modifications AND the tr300 binary");
+    println!("     Removes shell profile modifications AND both commands");
     #[cfg(unix)]
     println!("     Also removes its exact matching cargo-dist receipt, when present");
     println!();
@@ -58,19 +58,24 @@ pub fn prompt_uninstall_option() -> UninstallOption {
 /// Confirm complete uninstall with the user
 /// Returns true if user confirms, false otherwise
 pub fn confirm_complete_uninstall(binary_path: &Path, parent_dir: Option<&Path>) -> bool {
-    confirm_complete_uninstall_paths(Some(binary_path), parent_dir, None)
+    confirm_complete_uninstall_paths(Some(binary_path), None, parent_dir, None)
 }
 
 /// Confirm Complete uninstall while naming every exact Unix ownership path.
 pub fn confirm_complete_uninstall_paths(
     binary_path: Option<&Path>,
+    report_path: Option<&Path>,
     parent_dir: Option<&Path>,
     receipt_path: Option<&Path>,
 ) -> bool {
     println!();
-    if let Err(error) =
-        write_complete_uninstall_paths(&mut io::stdout(), binary_path, parent_dir, receipt_path)
-    {
+    if let Err(error) = write_complete_uninstall_paths(
+        &mut io::stdout(),
+        binary_path,
+        report_path,
+        parent_dir,
+        receipt_path,
+    ) {
         eprintln!("Could not display the exact Complete-uninstall paths: {error}");
         return false;
     }
@@ -99,6 +104,7 @@ pub fn confirm_complete_uninstall_paths(
 fn write_complete_uninstall_paths(
     output: &mut impl Write,
     binary_path: Option<&Path>,
+    report_path: Option<&Path>,
     parent_dir: Option<&Path>,
     receipt_path: Option<&Path>,
 ) -> io::Result<()> {
@@ -106,6 +112,9 @@ fn write_complete_uninstall_paths(
     writeln!(output, "  - Shell profile modifications")?;
     if let Some(binary_path) = binary_path {
         writeln!(output, "  - Binary: {}", binary_path.display())?;
+    }
+    if let Some(report_path) = report_path {
+        writeln!(output, "  - Report command: {}", report_path.display())?;
     }
     if let Some(receipt_path) = receipt_path {
         writeln!(output, "  - cargo-dist receipt: {}", receipt_path.display())?;
@@ -127,6 +136,7 @@ mod tests {
         write_complete_uninstall_paths(
             &mut output,
             Some(Path::new("/managed/bin/tr300")),
+            Some(Path::new("/managed/bin/report")),
             None,
             Some(Path::new("/config/tr300/tr300-receipt.json")),
         )
@@ -134,6 +144,7 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
 
         assert!(output.contains("Binary: /managed/bin/tr300"));
+        assert!(output.contains("Report command: /managed/bin/report"));
         assert!(output.contains("cargo-dist receipt: /config/tr300/tr300-receipt.json"));
         assert!(!output.contains("when present"));
     }

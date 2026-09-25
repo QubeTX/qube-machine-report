@@ -8,8 +8,7 @@ use clap::{Parser, ValueEnum};
 /// Positional action commands.
 ///
 /// These mirror the legacy action flags (`--update`, `--install`,
-/// `--uninstall`) so users can run `tr300 update` or the installed
-/// `report update` alias without a double-dash flag.
+/// `--uninstall`) so users can run `tr300 update` without a double-dash flag.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Action {
@@ -50,7 +49,8 @@ pub enum Action {
 #[command(
     long_about = "TR-300 displays comprehensive system information including OS, network, CPU, \n\
     memory, disk usage, and session details in a formatted table.\n\n\
-    After installation with --install, you can also use the 'report' alias."
+    The companion 'report' command is a full alias for 'tr300', including all reporting, \
+    installation, update, and uninstall options."
 )]
 pub struct Cli {
     /// Optional action command: update, install, or uninstall
@@ -65,7 +65,7 @@ pub struct Cli {
     #[arg(long)]
     pub json: bool,
 
-    /// Install tr300 to shell profile (adds 'report' alias and auto-run)
+    /// Configure shell-profile auto-run
     #[arg(long, conflicts_with_all = ["update", "uninstall", "action"])]
     pub install: bool,
 
@@ -152,6 +152,11 @@ pub struct Cli {
     /// for locating the cargo-bin directory).
     #[arg(long = "cargo-home", value_name = "PATH", hide = true)]
     pub cargo_home: Option<String>,
+
+    /// Verify native destination companion ownership before installer mutation.
+    #[arg(long = "native-destination", value_name = "TR300_PATH", hide = true,
+        requires_all = ["strict_cleanup", "dry_run"])]
+    pub native_destination: Option<std::path::PathBuf>,
 
     /// Exact sibling backup created by the Windows live-image handoff.
     #[arg(long = "update-backup", value_name = "PATH", hide = true)]

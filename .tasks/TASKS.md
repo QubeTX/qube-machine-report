@@ -4,11 +4,28 @@
 
 ## To-Do
 
+- [ ] **Ship v4.4.0 through the protected release chain** - merge only reviewed exact-head code, pass exact-main CI and trusted-OIDC crates publication, then push only `v4.4.0` and preserve immutable fix-forward rules (needs #v440) (ms #v44) (owner codex) #r44
+  - [ ] Merge a reviewed exact-head PR and pass all required checks
+  - [ ] Verify exact-main CI and trusted-OIDC crates publication before tagging
+  - [ ] Push only tag `v4.4.0` and pass private 24-to-30-to-validated-to-34 publication
+- [ ] **Audit the public v4.4.0 distribution and close the release ledger** - verify crates.io, all stable-name release assets, PATH-level `report` behavior, post-public smokes, and versionless homepage continuity (needs #r44) (ms #v44) (owner codex) #q44
+  - [ ] Verify exact public asset inventory, digests, signatures, and latest-release identity
+  - [ ] Verify `report` and `tr300` lifecycle behavior from the published channels
+  - [ ] Record run IDs, public evidence, task closure, and final docs in a protected follow-up PR
 - [ ] **Validate TR-300 on the AMD64 Linux laptop** - full/fast reports, shell/Cargo update preservation, permissions, networking, and graceful optional probes (ms #hw4) #amd
 - [ ] **Validate TR-300 on Raspberry Pi 4 ARM64** - native ARM asset, full/fast reports, shell/Cargo updates, permissions, networking, and graceful optional probes (ms #hw4) #pi4
 - [ ] **Complete the Alienware Global MSI v4.1.3 → v4.2.2 UAC update** - approve the same-channel transaction, then reprove one Program Files owner, registry/PATH, cleanup, JSON, functionality, and hardware (needs #v42) (ms #hw4) #w422
 
 ## Active
+
+- [ ] **Replace the Windows MSI placeholder EULA** - embed PolyForm Noncommercial 1.0.0 in both editions and inspect macOS packaging for placeholders (owner codex) #eula
+
+- [ ] **Implement the v4.4.0 PATH-level `report` command** - add a full CLI alias command across Cargo, archives, managed/native installers, Apple trust, tests, and user documentation while preserving canonical install/update/uninstall ownership (ms #v44) (owner codex) #v440
+  - [ ] Define the sibling-command execution and ownership contract
+  - [ ] Add `report` to Cargo and every supported distribution payload
+  - [ ] Forward every CLI action, including install, update, and uninstall while preserving Apple-signing and ownership invariants
+  - [ ] Add focused runtime, archive, installer-source, and provenance coverage
+  - [ ] Bump v4.4.0 docs and pass the complete local release gate
 
 ## Done
 
