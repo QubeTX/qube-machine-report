@@ -57,6 +57,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Windows managed updates resolve Windows PowerShell through the native system-directory API, share its bounded absolute-path resolver with MSI, and launch from the trusted PowerShell directory. Never restore PATH-selected PowerShell launchers. API contract: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw
 
+Cargo-dist Apple runner policy: explicitly map aarch64 to `macos-15` and x86_64 to `macos-15-intel` in the global manifest table. Validate the actual JSON plan before tag-only builds; a parse-only plan missed retired `macos-14` in v4.4.1. Keep the customized trust-boundary workflow intact. See the dated runner-plan addendum in the architecture ledger.
+
 ## Project Overview
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.

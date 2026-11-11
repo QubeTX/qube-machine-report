@@ -1,7 +1,7 @@
 [package]
 name = "tr300"
 default-run = "tr300"
-version = "4.4.1"
+version = "4.4.2"
 edition = "2021"
 # MSRV: __cpuid was reclassified as safe-to-call in Rust 1.95.0; we drop the
 # unsafe wrappers in collectors/cpu.rs and platform/windows.rs accordingly.
@@ -107,3 +107,8 @@ install-updater = false
 install-path = "CARGO_HOME"
 # Whether to publish prereleases to package managers
 publish-prereleases = false
+
+# Keep cargo-dist's generated Apple build matrix on supported native runners.
+[workspace.metadata.dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
+x86_64-apple-darwin = "macos-15-intel"

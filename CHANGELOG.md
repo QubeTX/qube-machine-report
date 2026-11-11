@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.2] - 2026-11-11
+
+### Fixed
+- Pin cargo-dist 0.31.0's generated Apple release builders to native `macos-15` and `macos-15-intel`. GitHub retired the default ARM `macos-14` image, cancelling v4.4.1 before runner assignment or any signing/publication. Preserve that immutable tag and exact published crate; v4.4.2 carries all v4.4.1 security fixes through a new complete release. (#sec35)
+
+### Internal
+- Validate the actual generated release matrix in both pre-tag CI and the Release plan before exposing build inputs. Require one native job per Apple target, exact runner and host architecture, and no container. Positive and negative fixtures cover retired, swapped, missing, duplicate, and non-native plans. (#sec35)
+
 ## [4.4.1] - 2026-11-10
+
+> Release status: exact unyanked crate published; immutable tag retained. GitHub distribution stopped before draft creation on a retired Apple ARM runner. Fix-forward: v4.4.2.
 
 ### Fixed
 - **Windows managed self-updates no longer execute a `pwsh.exe` selected from

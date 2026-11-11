@@ -7,9 +7,14 @@ as passed.
 
 ## Per-version verification log
 
+### v4.4.2 — Supported native Apple release runners (2026-11-11)
+
+Candidate carries the v4.4.1 security fixes unchanged and pins the generated cargo-dist Apple matrix to supported native macOS 15 runners. A shared plan validator runs against both CI's real JSON plan and the tag's real release plan, with positive and fail-closed negative fixtures. Local, exact-head, exact-main/OIDC, native assembly, and public gates are pending.
+
+
 ### v4.4.1 — Windows managed updater launcher security (2026-11-10)
 
-PR #35 merged after exact-head CI `42965125140` (20/20) and Release plan `42965125037`. Initial exact-main CI `42966014094` hit `ETXTBSY` in the existing copied-report integration fixture on both the first run and its single retry; all security tests passed. The automatic publisher stopped before registry credentials. A test-only fix-forward exercises a temporarily writable fixture and bounds retries of that Linux spawn error to one second, preserving all assertions. Version 4.4.1 remains unpublished and untagged until the new exact-main gates succeed.
+PR #35 merged after exact-head CI `42965125140` (20/20) and Release plan `42965125037`. Initial exact-main CI `42966014094` hit `ETXTBSY` in the existing copied-report integration fixture on both the first run and its single retry; all security tests passed. The automatic publisher stopped before registry credentials. A test-only fix-forward exercises a temporarily writable fixture and bounds retries of that Linux spawn error to one second, preserving all assertions. PR #36 merged as `b4024e69e7a2def24da3ba2b42ed19a4dcd2b6a1`; exact-main CI `42968538009` passed 20/20 and automatic OIDC `42968537979` published exact unyanked 4.4.1. Downloaded checksum `45345d6727f2a4e4999f23921c8f743c0d066c7f45c9dd05d1502414ed95f4f2` and crate VCS metadata match that source. Immutable tag `v4.4.1` points there. Release `42970145859` built five targets but its ARM Apple job was cancelled before runner assignment: GitHub retired `macos-14` on November 2. All signing/hosting jobs skipped; no draft was created. Fix-forward is v4.4.2.
 
 Candidate PR #35 integrates current main, addresses remaining Unix GPU helper resolution from PR #2, preserves the existing PR #1 private-staging protections, and patches six audited TLS dependency advisories. Windows format/clippy/all-target tests pass (205 library, two companion, 29 integration), including a hostile-PATH PowerShell probe. Advisory audit, actionlint, ShellCheck, exact Mac preinstall-template lint, shell transaction fixtures, and PowerShell transaction fixtures under both hosts pass. Package/release build/provenance, exact-head review/hosted CI, exact-main CI/OIDC, native assembly, and public verification remain pending. Evidence is recorded in `.tasks/tasks/sec35.md` as each gate completes.
 

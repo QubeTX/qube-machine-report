@@ -10,9 +10,9 @@
 
 ## Active
 
-- [ ] **Resolve PR #35 and ship the Windows updater security fix** - integrate current main and release v4.4.1 through protected CI/OIDC/native publication (owner codex) #sec35
+- [ ] **Resolve PR #35 and ship the Windows updater security fix** - integrate current main and release v4.4.2 through protected CI/OIDC/native publication (owner codex) #sec35
   - [x] Resolve conflicts and verify trusted PowerShell launch behavior
-  - [x] Pass local and exact-head hosted gates plus independent review
+  - [ ] Pass local and exact-head hosted gates plus independent review
   - [ ] Merge and verify exact-main CI and trusted-OIDC publication
   - [ ] Publish the immutable release and verify public distribution
 

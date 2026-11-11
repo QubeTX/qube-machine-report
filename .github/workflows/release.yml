@@ -186,6 +186,7 @@ jobs:
           else
             dist plan --output-format=json > plan-dist-manifest.json
           fi
+          python3 scripts/check-dist-runners.py plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
