@@ -756,10 +756,7 @@ fn build_strategy_list(channel: InstallChannel) -> Vec<UpdateStrategy> {
         InstallChannel::ExeGlobal => vec![UpdateStrategy::ExeGlobal],
         InstallChannel::ExeCorporate => vec![UpdateStrategy::ExeCorporate],
         InstallChannel::Cargo => vec![UpdateStrategy::Cargo],
-        InstallChannel::PowerShellInstaller => vec![
-            UpdateStrategy::InstallerPwsh,
-            UpdateStrategy::InstallerPowerShell,
-        ],
+        InstallChannel::PowerShellInstaller => vec![UpdateStrategy::InstallerPowerShell],
         InstallChannel::ShellInstaller => {
             vec![UpdateStrategy::InstallerCurl, UpdateStrategy::InstallerWget]
         }
@@ -890,13 +887,12 @@ fn try_strategy_inner(strategy: UpdateStrategy, latest: &str) -> Result<(), Stra
             verify_installer_post_install(latest, "shell installer")
         }
         UpdateStrategy::InstallerPowerShell => {
-            try_installer_powershell("powershell", latest)?;
+            try_installer_powershell(latest)?;
             verify_installer_post_install(latest, "PowerShell installer")
         }
-        UpdateStrategy::InstallerPwsh => {
-            try_installer_powershell("pwsh", latest)?;
-            verify_installer_post_install(latest, "PowerShell installer")
-        }
+        UpdateStrategy::InstallerPwsh => Err(StrategyError::Preflight(
+            "PATH-resolved pwsh is not permitted for self-update".into(),
+        )),
         UpdateStrategy::MsiGlobal => {
             try_msi_install(&release_asset_url(latest, MSI_GLOBAL_ASSET), latest)
         }
@@ -1558,7 +1554,38 @@ fn try_installer_wget(_latest: &str) -> Result<(), StrategyError> {
 }
 
 #[cfg(windows)]
-fn try_installer_powershell(launcher: &str, latest: &str) -> Result<(), StrategyError> {
+fn trusted_windows_powershell() -> Result<std::path::PathBuf, StrategyError> {
+    let mut system_directory = vec![0u16; winapi::shared::minwindef::MAX_PATH];
+    // SAFETY: `system_directory` is writable for the supplied length. The API
+    // returns the number of UTF-16 code units written, excluding the NUL.
+    let length = unsafe {
+        winapi::um::sysinfoapi::GetSystemDirectoryW(
+            system_directory.as_mut_ptr(),
+            system_directory.len() as u32,
+        )
+    };
+    if length == 0 || length as usize >= system_directory.len() {
+        return Err(StrategyError::Preflight(
+            "could not resolve the trusted Windows system directory".into(),
+        ));
+    }
+    system_directory.truncate(length as usize);
+    use std::os::windows::ffi::OsStringExt;
+    let mut launcher = std::path::PathBuf::from(std::ffi::OsString::from_wide(&system_directory));
+    launcher.push("WindowsPowerShell");
+    launcher.push("v1.0");
+    launcher.push("powershell.exe");
+    if !launcher.is_file() {
+        return Err(StrategyError::Preflight(format!(
+            "trusted Windows PowerShell launcher is unavailable at {}",
+            launcher.display()
+        )));
+    }
+    Ok(launcher)
+}
+
+#[cfg(windows)]
+fn try_installer_powershell(latest: &str) -> Result<(), StrategyError> {
     let script = format!(
         "$ErrorActionPreference='Stop'; irm {} | iex",
         release_asset_url(latest, PS_INSTALLER_ASSET)
@@ -1566,8 +1593,11 @@ fn try_installer_powershell(launcher: &str, latest: &str) -> Result<(), Strategy
     let prefix = cargo_dist_install_prefix().ok_or_else(|| {
         StrategyError::Preflight("matching cargo-dist receipt is unavailable".into())
     })?;
+    let launcher = trusted_windows_powershell()?;
     run_command_status_with_env(
-        launcher,
+        launcher.to_str().ok_or_else(|| {
+            StrategyError::Preflight("Windows system directory is not valid Unicode".into())
+        })?,
         &[
             "-NoProfile",
             "-NonInteractive",
@@ -1582,7 +1612,7 @@ fn try_installer_powershell(launcher: &str, latest: &str) -> Result<(), Strategy
 }
 
 #[cfg(not(windows))]
-fn try_installer_powershell(_launcher: &str, _latest: &str) -> Result<(), StrategyError> {
+fn try_installer_powershell(_latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "PowerShell installer is Windows-only".into(),
     ))
@@ -2717,10 +2747,7 @@ mod tests {
         );
         assert_eq!(
             build_strategy_list(InstallChannel::PowerShellInstaller),
-            vec![
-                UpdateStrategy::InstallerPwsh,
-                UpdateStrategy::InstallerPowerShell
-            ]
+            vec![UpdateStrategy::InstallerPowerShell]
         );
         assert!(build_strategy_list(InstallChannel::Unknown).is_empty());
     }

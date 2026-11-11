@@ -347,6 +347,9 @@ installer for an **in-place upgrade**. It preserves installer format, edition,
 scope, and recorded directory: Corporate MSI stays Corporate MSI, Global EXE
 stays Global EXE, Cargo stays Cargo, shell/PowerShell stays at its receipt
 prefix, and a macOS PKG opens the verified universal PKG in Apple Installer.
+On Windows, managed PowerShell updates invoke the built-in Windows PowerShell
+executable by its trusted system-directory path rather than selecting a
+PowerShell executable from the current directory or `PATH`.
 
 **Fresh install and update are different operations.** A CLI update is
 latest-only and preserves its proven channel. A fresh managed CLI/native

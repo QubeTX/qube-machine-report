@@ -13,6 +13,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Windows one-command installs now update through Windows' trusted built-in
+  PowerShell location.** TR-300 no longer lets the current folder or command
+  search path choose which PowerShell program runs during an update, closing a
+  route by which another local program could run with the updater's access.
+
 ## [4.2.2] - 2026-07-18
 
 ### Fixed

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Windows managed self-updates no longer execute a `pwsh.exe` selected from
+  `PATH`.** The updater now invokes Windows PowerShell only through the absolute
+  system-directory path returned by Windows and does not fall back to a
+  PATH-resolved PowerShell 7 executable, preventing a hostile working directory
+  or `PATH` entry from supplying the updater process.
+
 ## [4.2.2] - 2026-07-18
 
 ### Fixed
