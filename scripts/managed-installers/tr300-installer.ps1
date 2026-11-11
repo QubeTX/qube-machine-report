@@ -1,10 +1,11 @@
 # TR-300 managed PowerShell installer.
 #
-# The release workflow renders the immutable tag/version placeholders, keeps the
-# cargo-dist generated installer as tr300-dist-installer.ps1, and publishes this
-# stable-name wrapper as tr300-installer.ps1. A deliberately launched fresh
-# wrapper is authoritative: after cargo-dist installs and verifies the managed
-# PowerShell channel, recognized native MSI/Inno products are uninstalled.
+# The release workflow renders the immutable tag, version, and exact raw
+# cargo-dist installer SHA-256 placeholders, keeps the generated installer as
+# tr300-dist-installer.ps1, and publishes this stable-name wrapper as
+# tr300-installer.ps1. A deliberately launched fresh wrapper is authoritative:
+# after cargo-dist installs and verifies the managed PowerShell channel,
+# recognized native MSI/Inno products are uninstalled.
 
 param (
     [switch]$NoModifyPath,
@@ -15,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 $Tr300Tag = '@TR300_TAG@'
 $Tr300Version = '@TR300_VERSION@'
+$Tr300DistInstallerSha256 = '@TR300_DIST_INSTALLER_SHA256@'
 $Tr300ReleaseBase = "https://github.com/QubeTX/qube-machine-report/releases/download/$Tr300Tag"
 $Tr300RecoveryUrl = 'https://github.com/QubeTX/qube-machine-report/releases/latest'
 
@@ -22,6 +24,101 @@ if ($Help) {
     Write-Information 'TR-300 managed PowerShell installer'
     Write-Information 'Installs the latest managed CLI channel and safely supersedes recognized TR-300 MSI/EXE installs.'
     return
+}
+
+function Get-Tr300TrustedMsiExecPath {
+    # Environment.SystemDirectory is backed by the Windows system-directory
+    # API. Do not replace this with Get-Command, a bare executable name, PATH,
+    # or the current directory: Global MSI removal may run with a UAC token.
+    $systemDirectory = [Environment]::SystemDirectory
+    if ([string]::IsNullOrWhiteSpace($systemDirectory)) {
+        throw 'Windows did not provide its trusted system directory'
+    }
+    $systemDirectory = [IO.Path]::GetFullPath($systemDirectory).TrimEnd('\')
+    if (-not [IO.Path]::IsPathRooted($systemDirectory)) {
+        throw 'Windows returned a non-absolute system directory'
+    }
+    $msiexec = [IO.Path]::GetFullPath((Join-Path $systemDirectory 'msiexec.exe'))
+    $parent = [IO.Path]::GetDirectoryName($msiexec).TrimEnd('\')
+    if (-not $parent.Equals($systemDirectory, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $msiexec -PathType Leaf)) {
+        throw "the trusted Windows Installer executable is unavailable: $msiexec"
+    }
+    return $msiexec
+}
+
+function Get-Tr300Sha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $algorithm.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Assert-Tr300DistInstallerHash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ($Tr300DistInstallerSha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+        throw 'the managed installer has an invalid embedded cargo-dist checksum'
+    }
+    $actual = Get-Tr300Sha256 -Path $Path
+    if ($actual -cne $Tr300DistInstallerSha256) {
+        throw 'the downloaded cargo-dist installer checksum did not match this release'
+    }
+}
+
+function Copy-Tr300DistInstallerToPrivateStaging {
+    param([Parameter(Mandatory = $true)][string]$Destination)
+
+    $localInstaller = [Environment]::GetEnvironmentVariable('TR300_DIST_INSTALLER_PATH', 'Process')
+    if ($null -ne $localInstaller) {
+        if ([string]::IsNullOrWhiteSpace($localInstaller) -or
+            $localInstaller -cnotmatch '\A[A-Za-z]:[\\/]' -or
+            $localInstaller.Substring(2).Contains(':')) {
+            throw 'TR300_DIST_INSTALLER_PATH must be an absolute local file path'
+        }
+        $localInstaller = [IO.Path]::GetFullPath($localInstaller)
+        $source = Get-Item -LiteralPath $localInstaller -Force -ErrorAction Stop
+        if (-not ($source -is [IO.FileInfo]) -or
+            (($source.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'TR300_DIST_INSTALLER_PATH must name a regular file, not a reparse point'
+        }
+        Copy-Item -LiteralPath $source.FullName -Destination $Destination -ErrorAction Stop
+        $staged = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+        if (-not ($staged -is [IO.FileInfo]) -or
+            (($staged.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'the staged local cargo-dist installer is not a regular file'
+        }
+        return
+    }
+
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $headers = @{}
+    $token = if ($env:TR300_GITHUB_TOKEN) {
+        $env:TR300_GITHUB_TOKEN
+    } elseif ($env:GITHUB_TOKEN) {
+        $env:GITHUB_TOKEN
+    } elseif ($env:GH_TOKEN) {
+        $env:GH_TOKEN
+    } else {
+        $null
+    }
+    if ($token) { $headers.Authorization = "Bearer $token" }
+    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$Tr300ReleaseBase/tr300-dist-installer.ps1" -OutFile $Destination
 }
 
 function Get-Tr300MsiProducts {
@@ -38,6 +135,10 @@ namespace Tr300.ManagedInstaller {
             uint reserved,
             uint productIndex,
             StringBuilder productCode);
+        [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+        public static extern int MsiGetComponentPath(
+            string productCode, string componentCode,
+            StringBuilder path, ref uint length);
     }
 }
 '@
@@ -47,10 +148,14 @@ namespace Tr300.ManagedInstaller {
         [pscustomobject]@{
             UpgradeCode = '{5CD540A8-AD16-4B0F-8CE4-51FF641DE181}'; Channel = 'msi-global'; Elevated = $true
             Binary = (Join-Path $env:ProgramFiles 'tr300\bin\tr300.exe')
+            Report = (Join-Path $env:ProgramFiles 'tr300\bin\report.exe')
+            ReportComponent = '{8281A044-4A65-476C-890B-EF7A012E5F25}'
         },
         [pscustomobject]@{
             UpgradeCode = '{93F465CB-7F66-4930-A773-FDA017E8FD64}'; Channel = 'msi-corporate'; Elevated = $false
             Binary = (Join-Path $env:LOCALAPPDATA 'Programs\tr300\bin\tr300.exe')
+            Report = (Join-Path $env:LOCALAPPDATA 'Programs\tr300\bin\report.exe')
+            ReportComponent = '{2EB04231-F655-42C0-863E-D5ED46E6C41B}'
         }
     )
     $products = @()
@@ -67,13 +172,21 @@ namespace Tr300.ManagedInstaller {
             if ($result -ne 0) {
                 throw "MsiEnumRelatedProducts failed for $($family.Channel) with code $result"
             }
+            $componentPath = New-Object System.Text.StringBuilder 32768
+            [uint32]$componentLength = $componentPath.Capacity
+            $componentState = [Tr300.ManagedInstaller.NativeMsi]::MsiGetComponentPath(
+                $productCode.ToString(), $family.ReportComponent, $componentPath, [ref]$componentLength)
+            $reportOwned = $componentState -eq 3 -and
+                $componentPath.ToString().Equals($family.Report, [StringComparison]::OrdinalIgnoreCase)
             $products += [pscustomobject]@{
                 Kind = 'msi'
                 Channel = $family.Channel
                 Elevated = $family.Elevated
                 ProductCode = $productCode.ToString()
-                Uninstaller = 'msiexec.exe'
+                Uninstaller = Get-Tr300TrustedMsiExecPath
                 Binary = $family.Binary
+                Report = $family.Report
+                ReportOwned = $reportOwned
             }
         }
     }
@@ -132,6 +245,9 @@ function Get-Tr300InnoProducts {
         }
         if (-not $seen.ContainsKey($full.ToLowerInvariant())) {
             $seen[$full.ToLowerInvariant()] = $true
+            $installedVersion = $null
+            $reportOwned = [version]::TryParse([string]$entry.DisplayVersion, [ref]$installedVersion) -and
+                $installedVersion -ge [version]'4.4.0'
             $products += [pscustomobject]@{
                 Kind = 'inno'
                 Channel = $family.Channel
@@ -139,6 +255,8 @@ function Get-Tr300InnoProducts {
                 ProductCode = $null
                 Uninstaller = $full
                 Binary = (Join-Path $family.Root 'bin\tr300.exe')
+                Report = (Join-Path $family.Root 'bin\report.exe')
+                ReportOwned = $reportOwned
             }
         }
     }
@@ -152,13 +270,24 @@ function Get-Tr300NativeProducts {
     return $products
 }
 
-function Invoke-Tr300Process([string]$FilePath, [string[]]$Arguments, [bool]$Elevated) {
+function Invoke-Tr300Process(
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [bool]$Elevated,
+    [string]$WorkingDirectory = ''
+) {
     $params = @{
         FilePath = $FilePath
         ArgumentList = $Arguments
         Wait = $true
         PassThru = $true
         WindowStyle = 'Hidden'
+    }
+    if ($WorkingDirectory) {
+        if (-not [IO.Path]::IsPathRooted($WorkingDirectory)) {
+            throw 'a process working directory must be absolute'
+        }
+        $params.WorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)
     }
     if ($Elevated) { $params.Verb = 'RunAs' }
     return Start-Process @params
@@ -167,12 +296,27 @@ function Invoke-Tr300Process([string]$FilePath, [string[]]$Arguments, [bool]$Ele
 function Remove-Tr300NativeProduct($Product) {
     Write-Information "Switching TR-300 ownership from $($Product.Channel) to powershell-installer..."
     if ($Product.Kind -eq 'msi') {
-        $process = Invoke-Tr300Process 'msiexec.exe' @('/x', $Product.ProductCode, '/passive', '/norestart') $Product.Elevated
+        # Resolve again at the launch boundary rather than trusting PATH or a
+        # mutable product object carried forward from discovery. Pin the child
+        # working directory to the same OS-owned directory; do not clear the
+        # inherited environment because Windows Installer depends on it.
+        $msiexec = Get-Tr300TrustedMsiExecPath
+        $systemDirectory = [IO.Path]::GetDirectoryName($msiexec)
+        $process = Invoke-Tr300Process $msiexec @('/x', $Product.ProductCode, '/passive', '/norestart') $Product.Elevated $systemDirectory
         if ($process.ExitCode -notin @(0, 1605, 1614, 1641, 3010)) {
             throw "$($Product.Channel) uninstall exited with Windows Installer code $($process.ExitCode)"
         }
     } else {
-        $process = Invoke-Tr300Process $Product.Uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') $Product.Elevated
+        # The Global Inno uninstaller crosses UAC. Keep its current directory
+        # beside the already validated absolute uninstaller rather than
+        # inheriting the directory from which this wrapper happened to run.
+        $uninstaller = [IO.Path]::GetFullPath([string]$Product.Uninstaller)
+        $uninstallerDirectory = [IO.Path]::GetDirectoryName($uninstaller)
+        if ([string]::IsNullOrWhiteSpace($uninstallerDirectory) -or
+            -not [IO.Path]::IsPathRooted($uninstallerDirectory)) {
+            throw "recognized $($Product.Channel) uninstaller has no absolute working directory"
+        }
+        $process = Invoke-Tr300Process $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') $Product.Elevated $uninstallerDirectory
         if ($process.ExitCode -ne 0) {
             throw "$($Product.Channel) uninstall exited with code $($process.ExitCode)"
         }
@@ -193,9 +337,28 @@ function Get-Tr300InstallPrefix {
     return [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.cargo'))
 }
 
+function Test-Tr300CargoOwnsReport([string]$IntendedPrefix) {
+    $cargoPrefix = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+    if (-not ([IO.Path]::GetFullPath($cargoPrefix).Equals(
+        [IO.Path]::GetFullPath($IntendedPrefix), [StringComparison]::OrdinalIgnoreCase))) { return $false }
+    $inventoryPath = Join-Path $cargoPrefix '.crates2.json'
+    if (-not (Test-Path -LiteralPath $inventoryPath -PathType Leaf)) { return $false }
+    if ((Get-Item -LiteralPath $inventoryPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    try { $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { return $false }
+    foreach ($package in $inventory.installs.PSObject.Properties) {
+        if ($package.Name -cmatch '^tr300 [^ ]+ \([^()]+\)$' -and
+            $package.Value.bins -is [array] -and
+            @($package.Value.bins) -ccontains 'tr300.exe' -and
+            @($package.Value.bins) -ccontains 'report.exe') { return $true }
+    }
+    return $false
+}
+
 function Save-Tr300ManagedState([string]$BackupRoot) {
     $receiptPath = Get-Tr300ReceiptPath
     $priorPrefix = $null
+    $priorReportOwned = $false
     $receiptExisted = Test-Path -LiteralPath $receiptPath -PathType Leaf
     if ($receiptExisted) {
         $priorReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
@@ -205,11 +368,31 @@ function Save-Tr300ManagedState([string]$BackupRoot) {
             throw 'the existing TR-300 managed receipt is ambiguous; preserving it'
         }
         $priorPrefix = [IO.Path]::GetFullPath([string]$priorReceipt.install_prefix)
+        $priorReportOwned = $priorReceipt.binaries -is [array] -and
+            $priorReceipt.binaries -ccontains 'tr300.exe' -and
+            $priorReceipt.binaries -ccontains 'report.exe'
         Copy-Item -LiteralPath $receiptPath -Destination (Join-Path $BackupRoot 'receipt.json')
     }
 
-    $binaryPaths = @((Join-Path (Get-Tr300InstallPrefix) 'bin\tr300.exe'))
-    if ($priorPrefix) { $binaryPaths += (Join-Path $priorPrefix 'bin\tr300.exe') }
+    $intendedPrefix = Get-Tr300InstallPrefix
+    $intendedReport = Join-Path $intendedPrefix 'bin\report.exe'
+    if (Test-Path -LiteralPath $intendedReport) {
+        $samePrefix = $priorPrefix -and $intendedPrefix.Equals($priorPrefix, [StringComparison]::OrdinalIgnoreCase)
+        $cargoOwned = -not $receiptExisted -and (Test-Tr300CargoOwnsReport $intendedPrefix)
+        $reportItem = Get-Item -LiteralPath $intendedReport -Force
+        if ((-not ($samePrefix -and $priorReportOwned) -and -not $cargoOwned) -or $reportItem.PSIsContainer -or
+            ($reportItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'an unowned report command occupies the intended install path; preserving it'
+        }
+    }
+    $binaryPaths = @(
+        (Join-Path $intendedPrefix 'bin\tr300.exe'),
+        (Join-Path $intendedPrefix 'bin\report.exe')
+    )
+    if ($priorPrefix) {
+        $binaryPaths += (Join-Path $priorPrefix 'bin\tr300.exe')
+        if ($priorReportOwned) { $binaryPaths += (Join-Path $priorPrefix 'bin\report.exe') }
+    }
     $seen = @{}
     $binaries = @()
     foreach ($candidate in $binaryPaths) {
@@ -231,6 +414,7 @@ function Save-Tr300ManagedState([string]$BackupRoot) {
         ReceiptExisted = $receiptExisted
         ReceiptBackup = (Join-Path $BackupRoot 'receipt.json')
         PriorPrefix = $priorPrefix
+        PriorReportOwned = $priorReportOwned
         Binaries = $binaries
     }
 }
@@ -318,6 +502,26 @@ function Get-Tr300ManagedBinary {
     if ($LASTEXITCODE -ne 0 -or $reported -ne "tr300 $Tr300Version") {
         throw "managed TR-300 binary did not report the expected version $Tr300Version"
     }
+    $report = Join-Path $actualPrefix 'bin\report.exe'
+    if (-not (Test-Path -LiteralPath $report -PathType Leaf)) {
+        throw "managed report command is missing: $report"
+    }
+    $reportVersion = (& $report --version | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $reportVersion -ne "tr300 $Tr300Version") {
+        throw "managed report command did not report the expected version $Tr300Version"
+    }
+    $null = & $report --fast --json
+    if ($LASTEXITCODE -ne 0) {
+        throw 'managed report command could not delegate to adjacent tr300'
+    }
+    $reportHelp = (& $report --help) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'managed report help failed'
+    }
+    $canonicalHelp = (& $binary --help) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $reportHelp -cne $canonicalHelp) {
+        throw 'report help differs from TR-300'
+    }
     return $binary
 }
 
@@ -336,20 +540,8 @@ try {
     $managedState = Save-Tr300ManagedState $tempRoot
     Assert-Tr300NoUnknownPathOwners $native $managedState
     $distInstaller = Join-Path $tempRoot 'tr300-dist-installer.ps1'
-    [Net.ServicePointManager]::SecurityProtocol =
-        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $headers = @{}
-    $token = if ($env:TR300_GITHUB_TOKEN) {
-        $env:TR300_GITHUB_TOKEN
-    } elseif ($env:GITHUB_TOKEN) {
-        $env:GITHUB_TOKEN
-    } elseif ($env:GH_TOKEN) {
-        $env:GH_TOKEN
-    } else {
-        $null
-    }
-    if ($token) { $headers.Authorization = "Bearer $token" }
-    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$Tr300ReleaseBase/tr300-dist-installer.ps1" -OutFile $distInstaller
+    Copy-Tr300DistInstallerToPrivateStaging -Destination $distInstaller
+    Assert-Tr300DistInstallerHash -Path $distInstaller
 
     $transactionStarted = $true
     $launcher = if ($PSVersionTable.PSEdition -eq 'Core') {
@@ -378,6 +570,9 @@ try {
         if (Test-Path -LiteralPath $product.Binary -PathType Leaf) {
             throw "native installer takeover left its executable behind: $($product.Binary)"
         }
+        if ($product.ReportOwned -and (Test-Path -LiteralPath $product.Report -PathType Leaf)) {
+            throw "native installer takeover left its report command behind: $($product.Report)"
+        }
     }
 
     if ($native.Count -gt 0) {
@@ -388,12 +583,21 @@ try {
     }
     if ($managedState.PriorPrefix) {
         $priorBinary = Join-Path $managedState.PriorPrefix 'bin\tr300.exe'
+        $priorReport = Join-Path $managedState.PriorPrefix 'bin\report.exe'
         $sameBinary = [IO.Path]::GetFullPath($priorBinary).Equals(
             [IO.Path]::GetFullPath($binary),
             [StringComparison]::OrdinalIgnoreCase
         )
         if (-not $sameBinary -and (Test-Path -LiteralPath $priorBinary -PathType Leaf)) {
             Remove-Item -LiteralPath $priorBinary -Force -ErrorAction Stop
+        }
+        $currentReport = Join-Path (Split-Path -Parent $binary) 'report.exe'
+        $sameReport = [IO.Path]::GetFullPath($priorReport).Equals(
+            [IO.Path]::GetFullPath($currentReport),
+            [StringComparison]::OrdinalIgnoreCase
+        )
+        if ($managedState.PriorReportOwned -and -not $sameReport -and (Test-Path -LiteralPath $priorReport -PathType Leaf)) {
+            Remove-Item -LiteralPath $priorReport -Force -ErrorAction Stop
         }
     }
     $binary = Get-Tr300ManagedBinary

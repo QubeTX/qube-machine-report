@@ -1,25 +1,280 @@
 # Handoff: v4 release, origin-preserving updates, and fleet continuation
 
-**Date:** 2026-07-14–18 CDT
+**Date:** 2026-07-14–2026-08-25 CDT
 **Session:** 002
 **Agent:** Codex
 **Repository:** `QubeTX/qube-machine-report`
 **Current working directory:** `C:\Users\hey\git\qube-machine-report`
 **Default branch:** `main` (GitHub atomically renamed the former `master`
 branch on 2026-07-17 without changing the source SHA)
-**Complete GitHub distribution / crates.io / working version:** `4.2.2` / `4.2.2` / `4.2.2` (all prior tags remain immutable)
-**Prior pushed checkpoint:** `db0f538c82961569a7118b105a20e967b15476f0`
-**Release commit:** `db0f538c82961569a7118b105a20e967b15476f0`
-**Hosted run IDs:** CI 29664547910; crates 29664653519; cargo-dist 29664688035;
-native macOS 29664824418; Windows Installers 29664824432; Windows transitions 29664948031
+**Complete public GitHub distribution / crates.io / working version:** `4.3.12` / `4.3.12` / `4.3.12` (all prior tags remain immutable)
+**Release state:** v4.3.12 complete; continuation is the separate physical-hardware queue
+**Release source checkpoint:** `19246b76f39c53340e6be62a332cedca9bca766c`
+**Last complete GitHub release commit:** `19246b76f39c53340e6be62a332cedca9bca766c`
+**Hosted run IDs:** v4.2.2 CI 29664547910; crates 29664653519; cargo-dist
+29664688035; native macOS 29664824418; Windows Installers 29664824432; Windows
+transitions 29664948031. v4.3.0 exact-main CI 32794371259; automatic trusted-
+OIDC crates 32794371283; final tagless Apple preflight 32795757823; failed-
+closed GitHub Release 32795846831. v4.3.1 PR CI 32799513518; Release plan
+32799513464; exact-main CI 32800131846; automatic trusted-OIDC crates
+32800131893; tagless native preflight 32800830054; failed-closed GitHub Release
+  32800944635. v4.3.2 PR CI 32809107588; Release plan 32809107593;
+  exact-main CI 32809616793; automatic trusted-OIDC crates 32809616807;
+  tagless native preflight 32810343902; failed-closed Release 32810420213.
+  v4.3.3 PR CI 32813881136; Release plan 32813881154; exact-main CI
+  32814328977; automatic trusted-OIDC crates 32814329178; tagless native
+  preflight 32815263338; failed-closed Release 32815338720.
+  v4.3.4 PR CI 32819974330; Release plan 32819974234; exact-main CI
+  32820725614; automatic trusted-OIDC crates 32820725583; tagless native
+  preflight 32821497928; failed-closed Release 32821575317.
+  v4.3.5 PR CI 32823394621; Release plan 32823394660; exact-main CI
+  32823922777; automatic trusted-OIDC crates 32823922726; tagless native
+  preflight 32824834401; failed-closed Release 32824925889; private 24-asset
+  draft id 376242296. v4.3.6 PR CI 32829236226; Release plan 32829236145;
+  exact-main CI 32830286853; automatic trusted-OIDC crates 32830286932;
+  tagless native preflight 32830369613; failed-closed Release 32831292249;
+  private 24-asset draft id 376283574. v4.3.7 PR CI 32833632116; Release plan
+  32833632174; exact-main CI 32834399658; automatic trusted-OIDC crates
+  32834399800; tagless native preflight 32835377627; successful 13-job Release
+  32835470143; private 24-asset draft id 376309349; failed-closed Windows
+  32835918254 and macOS 32835918239 downstream source resolution. v4.3.8
+  exact-main CI 32842065507; automatic trusted-OIDC crates 32842065501;
+  tagless native preflight 32842865442; successful 13-job Release 32842969776;
+  private 24-asset draft id 376357745; failed-closed macOS 32843468883 prepare
+  job 97787965884 and Windows 32843468892 build job 97787896541. v4.3.9
+  exact-main CI 32848574652; automatic trusted-OIDC crates 32848574607;
+  tagless native preflight 32849403638; successful 13-job Release 32849508590;
+  private draft id 376401700 extended to 30 assets by Windows 32850002419;
+  failed-closed macOS 32850002313 and private Windows validation 32850359079.
+  v4.3.10 exact-main CI 32854836544; automatic trusted-OIDC crates
+  32854836651; tagless native preflight 32855676983; successful 13-job Release
+  32855768841; private draft id 376446284 extended to 30 assets by Windows
+  32856291489; successful private Windows validation 32856682126; failed-
+  closed native macOS validation 32856291645 after signing/notarization. PR #28
+  exact-head CI 32859056143 and Release plan 32859054543 passed; it merged as
+  e55c71bd35d410cc0abda5419168c5384f92690a and exact-main CI 32859831814
+  passed. Recovery 32860673370 refused the immutable tag/current-main mismatch
+  before credentials. v4.3.11 exact-main CI 32864501691; automatic trusted-
+  OIDC crates 32864502146; tagless native preflight 32865435959; successful
+  13-job Release 32865635948; private draft id 376514152 extended to 30 assets
+  by Windows 32866237615; private Windows validation 32866624445 passed;
+  failed-closed macOS 32866237569 after both signed/
+  notarized packages passed the managed-install rejection and the harness
+  lacked privilege only for final `/Users` fixture cleanup. v4.3.12 PR CI
+  32868424781; Release plan 32868425481; exact-main CI 32869031682; automatic
+  trusted-OIDC crates 32869029189; native preflight 32869891315; successful
+  13-job Release 32869971805; Windows Installers 32870555353; private Windows
+  validation 32870926989; successful macOS finalization 32870555348; and
+  successful post-public Windows/updater validation 32871841072.
 **Task IDs:** `#mic1`, `#pkg42`, `#w422`, `#nd372`, `#v42`, `#v400`,
 `#core`, `#plat`, `#test`, `#docs`, `#winhw`, `#ship`, `#site`, `#brmain`,
-`#adrlog`
+`#adrlog`, `#v43`, `#v430`, `#r43`
 
 This is the exhaustive portable continuation record. The SHAUGHV board source,
 milestones, and task details under `.tasks/` are Git-tracked; only runtime and
 secure state are ignored. A fresh checkout must read this file, the board,
 `AGENTS.md`, `CLAUDE.md`, and `TESTING.md` before changing the v4 release.
+
+## 2026-08-24–25 v4.3.0–v4.3.11 publication splits and v4.3.12 completion
+
+Exact source `c788029d28a7860444520e716f5cc55309f075c9` passed exact-main CI and
+published unyanked v4.3.0 through automatic trusted OIDC. Crates.io reports
+`trustpub_only=true` and binds the public checksum/provenance to that source and
+run. Immutable tag `v4.3.0` points to the same SHA. Its Release run failed
+before Apple signing, hosting, or draft creation because the pinned official
+cargo-dist PowerShell installer deliberately hard-links `dist.exe` and
+`cargo-dist.exe`, while a new generic nonempty-`LinkType` guard rejected the
+valid tool. An unchanged rerun uses the same immutable workflow and cannot
+pass; every downstream recovery correctly requires a successful exact Release.
+
+The Windows fix-forward passed its reviewed PR as exact head `4979636`, all 20
+jobs in CI `32799513518`, Release plan `32799513464`, and every review thread.
+PR #18 merged as exact source `07e0e3ae265eb70856eb5ee0602beb11850ea00d`;
+exact-main CI `32800131846`, automatic trusted-OIDC crates run `32800131893`,
+and native credential preflight `32800830054` passed. Crates.io serves exact
+unyanked v4.3.1 with `trustpub_only=true`, and immutable tag `v4.3.1` points to
+that source. Release `32800944635` built all six targets, then both fresh Apple
+signer jobs failed before signing, upload, hosting, or draft creation because
+macOS system Bash 3.2 does not support the Bash-4-only `declare -A` and
+`mapfile` constructs in their staging step. Latent matching constructs in the
+downstream macOS workflow would have failed later as well. An unchanged rerun
+cannot consume corrected workflow code.
+
+PR #19 replaced Bash-4-only native Apple staging with fail-closed
+system-Bash-compatible inventories and added exact syntax/staging coverage on
+both native Mac runners. It merged as `c246ded2`; exact-main CI, automatic OIDC
+v4.3.2 publication, and native preflight passed. Immutable Release
+`32810420213` then built all six targets but stopped both Apple signers before
+credential use: cargo-dist 0.31.0 emits raw checksum records followed by a
+blank line (`LF LF`), while the new exact guard modeled one LF. No signing,
+notarization, draft, or downstream release occurred.
+
+PR #20 implemented the checksum repair and passed exact-head CI
+`32813881136`, Release plan `32813881154`, and independent review before merge
+as exact source `cf1ac838ac582569bb7d3ea2c76b5773b44a4083`. Exact-main CI
+`32814328977`, automatic trusted-OIDC v4.3.3 publication `32814329178`, and
+native preflight `32815263338` passed. Immutable Release `32815338720` built
+all six targets and validated both two-LF Apple sidecars, then both signers
+stopped before credential use: pinned cargo-dist preserves matching POSIX file-
+type bits in tar modes (`040755`, `0100755`, and `0100644`), while the custom
+extractor accepted only permission-only `0755`/`0644`. No signing,
+notarization, draft, or downstream publication occurred.
+
+PR #21 exact head `a631e971786682bc823b3351e4cf3a569afe491f` repaired that
+tar-mode boundary and passed CI `32819974330` plus Release plan `32819974234`
+before merge as exact source `ed22545e444f968296d5a34cbc27a0a205e92ae0`.
+Exact-main CI `32820725614`, automatic trusted-OIDC v4.3.4 publication
+`32820725583`, and native preflight `32821497928` passed. Crates.io serves
+unyanked v4.3.4 with checksum
+`b74d1aec64b44f5f7f56d284dcb89dd44f1d6b2aa18400e49adb2acb27cbd304`.
+Immutable Release `32821575317` passed its plan, all six builds, both Apple
+signer/notary jobs, and global artifacts, then the uncredentialed 24-asset
+preparation failed before upload because jq predicate context indexed a
+boolean instead of the plan manifest. Host and every downstream workflow
+skipped; no draft exists.
+
+PR #22 exact head `f9aac4f7e4601402e34c0959f790d587bdabab76` repaired that
+manifest boundary and passed CI `32823394621` plus Release plan `32823394660`
+before merge as exact source `42879b4af0699148aea46a841e76aa5fc1673786`.
+Exact-main CI `32823922777`, automatic trusted-OIDC v4.3.5 publication
+`32823922726`, and native preflight `32824834401` passed. Crates.io serves
+unyanked v4.3.5 with checksum
+`a5facb0b31419f128e85f74c8636bf134388212b68937bf795bf498924c99032`.
+Immutable Release `32824925889` created the correct private 24-asset draft,
+release id `376242296`, then host verification failed because GitHub's by-tag
+endpoint returns 404 for drafts. Announcement and every downstream workflow
+skipped; the draft remains private.
+
+PR #23 exact head `ebb4f76a87b7d3eaea7970dce9cb35c68332723c` repaired that
+draft-discovery boundary and passed Release plan `32829236145` plus CI
+`32829236226` before merge as exact source
+`9ab392f4df56aa8824f5a8627f940eaee0b62b44`. Exact-main CI `32830286853`,
+automatic trusted-OIDC v4.3.6 publication `32830286932`, and native preflight
+`32830369613` passed. Crates.io serves unyanked v4.3.6 with checksum
+`4ebfb22c54355c489f48f79aa5a6bd5a72f3fc0a7285201885957081ce1bd427`.
+Immutable Release `32831292249` passed all six builds, both Apple signer/notary
+jobs, global assembly, and exact 24-asset preparation. Host job `97751759346`
+created exact private draft `376283574`, then failed after draft validation:
+default `sha256sum` writes awk field two as `tr300-installer.sh`, while the
+managed-installer hash lookup required `*tr300-installer.sh`. Announcement and
+every downstream workflow skipped; the draft remains private.
+
+PR #24 exact head `eebce78cb0e62efce1e9d70ec20068316f5c36d5` repaired that
+checksum lookup, passed Release plan `32833632174` and all 20 CI jobs in
+`32833632116`, then merged as exact source
+`b9aa12850720b49c120c6465cefd094a843c5fc4`. Exact-main CI `32834399658`,
+automatic trusted-OIDC v4.3.7 publication `32834399800`, and native preflight
+`32835377627` passed. Crates.io serves exact unyanked v4.3.7 with checksum
+`225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
+Release `32835470143` passed all 13 jobs and created exact private 24-asset
+draft `376309349`. Automatic Windows run `32835918254` and macOS run
+`32835918239` then failed before any downstream build/publication: both source
+resolvers used read-only tokens without push access, so GitHub omitted private
+drafts from their authenticated release collections and they deterministically
+saw zero matches. The exact draft remains private.
+
+PR #25 repaired that private-draft identity boundary and merged as exact source
+`0b726a854666ed73e42fda675645a097fa887824`. Exact-main CI `32842065507`
+passed 20/20, automatic trusted-OIDC run `32842065501` published exact unyanked
+v4.3.8 with checksum
+`f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`,
+and native Intel/Apple Silicon preflight `32842865442` passed. Immutable tag
+`v4.3.8` points to the same source. Release `32842969776` passed all 13 jobs and
+created exact private 24-asset draft `376357745`.
+
+Automatic macOS run `32843468883` successfully resolved that draft, froze the
+exact Release-run Apple/source bytes, and passed both Installer-identity
+preflights. Its uncredentialed prepare job `97787965884` then rejected the
+trusted artifact: the freezer intentionally included `tr300-installer.sh` and
+`tr300-dist-installer.sh` alongside both Apple archives and sidecars, but the
+consumer still required an obsolete four-file archive-only inventory. All Mac
+package-build, sign/notary, publisher, and smoke jobs skipped. Automatic
+Windows run `32843468892` failed independently in build job `97787896541` at
+`Install the pinned official Inno Setup 6.7.3`; `gh release verify-asset` had no
+`GH_TOKEN` after build-job hardening. Windows publication skipped. The draft
+stayed private at exactly 24 assets and nothing became public.
+
+v4.3.9 then passed exact-main CI `32848574652`, automatic trusted-OIDC
+publication `32848574607`, and native preflight `32849403638`. Immutable tag
+`v4.3.9` points to exact source `a4a75e975ebceba90a585deeb4767a4546504a18`.
+Release `32849508590` passed all 13 jobs and created exact private draft
+`376401700`; Windows Installers `32850002419` extended it to exactly 30 assets.
+macOS `32850002313` stopped before Apple credential use because checksum-name
+comparison depended on locale ordering. Private Windows validation
+`32850359079` passed every other case but asked the production Global worker to
+fetch an anonymous exact-tag asset while the release was private. Nothing
+became public.
+
+v4.3.10 then passed exact-main CI `32854836544`, automatic trusted-OIDC
+publication `32854836651`, and native preflight `32855676983`. Immutable tag
+`v4.3.10` points to exact source
+`e8b0bb73f895f3c2b2d2f62fd39df5846db8f526`. Release `32855768841` passed
+all 13 jobs; Windows Installers `32856291489` extended exact private draft
+`376446284` to 30 assets, and private Windows validation `32856682126` passed.
+macOS run `32856291645` built, signed, and notarized the universal PKG and
+compatibility DMG, then both native validation jobs stopped because the harness
+expected PackageKit to repeat the preinstall script's human message. No
+publisher ran and nothing became public. PR #28 repaired only that assertion,
+passed exact-head CI `32859056143` plus Release plan `32859054543`, merged as
+`e55c71bd35d410cc0abda5419168c5384f92690a`, and exact-main CI
+`32859831814` passed. Recovery `32860673370` correctly refused to combine the
+old tag with newer protected-main workflow code before credentials.
+
+v4.3.11 then passed exact-main CI `32864501691`, automatic trusted-OIDC
+publication `32864502146`, and native preflight `32865435959`. Immutable tag
+`v4.3.11` points to exact source
+`c88ddc21d902ccf21158585dd60b89d37650424b`. Release `32865635948` passed all
+13 jobs; Windows Installers `32866237615` extended exact private draft
+`376514152` to 30 assets, and private Windows validation `32866624445` passed.
+macOS `32866237569` built, signed, and notarized both
+artifacts and both native jobs passed the real managed-install rejection and
+state-preservation checks. They then failed only while deleting their exact
+second-home fixture: unprivileged `rmdir` cannot unlink a child from root-owned
+`/Users`. The publisher and all public smokes skipped; nothing became public.
+
+PR #30 exact head `7fe751f8fe39bd4c5764998f3784b26d025936a2` passed all
+20 CI jobs in `32868424781` and Release plan `32868425481`, then merged normally
+as exact source/tag `19246b76f39c53340e6be62a332cedca9bca766c`.
+Exact-main CI `32869031682`, automatic trusted-OIDC publication `32869029189`,
+native preflight `32869891315`, tagged Release `32869971805`, Windows Installers
+`32870555353`, private Windows validation `32870926989`, macOS finalization
+`32870555348`, and post-public Windows/updater validation `32871841072` all
+passed. Public release `376540890` has exactly 34 nonempty digest-bearing assets
+and is `latest`. Product behavior and installer policy remain unchanged. Never
+move or delete v4.3.0 through v4.3.11, hand-assemble any existing draft, or
+publish a partial release.
+
+## 2026-08-24 v4.3 supersession — direct PKG refuses managed ownership
+
+The v4.2.2 evidence and behavior below remain immutable shipped history, but
+the automatic managed-to-PKG direction is not the current v4.3 contract.
+Hardening head `dae0857` CI run `32710504501` passed every non-Mac gate; both
+native Apple architectures then proved that Apple Installer can retain
+`/usr/local/bin/tr300` after an intended failing `postinstall` even when the
+old managed binary and receipt restore exactly. That disproves the overall
+cross-phase transaction premise.
+
+The v4.3 direct PKG therefore contains only a non-mutating `preinstall`. It
+checks the standard `~/.cargo/bin/tr300` binary and
+`~/.config/tr300/tr300-receipt.json` receipt in every `/Users` home, including
+dot-prefixed unregistered residue, plus all eligible local Directory Service
+homes, independent of console or launch environment, including broken links,
+and exits before payload or native receipt creation. It enumerates only the
+fixed standard-path parent levels and treats abnormal or unlistable
+intermediates as blocking ambiguity rather than absence.
+It ships no migration probe, rollback helper, or `postinstall` and never
+mutates user-owned managed state as root. It uses pre-macOS-12-compatible
+`plutil -lint` plus escaped-key `PlistBuddy` reads and accepts only PackageKit's
+`/` target volume. Managed-to-PKG is now: refresh or reinstall through the
+managed installer to this receipt-aware version, choose Complete uninstall,
+then run the PKG. Clean/native PKG upgrade and exact PKG-to-managed takeover
+remain supported. New source, provenance, security, and native Intel/ARM
+evidence must begin from the checksum-bound public v4.2.2 managed wrapper,
+reject its unchanged state, refresh through the candidate wrapper, then prove
+receipt-aware Complete and PKG install. The v4.2.2 runs below do not qualify the
+changed package.
+Arbitrary custom Cargo/cargo-dist/XDG locations are outside PackageKit's account
+inventory and must not be claimed as detected by this preinstall.
 
 ## 2026-07-18 v4.2.2 MIC-1 and direct-PKG fix-forward candidate
 
@@ -67,11 +322,13 @@ fresh-channel cleanup by itself.
 The Unix public wrapper similarly drives internal
 `tr300-dist-installer.sh`. On macOS it will surrender an existing PKG only when
 the fixed receipt, root payload, per-file package owner, install path, and
-Developer ID identity all agree. The reciprocal native PKG postinstall invokes
-the bounded migration helper to remove an exact managed-shell/Cargo copy and
-matching cargo-dist receipt. Linux stays on the managed-shell channel.
+Developer ID identity all agree. In the superseding v4.3 direction, the native
+PKG has no reciprocal postinstall or migration helper: its preinstall preserves
+and refuses managed state until the user refreshes the managed copy, chooses
+receipt-aware Complete uninstall, and retries from a clean state. Linux stays
+on the managed-shell channel.
 
-All current native packages use the hidden helper's mandatory `--strict` mode;
+All current Windows native packages use the hidden helper's mandatory `--strict` mode;
 the v3.17 interactive cleanup tasks/checkboxes are gone. A present cargo-dist
 receipt must exactly match provider, app, prefix, and platform path semantics
 before its binary moves. The pair is quarantined transactionally and restored
@@ -81,9 +338,9 @@ extracts the candidate and requires a strict non-mutating
 then reconfirms from `ssPostInstall` after registry/ARP ownership exists (Global
 uses the original user's token). MSI performs the same embedded-candidate
 preflight before any same-edition Inno uninstall; both Windows formats reject
-registered or exact-path opposite-scope state. PKG postinstall
-snapshots/restores the managed pair inside Apple's package transaction.
-Legacy no-`--strict` calls
+registered or exact-path opposite-scope state. The v4.2 PKG postinstall
+snapshot/restore design is immutable shipped history and is not present in the
+v4.3 candidate. Legacy no-`--strict` calls
 remain advisory only so immutable integrations and diagnostics keep working.
 
 The preferred Mac download is now the direct signed/notarized/stapled universal
@@ -956,20 +1213,19 @@ This section records observed hosted state, never expectation.
 
 ## What's Next
 
-The release and homepage are complete. The next machine must begin with the
-post-release hardware queue, not reopen or regenerate the Mac release path:
+The v4.3.12 crates.io and complete 34-asset GitHub distribution are public and
+audited. The homepage already uses versionless `releases/latest` links, so no
+source deployment was required. Continue only the separate physical-hardware
+queue:
 
-1. On the personal Alienware, run task `#winhw`: compare full/fast/table/JSON/
-   manual-save output to native Windows tools and exercise the installed
-   edition's updater/installer-origin path. Record evidence and patch forward.
-2. On the personal AMD64 Linux laptop, run the Linux portion of `#plat` against
-   native topology, disk/memory, network/DNS, battery/encryption, login, and
-   elevated/unelevated facts.
-3. On the 64-bit Raspberry Pi 4, finish `#plat` with devicetree CPU/model,
-   frequency, load, filesystem, network, graceful-missing-tool, installer, and
-   fast-budget checks.
-4. Preserve the absolute Mac freeze above. Windows/Linux-only cfg code and
-   tests may change; any shared/dependency/build/dist/workflow/Apple change
-   reopens the stated native arm64 + Rosetta + real notary gates before a tag.
-5. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
+1. Keep `v4.3.0` through `v4.3.11` immutable. The first five produced no draft;
+   v4.3.5, v4.3.6, v4.3.7, and v4.3.8 produced private drafts `376242296`,
+   `376283574`, `376309349`, and `376357745`; v4.3.9 produced private 30-asset
+   draft `376401700`, v4.3.10 produced private 30-asset draft `376446284`, and
+   v4.3.11 produced private 30-asset draft `376514152`.
+   Do not delete, move, reuse, or hand-recover any tag or draft.
+2. Continue the personal Alienware, AMD64 Linux, and
+   Raspberry Pi 4 tasks. Those physical checks remain open and must not be
+   inferred from hosted evidence.
+3. Keep SD-300 and Shaughv OS WIP-delisted on the homepage until their separate
    work is actually ready.

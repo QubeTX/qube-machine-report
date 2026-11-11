@@ -80,12 +80,13 @@ CloseApplications=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; Bundles tr300.exe from target/release/. The CI workflow runs cargo build
+; Bundles tr300.exe and its report-only companion from target/release/.
 ; --release before invoking iscc so this path is populated.
 ; PrepareToInstall extracts this same payload temporarily for its non-mutating
 ; strict ownership preflight. `noencryption` permits that early extraction;
 ; the normal Files pass still installs the one compiled payload.
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignoreversion noencryption
+Source: "..\target\release\report.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 [Registry]
 ; Install-source marker. tr300 update reads HKCU\Software\TR300\InstallSource
@@ -111,7 +112,8 @@ begin
   ExtractTemporaryFile('{#MyAppExeName}');
   Binary := ExpandConstant('{tmp}\{#MyAppExeName}');
   if not ExecAsOriginalUser(Binary,
-      'migrate-cleanup --quiet --strict --dry-run --cargo-copy',
+      'migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination "' +
+      ExpandConstant('{app}\bin\{#MyAppExeName}') + '"',
       ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
   begin
     Result := 'Could not start the TR-300 managed/Cargo ownership preflight. ' +

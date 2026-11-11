@@ -1,29 +1,39 @@
 #!/bin/sh
 # TR-300 managed shell installer.
 #
-# The release workflow renders the immutable tag/version placeholders, keeps the
-# cargo-dist generated installer as tr300-dist-installer.sh, and publishes this
-# stable-name wrapper as tr300-installer.sh. On macOS a deliberately launched
-# fresh wrapper safely supersedes an exact, receipt-owned TR-300 PKG install.
+# The release workflow renders the immutable tag, version, and exact raw
+# cargo-dist installer SHA-256 placeholders, keeps the generated installer as
+# tr300-dist-installer.sh, and publishes this stable-name wrapper as
+# tr300-installer.sh. On macOS a deliberately launched fresh wrapper safely
+# supersedes an exact, receipt-owned TR-300 PKG install.
 
 set -u
 
 tr300_tag='@TR300_TAG@'
 tr300_version='@TR300_VERSION@'
+tr300_dist_installer_sha256='@TR300_DIST_INSTALLER_SHA256@'
 tr300_release_base="https://github.com/QubeTX/qube-machine-report/releases/download/${tr300_tag}"
 tr300_recovery_url='https://github.com/QubeTX/qube-machine-report/releases/latest'
 tr300_temp=''
 tr300_transaction_started=0
 tr300_committed=0
+tr300_cleanup_ran=0
 tr300_receipt_existed=0
 tr300_intended_binary_existed=0
+tr300_intended_report_existed=0
 tr300_prior_binary_existed=0
+tr300_prior_report_existed=0
 tr300_prior_binary=''
+tr300_prior_report=''
 tr300_pkg_present=0
 tr300_pkg_payload_removed=0
 tr300_pkg_receipt_forgotten=0
+tr300_pkg_report_present=0
+tr300_sha256sum_directory=''
 
 tr300_cleanup() {
+    [ "$tr300_cleanup_ran" -eq 0 ] || return 0
+    tr300_cleanup_ran=1
     if [ "$tr300_transaction_started" -eq 1 ] && [ "$tr300_committed" -eq 0 ]; then
         if [ "$tr300_pkg_receipt_forgotten" -eq 1 ]; then
             # pkgutil has no supported inverse that recreates an exact signed
@@ -37,15 +47,97 @@ tr300_cleanup() {
             if [ "$tr300_pkg_payload_removed" -eq 1 ] && [ -f "$tr300_temp/prior-pkg-tr300" ]; then
                 sudo /usr/bin/ditto "$tr300_temp/prior-pkg-tr300" /usr/local/bin/tr300 >/dev/null 2>&1 ||
                     printf '%s\n' 'TR-300 warning: restoring the prior PKG payload also failed' >&2
+                if [ "$tr300_pkg_report_present" -eq 1 ] && [ -f "$tr300_temp/prior-pkg-report" ]; then
+                    sudo /usr/bin/ditto "$tr300_temp/prior-pkg-report" /usr/local/bin/report >/dev/null 2>&1 ||
+                        printf '%s\n' 'TR-300 warning: restoring the prior PKG report command also failed' >&2
+                fi
             fi
         fi
-        tr300_committed=1
     fi
     if [ -n "$tr300_temp" ]; then
         rm -rf "$tr300_temp" >/dev/null 2>&1 || true
     fi
 }
-trap tr300_cleanup EXIT HUP INT TERM
+
+tr300_sha256() {
+    sha256_path=$1
+    if [ -x /usr/bin/shasum ]; then
+        sha256_output=$(/usr/bin/shasum -a 256 "$sha256_path") || return 1
+    elif [ -x /usr/bin/sha256sum ]; then
+        sha256_output=$(/usr/bin/sha256sum "$sha256_path") || return 1
+    elif [ -x /bin/sha256sum ]; then
+        sha256_output=$(/bin/sha256sum "$sha256_path") || return 1
+    else
+        return 1
+    fi
+    sha256_value=${sha256_output%% *}
+    case "$sha256_value" in
+        ''|*[!0-9a-f]*) return 1 ;;
+    esac
+    [ "${#sha256_value}" -eq 64 ] || return 1
+    printf '%s\n' "$sha256_value"
+}
+
+tr300_verify_dist_installer() {
+    dist_installer_path=$1
+    case "$tr300_dist_installer_sha256" in
+        ''|*[!0-9a-f]*)
+            tr300_fail 'the managed installer has an invalid embedded cargo-dist checksum'
+            ;;
+    esac
+    [ "${#tr300_dist_installer_sha256}" -eq 64 ] ||
+        tr300_fail 'the managed installer has an invalid embedded cargo-dist checksum'
+    dist_installer_actual_sha256=$(tr300_sha256 "$dist_installer_path") ||
+        tr300_fail 'could not hash the downloaded cargo-dist installer'
+    [ "$dist_installer_actual_sha256" = "$tr300_dist_installer_sha256" ] ||
+        tr300_fail 'the downloaded cargo-dist installer checksum did not match this release'
+}
+
+tr300_prepare_sha256sum() {
+    verified_path=$1
+    tr300_sha256sum_directory="${tr300_temp}/hash-tools"
+    /bin/mkdir "$tr300_sha256sum_directory" ||
+        tr300_fail 'could not create the private checksum-tool directory'
+    /bin/chmod 700 "$tr300_sha256sum_directory" ||
+        tr300_fail 'could not protect the private checksum-tool directory'
+    sha256sum_shim="${tr300_sha256sum_directory}/sha256sum"
+    if [ -x /usr/bin/shasum ]; then
+        /bin/cat > "$sha256sum_shim" <<'TR300_SHA256SUM_SHIM'
+#!/bin/sh
+set -u
+case "${1-}" in
+    -b|--binary) shift ;;
+esac
+[ "$#" -eq 1 ] || exit 64
+exec /usr/bin/shasum -a 256 "$1"
+TR300_SHA256SUM_SHIM
+    elif [ -x /usr/bin/sha256sum ]; then
+        /bin/cat > "$sha256sum_shim" <<'TR300_SHA256SUM_SHIM'
+#!/bin/sh
+exec /usr/bin/sha256sum "$@"
+TR300_SHA256SUM_SHIM
+    elif [ -x /bin/sha256sum ]; then
+        /bin/cat > "$sha256sum_shim" <<'TR300_SHA256SUM_SHIM'
+#!/bin/sh
+exec /bin/sha256sum "$@"
+TR300_SHA256SUM_SHIM
+    else
+        tr300_fail 'no trusted SHA-256 implementation is available for cargo-dist'
+    fi
+    /bin/chmod 700 "$sha256sum_shim" ||
+        tr300_fail 'could not protect the private checksum shim'
+    if [ ! -f "$sha256sum_shim" ] || [ -L "$sha256sum_shim" ] ||
+        [ ! -x "$sha256sum_shim" ]; then
+        tr300_fail 'the private checksum shim is not a regular executable file'
+    fi
+    shim_output=$("$sha256sum_shim" -b "$verified_path") ||
+        tr300_fail 'the private checksum shim could not hash the cargo-dist installer'
+    shim_sha256=${shim_output%% *}
+    [ "$shim_sha256" = "$tr300_dist_installer_sha256" ] ||
+        tr300_fail 'the private checksum shim returned an unexpected digest'
+}
+trap tr300_cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 tr300_fail() {
     printf '%s\n' "TR-300 managed install failed safely: $*" >&2
@@ -73,6 +165,29 @@ tr300_download() {
         fi
     else
         tr300_fail 'curl or wget is required'
+    fi
+}
+
+tr300_stage_dist_installer() {
+    staged_installer=$1
+    if [ "${TR300_DIST_INSTALLER_PATH+x}" = x ]; then
+        local_installer=$TR300_DIST_INSTALLER_PATH
+        case "$local_installer" in
+            /*) ;;
+            *) tr300_fail 'TR300_DIST_INSTALLER_PATH must be an absolute local path' ;;
+        esac
+        if [ ! -f "$local_installer" ] || [ -L "$local_installer" ] ||
+            [ ! -r "$local_installer" ]; then
+            tr300_fail 'TR300_DIST_INSTALLER_PATH must name a readable regular file, not a symbolic link'
+        fi
+        /bin/cp "$local_installer" "$staged_installer" ||
+            tr300_fail 'could not copy the local cargo-dist installer into private staging'
+        if [ ! -f "$staged_installer" ] || [ -L "$staged_installer" ]; then
+            tr300_fail 'the staged local cargo-dist installer is not a regular file'
+        fi
+    else
+        tr300_download "${tr300_release_base}/tr300-dist-installer.sh" "$staged_installer" ||
+            tr300_fail 'could not download the immutable managed installer'
     fi
 }
 
@@ -129,6 +244,95 @@ tr300_receipt_is_exact_app() {
     tr300_receipt_prefix "$receipt" >/dev/null 2>&1 || return 1
 }
 
+tr300_receipt_owns_report() {
+    # cargo-dist records executable basenames in this top-level array. An old
+    # tr300-only receipt does not authorize a generic report sibling.
+    tr300_inventory_owns_report receipt "$1"
+}
+
+tr300_cargo_owns_report() {
+    cargo_prefix=${CARGO_HOME:-${HOME:-}/.cargo}
+    [ "${cargo_prefix%/}" = "${tr300_intended_prefix%/}" ] || return 1
+    cargo_inventory="${cargo_prefix%/}/.crates2.json"
+    [ -f "$cargo_inventory" ] && [ ! -L "$cargo_inventory" ] || return 1
+    tr300_inventory_owns_report cargo "$cargo_inventory"
+}
+
+tr300_inventory_owns_report() {
+    # Parse JSON structurally using POSIX awk, without depending on Python/jq
+    # or executing either installed command. Unrelated nested bins do not count.
+    awk -v mode="$1" '
+    function ws() { while (substr(s,p,1) ~ /[ \t\r\n]/ && p<=length(s)) p++ }
+    function bad() { failed=1; exit 1 }
+    function str(iskey, c,e,out) {
+        if (substr(s,p++,1)!="\"") bad()
+        out=""
+        while (p<=length(s)) {
+            c=substr(s,p++,1)
+            if(c=="\"") return out
+            if(c=="\\") {
+                # Reject escaped keys rather than treating alternate spellings
+                # as distinct keys and accepting contradictory inventories.
+                if(iskey) bad()
+                e=substr(s,p++,1)
+                if(e=="u") {
+                    if(substr(s,p,4)!~/^[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]$/) bad()
+                    out=out "\\u" substr(s,p,4); p+=4
+                } else if(e ~ /^["\\\/bfnrt]$/) out=out "\\" e
+                else bad()
+            } else {
+                if(c ~ /[[:cntrl:]]/) bad()
+                out=out c
+            }
+        }
+        bad()
+    }
+    function value(path,depth, c,k,v,n,i,key) {
+        if(depth>64) bad()
+        ws(); c=substr(s,p,1)
+        if(c=="{") {
+            p++; ws(); if(substr(s,p,1)=="}") {p++; return}
+            while(1) {
+                ws(); k=str(1); key=path SUBSEP k
+                if(seen[key]++) bad()
+                ws(); if(substr(s,p++,1)!=":") bad()
+                value(key,depth+1); ws(); c=substr(s,p++,1)
+                if(c=="}") return
+                if(c!=",") bad()
+            }
+        } else if(c=="[") {
+            arrays[path]=1
+            p++; ws(); i=0; if(substr(s,p,1)=="]") {p++; return}
+            while(1) {
+                value(path SUBSEP i++,depth+1); ws(); c=substr(s,p++,1)
+                if(c=="]") return
+                if(c!=",") bad()
+            }
+        } else if(c=="\"") {
+            v=str(0); n=split(path,parts,SUBSEP)
+            if(mode=="receipt" && n==3 && parts[2]=="binaries" && arrays[SUBSEP "binaries"]) {
+                if(v=="tr300") mainbin["receipt"]=1
+                if(v=="report") reportbin["receipt"]=1
+            }
+            if(mode=="cargo" && n==5 && parts[2]=="installs" && parts[3] ~ /^tr300 [^ ]+ \([^()]+\)$/ && parts[4]=="bins" && arrays[parts[1] SUBSEP parts[2] SUBSEP parts[3] SUBSEP parts[4]]) {
+                if(v=="tr300") mainbin[parts[3]]=1
+                if(v=="report") reportbin[parts[3]]=1
+            }
+        } else {
+            v=substr(s,p)
+            if(match(v,/^(true|false|null|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?)/)!=1) bad()
+            p+=RLENGTH
+        }
+    }
+    {s=s $0 "\n"}
+    END {
+        if(failed) exit 1
+        p=1; value("",0); ws(); if(p<=length(s)) exit 1
+        for(k in mainbin) if(reportbin[k]) exit 0
+        exit 1
+    }' "$2"
+}
+
 tr300_save_managed_state() {
     tr300_intended_prefix=$(tr300_install_prefix) || tr300_fail 'could not resolve the managed install prefix'
     case "$tr300_intended_prefix" in
@@ -136,6 +340,7 @@ tr300_save_managed_state() {
         *) tr300_fail 'the managed install prefix must be an absolute path' ;;
     esac
     tr300_intended_binary="${tr300_intended_prefix%/}/bin/tr300"
+    tr300_intended_report="${tr300_intended_prefix%/}/bin/report"
     tr300_receipt=$(tr300_receipt_path) || tr300_fail 'could not resolve the managed receipt path'
 
     if [ -f "$tr300_receipt" ]; then
@@ -147,6 +352,17 @@ tr300_save_managed_state() {
         tr300_prior_prefix=$(tr300_receipt_prefix "$tr300_receipt") ||
             tr300_fail 'could not read the existing managed install prefix'
         tr300_prior_binary="${tr300_prior_prefix%/}/bin/tr300"
+        if tr300_receipt_owns_report "$tr300_receipt"; then
+            tr300_prior_report="${tr300_prior_prefix%/}/bin/report"
+        fi
+    fi
+
+    if [ -e "$tr300_intended_report" ] || [ -L "$tr300_intended_report" ]; then
+        if ! { [ "$tr300_prior_report" = "$tr300_intended_report" ] ||
+          { [ "$tr300_receipt_existed" -eq 0 ] && tr300_cargo_owns_report; }; } ||
+            [ ! -f "$tr300_intended_report" ] || [ -L "$tr300_intended_report" ]; then
+            tr300_fail 'an unowned report command occupies the intended install path; preserving it'
+        fi
     fi
 
     if [ -f "$tr300_intended_binary" ]; then
@@ -154,11 +370,22 @@ tr300_save_managed_state() {
         cp -p "$tr300_intended_binary" "$tr300_temp/prior-intended-tr300" ||
             tr300_fail 'could not back up the existing managed/Cargo binary'
     fi
+    if [ -f "$tr300_intended_report" ]; then
+        tr300_intended_report_existed=1
+        cp -p "$tr300_intended_report" "$tr300_temp/prior-intended-report" ||
+            tr300_fail 'could not back up the existing managed report command'
+    fi
     if [ -n "$tr300_prior_binary" ] && [ "$tr300_prior_binary" != "$tr300_intended_binary" ] &&
         [ -f "$tr300_prior_binary" ]; then
         tr300_prior_binary_existed=1
         cp -p "$tr300_prior_binary" "$tr300_temp/prior-receipt-tr300" ||
             tr300_fail 'could not back up the receipt-owned managed binary'
+    fi
+    if [ -n "$tr300_prior_report" ] && [ "$tr300_prior_report" != "$tr300_intended_report" ] &&
+        [ -f "$tr300_prior_report" ]; then
+        tr300_prior_report_existed=1
+        cp -p "$tr300_prior_report" "$tr300_temp/prior-receipt-report" ||
+            tr300_fail 'could not back up the receipt-owned managed report command'
     fi
 }
 
@@ -176,9 +403,15 @@ tr300_restore_one_binary() {
 tr300_restore_managed_state() {
     tr300_restore_one_binary "$tr300_intended_binary" "$tr300_intended_binary_existed" \
         "$tr300_temp/prior-intended-tr300" || return 1
+    tr300_restore_one_binary "$tr300_intended_report" "$tr300_intended_report_existed" \
+        "$tr300_temp/prior-intended-report" || return 1
     if [ -n "$tr300_prior_binary" ] && [ "$tr300_prior_binary" != "$tr300_intended_binary" ]; then
         tr300_restore_one_binary "$tr300_prior_binary" "$tr300_prior_binary_existed" \
             "$tr300_temp/prior-receipt-tr300" || return 1
+    fi
+    if [ -n "$tr300_prior_report" ] && [ "$tr300_prior_report" != "$tr300_intended_report" ]; then
+        tr300_restore_one_binary "$tr300_prior_report" "$tr300_prior_report_existed" \
+            "$tr300_temp/prior-receipt-report" || return 1
     fi
     if [ "$tr300_receipt_existed" -eq 1 ]; then
         mkdir -p "$(dirname "$tr300_receipt")" &&
@@ -246,12 +479,23 @@ tr300_verify_receipt() {
         tr300_fail "managed installer receipt does not identify ${tr300_version}"
 }
 
-tr300_verify_binary() {
+tr300_verify_binaries() {
     binary=$tr300_intended_binary
     [ -x "$binary" ] || tr300_fail "managed TR-300 binary is missing: $binary"
-    reported=$($binary --version 2>/dev/null) || tr300_fail 'managed TR-300 binary did not run'
+    reported=$("$binary" --version 2>/dev/null) || tr300_fail 'managed TR-300 binary did not run'
     [ "$reported" = "tr300 ${tr300_version}" ] \
         || tr300_fail "managed TR-300 binary did not report ${tr300_version}"
+    report_binary=$tr300_intended_report
+    [ -x "$report_binary" ] || tr300_fail "managed report command is missing: $report_binary"
+    report_version=$("$report_binary" --version 2>/dev/null) ||
+        tr300_fail 'managed report command did not run'
+    [ "$report_version" = "tr300 ${tr300_version}" ] ||
+        tr300_fail "managed report command did not report ${tr300_version}"
+    "$report_binary" --fast --json >/dev/null 2>&1 ||
+        tr300_fail 'managed report command could not delegate to adjacent tr300'
+    report_help=$("$report_binary" --help) || tr300_fail 'managed report help failed'
+    canonical_help=$("$binary" --help) || tr300_fail 'managed TR-300 help failed'
+    [ "$report_help" = "$canonical_help" ] || tr300_fail 'report help differs from TR-300'
     printf '%s\n' "$binary"
 }
 
@@ -279,6 +523,20 @@ tr300_pkg_is_exact_product() {
     printf '%s\n' "$signature" | grep -Fxq 'Identifier=com.qubetx.tr300' || return 1
     printf '%s\n' "$signature" | grep -Fxq 'TeamIdentifier=M9D5379H93' || return 1
     printf '%s\n' "$signature" | grep -Eq '^Authority=Developer ID Application:' || return 1
+    if printf '%s\n' "$payload_files" | sed 's#^\./##; s#^/##' | grep -Fxq 'usr/local/bin/report'; then
+        [ -f /usr/local/bin/report ] && [ ! -L /usr/local/bin/report ] || return 1
+        report_file_info=$(pkgutil --file-info /usr/local/bin/report 2>/dev/null) || return 1
+        report_signature=$(codesign -d --verbose=4 /usr/local/bin/report 2>&1) || return 1
+        codesign --verify --strict /usr/local/bin/report >/dev/null 2>&1 || return 1
+        report_version=$(/usr/local/bin/report --version 2>/dev/null) || return 1
+        [ "$report_version" = "tr300 ${package_version}" ] || return 1
+        printf '%s\n' "$report_file_info" | grep -Eq '^(pkgid|package-id):[[:space:]]*com\.qubetx\.tr300\.pkg$' || return 1
+        printf '%s\n' "$report_file_info" | grep -Eq '^path:[[:space:]]*/usr/local/bin/report$' || return 1
+        printf '%s\n' "$report_file_info" | grep -Eq '^volume:[[:space:]]*/$' || return 1
+        printf '%s\n' "$report_signature" | grep -Fxq 'Identifier=com.qubetx.tr300.report' || return 1
+        printf '%s\n' "$report_signature" | grep -Fxq 'TeamIdentifier=M9D5379H93' || return 1
+        printf '%s\n' "$report_signature" | grep -Eq '^Authority=Developer ID Application:' || return 1
+    fi
 }
 
 tr300_prepare_macos_pkg() {
@@ -291,7 +549,22 @@ tr300_prepare_macos_pkg() {
     tr300_pkg_is_exact_product || tr300_fail 'the PKG receipt/payload/signature evidence conflicts; preserving it'
     /usr/bin/ditto /usr/local/bin/tr300 "$tr300_temp/prior-pkg-tr300" ||
         tr300_fail 'could not back up the receipt-owned PKG payload'
+    if pkgutil --files com.qubetx.tr300.pkg | sed 's#^\./##; s#^/##' | grep -Fxq 'usr/local/bin/report'; then
+        /usr/bin/ditto /usr/local/bin/report "$tr300_temp/prior-pkg-report" ||
+            tr300_fail 'could not back up the receipt-owned PKG report command'
+        tr300_pkg_report_present=1
+    fi
     tr300_pkg_present=1
+}
+
+tr300_remove_owned_pkg_payloads() {
+    sudo rm -f /usr/local/bin/tr300 ||
+        tr300_fail 'could not remove the receipt-owned PKG payload'
+    tr300_pkg_payload_removed=1
+    if [ "$tr300_pkg_report_present" -eq 1 ]; then
+        sudo rm -f /usr/local/bin/report ||
+            tr300_fail 'could not remove the receipt-owned PKG report command'
+    fi
 }
 
 tr300_take_over_macos_pkg() {
@@ -300,13 +573,17 @@ tr300_take_over_macos_pkg() {
 
     printf '%s\n' 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer...'
     sudo -v || tr300_fail 'administrator authorization was cancelled; the existing PKG was preserved'
-    sudo rm -f /usr/local/bin/tr300 || tr300_fail 'could not remove the receipt-owned PKG payload'
-    tr300_pkg_payload_removed=1
+    tr300_remove_owned_pkg_payloads
     sudo pkgutil --forget com.qubetx.tr300.pkg >/dev/null \
         || tr300_fail 'could not forget the TR-300 PKG receipt'
     tr300_pkg_receipt_forgotten=1
-    if [ -e /usr/local/bin/tr300 ] || pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
+    if [ -e /usr/local/bin/tr300 ] || [ -L /usr/local/bin/tr300 ] ||
+       pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
         tr300_fail 'PKG takeover did not converge; the managed shell install remains available'
+    fi
+    if [ "$tr300_pkg_report_present" -eq 1 ] &&
+       { [ -e /usr/local/bin/report ] || [ -L /usr/local/bin/report ]; }; then
+        tr300_fail 'PKG takeover left its report command behind'
     fi
     tr300_pkg_present=0
 }
@@ -318,20 +595,26 @@ tr300_main() {
     tr300_save_managed_state
     tr300_assert_no_unknown_path_owners
     dist_installer="$tr300_temp/tr300-dist-installer.sh"
-    tr300_download "${tr300_release_base}/tr300-dist-installer.sh" "$dist_installer" \
-        || tr300_fail 'could not download the immutable managed installer'
+    tr300_stage_dist_installer "$dist_installer"
+    tr300_verify_dist_installer "$dist_installer"
+    tr300_prepare_sha256sum "$dist_installer"
     chmod 700 "$dist_installer" || tr300_fail 'could not protect the managed installer'
 
     tr300_transaction_started=1
-    sh "$dist_installer" "$@" || tr300_fail 'cargo-dist installation did not complete'
+    PATH="${tr300_sha256sum_directory}:${PATH:-/usr/bin:/bin}" \
+        /bin/sh "$dist_installer" "$@" ||
+        tr300_fail 'cargo-dist installation did not complete'
     tr300_verify_receipt
-    managed_binary=$(tr300_verify_binary) || tr300_fail 'managed TR-300 verification did not complete'
+    managed_binary=$(tr300_verify_binaries) || tr300_fail 'managed TR-300 verification did not complete'
     tr300_take_over_macos_pkg
     if [ -n "$tr300_prior_binary" ] && [ "$tr300_prior_binary" != "$managed_binary" ]; then
         rm -f "$tr300_prior_binary" || tr300_fail 'could not remove the prior managed install path'
     fi
+    if [ -n "$tr300_prior_report" ] && [ "$tr300_prior_report" != "$tr300_intended_report" ]; then
+        rm -f "$tr300_prior_report" || tr300_fail 'could not remove the prior managed report path'
+    fi
     tr300_verify_receipt
-    tr300_verify_binary >/dev/null || tr300_fail 'final managed TR-300 verification did not complete'
+    tr300_verify_binaries >/dev/null || tr300_fail 'final managed TR-300 verification did not complete'
     tr300_assert_no_unknown_path_owners
     tr300_committed=1
     printf '%s\n' "TR-300 ${tr300_version} is installed through the managed shell channel: ${managed_binary}"

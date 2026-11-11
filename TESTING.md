@@ -7,7 +7,612 @@ as passed.
 
 ## Per-version verification log
 
+### v4.4.1 — Windows managed updater launcher security (2026-11-10)
+
+Candidate PR #35 integrates current main, addresses remaining Unix GPU helper resolution from PR #2, preserves the existing PR #1 private-staging protections, and patches six audited TLS dependency advisories. Windows format/clippy/all-target tests pass (205 library, two companion, 29 integration), including a hostile-PATH PowerShell probe. Advisory audit, actionlint, ShellCheck, exact Mac preinstall-template lint, shell transaction fixtures, and PowerShell transaction fixtures under both hosts pass. Package/release build/provenance, exact-head review/hosted CI, exact-main CI/OIDC, native assembly, and public verification remain pending. Evidence is recorded in `.tasks/tasks/sec35.md` as each gate completes.
+
+### v4.4.0 — PATH report command and MSI license (2026-09-24)
+
+Status: **published v4.4.0** at immutable source/tag
+`f49d50a256842ac6c677d1c743c553b3dd92717f`. Stable release
+[396235243](https://github.com/QubeTX/qube-machine-report/releases/tag/v4.4.0)
+was published at `2026-09-25T02:41:06Z` (September 24 in America/Chicago) with
+exactly 34 nonempty assets. Post-public Windows run `36087344916` passed all nine jobs; release-ledger
+closure and its protected documentation PR remain open.
+
+- PR #32 merged as `64486fa46790e4a4ecaaca847bfcc626280b3746` after reviewed
+  exact-head qualification. Publisher run `36082259983` stopped before any
+  registry credential/upload because its fixed source policy still expected
+  one binary and prohibited `src/bin`. No v4.4.0 crate or tag existed then.
+  PR #33 repaired only that policy and merged as the final source above;
+  extracted current and immutable v4.3.12 manifest guards passed positive and
+  negative target/default-run/source-inventory fixtures.
+- Exact-main CI `36084969867`, attempt 2, passed all 20 jobs. The first
+  Windows PowerShell attempt hit an existing 10-second timing boundary; five
+  local reproductions and the unchanged-code hosted retry passed. Automatic
+  trusted-OIDC crates run `36084969841`, attempt 2, published exact unyanked
+  v4.4.0 with checksum
+  `f9b47301f2e02db3b51221bd93af7530f7dfd770e20fb0d9dca1d9eb619d5402`.
+- Apple identity preflight `36082271439` passed both architectures. Tagged
+  Release `36085847270` passed all 13 jobs and created the private 24-asset
+  draft; Windows assembly `36086249950` passed and expanded it to 30 assets.
+- Private Windows validation `36086484931`, attempt 2, passed all 16 jobs.
+  The first attempt received a transient empty JSON download; all 30 API asset
+  records were read and verified before retrying without source changes.
+- macOS workflow `36086249996` passed all 12 jobs: both native Intel/Apple
+  Silicon signed/notarized PKG lifecycles, the DMG bridge, Linux smoke, and
+  sole final publication of all 34 assets. Both packaged commands are signed.
+- Public audit `target/public-v4.4.0-audit.json` passed all 34 GitHub SHA-256
+  digests/sizes, 13 sidecars, eight aggregate records, six paired-command
+  archives, compatibility aliases, source-rendered wrapper bindings, and
+  immutable source/latest-release identity. The audit executes no payload.
+- Read-only public MSI database proof in
+  `target/public-v4.4.0-msi-proof.json` verifies exact complete PolyForm
+  Noncommercial 1.0.0 RTF, including Required Notice, and both command files in
+  Global and Corporate editions. macOS has no EULA screen: the component PKG
+  and compatibility DMG contain no placeholder license resource.
+- Downloaded Windows release commands both report `tr300 4.4.0`, expose
+  identical full help, parse fast JSON, and render full ASCII reports.
+  Installer tests cover prior-version transitions, foreign destination
+  preservation, paired receipts, rollback, and loaded-image handling.
+- Local qualification passed formatting, all-target Clippy, all 234 tests,
+  dependency audit, release/package/publish dry-run, workflow/ShellCheck and
+  extracted preinstall checks, managed transaction fixtures, and independent
+  runtime/migration/package reviews. Cargo-dist includes both commands for
+  all six archive targets. Earlier five-run alias timing of 244.5–292.7 ms is
+  smoke evidence only, not a before/after performance claim.
+- The related website is deployed as 1.21.8 from
+  `f137414f442e67bee5d3a79ad52e46bc84ab0e0f`, production run `6652671791`.
+  All four routes and MSI-before-EXE ordering for Global/Corporate choices
+  passed actual Chrome verification. Versionless latest download links remain.
+
+Open acceptance: protected follow-up documentation PR and its
+main/idempotent-publisher checks. Personal
+AMD64 Linux laptop, Raspberry Pi 4, and the Alienware's natural Global MSI
+UAC transition remain separate open rows; hosted results and downloaded
+binary smoke do not establish those physical/operator outcomes.
+
+### v4.3.12 — Native Mac fixture-cleanup fix-forward (as of 2026-08-25)
+
+Release status: complete. Product behavior and installer policy are unchanged
+from v4.3.11. The only workflow change removes runner-owned nested fixture
+directories normally and uses `sudo` solely to unlink the exact validated
+fixture directory from root-owned `/Users`; executable provenance coverage
+rejects the former combined unprivileged `rmdir`.
+
+Exact PR #30 head `7fe751f8fe39bd4c5764998f3784b26d025936a2`
+passed all 20 CI jobs in `32868424781` and Release plan `32868425481`, then
+merged normally as exact source/tag
+`19246b76f39c53340e6be62a332cedca9bca766c`. Exact-main CI `32869031682`
+passed all 20 jobs. Automatic trusted-OIDC run `32869029189` published the
+unyanked crate with checksum
+`1ac1807630cd2bfc3c996e0960ca7ba303a090a0139035dd71a311f38f25119b`;
+tagless native Apple preflight `32869891315` passed both architectures.
+
+Tagged Release `32869971805` passed all 13 jobs and created exact private
+24-asset draft `376540890`. Windows Installers `32870555353` extended it to
+30 assets, and private Windows validation `32870926989` passed all 16 jobs.
+macOS run `32870555348` built, signed, notarized, and validated the universal
+PKG/compatibility DMG on native Intel and Apple Silicon; both direct-PKG jobs
+passed the previously failing second-home cleanup. Its sole finalizer published
+exactly 34 nonempty assets, the managed Linux installer smoke passed, and both
+legacy-DMG bridge smokes passed. Post-public Windows/updater run `32871841072`
+passed all nine applicable jobs. GitHub reports every asset with a 64-hex
+SHA-256 digest, `releases/latest` resolves to v4.3.12, and representative
+managed, Windows, macOS, and Linux stable download URLs return HTTP 200.
+`https://reports.qubetx.com/` returns HTTP 200 and its deployed bundle uses
+versionless `releases/latest/download` links, so no homepage source deployment
+was required. AMD64 Linux laptop, Raspberry Pi, and the separate Alienware
+v4.2.2 UAC task remain open and are not inferred from hosted release proof.
+
+### v4.3.11 — Native Mac validation fix-forward (as of 2026-08-25)
+
+Release status: exact source and crates.io publication completed; its GitHub
+draft exists but remains private. Tag `v4.3.11` points to exact source
+`c88ddc21d902ccf21158585dd60b89d37650424b`. Exact-main CI `32864501691`,
+automatic trusted-OIDC crates run `32864502146`, native Apple preflight
+`32865435959`, all 13 Release jobs in `32865635948`, and Windows Installers
+`32866237615` passed. Private Windows validation `32866624445` passed every
+channel and transition job. Draft `376514152` reached exactly 30 assets. macOS run
+`32866237569` built, signed, and notarized both artifacts. Both native jobs
+proved the real managed-install rejection and preserved the existing managed
+binary/receipt with no native payload/receipt, then failed only because the
+test harness tried to remove its second-home fixture from root-owned `/Users`
+without privilege. The publisher and public smokes skipped; nothing became
+public. v4.3.12 fixes forward without moving or mutating v4.3.11.
+
+Local release-source evidence on 2026-08-25: formatting; warnings-denied
+workspace/all-target Clippy; 185 unit tests and 22 integration tests; 39-file
+locked package inventory; locked publish dry-run; optimized workspace build;
+RustSec audit of 221 locked dependencies against 1,226 loaded advisories;
+cargo-dist 0.31.0 plan; structural actionlint; standalone ShellCheck for every
+release script/wrapper plus the exact extracted PKG `preinstall`; managed-
+installer transaction fixtures under Git Bash, PowerShell 7, and Windows
+PowerShell 5.1; pinned-Inno parsing under both PowerShell hosts; and the full
+executable release-provenance suite passed. Release-binary table, ASCII, fast
+JSON, and full JSON smokes passed; fast JSON measured 259.6 ms and full JSON
+2119.2 ms on the Alienware. Windows CPU temperature remained `null`, and the
+reported 52 C NVIDIA temperature exactly matched direct `nvidia-smi`. Product
+code and benchmark-sensitive paths are byte-for-byte unchanged from v4.3.10;
+no performance gain is newly claimed.
+
+### v4.3.10 — Mac checksum and staged Windows validation fix-forward (as of 2026-08-25)
+
+Release status: exact source and crates.io publication completed; its GitHub
+draft exists but remains private. Tag `v4.3.10` points to exact source
+`e8b0bb73f895f3c2b2d2f62fd39df5846db8f526`. Exact-main CI
+`32854836544`, automatic trusted-OIDC crates run `32854836651`, native Apple
+preflight `32855676983`, all 13 Release jobs in `32855768841`, Windows
+Installers `32856291489`, and private Windows Installer Validation
+`32856682126` passed. Draft `376446284` reached exactly 30 assets.
+
+macOS run `32856291645` built, signed, and notarized the universal PKG and
+compatibility DMG, then both native validation jobs stopped on one harness
+assertion: PackageKit emitted its normal generic `PKInstallErrorDomain Code=112`
+with `NSFilePath=./preinstall` instead of repeating the preinstall script's
+human recovery message. No publisher ran and nothing became public. PR #28
+changed only that validation boundary; exact-head CI `32859056143` and Release
+plan `32859054543` passed, it merged as
+`e55c71bd35d410cc0abda5419168c5384f92690a`, and exact-main CI
+`32859831814` passed. Recovery run `32860673370` then correctly refused to
+reuse the old tag because its source did not equal protected `main`. v4.3.11
+therefore fixes forward without moving or mutating v4.3.10.
+
+### v4.3.9 — Apple inventory and Windows attestation fix-forward (as of 2026-08-25)
+
+Release status: exact source and crate publication completed; the GitHub draft
+exists but remains private. Tag and main resolve to exact commit
+`a4a75e975ebceba90a585deeb4767a4546504a18`. Exact-main CI `32848574652`
+passed 20/20, trusted-OIDC run `32848574607` published exact unyanked v4.3.9,
+and native Intel/Apple Silicon credential preflight `32849403638` passed.
+Tagged Release `32849508590` passed all 13 jobs and created exact private draft
+`376401700` with 24 assets; Windows Installers `32850002419` passed and
+extended that same draft to exactly 30 assets.
+
+macOS run `32850002313` bound the exact source artifacts, passed both installer-
+identity preflights, prepared the correct signer input, and verified all three
+checksum payloads. Final job `97808652164` then stopped before any Apple
+credential use because a locale-sensitive `sort` comparison expected a
+different capitalization order. Private Windows validation `32850359079`
+passed all other installer, managed, Cargo, portable, transition, rollback,
+registration, PATH, and uninstall cases; only Global MSI and Global EXE failed
+when the hidden production worker tried its anonymous exact-tag URL while the
+release was intentionally private. The private proof attestation and every Mac
+publication/public-smoke job skipped. Nothing became public; v4.3.10 fixes
+forward without moving the tag or mutating the draft.
+
+Current local candidate evidence on 2026-08-25: formatting; warnings-denied
+locked Clippy; 185 unit tests, 22 integration tests, and the doc test; locked
+release build; 39-file package inventory; locked publish dry-run; RustSec audit
+(221 dependencies against 1,226 loaded advisories); cargo-dist 0.31.0 plan;
+structural actionlint; standalone ShellCheck including the extracted exact PKG
+`PREINSTALL`; PowerShell parser; managed-installer transaction fixtures under
+Git Bash, PowerShell 7, and Windows PowerShell; Apple staging compatibility;
+and the full executable release-provenance suite passed. Negative provenance
+mutations rejected Apple producer/consumer drift plus missing, job-scoped,
+workflow-scoped, duplicated, substituted, or post-verification inherited
+Windows authorization. Live v4.3.9 full/fast table, JSON, and ASCII smokes
+passed: Windows CPU temperature
+remained `null`, and the report's 52 C NVIDIA value was consistent with the
+direct 53 C reading. Independent review corrected factual ledger and token-
+scope claims, then exposed the child-process token inheritance repaired by the
+scrub/order regression. Final exact-head review and hosted/native/public gates
+remain open; these local results do not satisfy them.
+
+### v4.3.8 — Published crate; exact private draft, failed Apple input inventory
+
+Release status: exact source and crate publication completed; the GitHub draft
+exists but remains private. Tag and main resolve to exact commit
+`0b726a854666ed73e42fda675645a097fa887824`. Exact-main CI `32842065507`
+passed 20/20, trusted-OIDC run `32842065501` published unyanked v4.3.8 with
+checksum `f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`,
+and native Intel/Apple Silicon credential preflight `32842865442` passed.
+
+Tagged Release `32842969776` passed all 13 jobs and created exact private
+24-asset draft `376357745` for the same tag/target. Automatic macOS Universal
+Package run `32843468883` successfully resolved the private draft, froze the
+exact Release-run Apple/source bytes, and passed both installer-identity
+preflights. Its uncredentialed prepare job `97787965884` then failed
+deterministically because the frozen artifact contained the intended six files
+while the consumer's exact inventory listed only the four archives/sidecars.
+All package-build, sign/notary, final-publisher, and post-public smoke jobs
+skipped. Automatic Windows Installers run `32843468892` also failed
+deterministically: build job `97787896541` reached `Install the pinned official
+Inno Setup 6.7.3`, where `gh release verify-asset` had no `GH_TOKEN` after the
+build-job hardening. Windows publication skipped, the draft remained private
+at exactly 24 assets, and nothing became public. The tag and draft are
+immutable evidence; v4.3.9 fixes forward.
+
+The working permission split gives fresh no-checkout resolver/freezer jobs
+`contents: write` only because push access is required to enumerate and freeze
+private Release state. Checked-out builders and every job that executes
+candidate installers, wrappers, archives, or product code use read-only GitHub
+authorization and consume immutable internal artifacts; fresh no-checkout
+publisher steps are the only steps that perform a mutation on the bound draft.
+
+Observed pre-tag v4.3.8 working-tree evidence on 2026-08-25:
+`cargo fmt --all -- --check`,
+locked workspace Clippy with warnings denied, all 207 unit/integration tests
+(185 unit plus 22 integration), locked release build, and `cargo audit` passed
+(221 dependencies checked against 1,226 loaded advisories; no vulnerabilities).
+Cargo-dist 0.31.0 `dist plan` passed. The full executable release-provenance
+suite passed twice; managed shell and PowerShell transaction fixtures passed,
+including PowerShell under both `pwsh` and Windows PowerShell 5.1. ShellCheck
+passed every script/wrapper plus the extracted exact PKG `PREINSTALL`; both
+PowerShell hosts parsed `scripts/install-pinned-inno-setup.ps1`; actionlint
+passed the changed workflows with embedded ShellCheck disabled; and
+`git diff --check` passed. An isolated live `file://` probe of v4.3.7's raw
+cargo-dist installer installed exact `tr300 4.3.7`. Fast/full table and JSON
+runtime smokes plus ASCII output passed. Seven alternating full-mode runs of
+the exact v4.3.8 candidate and installed v4.2.2 measured medians of 2094.4 ms
+and 5134.0 ms respectively: v4.3.8 remained below 2.5 seconds and was 59.2%
+faster (2.45×). Eleven alternating fast-mode runs measured 247.1 ms and
+246.2 ms respectively (+0.4%); this is background-level and supports no fast-
+mode gain claim. Direct `nvidia-smi` reported 54 C while the candidate reported
+53 C, and Windows CPU temperature remained JSON `null`. Actionlint 1.7.12
+passed every workflow with its embedded ShellCheck integration disabled, and
+standalone ShellCheck 0.11.0 passed every tracked shell script; the combined
+Windows-host invocation wedged without a diagnostic, so the combined Linux
+hosted gate was therefore the authoritative result. The pre-commit 39-file package
+inventory and locked publish dry-run passed with `--allow-dirty`; their binding
+clean-tree repeats and the hosted gates later passed as recorded above. These
+local results do not imply complete GitHub publication or physical Linux/Pi
+acceptance.
+
+### v4.3.7 — Published crate; exact private draft, failed downstream visibility
+
+Release status: exact source and crate publication completed; the GitHub draft
+exists but remains private. Tag and main resolve to exact commit
+`b9aa12850720b49c120c6465cefd094a843c5fc4`. Exact-main CI `32834399658`
+passed, trusted-OIDC run `32834399800` published unyanked v4.3.7 with checksum
+`225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`,
+and native Intel/Apple Silicon credential preflight `32835377627` passed.
+
+Tagged Release `32835470143` passed all 13 jobs: plan, all six platform builds,
+both fresh Apple signing/notarization jobs, global assembly, exact fixed-asset
+preparation, host, and announce. It created private stable draft `376309349`
+for exact tag/target `v4.3.7` /
+`b9aa12850720b49c120c6465cefd094a843c5fc4`, with exactly 24 expected nonempty
+assets. Windows Installers `32835918254` and macOS Universal Package
+`32835918239` then failed in their initial read-only provenance resolvers: each
+received zero matching private-draft records. Their build, credential, and
+publisher jobs skipped; Windows validation skipped, no assets were added, and
+nothing became public. The tag and draft are immutable evidence; v4.3.8 fixed
+forward.
+
+The v4.3.7 candidate had already passed the complete local gate: formatting,
+Clippy with warnings denied, all 208 unit/integration/doc tests, release build,
+RustSec audit, cargo-dist 0.31.0 plan, actionlint/ShellCheck, the full executable
+provenance suite, Apple staging compatibility, managed-installer transaction
+fixtures, the 39-file package inventory, publish dry-run, and fast/full table,
+JSON, and ASCII smokes. Two independent reviews found no blocker. Seven
+alternating full-mode runs against installed v4.2.2 measured medians of 5140.3
+ms and 2102.1 ms (59.1% faster; 2.45×). Eleven alternating fast-mode runs
+measured 241.0 ms and 242.3 ms (+0.6%, statistically unchanged and not a
+speedup claim). Windows CPU temperature remained absent/JSON `null`; the
+reported 53 C NVIDIA temperature matched direct `nvidia-smi` at 53 C.
+
+### v4.3.6 — Published crate; correct private draft, failed checksum handoff
+
+Release status: exact source and crate publication completed; a second correct
+GitHub draft exists but remains private. PR #23 head
+`ebb4f76a87b7d3eaea7970dce9cb35c68332723c` passed Release plan
+`32829236145` and all 20 PR CI jobs in `32829236226` after one macOS ARM runner
+cleanup rerun. It merged as `9ab392f4df56aa8824f5a8627f940eaee0b62b44`;
+exact-main CI `32830286853` passed 20/20, trusted-OIDC run `32830286932`
+published unyanked v4.3.6 with checksum
+`4ebfb22c54355c489f48f79aa5a6bd5a72f3fc0a7285201885957081ce1bd427`,
+and native Intel/Apple Silicon credential preflight `32830369613` passed.
+
+The executable host fixture extracts the production asset/list/create/list/ID
+sequence and reproduces the real API split: a draft is visible in the
+authenticated collection while the by-tag endpoint returns 404. It accepts one
+exact 24-asset draft and rejects a pre-existing match on page two before any
+creation, duplicate matches, wrong targets, public or prerelease state,
+missing/extra assets, and zero-byte assets. Tagged Release `32831292249` passed
+its plan, all six platform builds, both fresh Apple signing/notarization jobs,
+global assembly, and exact 24-asset preparation. Host job `97751759346`
+created and revalidated private draft ID `376283574` for exact tag/target
+`v4.3.6` / `9ab392f4...`, with all 24 expected nonempty assets. Its final
+checksum lookup expected `*tr300-installer.sh`, while the immutable prepared
+manifest contains `tr300-installer.sh`; the empty result failed the following
+64-hex assertion. Announcement and every downstream workflow skipped. The
+draft stays private and the tag is immutable; v4.3.7 fixes forward.
+
+The corrected local candidate passed formatting, Clippy with warnings denied,
+all 208 unit/integration/doc tests, release build, RustSec audit, cargo-dist
+0.31.0 plan, actionlint/ShellCheck, the full executable provenance suite,
+Apple staging compatibility, the 39-file package inventory, publish dry-run,
+and fast/full table, JSON, and ASCII smokes. Seven alternating full-mode runs
+against installed v4.2.2 measured medians of 5147.8 ms and 2112.4 ms (59.0%
+faster); 11 alternating fast-mode runs measured 302.8 ms and 312.9 ms (+3.3%,
+within the non-regression band and not a speedup claim). Windows table/ASCII
+output omitted CPU temperature, JSON retained `cpu.temperature_c: null`, and
+the reported 53 C NVIDIA temperature matched direct `nvidia-smi` at 53 C.
+
+### v4.3.5 — Published crate; correct private draft, failed host assertion
+
+Release status: exact source and crate publication completed; a correct GitHub
+draft exists but remains private. PR #22 head
+`f9aac4f7e4601402e34c0959f790d587bdabab76` passed all 20 CI jobs in
+`32823394621`, Release plan `32823394660`, and focused review. It merged as
+`42879b4af0699148aea46a841e76aa5fc1673786`; exact-main CI `32823922777`
+passed 20/20, trusted-OIDC run `32823922726` published unyanked v4.3.5 with
+checksum `a5facb0b31419f128e85f74c8636bf134388212b68937bf795bf498924c99032`,
+and native Intel/Apple Silicon preflight `32824834401` passed.
+
+Tagged Release `32824925889` passed plan, all six platform builds, both fresh
+Apple signing/notarization jobs, global assembly, and the repaired exact
+24-asset preparation. Host job `97731923914` successfully created private draft
+ID `376242296` for exact tag/target `v4.3.5` / `42879b4...`, with all 24 expected
+nonempty assets. Its immediate `GET /releases/tags/v4.3.5` assertion then
+returned 404 because that endpoint does not expose drafts. The Release run
+failed, Windows/macOS workflow-run consumers skipped, and nothing became
+public. The draft stays private and the tag is immutable; v4.3.6 fixes forward.
+
+### v4.3.4 — Published crate; failed-closed release-metadata preparation
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. PR #21 head
+`a631e971786682bc823b3351e4cf3a569afe491f` passed all 20 CI jobs in
+`32819974330`, Release plan `32819974234`, and independent review. It merged as
+`ed22545e444f968296d5a34cbc27a0a205e92ae0`; exact-main CI `32820725614`
+passed 20/20, automatic trusted-OIDC run `32820725583` published unyanked
+v4.3.4, and native Intel/Apple Silicon preflight `32821497928` passed. A fresh
+crates.io record matched checksum
+`b74d1aec64b44f5f7f56d284dcb89dd44f1d6b2aa18400e49adb2acb27cbd304`.
+
+Tagged Release `32821575317` passed its plan, all six platform builds, both
+fresh Apple signing/notarization jobs, and global artifact assembly. This
+proves the v4.3.4 exact tar-mode repair against real cargo-dist output. The
+uncredentialed preparation job `97721850618` then wrote the result of a
+metadata predicate (`true`) to `dist-manifest.json`; its next projection failed
+with `Cannot index boolean with string "announcement_title"`. The prepared
+artifact was never uploaded, host/announce skipped, all downstream workflows
+skipped, and no draft or public release was created. The tag is immutable;
+v4.3.5 fixes forward.
+
+### v4.3.3 — Published crate; failed-closed tar-mode staging
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. The immutable v4.3.2 tag exposed a deterministic
+producer-contract mismatch before credential use: pinned cargo-dist 0.31.0
+writes each checksum record followed by a blank line (`LF LF`), while the new
+exact Apple guard modeled one `LF`. The v4.3.3 correction byte-validates that
+raw form, validates the corresponding eight-record `sha256.sum`, and only then
+canonicalizes all public sidecars and the aggregate to one terminal `LF`.
+Extracted-workflow fixtures accept the exact downloaded form and reject
+one-/three-LF, CRLF, same-length trailing garbage, signed-sidecar drift, and
+aggregate drift without changing rejected fixture files. The complete local
+candidate gate passed: locked formatting and warnings-denied Clippy; 185 unit
+and 22 integration tests; optimized build; 39-file package inventory and
+publish dry-run; RustSec audit over 221 dependencies; cargo-dist 0.31.0 plan;
+full and focused executable provenance fixtures; structural actionlint plus
+direct ShellCheck/Bash syntax; and fast/full table, JSON, and ASCII runtime
+smokes. The release binary reported v4.3.3; sample fast/full table runs were
+236.1 ms and 2108.5 ms, Windows CPU temperature stayed null, and the reported
+53 °C NVIDIA value matched direct `nvidia-smi`. PR #20 exact head
+`a0d6edf1655c441faf6b2e43dbc5dfdb1dcacf1d` passed all 20 CI jobs in
+`32813881136`, Release plan `32813881154`, and independent review. It merged as
+`cf1ac838ac582569bb7d3ea2c76b5773b44a4083`; exact-main CI `32814328977`
+passed, automatic trusted-OIDC run `32814329178` published unyanked v4.3.3,
+and native preflight `32815263338` passed. A fresh crate download matched
+checksum `5490f9329c29869e912aeb1c552c30434fde2e5aae17521ed89334d7d3851b91`.
+Tagged Release `32815338720` then passed its plan and all six platform builds,
+but Apple signer jobs `97703044073` and `97703044100` rejected the producer's
+safe full POSIX tar modes before signing, notarization, upload, or draft
+creation. Every downstream publication workflow skipped. The tag is immutable;
+v4.3.4 fixes forward.
+
+### v4.3.2 — Published crate; failed-closed checksum staging
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. PR #19 head
+`8b78d6de86f74deaaec0ba21be99b05f757a233a` passed CI `32809107588`, Release
+plan `32809107593`, native Intel/ARM Bash 3.2 staging, and independent review.
+It merged as `c246ded23a93f8c383498989a334268442ec2e57`; exact-main CI
+`32809616793` passed and automatic trusted-OIDC run `32809616807` published
+unyanked v4.3.2. A fresh crate download matched checksum
+`d6b1976c000a3fb06a4ee7b6cfaf410352e6e518076d840cb817232a0c511c`, and
+tagless native preflight `32810343902` passed. Tagged Release `32810420213`
+then passed its plan and all six platform builds, but Apple signer jobs
+`97689121553` and `97689121586` rejected cargo-dist's valid two-LF raw
+sidecars before signing, notarization, upload, or draft creation. Every
+downstream workflow skipped. The tag is immutable; v4.3.3 fixes forward.
+
+### v4.3.1 — Published crate; failed-closed Apple packaging
+
+Release status: exact source and crate publication completed, but no GitHub
+Release or draft exists. PR #18 head
+`497963675d8a4fe08b34cc649ab55b02bbc1c9c2` passed all 20 jobs in CI
+`32799513518` and Release plan `32799513464`. It merged and tagged at exact
+`07e0e3ae265eb70856eb5ee0602beb11850ea00d`; exact-main CI `32800131846`
+passed, automatic trusted-OIDC crates run `32800131893` published unyanked
+v4.3.1, and a fresh download matched crates.io checksum
+`cc7fc5798661b9b77eb7327cdaddbe5f12d2f17c42dafe0badfc992b4ee2624d`.
+Native credential preflight `32800830054` passed on Intel and Apple Silicon.
+Tagged Release `32800944635` then passed its plan and all six platform builds,
+but fresh Apple signer jobs `97662081638` and `97662081687` failed immediately,
+before signing or upload, because macOS `/bin/bash` 3.2 rejected `declare -A`;
+the following `mapfile` was incompatible as well. Hosting, announcement, and
+all downstream publication jobs skipped, and no draft was created. An unchanged
+rerun cannot consume corrected workflow code; v4.3.2 is the required
+immutable-tag-safe fix-forward.
+
+### v4.3.0 — Published crate; failed-closed GitHub packaging
+
+Release status: v4.2.2 remains the last complete GitHub distribution. Exact
+v4.3.0 is publicly available and unyanked on crates.io with
+`trustpub_only=true`, but no v4.3.0 GitHub Release or draft exists.
+Release-chain hardening exact head
+`8ea060f` passed complete local, hosted, security, and native fixture gates and
+merged through PR #15 as `1ffb0cc`; exact-main CI `32759430269` then passed all
+19 jobs. The local PR #14 branch integrated hardened `main` through merge
+`4e962b6` and source/test head `8471d95`, then final head `8f5919b` passed the
+complete local gate, controlled benchmark, zero-finding full/delta security
+scans, all 19 jobs in CI `32764677640`, release plan `32764677784`, independent
+review, and every review thread. PR #14 merged as
+`2f997d2e1a1dac764ca170abd0c227264858a8c9`; exact-main CI `32766014047` passed
+all 19 jobs. Release-automation PR #16 head `57b2597` then passed all 19 CI jobs
+in `32790636744` plus release plan `32790636676`, merged as `75e7092`, and
+exact-main CI `32791121107` passed 19/19. Automatic crates run `32791618652`
+proved the exact-SHA validator, then crates.io rejected the trusted-publishing
+exchange before issuing a crates.io publish token
+because trusted publishing does not support a `workflow_run` event. Publisher
+PR #17 fixed that trigger and merged as `c788029d`; exact-main CI
+`32794371259` attempt 2 passed, and automatic run `32794371283` attempt 2
+published exact v4.3.0 through trusted OIDC. The public checksum is
+`bef6e299d9e29e192a87875867516c38081c8b0f1efb6df5a14e3c7c5c6f0dad` and
+trusted provenance binds the crate to that SHA/run. Fresh Apple identity
+preflight `32795757823` passed on Intel and Apple Silicon with all release work
+skipped. Immutable tag `v4.3.0` then triggered Release `32795846831`; the
+official pinned cargo-dist installer completed, but its normal
+`dist.exe`/`cargo-dist.exe` hard link made `.LinkType` nonempty and the new
+guard rejected it. The run failed before signing, hosting, or draft creation.
+An unchanged rerun is deterministic. v4.3.1 repaired that Windows bootstrap,
+then exposed the separate Apple system-Bash gap recorded above; v4.3.2 is the
+required final fix-forward.
+
+- **Integrated local qualification — pass through source/test head `8471d95`:**
+  locked fmt; warnings-denied workspace/all-target Clippy; 185 library and 22
+  integration tests; release build; 39-file package list; locked publish
+  dry-run with no upload; RustSec audit of 221 dependencies; cargo-dist 0.31.0
+  plan; actionlint; source and extracted-preinstall ShellCheck; release
+  provenance fixtures; Bash, PowerShell 7, and Windows PowerShell managed-
+  transaction fixtures; pinned-Inno parser; Linux/macOS cross-target
+  check/Clippy; and full/fast table, JSON, and ASCII smokes. Three independent
+  final reviews reported no source or release-security P0–P3 finding; the
+  documentation review's state corrections are incorporated here. The hosted
+  exact-head result is recorded above; signed/tagged gates remain separate.
+
+- **Earlier repaired-code local gates — pass on exact head `56b92d7`:** locked fmt; warnings-denied
+  all-target/workspace Clippy; 173 library and 22 integration tests; release
+  build; 39-file package list; publish dry-run (no upload); audit of 221 locked
+  dependencies; cargo-dist plan; actionlint and shellcheck; Linux/macOS cross-
+  target check/Clippy; and full/fast table, ASCII, JSON, and thermal runtime
+  smokes all passed. Exact repaired-head hosted CI is recorded above.
+- **Windows thermal contract:** only an already-detected NVIDIA adapter may
+  trigger `nvidia-smi`, and its timeout follows the active collection mode.
+  A trusted answer renders `GPU TEMP` and a numeric
+  `cpu.gpu_temperature_c`; failure remains absent/`null`. Windows CPU
+  temperature is deliberately always absent/`null`: ACPI thermal-zone identity
+  cannot establish that a zone belongs to the CPU. No ACPI CPU probe is part of
+  the candidate acceptance surface. A targeted post-repair Alienware smoke
+  recorded `GPU TEMP` at 54 °C in both full and fast modes, with CPU temperature
+  `null`; one ASCII invocation had 49 nonempty lines and every line was exactly
+  51 display columns.
+- **Recorded Windows latency benchmark:** seven alternating Alienware m16 R2
+  full-mode runs per version against integrated source/test head `8471d95`
+  produced medians of 5146.9 ms for the installed v4.2.2 baseline and 2120.2 ms
+  for the candidate, a reduction of about 3026.6 ms (58.8%) and a 2.43× runtime
+  ratio. Eleven alternating fast-mode runs per version produced medians of
+  257.3 ms and 260.4 ms; the candidate's +1.2% difference is background-level,
+  so make no fast-mode gain claim. Candidate JSON kept Windows CPU
+  present-and-`null`; its 54 °C GPU value exactly matched direct `nvidia-smi`.
+  Independent reviewer runs reproduced the material full-mode improvement and
+  statistically unchanged fast behavior.
+- **Linux thermal contract:** both modes use pure sysfs. CPU/GPU selection is
+  deterministic, chooses the hottest plausible healthy sensor within the
+  preferred class, rejects faulted/unreadable/malformed channels, recognizes
+  `soc_thermal`, and falls back only to CPU/SoC-labeled thermal zones. Fixtures,
+  output parity, and Linux cross-target check/Clippy passed locally; hosted
+  Linux x86_64 and ARM64 feature-baseline tests/builds also passed. Physical
+  sensor acceptance remains open on the AMD64 laptop and Raspberry Pi.
+- **Linux battery contract:** reject explicit `scope=Device` and `present=0`
+  evidence; accept well-formed `*_now` or `*_avg` corroboration, including
+  valid signed current/power readings; cross-validate compatible energy/charge
+  pairs; and choose deterministically. These rules harden plausible
+  misattribution paths but do not prove which sysfs node produced the historical
+  Raspberry Pi "30%" report.
+- **macOS contract:** the `pmset` fallback requires a recognized
+  `-InternalBattery-N` record and cannot use an unrelated percentage. macOS
+  reports no thermal values in v4.3. Cross-target check/Clippy passes locally,
+  and hosted Intel/Apple Silicon tests, builds, and Apple Silicon speed gate pass.
+- **Physical gates still open:** capture the Raspberry Pi's real
+  `/sys/class/power_supply/*` and thermal layout, then run the full
+  thermal/battery/output matrix there; run the corresponding matrix on the
+  AMD64 Linux laptop. Hosted Linux fixtures do not close either physical gate.
+- **Release-chain hardening closure:** exact head `8ea060f` passed the complete
+  local gate, five sealed complete-coverage security scans with zero findings,
+  all 19 jobs and 26 reported checks in CI run `32758484378`, and release-plan
+  run `32758484335`. Both native Intel and Apple Silicon PackageKit fixtures
+  passed the preinstall-only refusal, no-mutation invariants, and clean-package
+  control before PR #15 merged as `1ffb0cc`. These results qualify the hardened
+  release chain; the final integrated v4.3 product head is qualified separately
+  above.
+- **Mac transaction finding:** exact hardening head `dae0857` CI run
+  `32710504501` passed workflow validation, formatting, Clippy, Linux/Windows
+  tests and release builds, audit, cargo-dist, Windows installer custody, and
+  speed gates. Both native Mac architectures then proved that Apple Installer
+  retained `/usr/local/bin/tr300` after the deliberate failing `postinstall`,
+  even though the old managed binary and receipt restored exactly. That design
+  was release-blocking and directly motivated the preinstall-only policy below.
+- **Superseding package policy:** the candidate direct PKG contains exactly one
+  non-mutating `preinstall`; it rejects the standard managed binary or receipt
+  paths (`~/.cargo/bin/tr300` and
+  `~/.config/tr300/tr300-receipt.json`) in every `/Users` home, including both
+  classes of safe dot-prefixed entry, plus all eligible local Directory Service
+  homes, independent of console or launch environment, before payload or native
+  receipt creation. `/Users` itself must first be a real listable directory, and
+  the exact fixed parent levels are then enumerated non-recursively;
+  symlinked, non-directory, permission-denied, or I/O-failed intermediates block
+  the package instead of being interpreted as absent. Fixed ASCII components
+  are matched case-insensitively so default APFS/HFS+ aliases and conservative
+  case-sensitive-volume variants cannot hide ownership; more than one folded
+  match is blocking ambiguity. It ships no migration probe,
+  rollback helper, or `postinstall` and
+  never mutates user-owned managed state as root. Directory Service plist
+  handling is constrained to pre-macOS-12-compatible `plutil -lint` plus
+  escaped-key `PlistBuddy` array reads. Sentinel-framed capture preserves data
+  newlines through the one-line validation instead of command-substitution
+  normalization; CI forbids newer typed extraction flags and exercises a real
+  trailing-newline Directory Service record through PackageKit. The
+  component PKG also rejects every target volume except `/`; the exact package
+  fixture must prove alternate-volume refusal leaves no target payload or
+  receipt. The signed candidate is byte-bound to that reviewed preinstall. A
+  real pre-macOS-12 PackageKit run remains a separate compatibility
+  qualification. UID 501–4294967295 accounts with missing, offline, or otherwise
+  uninspectable homes deliberately block the PKG until the home/Directory
+  Service record is repaired; keeping the managed installer is the supported
+  alternative, not bypassing the gate. Native PackageKit fixtures include a
+  custom home owned by UID 3000000000 and require values above UInt32—including
+  both 4294967296 and an 11-digit value—to fail closed before payload or receipt
+  creation. Arbitrary custom Cargo/cargo-dist/XDG
+  locations remain outside this PackageKit-visible inventory and must not be
+  claimed as detected.
+- **Supported channel transition:** managed-to-PKG requires a refresh or exact
+  reinstall through the v4.3-or-later managed installer, receipt-aware Complete
+  uninstall, and then a clean PKG install. Complete must preflight exact
+  cargo-dist provider/app/prefix evidence
+  before profile mutation and transactionally remove the running binary and
+  receipt. Raw Cargo stays binary-only; malformed, foreign, linked, or changed
+  receipts fail closed. Exact PKG-to-managed takeover remains supported.
+- **Pre-tag native fixture acceptance — pass:** hosted `macos-15` and
+  `macos-15-intel` proved the hardening fixtures for binary-only, receipt-only,
+  pair, malformed, broken-link, second-home, custom-home, and alternate-volume
+  conflicts on PR #15 and again on exact `main` in jobs `97534440875` and
+  `97534440916` of CI `32759430269`.
+- **Signed/tagged release-native acceptance still open:** the future signed
+  v4.3 release candidate must
+  repeat the applicable transition contract and prove those managed-conflict
+  cases leave all old bytes and native payload/receipt state unchanged; then
+  prove clean install,
+  same-version repair, v4.2.2 native upgrade, and the checksum-bound public
+  v4.2.2 managed wrapper -> rejected candidate PKG -> candidate managed refresh
+  -> receipt-aware Complete -> candidate PKG sequence, plus PKG-to-managed
+  takeover, trust, report/update modes, and uninstall inventory. Both managed
+  executions must bind wrapper, raw cargo-dist script, and selected archive
+  asset IDs/sizes/digests before and after; the candidate wrapper embeds the raw
+  script digest, and both the historical and candidate macOS children receive a
+  private `/usr/bin/shasum`-backed `sha256sum` shim so archive verification
+  cannot be skipped.
+  v4.2.2 evidence below is historical and does not qualify the new package
+  contents.
+
 ### v4.2.2 — 2026-07-18 (published package-transaction fix-forward)
+
+The behavior and evidence in this section describe immutable v4.2.2. The v4.3
+Mac policy above explicitly supersedes its automatic managed-to-PKG direction.
 
 - **Immutable release qualification:** final source
   `db0f538c82961569a7118b105a20e967b15476f0` passed clean-tree
@@ -1017,7 +1622,7 @@ The "Last verified" column tracks which release confirmed each row. Update as pa
 | **Raspberry Pi 4 (aarch64)** | CPU brand from devicetree, not empty | Post-v4.0.1 personal-hardware task open |
 | **AWS EC2 (Graviton or Intel)** | Hypervisor shows "amazon" / "kvm"; cloud detection works | — |
 | **WSL2 on Win11** | Hypervisor shows "WSL2"; terminal shows "Windows Terminal" via WT_SESSION | — |
-| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Personal Alienware post-v4.0.1 retest open; prior 3.10.0 evidence remains historical |
+| **Windows 11** | OS shows "Windows 11" (not 10); arch correct; last-login covers session start; battery on laptop | Alienware report/hardware and v4.1.3 same-channel evidence complete; natural v4.2.2 UAC update remains open |
 | **Windows 11 (BitLocker / Device Encryption ON)** | "Encryption" row shows "BitLocker On" non-admin if readable; full method when elevated | — |
 | **Windows 11 (BitLocker OFF)** | "Encryption" row shows an evidence-backed Off state or remains absent; no promise that elevation alone unlocks it | — |
 | **Windows 11 as Administrator** | Encryption shows evidence-backed method + protection level when available; no blanket elevation footer | — |

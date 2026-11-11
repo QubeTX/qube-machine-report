@@ -1,8 +1,9 @@
 // Cross-method install cleanup for TR-300 (`tr300 migrate-cleanup`).
 //
 // Mirrors ND-300's `nd300 migrate-cleanup` (same flags, same JSON contract, same
-// safety guarantees) so the two sibling tools behave identically. TR-300 ships a
-// SINGLE binary (`tr300`), is synchronous (ureq, no tokio), and keeps its
+// safety guarantees) so the two sibling tools behave identically. TR-300 ships
+// the `tr300` binary plus its full-alias `report` companion, is synchronous
+// (ureq, no tokio), and keeps its
 // install-origin detection in `update.rs` — so this module is the TR-300-shaped
 // counterpart, not a byte-for-byte copy.
 //
@@ -16,15 +17,16 @@
 //     (`C:\Program Files\tr300\bin`) and Corporate perUser
 //     (`%LocalAppData%\Programs\tr300\bin`).
 //
-// Operator policy: exactly ONE version/edition installed at a time. Native
-// installers invoke this to consolidate a prior Cargo/cargo-dist copy. Windows
-// installers may additionally remove the other Global/Corporate edition. On
-// macOS the signed PKG invokes the same bounded Cargo cleanup from postinstall;
-// Linux has no native package channel, so ordinary calls are harmless no-ops
+// Operator policy: exactly ONE version/edition installed at a time. The current
+// native integration is Windows, where installers invoke this to consolidate a
+// prior Cargo/cargo-dist copy and may remove the other Global/Corporate edition.
+// Unix keeps the hidden action for legacy callers, while Complete uninstall has
+// a separate running-image path below. Ordinary calls remain harmless no-ops
 // when no Cargo-path copy is present.
 //
 // HARD SAFETY GUARANTEES (see unit tests):
-//   1. Only ever deletes a file whose stem is in `OUR_BINARIES` (`tr300`). Never
+//   1. Only ever deletes a file whose stem is in `OUR_BINARIES` (`tr300` or its
+//      packaged `report` companion). Never
 //      cargo.exe / rustup.exe / any non-allowlisted file.
 //   2. Never removes the `.cargo\bin` PATH entry — it never touches PATH at all;
 //      it only deletes a single binary file.
@@ -42,6 +44,15 @@
 
 use crate::config::Config;
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use std::fs::{File, OpenOptions};
+#[cfg(unix)]
+use std::io::Read;
+#[cfg(any(windows, unix))]
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 // Reused install-origin detection lives in update.rs and is Windows-only there,
 // so import it Windows-gated to avoid an unused-import warning on macOS/Linux.
@@ -63,9 +74,9 @@ pub struct MigrateOptions {
     pub cargo_home: Option<String>,
 }
 
-/// The single binary TR-300 ships. (ND-300 ships two; TR-300 ships one — this is
-/// the allowlist that bounds every deletion.)
-const OUR_BINARIES: &[&str] = &["tr300"];
+/// Exact packaged command allowlist. This bounds every payload deletion; no
+/// PATH search or wildcard can turn the generic `report` name into authority.
+const OUR_BINARIES: &[&str] = &["tr300", "report"];
 
 /// Outcome of a single cleanup target after deletion was attempted (or skipped).
 /// Full variant set is the platform-agnostic contract; on macOS/Linux only
@@ -206,10 +217,10 @@ fn resolve_cargo_bin_dir(opts: &MigrateOptions) -> Option<PathBuf> {
     resolve_cargo_home(opts).map(|home| home.join("bin"))
 }
 
-/// Platform-correct path equality after best-effort canonicalization. Windows
-/// paths compare case-insensitively; Unix paths remain case-sensitive so a
-/// receipt cannot claim a differently cased prefix on a case-sensitive volume.
-#[cfg(any(windows, unix))]
+/// Windows path equality after best-effort canonicalization. Windows paths are
+/// compared case-insensitively for the drive-letter and ordinary
+/// case-insensitive-volume contract used by the supported installers.
+#[cfg(windows)]
 fn same_path(left: &Path, right: &Path) -> bool {
     let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
     let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
@@ -217,14 +228,18 @@ fn same_path(left: &Path, right: &Path) -> bool {
     let right = right.to_string_lossy();
     let left = left.trim_end_matches(['\\', '/']);
     let right = right.trim_end_matches(['\\', '/']);
-    #[cfg(windows)]
-    {
-        left.eq_ignore_ascii_case(right)
-    }
-    #[cfg(unix)]
-    {
-        left == right
-    }
+    left.eq_ignore_ascii_case(right)
+}
+
+/// Unix paths are arbitrary byte strings. Never authorize deletion through a
+/// lossy UTF-8 rendering: distinct invalid-byte and literal U+FFFD paths must
+/// remain distinct. Successful canonicalization also removes redundant
+/// separators, so direct `Path` equality is the exact platform contract.
+#[cfg(unix)]
+fn same_path(left: &Path, right: &Path) -> bool {
+    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+    left == right
 }
 
 // ── Detection + execution ──────────────────────────────────────────
@@ -331,16 +346,192 @@ fn execute_cargo_copy(opts: &MigrateOptions, running_dir: Option<&Path>) -> Targ
     }
 
     let cargo_exe = cargo_bin.join(if cfg!(windows) { "tr300.exe" } else { "tr300" });
+    let report_exe = cargo_bin.join(if cfg!(windows) {
+        "report.exe"
+    } else {
+        "report"
+    });
     if !cargo_exe.exists() {
         return TargetReport {
             id,
             label,
             path: None,
-            outcome: TargetOutcome::Skipped("no cargo copy present".to_string()),
+            outcome: if cargo_payload_present(&report_exe) {
+                TargetOutcome::Failed("report remains without its owning tr300 command; preserving ambiguous Cargo payload".to_string())
+            } else {
+                TargetOutcome::Skipped("no cargo copy present".to_string())
+            },
+        };
+    }
+
+    if cargo_payload_present(&report_exe) {
+        let owned = cargo_bin.parent().is_some_and(cargo_metadata_owns_report);
+        if !owned {
+            return TargetReport {
+                id,
+                label,
+                path: Some(report_exe),
+                outcome: TargetOutcome::Failed("Cargo metadata does not establish ownership of report; preserving both commands".to_string()),
+            };
+        }
+        if opts.dry_run {
+            return TargetReport {
+                id,
+                label: "older cargo command pair".to_string(),
+                path: Some(cargo_exe),
+                outcome: TargetOutcome::WouldRemove,
+            };
+        }
+        return match delete_cargo_command_pair(&cargo_exe, &report_exe) {
+            Ok(()) => TargetReport {
+                id,
+                label: "older cargo command pair".to_string(),
+                path: Some(cargo_exe),
+                outcome: TargetOutcome::Removed,
+            },
+            Err(error) => TargetReport {
+                id,
+                label: "older cargo command pair".to_string(),
+                path: Some(cargo_exe),
+                outcome: if is_permission_error(error.kind()) {
+                    TargetOutcome::NeedsAdmin(cargo_bin.display().to_string())
+                } else {
+                    TargetOutcome::Failed(error.to_string())
+                },
+            },
         };
     }
 
     delete_target(id, label, &cargo_exe, opts.dry_run)
+}
+
+#[cfg(any(windows, unix))]
+fn delete_cargo_command_pair(tr300: &Path, report: &Path) -> std::io::Result<()> {
+    if !is_allowlisted(tr300) || !is_allowlisted(report) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refused a Cargo payload outside the exact TR-300 command allowlist",
+        ));
+    }
+    let parent = tr300
+        .parent()
+        .filter(|parent| report.parent() == Some(*parent))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "refused Cargo payloads that are not exact siblings",
+            )
+        })?;
+    for path in [tr300, report] {
+        let metadata = std::fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "refused a non-regular Cargo command payload: {}",
+                    path.display()
+                ),
+            ));
+        }
+    }
+    let staging = tempfile::Builder::new()
+        .prefix(".tr300-migrate-")
+        .tempdir_in(parent)?
+        .keep();
+    let staged_tr300 = staging.join(tr300.file_name().unwrap_or_default());
+    let staged_report = staging.join(report.file_name().unwrap_or_default());
+
+    if let Err(error) = std::fs::rename(tr300, &staged_tr300) {
+        let _ = std::fs::remove_dir(&staging);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(report, &staged_report) {
+        let rollback = restore_cargo_command(&staged_tr300, tr300);
+        let _ = std::fs::remove_dir(&staging);
+        return Err(cargo_rollback_error(error, &staging, [rollback]));
+    }
+
+    let recovery_tr300 = staging.join(".tr300-recovery");
+    let recovery_report = staging.join(".report-recovery");
+    if let Err(error) = std::fs::hard_link(&staged_tr300, &recovery_tr300)
+        .and_then(|()| std::fs::hard_link(&staged_report, &recovery_report))
+    {
+        let report_restore = restore_cargo_command(&staged_report, report);
+        let tr300_restore = restore_cargo_command(&staged_tr300, tr300);
+        if report_restore.is_ok() {
+            let _ = std::fs::remove_file(&recovery_report);
+        }
+        if tr300_restore.is_ok() {
+            let _ = std::fs::remove_file(&recovery_tr300);
+        }
+        let _ = std::fs::remove_dir(&staging);
+        return Err(cargo_rollback_error(
+            error,
+            &staging,
+            [report_restore, tr300_restore],
+        ));
+    }
+
+    let commit =
+        std::fs::remove_file(&staged_report).and_then(|()| std::fs::remove_file(&staged_tr300));
+    if let Err(error) = commit {
+        let report_restore = restore_cargo_command(&recovery_report, report);
+        let tr300_restore = restore_cargo_command(&recovery_tr300, tr300);
+        if report_restore.is_ok() {
+            let _ = std::fs::remove_file(&staged_report);
+            let _ = std::fs::remove_file(&recovery_report);
+        }
+        if tr300_restore.is_ok() {
+            let _ = std::fs::remove_file(&staged_tr300);
+            let _ = std::fs::remove_file(&recovery_tr300);
+        }
+        if report_restore.is_ok() && tr300_restore.is_ok() {
+            let _ = std::fs::remove_dir(&staging);
+        }
+        return Err(cargo_rollback_error(
+            error,
+            &staging,
+            [report_restore, tr300_restore],
+        ));
+    }
+
+    let _ = std::fs::remove_file(&recovery_report);
+    let _ = std::fs::remove_file(&recovery_tr300);
+    let _ = std::fs::remove_dir(&staging);
+    Ok(())
+}
+
+#[cfg(any(windows, unix))]
+fn restore_cargo_command(source: &Path, destination: &Path) -> std::io::Result<()> {
+    // Linking refuses an occupied destination, preserving both the new path
+    // and the prior payload in staging when another writer wins the race.
+    std::fs::hard_link(source, destination)?;
+    std::fs::remove_file(source)
+}
+
+#[cfg(any(windows, unix))]
+fn cargo_rollback_error<const N: usize>(
+    error: std::io::Error,
+    staging: &Path,
+    restores: [std::io::Result<()>; N],
+) -> std::io::Error {
+    let failures = restores
+        .into_iter()
+        .filter_map(Result::err)
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if failures.is_empty() {
+        error
+    } else {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "{error}; rollback failed: {}; prior payload retained in {}",
+                failures.join("; "),
+                staging.display()
+            ),
+        )
+    }
 }
 
 #[cfg(any(windows, unix))]
@@ -392,6 +583,1261 @@ fn receipt_matches_cargo_home(contents: &str, cargo_home: &Path) -> bool {
     source_matches && app_matches && same_path(Path::new(prefix), cargo_home)
 }
 
+#[cfg(any(windows, unix))]
+fn receipt_owns_report(contents: &str, cargo_home: &Path) -> bool {
+    let binary = if cfg!(windows) { "tr300.exe" } else { "tr300" };
+    let report = if cfg!(windows) {
+        "report.exe"
+    } else {
+        "report"
+    };
+    receipt_matches_cargo_home(contents, cargo_home)
+        && serde_json::from_str::<serde_json::Value>(contents)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("binaries")
+                    .and_then(|bins| bins.as_array())
+                    .cloned()
+            })
+            .is_some_and(|bins| {
+                [binary, report]
+                    .iter()
+                    .all(|name| bins.iter().any(|bin| bin.as_str() == Some(*name)))
+            })
+}
+
+#[cfg(any(windows, unix))]
+fn cargo_payload_present(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+#[cfg(any(windows, unix))]
+fn cargo_metadata_binary_names() -> [&'static str; 2] {
+    if cfg!(windows) {
+        ["tr300.exe", "report.exe"]
+    } else {
+        ["tr300", "report"]
+    }
+}
+
+#[cfg(any(windows, unix))]
+fn cargo_metadata_owns_report(cargo_home: &Path) -> bool {
+    let Ok(contents) = std::fs::read(cargo_home.join(".crates2.json")) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&contents) else {
+        return false;
+    };
+    value
+        .get("installs")
+        .and_then(|installs| installs.as_object())
+        .is_some_and(|installs| {
+            installs.iter().any(|(package, details)| {
+                package.split_whitespace().next() == Some("tr300")
+                    && details
+                        .get("bins")
+                        .and_then(|bins| bins.as_array())
+                        .is_some_and(|bins| {
+                            cargo_metadata_binary_names()
+                                .iter()
+                                .all(|name| bins.iter().any(|bin| bin.as_str() == Some(name)))
+                        })
+            })
+        })
+}
+
+/// Read-only native installer preflight. The embedded candidate checks the
+/// old destination before another uninstaller or payload replacement can run.
+pub fn preflight_native_destination(binary_path: &Path) -> crate::error::Result<()> {
+    #[cfg(windows)]
+    {
+        if !binary_path.is_absolute()
+            || !binary_path
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"))
+        {
+            return Err(crate::error::AppError::platform(
+                "native preflight requires the exact absolute tr300.exe destination",
+            ));
+        }
+        owned_report_sibling(binary_path)?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = binary_path;
+        Err(crate::error::AppError::platform(
+            "native destination preflight is only supported on Windows",
+        ))
+    }
+}
+
+/// Resolve only an inventory-owned companion. Presence beside a running
+/// executable is not sufficient evidence to delete a generic report command.
+#[cfg(any(windows, unix))]
+pub(crate) fn owned_report_sibling(binary_path: &Path) -> crate::error::Result<Option<PathBuf>> {
+    let report_path = binary_path.with_file_name(if cfg!(windows) {
+        "report.exe"
+    } else {
+        "report"
+    });
+    match std::fs::symlink_metadata(&report_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(crate::error::AppError::platform(format!(
+                "could not inspect {}: {error}",
+                report_path.display()
+            )))
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(crate::error::AppError::platform(
+                "report companion is not a regular file; preserving the installation",
+            ))
+        }
+        Ok(_) => {}
+    }
+    let prefix = binary_path
+        .parent()
+        .filter(|bin| bin.file_name().is_some_and(|name| name == "bin"))
+        .and_then(Path::parent);
+    if let Some(prefix) = prefix {
+        let receipt_owned = cargo_dist_receipt_path(&MigrateOptions::default())
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .is_some_and(|contents| receipt_owns_report(&contents, prefix));
+        if receipt_owned || cargo_metadata_owns_report(prefix) {
+            return Ok(Some(report_path));
+        }
+    }
+    #[cfg(windows)]
+    if native_installer_owns_report(binary_path, &report_path) {
+        return Ok(Some(report_path));
+    }
+    Err(crate::error::AppError::platform(format!(
+        "cannot prove ownership of {}; preserving the commands and shell profiles. Use the native package uninstaller, or resolve the unowned report command before Complete uninstall",
+        report_path.display()
+    )))
+}
+
+#[cfg(windows)]
+fn native_installer_owns_report(binary: &Path, report: &Path) -> bool {
+    use winreg::enums::{
+        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+    };
+    use winreg::RegKey;
+    let (global_bin, corporate_bin) = edition_bin_dirs(&MigrateOptions::default());
+    let Some(bin) = binary.parent() else {
+        return false;
+    };
+    let global = global_bin
+        .as_ref()
+        .is_some_and(|expected| same_path(bin, expected));
+    let corporate = corporate_bin
+        .as_ref()
+        .is_some_and(|expected| same_path(bin, expected));
+    if !global && !corporate {
+        return false;
+    }
+    let Some(prefix) = bin.parent() else {
+        return false;
+    };
+    let (root, app_id, upgrade_code, report_component) = if global {
+        (
+            RegKey::predef(HKEY_LOCAL_MACHINE),
+            "{AB14223F-2693-4EC2-824F-BF53CC32D061}_is1",
+            "{5CD540A8-AD16-4B0F-8CE4-51FF641DE181}",
+            "{8281A044-4A65-476C-890B-EF7A012E5F25}",
+        )
+    } else {
+        (
+            RegKey::predef(HKEY_CURRENT_USER),
+            "{76A253EB-3A17-4730-9C54-5BE755A9BC4C}_is1",
+            "{93F465CB-7F66-4930-A773-FDA017E8FD64}",
+            "{2EB04231-F655-42C0-863E-D5ED46E6C41B}",
+        )
+    };
+    for view in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
+        let key = format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}");
+        if let Ok(registration) = root.open_subkey_with_flags(key, KEY_READ | view) {
+            let location: String = registration
+                .get_value("InstallLocation")
+                .unwrap_or_default();
+            let version: String = registration.get_value("DisplayVersion").unwrap_or_default();
+            if same_path(Path::new(location.trim_end_matches('\\')), prefix)
+                && version_owns_report(&version)
+            {
+                return true;
+            }
+        }
+    }
+    msi_component_matches(upgrade_code, report_component, report)
+}
+
+#[cfg(windows)]
+fn version_owns_report(version: &str) -> bool {
+    let components = version
+        .split('.')
+        .map(str::parse::<u32>)
+        .collect::<std::result::Result<Vec<_>, _>>();
+    matches!(components, Ok(ref parts) if parts.len() == 3 && (parts[0], parts[1], parts[2]) >= (4, 4, 0))
+}
+
+#[cfg(windows)]
+fn msi_component_matches(upgrade_code: &str, component_code: &str, expected: &Path) -> bool {
+    #[link(name = "msi")]
+    extern "system" {
+        fn MsiEnumRelatedProductsW(
+            upgrade: *const u16,
+            reserved: u32,
+            index: u32,
+            product: *mut u16,
+        ) -> u32;
+        fn MsiGetComponentPathW(
+            product: *const u16,
+            component: *const u16,
+            path: *mut u16,
+            count: *mut u32,
+        ) -> i32;
+    }
+    let upgrade: Vec<u16> = upgrade_code.encode_utf16().chain(Some(0)).collect();
+    let component: Vec<u16> = component_code.encode_utf16().chain(Some(0)).collect();
+    for index in 0..64 {
+        let mut product = [0u16; 39];
+        // SAFETY: input strings are NUL-terminated and the product GUID output
+        // has the documented 39 UTF-16 code units; MSI retains no pointers.
+        let result =
+            unsafe { MsiEnumRelatedProductsW(upgrade.as_ptr(), 0, index, product.as_mut_ptr()) };
+        if result != 0 {
+            return false;
+        }
+        let mut path = vec![0u16; 32768];
+        let mut count = path.len() as u32;
+        // SAFETY: GUID inputs are terminated; count describes the mutable
+        // buffer's full capacity. Only LOCAL with in-bounds output is used.
+        let state = unsafe {
+            MsiGetComponentPathW(
+                product.as_ptr(),
+                component.as_ptr(),
+                path.as_mut_ptr(),
+                &mut count,
+            )
+        };
+        if state == 3 && (count as usize) < path.len() {
+            let installed = PathBuf::from(String::from_utf16_lossy(&path[..count as usize]));
+            if same_path(&installed, expected) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// A Complete uninstall launched by the Cargo-path binary is the one legitimate
+// exception to migrate-cleanup's "never delete the running image" rule. Keep
+// that exception out of the installer-facing MigrateOptions surface: the Unix
+// uninstall path must first build this opaque plan while the user's profiles
+// are still untouched, then consume it through the dedicated commit function.
+#[cfg(unix)]
+const MAX_SELF_UNINSTALL_RECEIPT_BYTES: u64 = 64 * 1024;
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UnixFileIdentity {
+    device: u64,
+    inode: u64,
+    len: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+#[cfg(unix)]
+impl UnixFileIdentity {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            len: metadata.len(),
+            modified_seconds: metadata.mtime(),
+            modified_nanoseconds: metadata.mtime_nsec(),
+            changed_seconds: metadata.ctime(),
+            changed_nanoseconds: metadata.ctime_nsec(),
+        }
+    }
+
+    fn same_staged_object(self, other: Self) -> bool {
+        self.device == other.device
+            && self.inode == other.inode
+            && self.len == other.len
+            && self.modified_seconds == other.modified_seconds
+            && self.modified_nanoseconds == other.modified_nanoseconds
+    }
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnixBinarySnapshot {
+    path: PathBuf,
+    identity: UnixFileIdentity,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnixReceiptSnapshot {
+    path: PathBuf,
+    identity: UnixFileIdentity,
+    contents: Vec<u8>,
+    install_prefix: PathBuf,
+    mode: u32,
+}
+
+/// Opaque proof that the current Unix process is the exact Cargo-path TR-300
+/// candidate and that any cargo-dist receipt is safe to treat as its ownership
+/// record. Callers cannot construct or weaken this plan.
+#[cfg(unix)]
+#[derive(Debug)]
+pub(crate) struct CurrentCargoUninstallPlan {
+    cargo_home: PathBuf,
+    binary_path: PathBuf,
+    report_path: PathBuf,
+    receipt_path: PathBuf,
+    binary: Option<UnixBinarySnapshot>,
+    report: Option<UnixBinarySnapshot>,
+    receipt: Option<UnixReceiptSnapshot>,
+}
+
+#[cfg(unix)]
+impl CurrentCargoUninstallPlan {
+    pub(crate) fn binary_path(&self) -> Option<&Path> {
+        self.binary.as_ref().map(|binary| binary.path.as_path())
+    }
+
+    pub(crate) fn report_path(&self) -> Option<&Path> {
+        self.report.as_ref().map(|report| report.path.as_path())
+    }
+
+    pub(crate) fn receipt_path(&self) -> Option<&Path> {
+        self.receipt.as_ref().map(|receipt| receipt.path.as_path())
+    }
+}
+
+/// Opaque proof for a running Unix binary that is not governed by the Cargo
+/// receipt contract. The snapshot is carried across interactive confirmation
+/// and prevents a replacement at the same pathname from being removed.
+#[cfg(unix)]
+#[derive(Debug)]
+pub(crate) struct CurrentBinaryUninstallPlan {
+    binary_path: PathBuf,
+    report_path: PathBuf,
+    binary: Option<UnixBinarySnapshot>,
+    report: Option<UnixBinarySnapshot>,
+}
+
+#[cfg(unix)]
+impl CurrentBinaryUninstallPlan {
+    pub(crate) fn binary_path(&self) -> Option<&Path> {
+        self.binary.as_ref().map(|binary| binary.path.as_path())
+    }
+
+    pub(crate) fn report_path(&self) -> Option<&Path> {
+        self.report.as_ref().map(|report| report.path.as_path())
+    }
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+pub(crate) struct CurrentCargoUninstallOutcome {
+    pub(crate) binary_path: Option<PathBuf>,
+    pub(crate) report_path: Option<PathBuf>,
+    pub(crate) receipt_path: Option<PathBuf>,
+    pub(crate) cleanup_warnings: Vec<String>,
+}
+
+#[cfg(unix)]
+fn self_uninstall_error(message: impl Into<String>) -> crate::error::AppError {
+    crate::error::AppError::platform(format!("Complete uninstall stopped: {}", message.into()))
+}
+
+#[cfg(unix)]
+fn open_unix_validation_file(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        // `O_NOFOLLOW` closes the final-component symlink race. `O_NONBLOCK`
+        // is equally load-bearing: a regular file can be swapped for a FIFO
+        // after lstat, and opening that FIFO without a writer must not hang the
+        // Complete-uninstall transaction before fstat rejects it.
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(unix)]
+fn validate_owned_regular_file(
+    path: &Path,
+    label: &str,
+) -> crate::error::Result<(File, UnixFileIdentity, u32)> {
+    let path_metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        self_uninstall_error(format!(
+            "could not inspect {label} {}: {error}",
+            path.display()
+        ))
+    })?;
+    if !path_metadata.file_type().is_file() {
+        return Err(self_uninstall_error(format!(
+            "{label} {} is not a regular file; preserving the binary, receipt, and shell profiles",
+            path.display()
+        )));
+    }
+    if path_metadata.nlink() != 1 {
+        return Err(self_uninstall_error(format!(
+            "{label} {} has {} hard links; preserving the binary, receipt, and shell profiles",
+            path.display(),
+            path_metadata.nlink()
+        )));
+    }
+    let expected_uid = unsafe { libc::geteuid() };
+    if path_metadata.uid() != expected_uid {
+        return Err(self_uninstall_error(format!(
+            "{label} {} is owned by uid {}, not the current uid {}; preserving the binary, receipt, and shell profiles",
+            path.display(),
+            path_metadata.uid(),
+            expected_uid
+        )));
+    }
+
+    let file = open_unix_validation_file(path).map_err(|error| {
+        self_uninstall_error(format!(
+            "could not safely open {label} {}: {error}",
+            path.display()
+        ))
+    })?;
+    let handle_metadata = file.metadata().map_err(|error| {
+        self_uninstall_error(format!(
+            "could not inspect opened {label} {}: {error}",
+            path.display()
+        ))
+    })?;
+    if !handle_metadata.file_type().is_file()
+        || handle_metadata.nlink() != 1
+        || handle_metadata.uid() != expected_uid
+        || UnixFileIdentity::from_metadata(&handle_metadata)
+            != UnixFileIdentity::from_metadata(&path_metadata)
+    {
+        return Err(self_uninstall_error(format!(
+            "{label} {} changed while it was being validated; preserving the binary, receipt, and shell profiles",
+            path.display()
+        )));
+    }
+
+    let identity = UnixFileIdentity::from_metadata(&handle_metadata);
+    Ok((file, identity, handle_metadata.mode()))
+}
+
+#[cfg(unix)]
+fn snapshot_binary(path: &Path) -> crate::error::Result<Option<UnixBinarySnapshot>> {
+    snapshot_binary_with_label(path, "Cargo-path binary")
+}
+
+#[cfg(unix)]
+fn snapshot_binary_with_label(
+    path: &Path,
+    label: &str,
+) -> crate::error::Result<Option<UnixBinarySnapshot>> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(self_uninstall_error(format!(
+            "could not inspect {label} {}: {error}",
+            path.display()
+        ))),
+        Ok(_) => {
+            let (_file, identity, _mode) = validate_owned_regular_file(path, label)?;
+            Ok(Some(UnixBinarySnapshot {
+                path: path.to_path_buf(),
+                identity,
+            }))
+        }
+    }
+}
+
+#[cfg(unix)]
+fn snapshot_receipt(path: &Path) -> crate::error::Result<Option<UnixReceiptSnapshot>> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(self_uninstall_error(format!(
+                "could not inspect cargo-dist receipt {}: {error}",
+                path.display()
+            )))
+        }
+        Ok(_) => {}
+    }
+
+    let (file, identity, mode) = validate_owned_regular_file(path, "cargo-dist receipt")?;
+    if identity.len > MAX_SELF_UNINSTALL_RECEIPT_BYTES {
+        return Err(self_uninstall_error(format!(
+            "cargo-dist receipt {} exceeds the {}-byte safety limit; preserving the binary, receipt, and shell profiles",
+            path.display(),
+            MAX_SELF_UNINSTALL_RECEIPT_BYTES
+        )));
+    }
+    let mut contents = Vec::with_capacity(identity.len as usize);
+    file.take(MAX_SELF_UNINSTALL_RECEIPT_BYTES + 1)
+        .read_to_end(&mut contents)
+        .map_err(|error| {
+            self_uninstall_error(format!(
+                "could not read cargo-dist receipt {}: {error}",
+                path.display()
+            ))
+        })?;
+    if contents.len() as u64 > MAX_SELF_UNINSTALL_RECEIPT_BYTES {
+        return Err(self_uninstall_error(format!(
+            "cargo-dist receipt {} grew beyond the {}-byte safety limit; preserving the binary, receipt, and shell profiles",
+            path.display(),
+            MAX_SELF_UNINSTALL_RECEIPT_BYTES
+        )));
+    }
+    let text = std::str::from_utf8(&contents).map_err(|error| {
+        self_uninstall_error(format!(
+            "cargo-dist receipt {} is not UTF-8 ({error}); preserving the binary, receipt, and shell profiles",
+            path.display()
+        ))
+    })?;
+    let receipt = serde_json::from_str::<serde_json::Value>(text).map_err(|error| {
+        self_uninstall_error(format!(
+            "cargo-dist receipt {} is malformed ({error}); preserving the binary, receipt, and shell profiles",
+            path.display()
+        ))
+    })?;
+    let source_matches = receipt
+        .pointer("/provider/source")
+        .and_then(serde_json::Value::as_str)
+        == Some("cargo-dist");
+    let app_matches = receipt
+        .pointer("/source/app_name")
+        .and_then(serde_json::Value::as_str)
+        == Some("tr300");
+    let install_prefix = receipt
+        .get("install_prefix")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+        .filter(|prefix| prefix.is_absolute());
+    let Some(install_prefix) = install_prefix else {
+        return Err(self_uninstall_error(format!(
+            "cargo-dist receipt {} does not exactly identify TR-300 and an absolute install prefix; preserving the binary, receipt, and shell profiles",
+            path.display()
+        )));
+    };
+    if !source_matches || !app_matches {
+        return Err(self_uninstall_error(format!(
+            "cargo-dist receipt {} does not exactly identify TR-300 and an absolute install prefix; preserving the binary, receipt, and shell profiles",
+            path.display()
+        )));
+    }
+
+    Ok(Some(UnixReceiptSnapshot {
+        path: path.to_path_buf(),
+        identity,
+        contents,
+        install_prefix,
+        mode,
+    }))
+}
+
+#[cfg(unix)]
+fn path_looks_like_managed_binary(path: &Path) -> bool {
+    matches!(
+        path.file_name(),
+        Some(name)
+            if name == std::ffi::OsStr::new("tr300")
+                || name == std::ffi::OsStr::new("tr300 (deleted)")
+    ) && path.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("bin"))
+}
+
+#[cfg(unix)]
+fn path_looks_like_default_cargo_binary(path: &Path) -> bool {
+    path_looks_like_managed_binary(path)
+        && path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            == Some(std::ffi::OsStr::new(".cargo"))
+}
+
+#[cfg(unix)]
+fn current_exe_matches_cargo_binary(current_exe: &Path, binary_path: &Path) -> bool {
+    if same_path(current_exe, binary_path) {
+        return true;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Linux exposes an already-unlinked running image through /proc/self/exe
+        // with this exact suffix. Accept it only when the unsuffixed expected
+        // Cargo path and the suffixed presentation are both absent; a real file
+        // literally named `tr300 (deleted)` must never authorize deletion of the
+        // receipt for another path.
+        if std::fs::symlink_metadata(binary_path).is_ok()
+            || !matches!(
+                std::fs::symlink_metadata(current_exe),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            )
+        {
+            return false;
+        }
+        let mut deleted_path = binary_path.as_os_str().to_os_string();
+        deleted_path.push(" (deleted)");
+        current_exe.as_os_str() == deleted_path
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    false
+}
+
+#[cfg(unix)]
+fn preflight_current_cargo_uninstall_at(
+    current_exe: &Path,
+    opts: &MigrateOptions,
+    receipt_path: &Path,
+) -> crate::error::Result<Option<CurrentCargoUninstallPlan>> {
+    let receipt = snapshot_receipt(receipt_path)?;
+    if let Some(receipt) = receipt {
+        let cargo_home = receipt.install_prefix.clone();
+        let binary_path = cargo_home.join("bin").join("tr300");
+        if !current_exe_matches_cargo_binary(current_exe, &binary_path) {
+            if path_looks_like_managed_binary(current_exe) {
+                return Err(self_uninstall_error(format!(
+                    "cargo-dist receipt {} belongs to {}, not the running binary {}; preserving the binary, receipt, and shell profiles",
+                    receipt_path.display(),
+                    binary_path.display(),
+                    current_exe.display()
+                )));
+            }
+            return Ok(None);
+        }
+        let binary = snapshot_binary(&binary_path)?;
+        let report_path = cargo_home.join("bin").join("report");
+        let report = snapshot_binary_with_label(&report_path, "report command")?;
+        if report.is_some()
+            && !receipt_owns_report(
+                std::str::from_utf8(&receipt.contents).unwrap_or_default(),
+                &cargo_home,
+            )
+        {
+            return Err(self_uninstall_error(
+                "receipt does not own report; preserving commands, receipt, and shell profiles",
+            ));
+        }
+        return Ok(Some(CurrentCargoUninstallPlan {
+            cargo_home,
+            binary_path,
+            report_path,
+            receipt_path: receipt_path.to_path_buf(),
+            binary,
+            report,
+            receipt: Some(receipt),
+        }));
+    }
+
+    let Some(cargo_home) = resolve_cargo_home(opts) else {
+        if path_looks_like_default_cargo_binary(current_exe) {
+            return Err(self_uninstall_error(
+                "the running binary appears to be in Cargo home, but Cargo home could not be resolved; preserving the binary, receipt, and shell profiles",
+            ));
+        }
+        return Ok(None);
+    };
+    let binary_path = cargo_home.join("bin").join("tr300");
+    if !current_exe_matches_cargo_binary(current_exe, &binary_path) {
+        return Ok(None);
+    }
+    let binary = snapshot_binary(&binary_path)?;
+    let report_path = cargo_home.join("bin").join("report");
+    // Cargo's package inventory must claim the companion; sharing a prefix
+    // with tr300 does not establish ownership of a generic report command.
+    let report = snapshot_binary_with_label(&report_path, "report command")?;
+    if report.is_some() && !cargo_metadata_owns_report(&cargo_home) {
+        return Err(self_uninstall_error(
+            "Cargo metadata does not own report; preserving commands and shell profiles",
+        ));
+    }
+
+    Ok(Some(CurrentCargoUninstallPlan {
+        cargo_home,
+        binary_path,
+        report_path,
+        receipt_path: receipt_path.to_path_buf(),
+        binary,
+        report,
+        receipt: None,
+    }))
+}
+
+/// Validate a running Unix Cargo/cargo-dist install before Complete uninstall
+/// mutates a shell profile. `Ok(None)` means the current executable is not the
+/// Cargo-path copy and the ordinary single-binary uninstall path should run.
+#[cfg(unix)]
+pub(crate) fn preflight_current_cargo_uninstall(
+    current_exe: &Path,
+) -> crate::error::Result<Option<CurrentCargoUninstallPlan>> {
+    let opts = MigrateOptions::default();
+    let receipt_path = cargo_dist_receipt_path(&opts);
+    preflight_current_cargo_uninstall_with_receipt_location(
+        current_exe,
+        &opts,
+        receipt_path.as_deref(),
+    )
+}
+
+#[cfg(unix)]
+fn preflight_current_cargo_uninstall_with_receipt_location(
+    current_exe: &Path,
+    opts: &MigrateOptions,
+    receipt_path: Option<&Path>,
+) -> crate::error::Result<Option<CurrentCargoUninstallPlan>> {
+    let Some(receipt_path) = receipt_path else {
+        if path_looks_like_default_cargo_binary(current_exe) {
+            return Err(self_uninstall_error(
+                "the running binary may be managed, but the cargo-dist receipt location could not be resolved; preserving the binary and shell profiles",
+            ));
+        }
+        return Ok(None);
+    };
+    preflight_current_cargo_uninstall_at(current_exe, opts, receipt_path)
+}
+
+/// Bind a portable or otherwise non-Cargo Unix Complete uninstall to the exact
+/// current-executable pathname and inode observed before confirmation. A
+/// missing running image remains a no-binary plan; it must never fall back to
+/// a conventional install path that could belong to another installation.
+#[cfg(unix)]
+pub(crate) fn preflight_current_binary_uninstall(
+    current_exe: &Path,
+) -> crate::error::Result<CurrentBinaryUninstallPlan> {
+    let report_path = current_exe.with_file_name("report");
+    owned_report_sibling(current_exe)?;
+    Ok(CurrentBinaryUninstallPlan {
+        binary_path: current_exe.to_path_buf(),
+        report_path: report_path.clone(),
+        binary: snapshot_binary_with_label(current_exe, "running binary")?,
+        report: snapshot_binary_with_label(&report_path, "report command")?,
+    })
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+struct StagedUnixUninstallFile {
+    directory: PathBuf,
+    path: PathBuf,
+    original_path: PathBuf,
+}
+
+#[cfg(unix)]
+impl StagedUnixUninstallFile {
+    #[cfg(test)]
+    fn try_remove(self) -> std::result::Result<Option<String>, (std::io::Error, Self)> {
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => match std::fs::remove_dir(&self.directory) {
+                Ok(()) => Ok(None),
+                Err(error) => Ok(Some(format!(
+                    "removed {}, but could not remove private staging directory {}: {error}",
+                    self.original_path.display(),
+                    self.directory.display()
+                ))),
+            },
+            Err(error) => Err((error, self)),
+        }
+    }
+
+    fn restore(self) -> std::result::Result<(), String> {
+        if let Err(error) = std::fs::hard_link(&self.path, &self.original_path) {
+            return Err(format!(
+                "could not restore {} ({error}); the prior inode and contents remain preserved at {}",
+                self.original_path.display(),
+                self.path.display()
+            ));
+        }
+        if let Err(error) = std::fs::remove_file(&self.path) {
+            return Err(format!(
+                "restored {}, but could not remove its staged link ({error}); the extra link remains at {} in preserved directory {}",
+                self.original_path.display(),
+                self.path.display(),
+                self.directory.display()
+            ));
+        }
+        std::fs::remove_dir(&self.directory).map_err(|error| {
+            format!(
+                "restored {}, but could not remove private staging directory {}: {error}",
+                self.original_path.display(),
+                self.directory.display()
+            )
+        })
+    }
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+struct RecoverableUnixUninstallFile {
+    staged: StagedUnixUninstallFile,
+    recovery_path: PathBuf,
+}
+
+#[cfg(unix)]
+impl RecoverableUnixUninstallFile {
+    fn prepare(
+        staged: StagedUnixUninstallFile,
+    ) -> std::result::Result<Self, (std::io::Error, StagedUnixUninstallFile)> {
+        let recovery_path = staged.directory.join(".tr300-recovery");
+        match std::fs::hard_link(&staged.path, &recovery_path) {
+            Ok(()) => Ok(Self {
+                staged,
+                recovery_path,
+            }),
+            Err(error) => Err((error, staged)),
+        }
+    }
+
+    fn remove_staged_path(&self) -> std::io::Result<()> {
+        std::fs::remove_file(&self.staged.path)
+    }
+
+    fn restore(self) -> std::result::Result<(), String> {
+        if let Err(error) = std::fs::hard_link(&self.recovery_path, &self.staged.original_path) {
+            return Err(format!(
+                "could not restore {} ({error}); the prior inode and contents remain preserved at {}",
+                self.staged.original_path.display(),
+                self.recovery_path.display()
+            ));
+        }
+        if self.staged.path.exists() {
+            if let Err(error) = std::fs::remove_file(&self.staged.path) {
+                return Err(format!(
+                    "restored {}, but could not remove its staged link ({error}); recovery state remains in {}",
+                    self.staged.original_path.display(),
+                    self.staged.directory.display()
+                ));
+            }
+        }
+        if let Err(error) = std::fs::remove_file(&self.recovery_path) {
+            return Err(format!(
+                "restored {}, but could not remove its recovery link ({error}); the extra link remains at {}",
+                self.staged.original_path.display(),
+                self.recovery_path.display()
+            ));
+        }
+        std::fs::remove_dir(&self.staged.directory).map_err(|error| {
+            format!(
+                "restored {}, but could not remove private staging directory {}: {error}",
+                self.staged.original_path.display(),
+                self.staged.directory.display()
+            )
+        })
+    }
+
+    fn finalize(self) -> Option<String> {
+        if let Err(error) = std::fs::remove_file(&self.recovery_path) {
+            return Some(format!(
+                "removed {}, but could not remove its private recovery link {}: {error}",
+                self.staged.original_path.display(),
+                self.recovery_path.display()
+            ));
+        }
+        std::fs::remove_dir(&self.staged.directory)
+            .err()
+            .map(|error| {
+                format!(
+                    "removed {}, but could not remove private staging directory {}: {error}",
+                    self.staged.original_path.display(),
+                    self.staged.directory.display()
+                )
+            })
+    }
+}
+
+#[cfg(unix)]
+fn stage_unix_path(path: &Path, label: &str) -> crate::error::Result<StagedUnixUninstallFile> {
+    let parent = path.parent().ok_or_else(|| {
+        self_uninstall_error(format!("{label} path has no parent: {}", path.display()))
+    })?;
+    let directory = tempfile::Builder::new()
+        .prefix(".tr300-uninstall-")
+        .tempdir_in(parent)
+        .map_err(|error| {
+            self_uninstall_error(format!(
+                "could not create private {label} staging beside {}: {error}",
+                path.display()
+            ))
+        })?
+        .keep();
+    let staged_path = directory.join(
+        path.file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("tr300")),
+    );
+    if let Err(error) = std::fs::rename(path, &staged_path) {
+        let cleanup = std::fs::remove_dir(&directory)
+            .err()
+            .map(|cleanup_error| {
+                format!(
+                    "; private staging directory {} was preserved because cleanup failed: {cleanup_error}",
+                    directory.display()
+                )
+            })
+            .unwrap_or_default();
+        return Err(self_uninstall_error(format!(
+            "could not stage {label} {}: {error}{cleanup}",
+            path.display()
+        )));
+    }
+    Ok(StagedUnixUninstallFile {
+        directory,
+        path: staged_path,
+        original_path: path.to_path_buf(),
+    })
+}
+
+#[cfg(unix)]
+fn stage_binary_snapshot(
+    expected: &UnixBinarySnapshot,
+    label: &str,
+) -> crate::error::Result<StagedUnixUninstallFile> {
+    let refreshed = snapshot_binary_with_label(&expected.path, label)?.ok_or_else(|| {
+        self_uninstall_error(format!(
+            "{label} {} disappeared after preflight",
+            expected.path.display()
+        ))
+    })?;
+    if refreshed != *expected {
+        return Err(self_uninstall_error(format!(
+            "{label} {} changed after preflight; preserving ownership state",
+            expected.path.display()
+        )));
+    }
+
+    let staged = stage_unix_path(&expected.path, label)?;
+    let staged_snapshot = snapshot_binary_with_label(&staged.path, label);
+    let valid = matches!(staged_snapshot, Ok(Some(ref snapshot)) if snapshot.identity.same_staged_object(expected.identity));
+    if valid {
+        return Ok(staged);
+    }
+    let validation = match staged_snapshot {
+        Ok(_) => "staged binary identity does not match preflight".to_string(),
+        Err(error) => error.to_string(),
+    };
+    let restore = staged.restore();
+    Err(self_uninstall_error(format!(
+        "{validation}; {}",
+        restore
+            .err()
+            .unwrap_or_else(|| "restored the original binary".to_string())
+    )))
+}
+
+#[cfg(unix)]
+fn stage_receipt_snapshot(
+    expected: &UnixReceiptSnapshot,
+) -> crate::error::Result<StagedUnixUninstallFile> {
+    let refreshed = snapshot_receipt(&expected.path)?.ok_or_else(|| {
+        self_uninstall_error(format!(
+            "cargo-dist receipt {} disappeared after preflight",
+            expected.path.display()
+        ))
+    })?;
+    if refreshed != *expected {
+        return Err(self_uninstall_error(format!(
+            "cargo-dist receipt {} changed after preflight; preserving ownership state",
+            expected.path.display()
+        )));
+    }
+
+    let staged = stage_unix_path(&expected.path, "cargo-dist receipt")?;
+    let staged_snapshot = snapshot_receipt(&staged.path);
+    let valid = matches!(
+        staged_snapshot,
+        Ok(Some(ref snapshot))
+            if snapshot.identity.same_staged_object(expected.identity)
+                && snapshot.contents == expected.contents
+                && snapshot.install_prefix == expected.install_prefix
+                && snapshot.mode == expected.mode
+    );
+    if valid {
+        return Ok(staged);
+    }
+    let validation = match staged_snapshot {
+        Ok(_) => "staged receipt identity or contents do not match preflight".to_string(),
+        Err(error) => error.to_string(),
+    };
+    let restore = staged.restore();
+    Err(self_uninstall_error(format!(
+        "{validation}; {}",
+        restore
+            .err()
+            .unwrap_or_else(|| "restored the original receipt".to_string())
+    )))
+}
+
+#[cfg(unix)]
+fn ensure_absent(path: &Path, label: &str) -> crate::error::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err(self_uninstall_error(format!(
+            "a new path appeared at {label} {}; refusing to clobber it",
+            path.display()
+        ))),
+        Err(error) => Err(self_uninstall_error(format!(
+            "could not recheck {label} {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+#[cfg(unix)]
+fn restore_staged_files(staged: Vec<StagedUnixUninstallFile>) -> String {
+    staged
+        .into_iter()
+        .rev()
+        .map(|file| {
+            let path = file.original_path.clone();
+            file.restore()
+                .err()
+                .unwrap_or_else(|| format!("restored {}", path.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+#[cfg(unix)]
+fn restore_recoverable_files(files: Vec<RecoverableUnixUninstallFile>) -> String {
+    files
+        .into_iter()
+        .rev()
+        .map(|file| {
+            let path = file.staged.original_path.clone();
+            file.restore()
+                .err()
+                .unwrap_or_else(|| format!("restored {}", path.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+#[cfg(unix)]
+fn commit_staged_files(staged: Vec<StagedUnixUninstallFile>) -> crate::error::Result<Vec<String>> {
+    let mut pending = staged.into_iter();
+    let mut recoverable = Vec::new();
+    while let Some(file) = pending.next() {
+        match RecoverableUnixUninstallFile::prepare(file) {
+            Ok(file) => recoverable.push(file),
+            Err((error, file)) => {
+                let mut rollback = restore_recoverable_files(recoverable);
+                let remaining: Vec<_> = std::iter::once(file).chain(pending).collect();
+                let staged_rollback = restore_staged_files(remaining);
+                if !rollback.is_empty() && !staged_rollback.is_empty() {
+                    rollback.push_str("; ");
+                }
+                rollback.push_str(&staged_rollback);
+                return Err(self_uninstall_error(format!(
+                    "could not create a private uninstall recovery link: {error}; {rollback}"
+                )));
+            }
+        }
+    }
+
+    for file in &recoverable {
+        if let Err(error) = file.remove_staged_path() {
+            let rollback = restore_recoverable_files(recoverable);
+            return Err(self_uninstall_error(format!(
+                "could not commit staged payload removal: {error}; {rollback}"
+            )));
+        }
+    }
+
+    Ok(recoverable
+        .into_iter()
+        .filter_map(RecoverableUnixUninstallFile::finalize)
+        .collect())
+}
+
+/// Consume a successful preflight and remove the current Unix Cargo binary and
+/// its exact cargo-dist receipt. Each present member moves into an exclusive
+/// same-directory staging directory and is identity-checked after rename
+/// before either staged inode is unlinked.
+#[cfg(unix)]
+pub(crate) fn commit_current_cargo_uninstall(
+    plan: CurrentCargoUninstallPlan,
+) -> crate::error::Result<CurrentCargoUninstallOutcome> {
+    revalidate_current_cargo_uninstall(&plan)?;
+
+    let mut staged = Vec::new();
+    if let Some(binary) = plan.binary.as_ref() {
+        staged.push(stage_binary_snapshot(binary, "Cargo-path binary")?);
+    }
+    if let Some(report) = plan.report.as_ref() {
+        match stage_binary_snapshot(report, "report command") {
+            Ok(file) => staged.push(file),
+            Err(error) => {
+                let rollback = restore_staged_files(staged);
+                return Err(crate::error::AppError::platform(format!(
+                    "{error}; {rollback}"
+                )));
+            }
+        }
+    }
+    if let Some(receipt) = plan.receipt.as_ref() {
+        match stage_receipt_snapshot(receipt) {
+            Ok(file) => staged.push(file),
+            Err(error) => {
+                let rollback = restore_staged_files(staged);
+                return Err(crate::error::AppError::platform(format!(
+                    "{error}; {rollback}"
+                )));
+            }
+        }
+    }
+
+    let absent = ensure_absent(&plan.binary_path, "Cargo-path binary")
+        .and_then(|()| ensure_absent(&plan.report_path, "report command"))
+        .and_then(|()| ensure_absent(&plan.receipt_path, "cargo-dist receipt"));
+    if let Err(error) = absent {
+        let rollback = restore_staged_files(staged);
+        return Err(crate::error::AppError::platform(format!(
+            "{error}; {rollback}"
+        )));
+    }
+
+    let outcome = CurrentCargoUninstallOutcome {
+        binary_path: plan.binary.as_ref().map(|binary| binary.path.clone()),
+        report_path: plan.report.as_ref().map(|report| report.path.clone()),
+        receipt_path: plan.receipt.as_ref().map(|receipt| receipt.path.clone()),
+        cleanup_warnings: commit_staged_files(staged)?,
+    };
+    Ok(outcome)
+}
+
+#[cfg(unix)]
+pub(crate) fn revalidate_current_cargo_uninstall(
+    plan: &CurrentCargoUninstallPlan,
+) -> crate::error::Result<()> {
+    if plan.report.is_some()
+        && plan.receipt.is_none()
+        && !cargo_metadata_owns_report(&plan.cargo_home)
+    {
+        return Err(self_uninstall_error(
+            "Cargo metadata no longer owns report; preserving the installation",
+        ));
+    }
+    let refreshed_binary = snapshot_binary(&plan.binary_path)?;
+    let refreshed_report = snapshot_binary_with_label(&plan.report_path, "report command")?;
+    let refreshed_receipt = snapshot_receipt(&plan.receipt_path)?;
+    if refreshed_binary != plan.binary
+        || refreshed_report != plan.report
+        || refreshed_receipt != plan.receipt
+    {
+        return Err(self_uninstall_error(
+            "the Cargo-path payload or receipt changed after preflight; preserving ownership state",
+        ));
+    }
+    if let Some(receipt) = refreshed_receipt.as_ref() {
+        if !same_path(&receipt.install_prefix, &plan.cargo_home) {
+            return Err(self_uninstall_error(
+                "the cargo-dist receipt prefix changed after preflight; preserving ownership state",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+pub(crate) fn revalidate_current_binary_uninstall(
+    plan: &CurrentBinaryUninstallPlan,
+) -> crate::error::Result<()> {
+    let refreshed = snapshot_binary_with_label(&plan.binary_path, "running binary")?;
+    let refreshed_report = snapshot_binary_with_label(&plan.report_path, "report command")?;
+    if refreshed != plan.binary || refreshed_report != plan.report {
+        return Err(self_uninstall_error(
+            "the running payload changed after preflight; preserving the commands and shell profiles",
+        ));
+    }
+    Ok(())
+}
+
+/// Consume the exact portable/non-Cargo binary proof. This uses the same
+/// same-directory staging and no-clobber restoration contract as the Cargo
+/// pair, but deliberately has no receipt side effect.
+#[cfg(unix)]
+pub(crate) fn commit_current_binary_uninstall(
+    plan: CurrentBinaryUninstallPlan,
+) -> crate::error::Result<CurrentCargoUninstallOutcome> {
+    revalidate_current_binary_uninstall(&plan)?;
+    if plan.binary.is_none() && plan.report.is_none() {
+        return Ok(CurrentCargoUninstallOutcome {
+            binary_path: None,
+            report_path: None,
+            receipt_path: None,
+            cleanup_warnings: Vec::new(),
+        });
+    }
+
+    let mut staged = Vec::new();
+    if let Some(binary) = plan.binary.as_ref() {
+        staged.push(stage_binary_snapshot(binary, "running binary")?);
+    }
+    if let Some(report) = plan.report.as_ref() {
+        match stage_binary_snapshot(report, "report command") {
+            Ok(file) => staged.push(file),
+            Err(error) => {
+                let rollback = restore_staged_files(staged);
+                return Err(crate::error::AppError::platform(format!(
+                    "{error}; {rollback}"
+                )));
+            }
+        }
+    }
+    let absent = ensure_absent(&plan.binary_path, "running binary")
+        .and_then(|()| ensure_absent(&plan.report_path, "report command"));
+    if let Err(error) = absent {
+        let rollback = restore_staged_files(staged);
+        return Err(crate::error::AppError::platform(format!(
+            "{error}; {rollback}"
+        )));
+    }
+
+    Ok(CurrentCargoUninstallOutcome {
+        binary_path: plan.binary.as_ref().map(|binary| binary.path.clone()),
+        report_path: plan.report.as_ref().map(|report| report.path.clone()),
+        receipt_path: None,
+        cleanup_warnings: commit_staged_files(staged)?,
+    })
+}
+
+#[cfg(any(windows, unix))]
+fn restore_receipt_noclobber(
+    path: &Path,
+    contents: &[u8],
+    permissions: Option<&std::fs::Permissions>,
+) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("receipt path has no parent: {}", path.display()),
+        )
+    })?;
+    let mut restore = tempfile::Builder::new()
+        .prefix(".tr300-receipt-restore-")
+        .suffix(".tmp")
+        .tempfile_in(parent)?;
+    restore.write_all(contents)?;
+    if let Some(permissions) = permissions {
+        restore.as_file().set_permissions(permissions.clone())?;
+    }
+    restore.as_file().sync_all()?;
+    restore
+        .persist_noclobber(path)
+        .map(|_| ())
+        .map_err(|error| error.error)
+}
+
 /// Strict native-package cleanup treats the Cargo-path binary and a matching
 /// cargo-dist receipt as one ownership record. Validate the receipt before any
 /// mutation, then quarantine the binary in a randomized same-directory staging
@@ -408,7 +1854,6 @@ fn execute_strict_cargo_pair(
     let binary_label = "older cargo copy".to_string();
     let receipt_id = "cargo_dist_receipt";
     let receipt_label = "matching cargo-dist receipt".to_string();
-
     let Some(cargo_home) = resolve_cargo_home(opts) else {
         return vec![
             TargetReport {
@@ -432,6 +1877,11 @@ fn execute_strict_cargo_pair(
     };
     let cargo_bin = cargo_home.join("bin");
     let cargo_exe = cargo_bin.join(if cfg!(windows) { "tr300.exe" } else { "tr300" });
+    let cargo_report = cargo_bin.join(if cfg!(windows) {
+        "report.exe"
+    } else {
+        "report"
+    });
     let Some(receipt_path) = cargo_dist_receipt_path(opts) else {
         return vec![
             TargetReport {
@@ -493,6 +1943,9 @@ fn execute_strict_cargo_pair(
             ];
         }
     };
+    let receipt_permissions = std::fs::metadata(&receipt_path)
+        .ok()
+        .map(|metadata| metadata.permissions());
     let receipt_text = match std::str::from_utf8(&receipt_contents) {
         Ok(text) => text,
         Err(error) => {
@@ -536,6 +1989,20 @@ fn execute_strict_cargo_pair(
         ];
     }
 
+    if cargo_payload_present(&cargo_report) && !receipt_owns_report(receipt_text, &cargo_home) {
+        return vec![
+            TargetReport {
+                id: binary_id,
+                label: binary_label,
+                path: Some(cargo_report),
+                outcome: TargetOutcome::Failed(
+                    "receipt does not own report; preserving both commands and receipt".to_string(),
+                ),
+            },
+            execute_cargo_dist_receipt(opts, false),
+        ];
+    }
+
     if let Some(rd) = running_dir {
         if same_path(rd, &cargo_bin) {
             return vec![
@@ -560,6 +2027,17 @@ fn execute_strict_cargo_pair(
     }
 
     if !cargo_exe.exists() {
+        if cargo_payload_present(&cargo_report) {
+            return vec![
+                TargetReport {
+                    id: binary_id,
+                    label: binary_label,
+                    path: Some(cargo_report),
+                    outcome: TargetOutcome::Failed("report remains without its owning tr300 command; preserving ambiguous Cargo payload".to_string()),
+                },
+                execute_cargo_dist_receipt(opts, false),
+            ];
+        }
         return vec![
             TargetReport {
                 id: binary_id,
@@ -605,6 +2083,85 @@ fn execute_strict_cargo_pair(
                 outcome: TargetOutcome::WouldRemove,
             },
         ];
+    }
+
+    // v4.4+ managed installs own both exact Cargo-prefix commands. Remove the
+    // receipt first, then transact the sibling payload pair with private
+    // recovery links. If payload commit fails, restore the receipt before
+    // returning failure so a native installer cannot strand partial ownership.
+    if cargo_payload_present(&cargo_report) {
+        if let Err(error) = std::fs::remove_file(&receipt_path) {
+            return vec![
+                TargetReport {
+                    id: binary_id,
+                    label: binary_label,
+                    path: Some(cargo_exe),
+                    outcome: TargetOutcome::Skipped(
+                        "the cargo-dist receipt was not removed; preserving both Cargo-path commands"
+                            .to_string(),
+                    ),
+                },
+                TargetReport {
+                    id: receipt_id,
+                    label: receipt_label,
+                    path: Some(receipt_path.clone()),
+                    outcome: if is_permission_error(error.kind()) {
+                        TargetOutcome::NeedsAdmin(receipt_path.display().to_string())
+                    } else {
+                        TargetOutcome::Failed(format!("{}: {error}", receipt_path.display()))
+                    },
+                },
+            ];
+        }
+
+        return match delete_cargo_command_pair(&cargo_exe, &cargo_report) {
+            Ok(()) => vec![
+                TargetReport {
+                    id: binary_id,
+                    label: "older cargo command pair".to_string(),
+                    path: Some(cargo_exe),
+                    outcome: TargetOutcome::Removed,
+                },
+                TargetReport {
+                    id: receipt_id,
+                    label: receipt_label,
+                    path: Some(receipt_path),
+                    outcome: TargetOutcome::Removed,
+                },
+            ],
+            Err(error) => {
+                let receipt_restore = restore_receipt_noclobber(
+                    &receipt_path,
+                    &receipt_contents,
+                    receipt_permissions.as_ref(),
+                );
+                let detail = match receipt_restore {
+                    Ok(()) => format!(
+                        "could not remove the Cargo-path command pair: {error}; restored the cargo-dist receipt"
+                    ),
+                    Err(restore_error) => format!(
+                        "could not remove the Cargo-path command pair: {error}; receipt restoration failed: {restore_error}"
+                    ),
+                };
+                vec![
+                    TargetReport {
+                        id: binary_id,
+                        label: "older cargo command pair".to_string(),
+                        path: Some(cargo_exe),
+                        outcome: TargetOutcome::Failed(detail),
+                    },
+                    TargetReport {
+                        id: receipt_id,
+                        label: receipt_label,
+                        path: Some(receipt_path),
+                        outcome: TargetOutcome::Skipped(
+                            "strict command-pair cleanup did not commit; receipt restoration was attempted"
+                                .to_string(),
+                        ),
+                    },
+                ]
+            }
+        };
     }
 
     let staging = match tempfile::Builder::new()
@@ -702,7 +2259,11 @@ fn execute_strict_cargo_pair(
 
     if let Err(error) = std::fs::remove_file(&backup) {
         let binary_restore = std::fs::rename(&backup, &cargo_exe);
-        let receipt_restore = std::fs::write(&receipt_path, &receipt_contents);
+        let receipt_restore = restore_receipt_noclobber(
+            &receipt_path,
+            &receipt_contents,
+            receipt_permissions.as_ref(),
+        );
         let preserved = if binary_restore.is_err() {
             Some(staging.keep())
         } else {
@@ -1128,11 +2689,13 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_accepts_only_tr300() {
+    fn allowlist_accepts_only_the_two_packaged_commands() {
         // Cross-platform assertions: bare filenames + forward-slash paths parse
         // identically on Windows and Unix.
         assert!(is_allowlisted(Path::new("tr300.exe")));
         assert!(is_allowlisted(Path::new("tr300")));
+        assert!(is_allowlisted(Path::new("report.exe")));
+        assert!(is_allowlisted(Path::new("report")));
         assert!(is_allowlisted(Path::new("/home/me/.cargo/bin/tr300")));
         // Backslash paths only parse as paths on Windows; gate to Windows.
         #[cfg(windows)]
@@ -1225,6 +2788,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn receipt_restore_is_no_clobber() {
+        let root = tempfile::tempdir().unwrap();
+        let receipt = root.path().join("tr300-receipt.json");
+        std::fs::write(&receipt, b"foreign replacement").unwrap();
+
+        assert!(restore_receipt_noclobber(&receipt, b"prior receipt", None).is_err());
+        assert_eq!(std::fs::read(&receipt).unwrap(), b"foreign replacement");
+        assert!(root.path().read_dir().unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".tr300-receipt-restore-")
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn receipt_restore_preserves_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let receipt = root.path().join("tr300-receipt.json");
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        restore_receipt_noclobber(&receipt, b"prior receipt", Some(&permissions)).unwrap();
+
+        assert_eq!(std::fs::read(&receipt).unwrap(), b"prior receipt");
+        assert_eq!(
+            std::fs::metadata(&receipt).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
     #[test]
     fn cargo_dist_receipt_requires_exact_provider_app_and_prefix() {
         let prefix = Path::new("/home/test/.cargo");
@@ -1290,15 +2888,223 @@ mod tests {
 
     #[cfg(any(windows, unix))]
     #[test]
+    fn receipt_companion_ownership_requires_a_paired_array() {
+        let (_root, opts, _binary, receipt) = strict_fixture();
+        let contents = write_exact_receipt(&opts, &receipt);
+        let prefix = resolve_cargo_home(&opts).unwrap();
+        assert!(receipt_owns_report(
+            std::str::from_utf8(&contents).unwrap(),
+            &prefix
+        ));
+        let binary = if cfg!(windows) { "tr300.exe" } else { "tr300" };
+        let report = if cfg!(windows) {
+            "report.exe"
+        } else {
+            "report"
+        };
+        for inventory in [
+            serde_json::json!(report),
+            serde_json::json!([report]),
+            serde_json::json!([[binary, report]]),
+            serde_json::json!({"0": binary, "1": report}),
+            serde_json::json!([{"binaries": [binary, report]}]),
+        ] {
+            let mut malformed: serde_json::Value = serde_json::from_slice(&contents).unwrap();
+            malformed["binaries"] = inventory;
+            assert!(!receipt_owns_report(&malformed.to_string(), &prefix));
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn report_sibling_requires_inventory_ownership() {
+        let (_root, opts, binary, _receipt) = strict_fixture();
+        let report = binary.with_file_name(if cfg!(windows) {
+            "report.exe"
+        } else {
+            "report"
+        });
+        std::fs::write(&report, b"report").unwrap();
+        assert!(owned_report_sibling(&binary).is_err());
+        let inventory = resolve_cargo_home(&opts).unwrap().join(".crates2.json");
+        std::fs::write(
+            &inventory,
+            serde_json::json!({"installs":{"foreign 4.4.0 (registry)":{"bins":cargo_metadata_binary_names()}}}).to_string(),
+        )
+        .unwrap();
+        assert!(owned_report_sibling(&binary).is_err());
+        std::fs::write(
+            &inventory,
+            serde_json::json!({"installs":{"tr300 4.4.0 (registry)":{"bins":cargo_metadata_binary_names()}}}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(owned_report_sibling(&binary).unwrap(), Some(report));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_preflight_preserves_foreign_report_before_any_installer_mutation() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("tr300.exe");
+        assert!(preflight_native_destination(&binary).is_ok());
+        let report = root.path().join("report.exe");
+        std::fs::write(&binary, b"prior tr300").unwrap();
+        std::fs::write(&report, b"foreign command").unwrap();
+        assert!(preflight_native_destination(&binary).is_err());
+        assert_eq!(std::fs::read(binary).unwrap(), b"prior tr300");
+        assert_eq!(std::fs::read(report).unwrap(), b"foreign command");
+        assert!(preflight_native_destination(Path::new("tr300.exe")).is_err());
+        assert!(preflight_native_destination(&root.path().join("foreign.exe")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cargo_metadata_uses_windows_executable_names() {
+        let root = tempfile::tempdir().unwrap();
+        let metadata = root.path().join(".crates2.json");
+        std::fs::write(
+            &metadata,
+            r#"{"installs":{"tr300 4.4.0 (registry)":{"bins":["tr300","report"]}}}"#,
+        )
+        .unwrap();
+        assert!(!cargo_metadata_owns_report(root.path()));
+        std::fs::write(
+            &metadata,
+            r#"{"installs":{"tr300 4.4.0 (registry)":{"bins":["tr300.exe","report.exe"]}}}"#,
+        )
+        .unwrap();
+        assert!(cargo_metadata_owns_report(root.path()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_report_inventory_starts_at_stable_4_4() {
+        for version in ["4.3.12", "4.4", "4.4.0-beta", "bogus", "4.4.0.1"] {
+            assert!(!version_owns_report(version), "{version}");
+        }
+        for version in ["4.4.0", "4.5.0", "5.0.0"] {
+            assert!(version_owns_report(version), "{version}");
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn strict_cleanup_preserves_foreign_report_with_old_receipt_or_raw_cargo() {
+        for managed in [false, true] {
+            let (_root, opts, binary, receipt) = strict_fixture();
+            let report = binary.with_file_name(if cfg!(windows) {
+                "report.exe"
+            } else {
+                "report"
+            });
+            std::fs::write(&report, b"foreign report").unwrap();
+            if managed {
+                let contents = write_exact_receipt(&opts, &receipt);
+                let mut old: serde_json::Value = serde_json::from_slice(&contents).unwrap();
+                old["binaries"] = serde_json::json!(["tr300"]);
+                std::fs::write(&receipt, old.to_string()).unwrap();
+            }
+            let running_elsewhere = tempfile::tempdir().unwrap();
+            let reports = execute_strict_cargo_pair(&opts, Some(running_elsewhere.path()));
+            assert!(reports.iter().any(strict_report_failed));
+            assert_eq!(std::fs::read(&report).unwrap(), b"foreign report");
+            assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+            assert_eq!(receipt.exists(), managed);
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn strict_cleanup_preserves_orphan_report_and_receipt() {
+        for managed in [false, true] {
+            let (_root, opts, binary, receipt) = strict_fixture();
+            if managed {
+                write_exact_receipt(&opts, &receipt);
+            }
+            let report = binary.with_file_name(if cfg!(windows) {
+                "report.exe"
+            } else {
+                "report"
+            });
+            std::fs::write(&report, b"orphan report").unwrap();
+            std::fs::remove_file(&binary).unwrap();
+            let running_elsewhere = tempfile::tempdir().unwrap();
+
+            let reports = execute_strict_cargo_pair(&opts, Some(running_elsewhere.path()));
+
+            assert!(reports.iter().any(strict_report_failed));
+            assert_eq!(std::fs::read(&report).unwrap(), b"orphan report");
+            assert_eq!(receipt.exists(), managed);
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn cargo_command_rollback_preserves_concurrent_destination_and_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("recovery");
+        let destination = root.path().join("report");
+        std::fs::write(&source, b"prior report").unwrap();
+        std::fs::write(&destination, b"concurrent replacement").unwrap();
+
+        let restore = restore_cargo_command(&source, &destination);
+        assert!(restore.is_err());
+        assert_eq!(std::fs::read(&source).unwrap(), b"prior report");
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"concurrent replacement"
+        );
+        let error = cargo_rollback_error(
+            std::io::Error::other("commit failed"),
+            root.path(),
+            [restore],
+        );
+        assert!(error
+            .to_string()
+            .contains(&root.path().display().to_string()));
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn strict_command_pair_failure_restores_receipt_and_preserves_payload() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        let original_receipt = write_exact_receipt(&opts, &receipt);
+        let report = binary.with_file_name(if cfg!(windows) {
+            "report.exe"
+        } else {
+            "report"
+        });
+        std::fs::create_dir(&report).unwrap();
+        let unrelated = report.join("foreign-file");
+        std::fs::write(&unrelated, b"preserve").unwrap();
+        let running_elsewhere = tempfile::tempdir().unwrap();
+
+        let reports = execute_strict_cargo_pair(&opts, Some(running_elsewhere.path()));
+
+        assert!(reports.iter().any(strict_report_failed));
+        assert_eq!(std::fs::read(&receipt).unwrap(), original_receipt);
+        assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"preserve");
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
     fn strict_cargo_pair_removes_only_exact_binary_and_receipt_together() {
         let (_root, opts, binary, receipt) = strict_fixture();
         let cargo_home = resolve_cargo_home(&opts).unwrap();
+        let report = binary.with_file_name(if cfg!(windows) {
+            "report.exe"
+        } else {
+            "report"
+        });
+        std::fs::write(&report, b"prior report command").unwrap();
         std::fs::write(
             &receipt,
             serde_json::json!({
                 "provider": { "source": "cargo-dist" },
                 "source": { "app_name": "tr300" },
                 "install_prefix": cargo_home.display().to_string(),
+                "binaries": if cfg!(windows) { vec!["tr300.exe", "report.exe"] } else { vec!["tr300", "report"] },
             })
             .to_string(),
         )
@@ -1311,6 +3117,7 @@ mod tests {
             .iter()
             .all(|report| matches!(report.outcome, TargetOutcome::Removed)));
         assert!(!binary.exists());
+        assert!(!report.exists());
         assert!(!receipt.exists());
         assert!(binary.parent().unwrap().read_dir().unwrap().all(|entry| {
             !entry
@@ -1319,6 +3126,28 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(".tr300-migrate-")
         }));
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn strict_raw_cargo_cleanup_removes_the_exact_command_pair() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        let report = binary.with_file_name(if cfg!(windows) {
+            "report.exe"
+        } else {
+            "report"
+        });
+        std::fs::write(&report, b"prior report command").unwrap();
+        std::fs::write(resolve_cargo_home(&opts).unwrap().join(".crates2.json"), serde_json::json!({"installs":{"tr300 4.4.0 (registry+https://github.com/rust-lang/crates.io-index)":{"bins":cargo_metadata_binary_names()}}}).to_string()).unwrap();
+        assert!(!receipt.exists());
+
+        let running_elsewhere = tempfile::tempdir().unwrap();
+        let reports = execute_strict_cargo_pair(&opts, Some(running_elsewhere.path()));
+
+        assert_eq!(reports.len(), 2);
+        assert!(reports.iter().all(|report| !strict_report_failed(report)));
+        assert!(!binary.exists());
+        assert!(!report.exists());
     }
 
     #[cfg(any(windows, unix))]
@@ -1333,5 +3162,458 @@ mod tests {
         assert!(reports.iter().any(strict_report_failed));
         assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
         assert!(receipt.exists());
+    }
+
+    #[cfg(any(windows, unix))]
+    fn write_exact_receipt(opts: &MigrateOptions, receipt: &Path) -> Vec<u8> {
+        let contents = serde_json::json!({
+            "provider": { "source": "cargo-dist" },
+            "source": { "app_name": "tr300" },
+            "install_prefix": resolve_cargo_home(opts).unwrap().display().to_string(),
+            "binaries": if cfg!(windows) { vec!["tr300.exe", "report.exe"] } else { vec!["tr300", "report"] },
+        })
+        .to_string()
+        .into_bytes();
+        std::fs::write(receipt, &contents).unwrap();
+        contents
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn hidden_strict_cleanup_still_preserves_the_running_cargo_pair() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        let expected_receipt = write_exact_receipt(&opts, &receipt);
+
+        let reports = execute_strict_cargo_pair(&opts, binary.parent());
+
+        assert!(reports.iter().any(strict_report_failed));
+        assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+        assert_eq!(std::fs::read(&receipt).unwrap(), expected_receipt);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_cargo_uninstall_removes_exact_managed_pair() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        write_exact_receipt(&opts, &receipt);
+        let report = binary.with_file_name("report");
+        std::fs::write(&report, b"report command").unwrap();
+
+        let plan = preflight_current_cargo_uninstall_at(&binary, &opts, &receipt)
+            .unwrap()
+            .expect("Cargo-path binary should produce a self-uninstall plan");
+        assert_eq!(plan.binary_path(), Some(binary.as_path()));
+        assert_eq!(plan.report_path(), Some(report.as_path()));
+        assert_eq!(plan.receipt_path(), Some(receipt.as_path()));
+        let outcome = commit_current_cargo_uninstall(plan).unwrap();
+
+        assert_eq!(outcome.binary_path.as_deref(), Some(binary.as_path()));
+        assert_eq!(outcome.report_path.as_deref(), Some(report.as_path()));
+        assert_eq!(outcome.receipt_path.as_deref(), Some(receipt.as_path()));
+        assert!(!binary.exists());
+        assert!(!report.exists());
+        assert!(!receipt.exists());
+        assert!(binary.parent().unwrap().read_dir().unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".tr300-uninstall-")
+        }));
+        assert!(receipt.parent().unwrap().read_dir().unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".tr300-uninstall-")
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_uninstall_surfaces_and_preserves_unexpected_directory_residue() {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("tr300");
+        std::fs::write(&original, b"managed binary").unwrap();
+        let staged = stage_unix_path(&original, "test binary").unwrap();
+        let staging_directory = staged.directory.clone();
+        let unexpected = staging_directory.join("unexpected");
+        std::fs::write(&unexpected, b"do not recursively delete").unwrap();
+
+        let warning = staged
+            .try_remove()
+            .unwrap()
+            .expect("nonempty staging directory must be surfaced");
+
+        assert!(!original.exists());
+        assert_eq!(
+            std::fs::read(&unexpected).unwrap(),
+            b"do not recursively delete"
+        );
+        assert!(warning.contains(&staging_directory.display().to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_cargo_uninstall_derives_custom_prefix_from_xdg_receipt() {
+        let root = tempfile::tempdir().unwrap();
+        let custom_prefix = root.path().join("managed-prefix");
+        let binary = custom_prefix.join("bin").join("tr300");
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::write(&binary, b"custom managed binary").unwrap();
+
+        let xdg_config = root.path().join("xdg-config");
+        let receipt = xdg_config.join("tr300").join("tr300-receipt.json");
+        std::fs::create_dir_all(receipt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &receipt,
+            serde_json::json!({
+                "provider": { "source": "cargo-dist" },
+                "source": { "app_name": "tr300" },
+                "install_prefix": custom_prefix.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        // No CARGO_HOME/user-profile hint: the exact XDG receipt is the
+        // authority for this custom cargo-dist prefix.
+        let plan =
+            preflight_current_cargo_uninstall_at(&binary, &MigrateOptions::default(), &receipt)
+                .unwrap()
+                .expect("custom receipt prefix should bind the running binary");
+        assert_eq!(plan.cargo_home, custom_prefix);
+        let outcome = commit_current_cargo_uninstall(plan).unwrap();
+
+        assert_eq!(outcome.binary_path.as_deref(), Some(binary.as_path()));
+        assert_eq!(outcome.receipt_path.as_deref(), Some(receipt.as_path()));
+        assert!(!binary.exists());
+        assert!(!receipt.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_custom_prefix_rejects_receipt_for_a_different_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let custom_prefix = root.path().join("managed-prefix");
+        let binary = custom_prefix.join("bin").join("tr300");
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::write(&binary, b"custom managed binary").unwrap();
+        let receipt = root
+            .path()
+            .join("xdg-config")
+            .join("tr300")
+            .join("tr300-receipt.json");
+        std::fs::create_dir_all(receipt.parent().unwrap()).unwrap();
+        let receipt_bytes = serde_json::json!({
+            "provider": { "source": "cargo-dist" },
+            "source": { "app_name": "tr300" },
+            "install_prefix": root.path().join("other-prefix").display().to_string(),
+        })
+        .to_string()
+        .into_bytes();
+        std::fs::write(&receipt, &receipt_bytes).unwrap();
+
+        assert!(preflight_current_cargo_uninstall_at(
+            &binary,
+            &MigrateOptions::default(),
+            &receipt,
+        )
+        .is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"custom managed binary");
+        assert_eq!(std::fs::read(&receipt).unwrap(), receipt_bytes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_raw_cargo_uninstall_remains_binary_only() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        assert!(!receipt.exists());
+
+        let plan = preflight_current_cargo_uninstall_at(&binary, &opts, &receipt)
+            .unwrap()
+            .expect("raw Cargo binary should produce a self-uninstall plan");
+        let outcome = commit_current_cargo_uninstall(plan).unwrap();
+
+        assert_eq!(outcome.binary_path.as_deref(), Some(binary.as_path()));
+        assert!(outcome.receipt_path.is_none());
+        assert!(!binary.exists());
+        assert!(!receipt.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn current_cargo_uninstall_removes_valid_receipt_when_binary_path_is_absent() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        write_exact_receipt(&opts, &receipt);
+        std::fs::remove_file(&binary).unwrap();
+        let mut deleted_current_exe = binary.as_os_str().to_os_string();
+        deleted_current_exe.push(" (deleted)");
+        let deleted_current_exe = PathBuf::from(deleted_current_exe);
+
+        let plan = preflight_current_cargo_uninstall_at(&deleted_current_exe, &opts, &receipt)
+            .unwrap()
+            .expect("unlinked running image should still validate its exact receipt");
+        let outcome = commit_current_cargo_uninstall(plan).unwrap();
+
+        assert!(outcome.binary_path.is_none());
+        assert_eq!(outcome.receipt_path.as_deref(), Some(receipt.as_path()));
+        assert!(!receipt.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn existing_literal_deleted_suffix_never_authorizes_receipt_cleanup() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        let expected_receipt = write_exact_receipt(&opts, &receipt);
+        std::fs::remove_file(&binary).unwrap();
+        let mut literal_deleted = binary.as_os_str().to_os_string();
+        literal_deleted.push(" (deleted)");
+        let literal_deleted = PathBuf::from(literal_deleted);
+        std::fs::write(&literal_deleted, b"literal running file").unwrap();
+
+        assert!(preflight_current_cargo_uninstall_at(&literal_deleted, &opts, &receipt).is_err());
+        assert_eq!(
+            std::fs::read(&literal_deleted).unwrap(),
+            b"literal running file"
+        );
+        assert_eq!(std::fs::read(&receipt).unwrap(), expected_receipt);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleted_default_cargo_path_fails_closed_without_a_receipt_location() {
+        let deleted_current_exe = Path::new("/home/test/.cargo/bin/tr300 (deleted)");
+        assert!(path_looks_like_default_cargo_binary(deleted_current_exe));
+
+        let error = preflight_current_cargo_uninstall_with_receipt_location(
+            deleted_current_exe,
+            &MigrateOptions::default(),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("receipt location could not be resolved"));
+        assert!(error.contains("preserving the binary and shell profiles"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_cargo_uninstall_rejects_ambiguous_receipts_before_any_mutation() {
+        let cases = [
+            b"not json".as_slice(),
+            br#"{"provider":{"source":"foreign"},"source":{"app_name":"tr300"},"install_prefix":"/tmp/foreign"}"#,
+            br#"{"provider":{"source":"cargo-dist"},"source":{"app_name":"other"},"install_prefix":"/tmp/foreign"}"#,
+            br#"{"provider":{"source":"cargo-dist"},"source":{"app_name":"tr300"},"install_prefix":"/tmp/wrong-prefix"}"#,
+        ];
+
+        for contents in cases {
+            let (root, opts, binary, receipt) = strict_fixture();
+            let profile = root.path().join(".bashrc");
+            std::fs::write(&profile, b"profile must remain byte-for-byte\n").unwrap();
+            std::fs::write(&receipt, contents).unwrap();
+
+            assert!(preflight_current_cargo_uninstall_at(&binary, &opts, &receipt).is_err());
+            assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+            assert_eq!(std::fs::read(&receipt).unwrap(), contents);
+            assert_eq!(
+                std::fs::read(&profile).unwrap(),
+                b"profile must remain byte-for-byte\n"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_cargo_uninstall_rejects_symlinked_or_hardlinked_receipt() {
+        use std::os::unix::fs::symlink;
+
+        let (root, opts, binary, receipt) = strict_fixture();
+        let target = root.path().join("receipt-target.json");
+        let expected = write_exact_receipt(&opts, &target);
+        symlink(&target, &receipt).unwrap();
+        assert!(preflight_current_cargo_uninstall_at(&binary, &opts, &receipt).is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+        assert_eq!(std::fs::read(&target).unwrap(), expected);
+        assert!(std::fs::symlink_metadata(&receipt)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        let (root, opts, binary, receipt) = strict_fixture();
+        let expected = write_exact_receipt(&opts, &receipt);
+        let second_link = root.path().join("receipt-hardlink.json");
+        std::fs::hard_link(&receipt, &second_link).unwrap();
+        assert!(preflight_current_cargo_uninstall_at(&binary, &opts, &receipt).is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+        assert_eq!(std::fs::read(&receipt).unwrap(), expected);
+        assert_eq!(std::fs::read(&second_link).unwrap(), expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_cargo_uninstall_rejects_linked_binary() {
+        use std::os::unix::fs::symlink;
+
+        let (root, opts, binary, receipt) = strict_fixture();
+        write_exact_receipt(&opts, &receipt);
+        let target = root.path().join("real-tr300");
+        std::fs::rename(&binary, &target).unwrap();
+        symlink(&target, &binary).unwrap();
+        assert!(preflight_current_cargo_uninstall_at(&binary, &opts, &receipt).is_err());
+        assert!(receipt.exists());
+        assert!(target.exists());
+
+        let (root, opts, binary, receipt) = strict_fixture();
+        write_exact_receipt(&opts, &receipt);
+        let second_link = root.path().join("tr300-hardlink");
+        std::fs::hard_link(&binary, &second_link).unwrap();
+        assert!(preflight_current_cargo_uninstall_at(&binary, &opts, &receipt).is_err());
+        assert!(binary.exists());
+        assert!(second_link.exists());
+        assert!(receipt.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_cargo_uninstall_revalidates_before_commit() {
+        let (_root, opts, binary, receipt) = strict_fixture();
+        write_exact_receipt(&opts, &receipt);
+        let plan = preflight_current_cargo_uninstall_at(&binary, &opts, &receipt)
+            .unwrap()
+            .unwrap();
+
+        std::fs::write(&receipt, br#"{"provider":{"source":"foreign"}}"#).unwrap();
+        assert!(commit_current_cargo_uninstall(plan).is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"prior managed binary");
+        assert_eq!(
+            std::fs::read(&receipt).unwrap(),
+            br#"{"provider":{"source":"foreign"}}"#
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_path_equality_never_collapses_invalid_bytes_to_replacement_character() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let invalid = root
+            .path()
+            .join(OsString::from_vec(vec![b'p', b'r', b'e', b'f', 0xff]));
+        let replacement = root.path().join("pref\u{fffd}");
+
+        // APFS rejects the invalid-byte component itself, so first exercise
+        // the non-existent-path fallback on every Unix host. Linux then also
+        // proves that successful canonicalization preserves the distinction.
+        assert!(!same_path(&invalid, &replacement));
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            std::fs::create_dir(&invalid).unwrap();
+            std::fs::create_dir(&replacement).unwrap();
+            assert!(!same_path(&invalid, &replacement));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validation_open_is_nonblocking_for_a_fifo_swap() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::io::AsRawFd;
+        use std::time::Duration;
+
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("validation-fifo");
+        let fifo_c = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+
+        let writer_path = fifo.clone();
+        let writer = std::thread::spawn(move || {
+            // This delayed writer prevents a regression from hanging the suite
+            // forever; the descriptor flag assertion below remains the oracle.
+            std::thread::sleep(Duration::from_millis(200));
+            OpenOptions::new().write(true).open(writer_path).unwrap()
+        });
+        let reader = open_unix_validation_file(&fifo).unwrap();
+        let flags = unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_GETFL) };
+        assert_ne!(flags, -1);
+        assert_ne!(flags & libc::O_NONBLOCK, 0);
+        let writer = writer.join().unwrap();
+        drop((reader, writer));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_uninstall_uses_an_exact_revalidated_binary_plan() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("portable-tr300");
+        let report = root.path().join("report");
+        std::fs::write(&binary, b"portable binary").unwrap();
+        std::fs::write(&report, b"report command").unwrap();
+
+        assert!(preflight_current_binary_uninstall(&binary).is_err());
+        assert_eq!(std::fs::read(&report).unwrap(), b"report command");
+        std::fs::remove_file(&report).unwrap();
+        let plan = preflight_current_binary_uninstall(&binary).unwrap();
+        assert_eq!(plan.binary_path(), Some(binary.as_path()));
+        assert_eq!(plan.report_path(), None);
+        let outcome = commit_current_binary_uninstall(plan).unwrap();
+
+        assert_eq!(outcome.binary_path.as_deref(), Some(binary.as_path()));
+        assert_eq!(outcome.report_path.as_deref(), None);
+        assert!(!binary.exists());
+        assert!(!report.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_uninstall_rejects_a_report_appearing_after_confirmation() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("portable-tr300");
+        let report = root.path().join("report");
+        std::fs::write(&binary, b"portable binary").unwrap();
+        let plan = preflight_current_binary_uninstall(&binary).unwrap();
+
+        std::fs::write(&report, b"replacement report").unwrap();
+        assert!(commit_current_binary_uninstall(plan).is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"portable binary");
+        assert_eq!(std::fs::read(&report).unwrap(), b"replacement report");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_uninstall_rejects_a_path_replacement_after_confirmation() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("portable-tr300");
+        std::fs::write(&binary, b"confirmed binary").unwrap();
+        let plan = preflight_current_binary_uninstall(&binary).unwrap();
+
+        std::fs::remove_file(&binary).unwrap();
+        std::fs::write(&binary, b"replacement binary").unwrap();
+        assert!(commit_current_binary_uninstall(plan).is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"replacement binary");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_portable_image_never_selects_a_fallback_binary() {
+        let root = tempfile::tempdir().unwrap();
+        let deleted_running_path = root.path().join("portable-tr300 (deleted)");
+        let unrelated_standard_path = root.path().join("tr300");
+        std::fs::write(&unrelated_standard_path, b"unrelated install").unwrap();
+
+        let plan = preflight_current_binary_uninstall(&deleted_running_path).unwrap();
+        assert!(plan.binary_path().is_none());
+        let outcome = commit_current_binary_uninstall(plan).unwrap();
+
+        assert!(outcome.binary_path.is_none());
+        assert_eq!(
+            std::fs::read(&unrelated_standard_path).unwrap(),
+            b"unrelated install"
+        );
     }
 }

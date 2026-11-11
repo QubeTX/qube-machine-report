@@ -281,7 +281,11 @@ fn get_socket_count() -> Option<usize> {
 #[cfg(target_os = "macos")]
 fn get_socket_count() -> Option<usize> {
     // Use sysctl to get package count
-    if let Some(stdout) = run_stdout("sysctl", ["-n", "hw.packages"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_stdout(
+        "/usr/sbin/sysctl",
+        ["-n", "hw.packages"],
+        CommandTimeout::Normal,
+    ) {
         if let Ok(count) = stdout.trim().parse::<usize>() {
             return (count > 0).then_some(count);
         }
@@ -519,6 +523,19 @@ mod load_tests {
 #[cfg(test)]
 mod cpu_info_tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn socket_probe_ignores_path_and_working_directory_helpers() {
+        if crate::collectors::command::test_helpers::is_probe_child() {
+            let _ = get_socket_count();
+            return;
+        }
+        crate::collectors::command::test_helpers::assert_probe_ignores_path(
+            "collectors::cpu::cpu_info_tests::socket_probe_ignores_path_and_working_directory_helpers",
+            &["sysctl"],
+        );
+    }
 
     #[test]
     fn unknown_physical_topology_is_labeled_as_logical_only() {

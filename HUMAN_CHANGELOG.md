@@ -13,11 +13,494 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-11-10
+
 ### Fixed
 - **Windows one-command installs now update through Windows' trusted built-in
   PowerShell location.** TR-300 no longer lets the current folder or command
   search path choose which PowerShell program runs during an update, closing a
   route by which another local program could run with the updater's access.
+
+### Security
+- Linux and Mac GPU checks use system-owned helper locations, preventing a different program on the command search path from being selected. Existing Windows protections for GPU checks and temporary installer files remain in place.
+- Update secure-connection dependencies to fix six reported vulnerabilities.
+
+## [4.4.0] - 2026-09-24
+
+### Fixed
+- Windows MSI installers now show the PolyForm Noncommercial 1.0.0 license
+  instead of placeholder text. Windows EXE installers already show this license;
+  the Mac installer has no license dialog.
+- Installs and upgrades protect unrelated commands named `report`, including
+  when upgrading from an older TR-300 installation.
+- Overlapping Windows updates preserve each other’s recovery files.
+- Updating through either command handles running Windows executables safely.
+  If recovery cannot finish, the error explains which files were preserved.
+
+### Added
+- **You can now type `report` in any terminal after installing TR-300.** It is
+  a real command included in every Windows, Mac, Linux, managed, and Cargo
+  install—not a PowerShell or shell-profile shortcut. It supports the normal
+  full report plus fast, JSON, ASCII, custom-title, and save options.
+- **Both names do the same thing.** `report update`, `report install`, and
+  `report uninstall` work just like the corresponding `tr300` commands.
+- **Both commands now come with matching terminal documentation.** `man tr300`
+  and `man report` explain the same reporting and maintenance options.
+  Both `-h` and `--help` are checked before release so their
+  command and option lists stay current.
+
+### Changed
+- **Upgrading no longer depends on a fragile profile alias.** If you previously
+  ran `tr300 install`, running it once after the upgrade removes TR-300's old
+  alias from the auto-run block. Any unrelated command or function that you
+  named `report` is preserved and called out as a possible conflict.
+- **Both commands now travel together through install, update, repair,
+  rollback, and uninstall.** The automated Windows and Mac package tests check
+  that `report` has the right version, exposes the same commands,
+  and disappears with the rest of TR-300.
+- **There still is no `tr300 config` command.** Settings are supplied as
+  command-line options; typing `tr300 config` returns an argument error.
+
+### Security
+- Update the secure-connection library to fix a recently disclosed TLS issue.
+- **Windows cleanup now uses the copy of `cmd.exe` owned by Windows itself.**
+  This prevents a different program earlier on PATH from being selected for
+  deferred uninstall cleanup.
+
+## [4.3.12] - 2026-08-25
+
+### Changed
+- **This packaging-test repair completed the cross-platform release; the report
+  and installer rules are unchanged.** Version 4.3.11 remains preserved as an
+  immutable crate, tag, and private draft. Version 4.3.12 is now published on
+  crates.io and GitHub with the complete set of 34 Windows, macOS, and Linux
+  release files, and the stable download links point to it.
+
+### Fixed
+- **Mac testing now uses the permission required to remove its temporary test
+  account directory from the system-owned Users folder.** The cleanup remains
+  limited to the exact temporary fixture, and automated coverage prevents the
+  invalid unprivileged cleanup from returning.
+
+### Security
+- **Version 4.3.11 never became public on GitHub.** Its crate, first-stage
+  release, Windows packages, Apple signatures, notarization, and the actual
+  managed-install safety rejection all succeeded. The final Mac tests stopped
+  only while deleting their temporary fixture. Version 4.3.12 repairs that
+  test cleanup without changing the product, installer policy, or immutable-
+  tag rules.
+
+## [4.3.11] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged.** Version
+  4.3.10 remains preserved as an immutable crate, tag, and private draft.
+  Version 4.3.11 is the only active candidate for complete cross-platform
+  downloads.
+
+### Fixed
+- **Mac testing now checks each rejection message where macOS actually exposes
+  it.** The package's own safety script is checked directly for its useful
+  recovery guidance, while the real macOS installer is checked for its normal
+  generic pre-install failure and for leaving the existing managed install
+  completely untouched.
+
+### Security
+- **Version 4.3.10 never became public on GitHub.** Its crate, first-stage
+  release, Windows packages, signatures, and notarization succeeded, leaving a
+  correct private 30-download draft. The final Mac tests stopped only because
+  they expected macOS to repeat a script message that PackageKit intentionally
+  summarizes. Version 4.3.11 fixes that test boundary without weakening the
+  package policy, release automation, or immutable-tag rules.
+
+## [4.3.10] - 2026-08-25
+
+### Changed
+- **This is another packaging-only repair; the report itself is unchanged from
+  the v4.3 line.** Version 4.3.9 remains preserved as an immutable crate, tag,
+  and private draft. Version 4.3.10 is the only active candidate for complete
+  cross-platform downloads.
+- **Windows now proves each repair using the right source for that release
+  stage.** Before publication it reuses the exact private installer bytes that
+  were already frozen. After publication it automatically exercises the real
+  Global updater against the public version-specific download.
+
+### Fixed
+- **Mac packaging no longer depends on alphabetic ordering differences between
+  runners.** It accepts the three expected checksum rows in any order but still
+  rejects a missing, extra, duplicate, renamed, or malformed entry. Automated
+  tests exercise every valid ordering and the invalid cases.
+- **Private Windows testing no longer tries to download an asset that is still
+  intentionally private.** All private installer and recovery checks remain;
+  the real Global live-update transaction runs automatically once the exact
+  release is public, and its error output is preserved if it fails.
+
+### Security
+- **Version 4.3.9 never became public on GitHub.** Its source checks, crate,
+  first-stage release, and Windows packaging succeeded, leaving a correct
+  private 30-download draft. Mac packaging stopped before using Apple
+  credentials because one filename comparison depended on runner ordering.
+  Windows testing passed every other case but the Global updater could not
+  anonymously download the still-private candidate. Version 4.3.10 fixes both
+  test boundaries without weakening installer or publication custody.
+
+## [4.3.9] - 2026-08-25
+
+### Changed
+- **This is another packaging-only repair; the report itself is unchanged from
+  the v4.3 line.** Version 4.3.8 remains an immutable crate, tag, and private
+  draft. Version 4.3.9 became the next complete-download candidate and remains
+  preserved as evidence of the later private-stage stops recorded above.
+
+### Fixed
+- **The Mac packaging stage now agrees on the exact files handed between its
+  trusted automation steps.** The handoff intentionally includes the two shell
+  installer sources as well as the two Apple archives and their checksums. The
+  next step no longer rejects those valid installer files as unexpected.
+- **The Windows packaging stage again supplies read-only GitHub authorization
+  to the official installer verification step.** That narrowly restores the
+  identity check without allowing the build job to change a Release. The helper
+  removes and checks the token before launching the downloaded setup program,
+  so that third-party child process cannot inherit it.
+
+### Security
+- **Version 4.3.8 never became public on GitHub.** Its crate and first-stage
+  private release succeeded, but the Mac stage stopped before package building
+  or publishing when one step expected an older, smaller file set. Windows
+  packaging completed the Corporate MSI, then stopped before both EXE builds
+  and before any Windows upload because the official setup-tool identity check
+  had no GitHub token. Version 4.3.9 fixes both narrow boundaries without
+  changing the report itself.
+
+## [4.3.8] - 2026-08-25
+
+### Changed
+- **This is another packaging-only repair; the report itself is unchanged from
+  the v4.3 line.** Its exact crate and tag are published and its exact private
+  draft remains preserved. Version 4.3.9 fixes the next automated packaging
+  boundary.
+- **The release notes now explain who can see a private GitHub draft.** GitHub
+  shows drafts only to callers with permission to push. The automated read-only
+  Windows and Mac stages therefore saw no draft even though the publisher had
+  created the correct one.
+
+### Fixed
+- **The private-draft permission repair worked.** Small, fresh automation steps
+  could find and freeze the private draft while build and installer jobs stayed
+  read-only.
+- **Private-draft access stays away from build and installer code.** Small,
+  fresh automation steps get only the access needed to find and freeze the
+  private draft. Build and installation tests remain read-only, and separate
+  fresh publishing steps are the only steps that actually change the draft.
+
+### Security
+- **Version 4.3.8 never became public on GitHub.** Its exact source passed all
+  20 main CI jobs, trusted publication produced the unyanked crate, Apple
+  credential preflight passed, and the 13-job first-stage Release created the
+  correct private 24-download draft. The Mac stage then rejected its trusted
+  six-file handoff because the next step still expected only four files. Every
+  Mac build, publish, and smoke job skipped. The Windows stage completed its
+  Corporate MSI, then stopped before both EXE builds and artifact upload because
+  its official Inno Setup verification step lacked the read-only GitHub token
+  it requires. Windows publishing skipped, the draft stayed private with
+  exactly 24 downloads, and nothing became public.
+- **Version 4.3.7 never became public on GitHub.** Its crate remains available,
+  its complete first-stage release build succeeded, and its exact 24-download
+  draft remains private. The Windows and Mac stages stopped at their first
+  read-only lookup, validation did not run, no downloads were added, and
+  nothing was exposed publicly.
+
+## [4.3.7] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.6 remains an immutable crate and private draft, while
+  v4.3.7 repaired the checksum handoff and reached its own exact private draft.
+  It is now immutable; v4.3.8 later fixed that boundary before the newer
+  packaging stops recorded above.
+
+### Fixed
+- **The release publisher now reads the verified installer checksum in the
+  same filename format that its checksum tool writes.** The previous workflow
+  looked for an extra star before the filename, found nothing, and stopped
+  after safely creating the private draft. The corrected handoff sends the
+  exact installer identity into the automatic Windows and Mac stages.
+- **Tests now execute the final checksum handoff instead of stopping just before
+  it.** The fixture uses the same spacing and filename emitted in a real release
+  and requires the exact checksum to reach the next workflow.
+
+### Security
+- **Version 4.3.7 never became public on GitHub.** Its crate and complete
+  first-stage release succeeded, but both read-only downstream stages could not
+  see the private draft. They stopped before building or changing anything;
+  validation skipped and the exact 24-download draft remains private.
+- **Version 4.3.6 never became public.** Its crate, builds, Apple signing and
+  notarization, and exact 24-download draft all succeeded. The checksum lookup
+  typo then stopped the chain before Windows and Mac completion. The tag and
+  private draft remain untouched; v4.3.7 fixes forward.
+
+## [4.3.6] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Its immutable crate and tag remain available. Its correct
+  24-download draft remains private. v4.3.7 later reached its own private draft
+  before another safe stop; later immutable repairs and their results are
+  recorded in the newer entries above.
+
+### Fixed
+- **The automated release chain can now see its own private draft.** GitHub does
+  not expose drafts through its normal “release by tag” endpoint. The release,
+  Windows, validation, and Mac jobs now find the one exact draft through the
+  authenticated release inventory, bind its numeric ID, and keep checking that
+  same draft until it is ready to become public.
+- **Tests now reproduce the real GitHub behavior that caused the stop.** They
+  verify that the draft remains invisible through the old lookup, is visible in
+  the full authenticated inventory, and that ambiguous, changed, incomplete,
+  public, prerelease, or empty download sets stop before publication.
+
+### Security
+- **Version 4.3.6 never became public.** It built and signed successfully and
+  created the correct 24-download private draft. Its final checksum lookup
+  expected an extra star before the installer filename, found no digest, and
+  stopped the chain before Windows and Mac completion. The draft remains
+  private; v4.3.7 fixes forward.
+
+## [4.3.5] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Its immutable crate and tag remain available. Its correct
+  24-download draft remains private, and v4.3.6 was its immutable fix-forward.
+
+### Fixed
+- **Release notes and download metadata now survive their validation step
+  intact.** The release workflow checks that the title, notes, and stable-release
+  status are valid while retaining the complete packaging record for the next
+  stage. Tests run that real validation sequence and reject incomplete or
+  incorrectly typed release information.
+
+### Security
+- **Version 4.3.5 stopped safely after creating the correct private draft.** The
+  workflow's follow-up tag lookup cannot see drafts, so it reported “not found”
+  and prevented every public step. Its crate, tag, and private draft stay
+  untouched; version 4.3.6 fixes forward.
+
+## [4.3.4] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.3 remains available as an immutable crate. Version
+  4.3.4 reached crates.io and passed Mac archive signing, but its downloadable
+  release stopped safely during metadata preparation; v4.3.5 fixes forward.
+
+### Fixed
+- **Mac packaging now understands the safe file-mode form emitted by its pinned
+  archive tool.** The workflow accepts the tool's matching file-type markers
+  with the expected permissions, while still rejecting links, type confusion,
+  special permissions, unexpected files, unsafe paths, and oversized archives.
+  Tests reproduce both the real packaging-tool bytes and the portable
+  permission-only form.
+
+### Security
+- **Version 4.3.3 stopped safely before Mac signing or any partial download
+  release.** Its crate and tag stay untouched. Version 4.3.4 fixes forward
+  through the same automatic review, `main`, signing, and publication chain.
+
+## [4.3.3] - 2026-08-25
+
+### Changed
+- **This is a packaging-only repair; the report itself is unchanged from the
+  v4.3 line.** Version 4.3.2 remains available as an immutable crate. Version
+  4.3.3 reached crates.io, but its downloadable-release run stopped safely;
+  v4.3.4 is the next complete-download candidate.
+
+### Fixed
+- **The release system now understands the exact checksum files produced by
+  its pinned packaging tool.** That tool adds a harmless blank line after its
+  checksum records. The workflow now verifies those bytes exactly, then writes
+  one terminal newline in each public checksum file before any release is
+  assembled. Tests cover
+  missing or extra newlines, Windows line endings, trailing garbage, wrong
+  signed-file formatting, and a changed combined checksum file.
+
+### Security
+- **Version 4.3.2 stopped safely before Mac signing or any partial download
+  release.** Its crate and tag stay untouched. Version 4.3.3 fixes forward
+  through the same automatic review, `main`, signing, and publication chain.
+
+## [4.3.2] - 2026-08-24
+
+### Added
+- **Everything added in v4.3 is included here.** Linux can show trustworthy CPU
+  and GPU temperatures, Windows
+  can show a bounded NVIDIA GPU reading, and unsupported temperatures simply
+  stay blank. The machine-readable report gains matching optional fields, and
+  the new `--full` flag explicitly chooses the normal complete report.
+
+### Changed
+- **Version 4.3.2 reached crates.io automatically, but its Mac signer rejected
+  the packaging tool's valid extra blank line before signing or creating a
+  draft.** The immutable tag stays untouched and version 4.3.3 fixes forward.
+- **The full Windows report is substantially faster on the controlled test
+  machine.** Its median fell from 5146.9 ms to 2120.2 ms across seven
+  alternating runs per version—58.8% less time, or a 2.43× runtime ratio.
+  Quick-mode medians differed by only 1.2%, so no quick-mode speedup is claimed.
+- **Switching a Mac from the managed install to the direct package follows a
+  clear safe sequence.** Refresh the managed copy, choose Complete uninstall,
+  then run the PKG. The package checks all standard local-account locations
+  before installing anything and preserves any conflict it finds.
+
+### Fixed
+- **Battery detection is more conservative.** Linux recognizes current and
+  averaged readings—including legitimate negative and zero values—while
+  rejecting device-scoped, absent, or malformed supplies. The Mac fallback now
+  accepts only a real internal-battery record. The old Raspberry Pi "30%"
+  report remains unverified until it can be examined on the physical Pi.
+- **Both packaging failures found by the first two v4.3 tags are repaired.**
+  Windows accepts the official build tool's safe hard-linked command without
+  accepting redirected files. Mac packaging now uses only features supported
+  by the system shell, and both kinds of hosted Mac test that exact staging
+  work before a tag can qualify. The two earlier tags remain untouched and
+  neither exposed a partial download release.
+
+### Security
+- **Crates.io publishing is automatic after accepted code reaches `main`; once
+  the qualified tag is pushed, all platform packaging and public checks continue
+  automatically.** Every irreversible step still proves the exact source and
+  bytes. Downloads stay private through Windows and native Mac validation, then
+  the final Mac step publishes the complete 34-file release. Routine releases
+  need no stored crates publishing token or recurring approval click.
+
+## [4.3.1] - 2026-08-24
+
+### Added
+- **This crate contains everything added in v4.3, although its tag did not
+  produce a downloadable GitHub release.** Linux can show trustworthy CPU and
+  GPU temperatures, Windows can show
+  a bounded NVIDIA GPU reading, and unsupported temperatures simply stay
+  blank. The machine-readable report gains matching optional fields, and the
+  new `--full` flag explicitly chooses the normal complete report.
+
+### Changed
+- **Version 4.3.1 reached crates.io automatically, but its Mac packaging step
+  stopped safely before signing or creating a draft.** The Mac's system shell
+  did not support newer shell features used by the workflow, so the immutable
+  tag is preserved and version 4.3.2 fixes forward.
+- **The full Windows report is substantially faster on the controlled test
+  machine.** Its median fell from 5146.9 ms to 2120.2 ms across seven
+  alternating runs per version—58.8% less time, or a 2.43× runtime ratio.
+  Quick-mode medians differed by only 1.2%, so no quick-mode speedup is claimed.
+- **Switching a Mac from the managed install to the direct package now follows
+  a clear safe sequence.** Refresh the managed copy, choose Complete uninstall,
+  then run the PKG. The package checks all standard local-account locations
+  before installing anything and preserves any conflict it finds.
+
+### Fixed
+- **Battery detection is more conservative.** Linux recognizes current and
+  averaged readings—including legitimate negative and zero values—while
+  rejecting device-scoped, absent, or malformed supplies. The Mac fallback now
+  accepts only a real internal-battery record. The old Raspberry Pi "30%"
+  report remains unverified until it can be examined on the physical Pi.
+- **Windows release packaging is repaired and now rehearsed before release.**
+  Version 4.3.0 reached crates.io, but its GitHub packaging run stopped safely
+  before publishing downloads because a new file-safety check rejected the
+  official build tool installer's normal hard-linked alias. The check still
+  blocks real path redirection, while every pull request and accepted `main`
+  update now runs the same Windows bootstrap used by a release tag.
+
+### Security
+- **Crates.io publishing is automatic after accepted code reaches `main`; once
+  the qualified tag is pushed, GitHub packaging continues without approval
+  clicks.** Every irreversible step still proves the exact source and bytes.
+  Crates.io uses a short-lived trusted login only after CI passes. GitHub
+  downloads stay private through Windows and native Mac validation, then the
+  final Mac step publishes the complete 34-file release and post-public updater
+  checks run. Routine releases need no stored crates publishing token.
+
+## [4.3.0] - 2026-08-24
+
+### Added
+- **Temperature readings are now part of the report.** On Linux the report
+  chooses the hottest trustworthy CPU and GPU readings in a repeatable way,
+  ignores sensors that report faults or nonsense, and recognizes the SoC
+  sensor names used by systems such as Raspberry Pi. On Windows, machines with
+  an NVIDIA graphics card can show GPU temperature; Windows CPU temperature is
+  left blank because the available system zones cannot reliably prove they are
+  the CPU. Macs report no temperature this release. If no trusted sensor
+  answers, the row simply stays hidden. Linux and Windows NVIDIA readings are
+  available in the quick startup view under their respective time budgets.
+- **A new `--full` flag** does what it says: runs the complete report. It's
+  the opposite of `--fast` and matches the default behavior.
+
+### Changed
+- **The full report on the Windows benchmark machine is substantially faster.**
+  Seven controlled alternating runs per version put the median at 5146.9 ms
+  before and 2120.2 ms after — about 3026.6 ms or 58.8% less time, a 2.43×
+  speedup. A slow security
+  check now overlaps other work under its own deadline, and repeated lookups
+  were consolidated. Eleven quick-report runs per version produced medians of
+  257.3 ms before and 260.4 ms after; that small 1.2% difference is
+  background-level, so there is no
+  quick-mode speedup claim.
+- **Switching from the managed Mac install to the system package is now a clear
+  three-step process.** Update or reinstall the managed v4.3 copy, choose
+  Complete uninstall so TR-300 safely removes both its command and matching
+  receipt, then open the PKG. A normal PKG upgrade still works, and switching
+  from an exact PKG back to the managed installer remains supported.
+
+### Fixed
+- **Linux is more careful about which battery belongs to the computer.** It
+  rejects supplies explicitly marked as devices or absent, accepts both
+  current and averaged live readings (including normal signed current/power
+  discharge values), and chooses consistently when several supplies exist. This closes
+  plausible paths to a fake percentage, but the source of the historical
+  Raspberry Pi "30%" report has not been proven; physical diagnostics remain
+  open.
+- The same care now applies to the Mac fallback: it accepts only the named
+  internal-battery line, not an unrelated percentage elsewhere in the output.
+
+### Security
+- **Release packaging now proves it is using the exact trusted release before
+  it can access signing credentials or upload files.** Forks, unrelated runs,
+  altered tags, and mismatched release records stop safely, which prevents an
+  untrusted change from borrowing the official release pipeline.
+- **A release stays private until the actual Windows installers pass.** The
+  Windows tests all use one frozen copy of the draft, and the final Mac step
+  checks that proof and every accepted download byte before making the complete
+  34-file release public. Public updater checks happen only after publication,
+  so an unpublished candidate is never mistaken for the public latest release.
+- **Crates.io publishing starts automatically with each accepted `main` update
+  and waits for that update's checks to pass.** The package is fully rehearsed
+  with read-only GitHub access and no registry login, a fresh runner proves it
+  has the same source and package bytes, and only the final upload receives a
+  short-lived login created for that one run. An already-published version is a
+  clean no-op, so normal documentation-only merges do not require attention.
+- **Mac signing credentials are isolated from project code.** Both kinds of Mac
+  runner prove signing and notarization access through the dedicated
+  environment. Credentialed jobs start fresh and receive only fixed package
+  data, with no approval click or wait timer in the normal tag workflow.
+- **Windows installer builds now use one verified official Inno Setup
+  download.** Both ordinary CI and release packaging check the compiler's
+  download hash, publisher signature, attestation, path, and exact version
+  instead of trusting a mutable package-manager install.
+- **Private shell profiles stay private during install and uninstall edits.**
+  If a Unix profile was owner-only, its atomic replacement keeps that access
+  mode instead of silently adopting a broader default.
+- **Windows package updates now keep administrator approval away from the
+  caller's folder and command search path.** They launch the operating system's
+  own installer or a verified TR-300 package from its trusted directory, so a
+  nearby lookalike program or library cannot inherit the elevated launch.
+  Company and personal installation choices keep their existing permission
+  behavior.
+- **The Mac package now stops before installing anything when a per-user copy
+   already exists.** Mac testing proved that a failed late installer step can
+   still leave the new system command behind, so the package no longer tries to
+   remove or roll back files in a user's home. It checks the standard managed
+   command and receipt locations in every home under the Mac's standard Users
+   folder plus every eligible local account's declared home, including custom
+   locations. It preserves any matching command or receipt it finds and asks the
+   user to complete the supported switch before trying again.
 
 ## [4.2.2] - 2026-07-18
 

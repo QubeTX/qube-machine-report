@@ -135,11 +135,15 @@ extract_dir="${work_dir}/archive"
 mkdir "$extract_dir"
 COPYFILE_DISABLE=1 tar -xJf "$archive" -C "$extract_dir"
 
-binary="${extract_dir}/${archive_root}/tr300"
-if [[ ! -f $binary || ! -x $binary ]]; then
-    echo "expected executable is missing from ${archive_name}: ${archive_root}/tr300" >&2
-    exit 65
-fi
+binary_dir="${extract_dir}/${archive_root}"
+tr300_binary="${binary_dir}/tr300"
+report_binary="${binary_dir}/report"
+for binary in "$tr300_binary" "$report_binary"; do
+    if [[ ! -f $binary || ! -x $binary ]]; then
+        echo "expected executable is missing from ${archive_name}: ${archive_root}/$(basename "$binary")" >&2
+        exit 65
+    fi
+done
 
 echo "Signing ${archive_name} with hardened runtime..."
 # `codesign --keychain` restricts identity lookup but does not itself put a
@@ -150,58 +154,60 @@ echo "Signing ${archive_name} with hardened runtime..."
 # immediately afterward (and again from the cleanup trap on any failure).
 security list-keychains -d user -s "$keychain" "${original_user_keychains[@]}"
 keychain_search_modified=true
-codesign \
-    --force \
-    --identifier com.qubetx.tr300 \
-    --options runtime \
-    --timestamp \
-    --keychain "$keychain" \
-    --sign "$signing_fingerprint" \
-    "$binary"
+codesign --force --identifier com.qubetx.tr300 --options runtime --timestamp \
+    --keychain "$keychain" --sign "$signing_fingerprint" "$tr300_binary"
+codesign --force --identifier com.qubetx.tr300.report --options runtime --timestamp \
+    --keychain "$keychain" --sign "$signing_fingerprint" "$report_binary"
 restore_keychain_search
-codesign --verify --strict --verbose=4 "$binary"
+codesign --verify --strict --verbose=4 "$tr300_binary"
+codesign --verify --strict --verbose=4 "$report_binary"
 
 # Verify identity metadata as well as the cryptographic envelope. This catches
 # a keychain/import mix-up where a valid but wrong Developer ID identity signs
 # the release. Keep the expected identifier and team explicit release inputs.
-signature_details=$(codesign -d --verbose=4 "$binary" 2>&1)
-if ! printf '%s\n' "$signature_details" | grep -Fqx 'Identifier=com.qubetx.tr300'; then
-    echo "signed binary identifier mismatch for ${target}" >&2
-    exit 1
-fi
-if ! printf '%s\n' "$signature_details" | grep -Fqx "TeamIdentifier=${APPLE_TEAM_ID}"; then
-    echo "signed binary Team ID mismatch for ${target}" >&2
-    exit 1
-fi
-if ! printf '%s\n' "$signature_details" | grep -Fqx "Authority=${imported_identity}"; then
-    echo "signed binary Developer ID authority mismatch for ${target}" >&2
-    exit 1
-fi
-certificate_prefix="${work_dir}/embedded-signing-certificate"
-codesign -d --extract-certificates="$certificate_prefix" "$binary" >/dev/null 2>&1
-embedded_fingerprint=$(openssl x509 \
-    -inform DER \
-    -in "${certificate_prefix}0" \
-    -noout \
-    -fingerprint \
-    -sha1 \
-    | sed 's/.*=//; s/://g')
-if [[ $embedded_fingerprint != "$signing_fingerprint" ]]; then
-    echo "signed binary certificate fingerprint mismatch for ${target}" >&2
-    exit 1
-fi
-if ! printf '%s\n' "$signature_details" | grep -Eq '^CodeDirectory .*flags=.*\(runtime\)'; then
-    echo "signed binary is missing the hardened-runtime flag for ${target}" >&2
-    exit 1
-fi
-if ! printf '%s\n' "$signature_details" | grep -Eq '^Timestamp=.+'; then
-    echo "signed binary is missing a secure timestamp for ${target}" >&2
-    exit 1
-fi
+verify_signed_binary() {
+    binary_path=$1
+    expected_identifier=$2
+    certificate_label=$3
+    signature_details=$(codesign -d --verbose=4 "$binary_path" 2>&1)
+    if ! printf '%s\n' "$signature_details" | grep -Fqx "Identifier=${expected_identifier}"; then
+        echo "signed binary identifier mismatch for ${target}: $(basename "$binary_path")" >&2
+        exit 1
+    fi
+    if ! printf '%s\n' "$signature_details" | grep -Fqx "TeamIdentifier=${APPLE_TEAM_ID}"; then
+        echo "signed binary Team ID mismatch for ${target}: $(basename "$binary_path")" >&2
+        exit 1
+    fi
+    if ! printf '%s\n' "$signature_details" | grep -Fqx "Authority=${imported_identity}"; then
+        echo "signed binary Developer ID authority mismatch for ${target}: $(basename "$binary_path")" >&2
+        exit 1
+    fi
+    certificate_prefix="${work_dir}/embedded-signing-certificate-${certificate_label}"
+    codesign -d --extract-certificates="$certificate_prefix" "$binary_path" >/dev/null 2>&1
+    embedded_fingerprint=$(openssl x509 -inform DER -in "${certificate_prefix}0" \
+        -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+    if [[ $embedded_fingerprint != "$signing_fingerprint" ]]; then
+        echo "signed binary certificate fingerprint mismatch for ${target}: $(basename "$binary_path")" >&2
+        exit 1
+    fi
+    if ! printf '%s\n' "$signature_details" | grep -Eq '^CodeDirectory .*flags=.*\(runtime\)'; then
+        echo "signed binary is missing the hardened-runtime flag for ${target}: $(basename "$binary_path")" >&2
+        exit 1
+    fi
+    if ! printf '%s\n' "$signature_details" | grep -Eq '^Timestamp=.+'; then
+        echo "signed binary is missing a secure timestamp for ${target}: $(basename "$binary_path")" >&2
+        exit 1
+    fi
+}
+verify_signed_binary "$tr300_binary" com.qubetx.tr300 tr300
+verify_signed_binary "$report_binary" com.qubetx.tr300.report report
 echo "Verified Developer ID identity, Team ID, hardened runtime, and timestamp for ${target}."
 
 notary_zip="${work_dir}/${archive_root}-notary.zip"
-/usr/bin/ditto -c -k --keepParent "$binary" "$notary_zip"
+notary_payload="${work_dir}/${archive_root}-notary"
+mkdir "$notary_payload"
+cp "$tr300_binary" "$report_binary" "$notary_payload/"
+/usr/bin/ditto -c -k --keepParent "$notary_payload" "$notary_zip"
 
 notary_result="${work_dir}/notary-result.json"
 echo "Submitting ${target} to Apple Notary Service..."

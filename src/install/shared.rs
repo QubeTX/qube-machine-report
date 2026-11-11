@@ -20,16 +20,11 @@ pub(crate) const MARKER_START: &str = "# TR-300 Machine Report";
 /// silently drop everything from `MARKER_START` to EOF.
 pub(crate) const MARKER_END: &str = "# End TR-300";
 
-// The three constants below are referenced only from per-platform
+// The two constants below are referenced only from per-platform
 // snippet-content tests, not from production code (the snippets are
 // raw string literals that inline the same values). They live here
 // so any future rename touches one place — tests then pin the
 // snippet's contract that it matches these canonical values.
-
-/// User-facing convenience command. Wired up as a `Set-Alias` on
-/// Windows and an `alias` on POSIX shells.
-#[allow(dead_code)]
-pub(crate) const ALIAS_NAME: &str = "report";
 
 /// Crate / binary name. Same as `Cargo.toml` `name` and the `[[bin]]`
 /// `name` field.

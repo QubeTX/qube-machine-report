@@ -23,10 +23,27 @@ pub struct NetworkInfo {
 pub fn collect_network_info(mode: CollectMode) -> Result<NetworkInfo> {
     let should_skip_slow = mode == CollectMode::Fast && should_skip_network_on_platform();
 
+    // Windows: ONE WMI round-trip feeds both machine IP and DNS servers —
+    // querying twice paid a duplicate COM init + full adapter enumeration on
+    // this thread.
+    #[cfg(target_os = "windows")]
+    let wmi_pair: (Option<String>, Vec<String>) = if should_skip_slow {
+        (None, Vec::new())
+    } else {
+        crate::collectors::platform::windows::get_network_info_wmi()
+    };
+
     let machine_ip = if should_skip_slow {
         None
     } else {
-        get_machine_ip()
+        #[cfg(target_os = "windows")]
+        {
+            get_machine_ip_windows(&wmi_pair)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            get_machine_ip()
+        }
     };
 
     let client_ip = get_client_ip();
@@ -34,7 +51,14 @@ pub fn collect_network_info(mode: CollectMode) -> Result<NetworkInfo> {
     let dns_servers = if should_skip_slow {
         Vec::new()
     } else {
-        get_dns_servers()
+        #[cfg(target_os = "windows")]
+        {
+            get_dns_servers_windows(&wmi_pair)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            get_dns_servers()
+        }
     };
 
     Ok(NetworkInfo {
@@ -68,13 +92,10 @@ fn should_skip_network_on_platform() -> bool {
     }
 }
 
-/// Get the machine's primary IP address
+/// Get the machine's primary IP address (non-Windows; Windows shares the
+/// single WMI round-trip directly in `collect_network_info`).
+#[cfg(not(target_os = "windows"))]
 fn get_machine_ip() -> Option<String> {
-    #[cfg(target_os = "windows")]
-    {
-        get_machine_ip_windows()
-    }
-
     #[cfg(target_os = "linux")]
     {
         get_machine_ip_linux()
@@ -85,18 +106,18 @@ fn get_machine_ip() -> Option<String> {
         get_machine_ip_macos()
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         None
     }
 }
 
 #[cfg(target_os = "windows")]
-fn get_machine_ip_windows() -> Option<String> {
-    // Use WMI for IP (no PowerShell subprocess)
-    let (ip, _dns) = crate::collectors::platform::windows::get_network_info_wmi();
+fn get_machine_ip_windows(wmi_pair: &(Option<String>, Vec<String>)) -> Option<String> {
+    // WMI result already fetched once by the caller (shared with DNS).
+    let (ip, _dns) = wmi_pair;
     if let Some(ip) = ip {
-        return valid_routable_ip(&ip);
+        return valid_routable_ip(ip);
     }
 
     // Fallback: try ipconfig
@@ -210,13 +231,10 @@ fn get_client_ip() -> Option<String> {
     None
 }
 
-/// Get DNS server addresses
+/// Get DNS server addresses (non-Windows; Windows shares the single WMI
+/// round-trip directly in `collect_network_info`).
+#[cfg(not(target_os = "windows"))]
 fn get_dns_servers() -> Vec<String> {
-    #[cfg(target_os = "windows")]
-    {
-        get_dns_servers_windows()
-    }
-
     #[cfg(target_os = "linux")]
     {
         get_dns_servers_linux()
@@ -227,18 +245,18 @@ fn get_dns_servers() -> Vec<String> {
         get_dns_servers_macos()
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         Vec::new()
     }
 }
 
 #[cfg(target_os = "windows")]
-fn get_dns_servers_windows() -> Vec<String> {
-    // Use WMI for DNS servers (no PowerShell subprocess)
-    let (_ip, servers) = crate::collectors::platform::windows::get_network_info_wmi();
+fn get_dns_servers_windows(wmi_pair: &(Option<String>, Vec<String>)) -> Vec<String> {
+    // WMI result already fetched once by the caller (shared with machine IP).
+    let (_ip, servers) = wmi_pair;
     if !servers.is_empty() {
-        return validated_servers(servers);
+        return validated_servers(servers.clone());
     }
 
     // Fallback: parse ipconfig /all

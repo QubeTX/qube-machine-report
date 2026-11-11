@@ -1,6 +1,6 @@
 //! Windows installation utilities
 //!
-//! Adds TR-300 alias and auto-run to PowerShell profile.
+//! Adds TR-300 auto-run to PowerShell profiles.
 
 use crate::error::{AppError, Result};
 use std::env;
@@ -35,8 +35,6 @@ use super::shared::{MARKER_END, MARKER_START};
 /// must appear at the boundaries — pinned by
 /// `shell_additions_contains_shared_markers` below.
 const POWERSHELL_ADDITIONS: &str = "# TR-300 Machine Report\r\n\
-    Set-Alias -Name report -Value tr300\r\n\
-    \r\n\
     # Auto-run on interactive shell; guards prevent error spam when the\r\n\
     # binary is missing, recursion in nested shells, and rendering in\r\n\
     # scripted (non-interactive) invocations.\r\n\
@@ -137,7 +135,7 @@ pub fn install() -> Result<()> {
     // to write would fail at the next shell start with an UnauthorizedAccess
     // PSSecurityException. Lift CurrentUser to `RemoteSigned` (the minimum
     // permissive policy that loads local unsigned scripts) when needed.
-    // Non-fatal: never short-circuits the alias write.
+    // Non-fatal: never short-circuits the profile write.
     run_execution_policy_preflight();
 
     let profile_paths = get_powershell_profiles();
@@ -147,9 +145,8 @@ pub fn install() -> Result<()> {
         ));
     }
 
-    // F17 (v3.15.3+): heads-up if the user already has a `report` defined.
-    // Best-effort heuristic — scans each PowerShell profile and PATH for a
-    // pre-existing definition that the install is about to shadow. Read-only,
+    // Heads-up if another definition will shadow the packaged `report`
+    // command. Best-effort heuristic — scans each PowerShell profile and PATH. Read-only,
     // no PowerShell subprocess, so a noisy $PROFILE can't fire side effects
     // during `tr300 install`.
     warn_if_report_already_defined(&profile_paths);
@@ -380,8 +377,8 @@ pub fn remove_empty_parent_dir(dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Warn (to stderr) when `report` is already defined in the user's
-/// PowerShell environment so the install doesn't silently shadow it.
+/// Warn (to stderr) when another `report` definition will shadow the packaged
+/// command in the user's PowerShell environment.
 ///
 /// Read-only heuristic: scans each `$PROFILE` we'd be writing to for
 /// `Set-Alias`, `function`, or `New-Alias` declarations of `report`,
@@ -427,10 +424,8 @@ fn warn_if_report_already_defined(profile_paths: &[PathBuf]) {
         }
     }
 
-    // PATH scan. Look for a `report.exe` / `.cmd` / `.bat` in the user's
-    // PATH. Skip the executable bundled with TR-300 itself (none today —
-    // tr300 ships only as `tr300.exe`) and skip anything inside an
-    // install path we recognize as ours.
+    // PATH scan. Skip the report executable bundled beside tr300 in a
+    // recognized TR-300 installation directory.
     if let Ok(path_env) = std::env::var("PATH") {
         for dir in path_env.split(';') {
             if dir.is_empty() {
@@ -454,11 +449,9 @@ fn warn_if_report_already_defined(profile_paths: &[PathBuf]) {
     for h in &hits {
         eprintln!("    {}", h);
     }
-    eprintln!("TR-300 is about to add `Set-Alias -Name report -Value tr300` to your");
-    eprintln!("PowerShell profile, which will shadow the existing definition for");
-    eprintln!("new sessions. If you want to keep your existing `report`, edit the");
-    eprintln!("TR-300 block out of $PROFILE after install (search for");
-    eprintln!("`# TR-300 Machine Report`).");
+    eprintln!("That definition may shadow TR-300's packaged `report` command.");
+    eprintln!("Remove or rename the existing definition if you want `report` to resolve");
+    eprintln!("to the full-alias TR-300 command on PATH.");
     eprintln!();
 }
 
@@ -601,7 +594,7 @@ fn run_execution_policy_preflight() {
                     "  This usually means a Group Policy (MachinePolicy/UserPolicy) is enforcing a stricter setting."
                 );
                 eprintln!(
-                    "  The 'report' alias still works manually, but the auto-run on new shells won't fire."
+                "  The packaged 'report' command still works manually, but the auto-run on new shells won't fire."
                 );
                 eprintln!("  To fix: from an elevated PowerShell, run");
                 eprintln!(
@@ -615,7 +608,7 @@ fn run_execution_policy_preflight() {
                     e
                 );
                 eprintln!(
-                    "  The 'report' alias still works manually, but the auto-run on new shells won't fire"
+                    "  The packaged 'report' command still works manually, but the auto-run on new shells won't fire"
                 );
                 eprintln!("  until you run (no admin needed):");
                 eprintln!(
@@ -631,7 +624,7 @@ fn run_execution_policy_preflight() {
                 "  AllSigned blocks the unsigned auto-run snippet in $PROFILE, so the auto-run on new shells won't fire."
             );
             eprintln!(
-                "  The 'report' alias still works manually. If you'd like to opt into the auto-run, you can either:"
+                "  The packaged 'report' command still works manually. If you'd like to opt into the auto-run, you can either:"
             );
             eprintln!("    - sign the TR-300 block in your profile yourself, or");
             eprintln!("    - relax the policy (no admin needed):");
@@ -644,11 +637,17 @@ fn run_execution_policy_preflight() {
 
 /// Perform complete uninstall (profile + binary + directory)
 pub fn uninstall_complete() -> Result<()> {
-    // First, uninstall from shell profiles
+    // Revalidate companion ownership before changing any shell profile.
+    let binary_path = find_binary_location();
+    let report_path = binary_path
+        .as_deref()
+        .map(adjacent_report_location)
+        .transpose()?
+        .flatten();
     uninstall()?;
 
-    // Then remove the binary and cleanup directory
-    if let Some(binary_path) = find_binary_location() {
+    // Then remove the binary and cleanup directory.
+    if let Some(binary_path) = binary_path {
         let parent_dir = get_binary_parent_dir(&binary_path);
 
         // If the binary we're about to delete IS the currently-running
@@ -668,20 +667,28 @@ pub fn uninstall_complete() -> Result<()> {
                 .as_ref()
                 .filter(|d| d.to_string_lossy().to_lowercase().contains("tr300"))
                 .map(|d| d.as_path());
-            schedule_self_cleanup(&binary_path, cleanup_dir).map_err(|e| {
-                AppError::platform(format!(
-                    "Failed to schedule deferred cleanup of {}: {}",
-                    binary_path.display(),
-                    e
-                ))
-            })?;
+            schedule_self_cleanup(&binary_path, report_path.as_deref(), cleanup_dir).map_err(
+                |e| {
+                    AppError::platform(format!(
+                        "Failed to schedule deferred cleanup of {}: {}",
+                        binary_path.display(),
+                        e
+                    ))
+                },
+            )?;
             println!("Scheduled deferred cleanup of: {}", binary_path.display());
+            if let Some(path) = report_path {
+                println!("Scheduled deferred cleanup of: {}", path.display());
+            }
             println!(
                 "  (this running tr300.exe will be removed within a few seconds of process exit)"
             );
             return Ok(());
         }
 
+        if let Some(report_path) = report_path {
+            remove_binary(&report_path)?;
+        }
         remove_binary(&binary_path)?;
 
         // Try to remove the parent directory if empty
@@ -694,6 +701,12 @@ pub fn uninstall_complete() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolve a companion only when the product inventory proves ownership.
+/// An ambiguous sibling stops Complete uninstall before profile mutation.
+pub fn adjacent_report_location(binary_path: &Path) -> Result<Option<PathBuf>> {
+    crate::migrate::owned_report_sibling(binary_path)
 }
 
 /// True iff `target` resolves to the same on-disk file as the
@@ -724,13 +737,18 @@ fn is_running_binary(target: &Path) -> bool {
 /// Used by `uninstall_complete` to delete the currently-running
 /// `tr300.exe` after this process exits. The wait gives the OS time
 /// to release the file-loader handle once this process terminates.
-fn schedule_self_cleanup(binary_path: &Path, parent_dir: Option<&Path>) -> io::Result<()> {
+fn schedule_self_cleanup(
+    binary_path: &Path,
+    report_path: Option<&Path>,
+    parent_dir: Option<&Path>,
+) -> io::Result<()> {
     use std::os::windows::process::CommandExt;
 
-    let mut script = format!(
-        "timeout /t 2 /nobreak > nul & del \"{}\"",
-        binary_path.display()
-    );
+    let mut script = "timeout /t 2 /nobreak > nul".to_string();
+    if let Some(report_path) = report_path {
+        script.push_str(&format!(" & del /f /q \"{}\"", report_path.display()));
+    }
+    script.push_str(&format!(" & del /f /q \"{}\"", binary_path.display()));
     if let Some(dir) = parent_dir {
         // `rd /q` quietly removes an empty directory. Failure (e.g.,
         // dir not empty because the user dropped another file in it)
@@ -746,7 +764,9 @@ fn schedule_self_cleanup(binary_path: &Path, parent_dir: Option<&Path>) -> io::R
     const DETACHED_PROCESS: u32 = 0x00000008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
-    Command::new("cmd")
+    Command::new(trusted_windows_cmd_path()?)
+        .arg("/d")
+        .arg("/s")
         .arg("/c")
         .arg(&script)
         .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
@@ -756,6 +776,45 @@ fn schedule_self_cleanup(binary_path: &Path, parent_dir: Option<&Path>) -> io::R
         .spawn()?;
 
     Ok(())
+}
+
+fn trusted_windows_cmd_path() -> io::Result<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use winapi::um::sysinfoapi::GetSystemDirectoryW;
+
+    const INITIAL_CAPACITY: usize = 260;
+    const MAX_DIRECTORY_CAPACITY: usize = 32_768;
+
+    let mut buffer = vec![0_u16; INITIAL_CAPACITY];
+    loop {
+        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
+        if length == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let length = length as usize;
+        if length < buffer.len() {
+            buffer.truncate(length);
+            let directory = PathBuf::from(OsString::from_wide(&buffer));
+            if !directory.is_absolute() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Windows returned a non-absolute system directory",
+                ));
+            }
+            return Ok(directory.join("cmd.exe"));
+        }
+        let Some(required) = length
+            .checked_add(1)
+            .filter(|size| *size > buffer.len() && *size <= MAX_DIRECTORY_CAPACITY)
+        else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Windows returned an invalid system-directory length",
+            ));
+        };
+        buffer.resize(required, 0);
+    }
 }
 
 /// Identifies which step of install/uninstall failed, so we can render a
@@ -923,9 +982,7 @@ mod tests {
         looks_like_onedrive_path, looks_like_redirected_path, policy_state, PolicyState,
         POWERSHELL_ADDITIONS,
     };
-    use crate::install::shared::{
-        ALIAS_NAME, AUTORUN_SENTINEL_VAR, BINARY_NAME, MARKER_END, MARKER_START,
-    };
+    use crate::install::shared::{AUTORUN_SENTINEL_VAR, BINARY_NAME, MARKER_END, MARKER_START};
     use std::path::Path;
 
     #[test]
@@ -935,7 +992,7 @@ mod tests {
         // both the block parser and the marker-balance pre-check.
         assert!(POWERSHELL_ADDITIONS.contains(MARKER_START));
         assert!(POWERSHELL_ADDITIONS.contains(MARKER_END));
-        assert!(POWERSHELL_ADDITIONS.contains(ALIAS_NAME));
+        assert!(!POWERSHELL_ADDITIONS.contains("Set-Alias"));
         assert!(POWERSHELL_ADDITIONS.contains(BINARY_NAME));
     }
 

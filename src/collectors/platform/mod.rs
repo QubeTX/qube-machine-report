@@ -48,6 +48,11 @@ pub struct PlatformInfo {
     pub display_resolution: Option<String>,
     /// Battery status (percentage and charging state)
     pub battery: Option<String>,
+    /// CPU package/SoC temperature in degrees Celsius when the platform can
+    /// establish one. Absence means no trusted sensor was available.
+    pub cpu_temp_celsius: Option<f64>,
+    /// Discrete GPU temperature in degrees Celsius when readable.
+    pub gpu_temp_celsius: Option<f64>,
     /// ZFS pool health summary when zpool is available.
     pub zfs_health: Option<String>,
     /// Motherboard/baseboard summary, populated only when safely readable.

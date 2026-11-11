@@ -10,8 +10,65 @@
 
 ## Active
 
+- [ ] **Resolve PR #35 and ship the Windows updater security fix** - integrate current main and release v4.4.1 through protected CI/OIDC/native publication (owner codex) #sec35
+  - [ ] Resolve conflicts and verify trusted PowerShell launch behavior
+  - [ ] Pass local and exact-head hosted gates plus independent review
+  - [ ] Merge and verify exact-main CI and trusted-OIDC publication
+  - [ ] Publish the immutable release and verify public distribution
+
+- [ ] **Audit the public v4.4.0 distribution and close the release ledger** - public byte, MSI EULA, and website audits pass; all nine post-public Windows jobs passed; only protected docs PR/main/idempotent checks remain (needs #r44) (ms #v44) (owner codex) #q44
+  - [x] Verify exact public asset inventory, digests, signatures, and latest-release identity
+  - [x] Verify `report` and `tr300` lifecycle behavior from the published channels
+  - [ ] Record run IDs, public evidence, task closure, and final docs in a protected follow-up PR
+
 ## Done
 
+- [x] **Ship v4.4.0 through the protected release chain** - exact source `f49d50a` is published as the unyanked crate and complete 34-asset release; post-public Windows run `36087344916` passed all nine jobs (needs #v440) (ms #v44) (owner codex) (done 2026-09-24) #r44
+  - [x] Merge a reviewed exact-head PR and pass all required checks
+  - [x] Verify exact-main CI and trusted-OIDC crates publication before tagging
+  - [x] Push only tag `v4.4.0` and pass private 24-to-30-to-validated-to-34 publication
+  - [x] Verify post-public Windows updater and published Linux/macOS smokes
+
+- [x] **Replace the Windows MSI placeholder EULA** - complete PolyForm Noncommercial 1.0.0 text verified in both public MSI editions; macOS has no EULA screen (owner codex) (done 2026-09-24) #eula
+- [x] **Implement the v4.4.0 PATH-level `report` command** - full CLI alias implemented and shipped across Cargo, archives, managed/native installers, with paired Apple trust and ownership safeguards (ms #v44) (owner codex) (done 2026-09-24) #v440
+  - [x] Define the sibling-command execution and ownership contract
+  - [x] Add `report` to Cargo and every supported distribution payload
+  - [x] Forward every CLI action, including install, update, and uninstall while preserving Apple-signing and ownership invariants
+  - [x] Add focused runtime, archive, installer-source, and provenance coverage
+  - [x] Bump v4.4.0 docs and pass the complete local release gate
+
+- [x] **Complete the TR-300 v4.3 release through v4.3.12** - preserved the immutable failed v4.3.0 through v4.3.11 tags and private drafts, carried the narrow native Mac fixture-cleanup fix forward, and completed the no-click exact-SHA crates/native/public chain (needs #v430) (ms #v43) (owner codex) (done 2026-08-25) #r43
+  - [x] Remediate and independently validate every confirmed release/privilege security finding
+  - [x] Retire Mac postinstall takeover and reject standard-path managed evidence in `/Users` plus eligible local Directory Service homes and non-root target volumes before payload
+  - [x] Prove receipt-aware Unix Complete uninstall safely removes exact managed ownership and fails closed on ambiguity
+  - [x] Pass PR #15 exact-head local/hosted/security/native qualification, merge it, and pass exact-main CI
+  - [x] Finish Apple environment-only reproof and merge removal of the temporary migration workflow
+  - [x] Merge automatic post-CI OIDC publication, prove the v4.3.0 crate and `trustpub_only`, and delete the unused repository secret
+  - [x] Merge hardened main into the local PR #14 branch and pass the complete local gate plus controlled benchmark
+  - [x] Push the integrated candidate and pass final exact-head hosted, security, and review gates
+  - [x] Merge only the accepted candidate and verify exact-main CI
+  - [x] Push only v4.3.0 and preserve its fail-closed Windows-bootstrap result without moving the immutable tag
+  - [x] Qualify and merge the v4.3.1 bootstrap fix, publish it through OIDC, and preserve its fail-closed Apple Bash result without moving the immutable tag
+  - [x] Qualify and merge the v4.3.2 Apple Bash fix, publish it through OIDC, and preserve its fail-closed raw-sidecar result without moving the immutable tag
+  - [x] Qualify and merge the v4.3.3 checksum fix, publish it through OIDC, and preserve its fail-closed raw-tar-mode result without moving the immutable tag
+  - [x] Qualify and merge the v4.3.4 tar-mode fix, publish it through OIDC, and preserve its fail-closed release-manifest result without moving the immutable tag
+  - [x] Qualify and merge the v4.3.5 release-manifest fix, publish it through OIDC, and preserve its correct private 24-asset draft plus fail-closed by-tag lookup result
+  - [x] Qualify and merge the v4.3.6 draft-lookup fix, publish it through OIDC, and preserve its exact private 24-asset draft plus fail-closed managed-installer hash result
+  - [x] Qualify and merge the v4.3.7 release-hash fix, publish it through OIDC, and preserve its exact private 24-asset draft plus fail-closed read-only downstream visibility result
+  - [x] Qualify and merge the v4.3.8 private-draft-visibility fix, publish it through OIDC, and preserve its exact private 24-asset draft plus fail-closed Apple-inventory and Windows-attestation results
+  - [x] Qualify and merge the v4.3.9 Apple-inventory/Windows-attestation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed Mac ordering/private-worker results
+  - [x] Qualify and merge the v4.3.10 checksum/validation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed native PackageKit assertion result
+  - [x] Qualify and merge the v4.3.11 native-validation fix, publish it through OIDC, and preserve its exact private 30-asset draft plus fail-closed `/Users` fixture-cleanup result
+  - [x] Qualify and merge the v4.3.12 fixture-cleanup fix, publish it through OIDC, and pass the automatic private 24-to-30-to-validated-to-34 chain
+  - [x] Audit public bytes, post-public updater/Linux/macOS smokes, and versionless homepage behavior
+- [x] **Repair and revalidate v4.3.0 PR #14** - correct platform accuracy, preserve the measurable Windows full-mode gain, prove exact-head CI, and leave the PR open (ms #v43) (owner codex) (done 2026-08-23) #v430
+  - [x] Repair Windows launch-relative deadlines and trustworthy NVIDIA-only thermals
+  - [x] Repair Linux battery compatibility and deterministic fault-aware thermals
+  - [x] Tighten macOS battery parsing and cross-format thermal rendering tests
+  - [x] Add `-f/--full` explicit flag
+  - [x] Reconcile unreleased docs, task state, and PR claims with measured evidence
+  - [x] Pass the full local gate and controlled v4.2.2 comparison
+  - [x] Push the corrected exact head and pass hosted CI/review without merging
 - [x] **Record the completed ND-300 v3.7.3 native-installer acceptance** - external operator-approved Alienware update completed without overlap; physical Mac GUI acceptance is optional/deferred behind native Intel/ARM direct-PKG and legacy-DMG gates (ms #hw4) (done 2026-07-18) #nd372
 - [x] **Codify and ship MIC-1 managed installation behavior** - make CLI installers the documented default, preserve update origin, make fresh managed intent authoritative, and fail closed across unsupported native scope transitions (ms #v42) (owner codex) (done 2026-07-18) #mic1
   - [x] Define the reusable managed-install/update state machine and raw-Cargo boundary

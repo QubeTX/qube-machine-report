@@ -7,12 +7,642 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-11-10
+
 ### Fixed
 - **Windows managed self-updates no longer execute a `pwsh.exe` selected from
   `PATH`.** The updater now invokes Windows PowerShell only through the absolute
   system-directory path returned by Windows and does not fall back to a
   PATH-resolved PowerShell 7 executable, preventing a hostile working directory
   or `PATH` entry from supplying the updater process.
+
+### Security
+- Resolve the remaining PR #2 GPU-helper risk with fixed trusted Linux `lspci` paths and absolute macOS `ioreg`/`sysctl` paths. Windows already reads GPU registry data through native APIs. PR #1 is superseded by private randomized staging and exclusive file creation. (#sec35)
+- Update locked rustls to 0.23.46, rustls-webpki to 0.103.16, and webpki-roots to 1.0.10, resolving all six advisories reported by the current dependency audit. (#sec35)
+
+## [4.4.0] - 2026-09-24
+
+### Fixed
+- Both Windows MSI editions now embed the complete PolyForm Noncommercial
+  1.0.0 license, including the required copyright notice, instead of WiX's
+  placeholder EULA. The EXE installers already use `LICENSE`; the macOS
+  PKG/compatibility DMG has no license dialog to replace. (#eula)
+- Installer and cleanup preflights require positive ownership of the new
+  companion; older single-binary receipts cannot authorize deleting an
+  unrelated `report`. Native installers reject collisions before payload
+  mutation, and managed wrappers validate Cargo/receipt inventories.
+- Concurrent Windows updates preserve recovery files belonging to active transactions.
+- Windows updates stage both loaded executables and restore both on failure.
+  Ambiguous partial rollback preserves unproven files and reports recovery
+  paths instead of claiming complete restoration. Unix `report` replaces
+  itself with the canonical process to preserve signals and avoid file locks.
+
+### Added
+- **Every supported distribution now installs a real `report` command beside
+  `tr300`.** The new binary is included in cargo-dist archives/installers, both
+  Windows MSI editions, both Inno Setup editions, the signed/notarized macOS
+  PKG/DMG, Cargo installs, and the managed shell/PowerShell channels. Bare
+  `report` produces the normal full report; `--fast`, `--full`, `--json`,
+  `--ascii`, title/color/elevation controls, and explicit Markdown saving are
+  supported.
+- **`report` is a full alias for `tr300`.** Every argument, including install,
+  update, and uninstall, is forwarded to the exact adjacent `tr300` payload
+  without a shell or PATH lookup. Help, version, output, and exit status use
+  the canonical CLI implementation.
+- **Both commands now have generated command references.** `tr300(1)` covers
+  the full reporting and lifecycle surface, while the new `report(1)` page
+  contains the same reporting and maintenance options. The `-h` and `--help` forms for
+  both commands are release-tested against their complete visible surfaces.
+
+### Changed
+- **Shell profiles no longer create a TR-300-owned `report` alias.** Rerunning
+  `tr300 install` refreshes the owned auto-run block and retires the legacy
+  alias. Foreign aliases, functions, and executables remain untouched and
+  receive a shadowing warning.
+- **Install, update, migration, rollback, and Complete uninstall treat
+  `tr300` plus `report` as one product payload.** Transactions snapshot both
+  commands, packages verify both versions and matching help output,
+  and hosted Windows/macOS lifecycle gates require both files to install,
+  update, and uninstall together. The public asset count remains 34 because
+  the companion lives inside existing archives and packages.
+- **`tr300 config` remains intentionally unsupported.** Runtime configuration
+  is still CLI-driven, and the invalid positional word exits with clap's
+  argument error rather than silently doing nothing.
+
+### Security
+- Update the locked rustls dependency to 0.23.45 (and rustls-webpki to
+  0.103.15), resolving RUSTSEC-2026-0285. The release dependency audit passes.
+- **Windows deferred self-uninstall now launches the OS-owned absolute
+  `cmd.exe`.** It no longer relies on PATH to resolve the helper that removes
+  the two exact packaged siblings after the running image exits.
+
+## [4.3.12] - 2026-08-25
+
+### Changed
+- **This distribution-only fix-forward completed cross-platform publication;
+  product behavior and installer policy are unchanged.** The v4.3.11 crate,
+  tag, and exact private 30-asset draft remain immutable. Exact v4.3.12
+  source/tag `19246b76f39c53340e6be62a332cedca9bca766c` passed trusted-OIDC
+  crates publication, the private 24-to-30-to-validated-to-34 chain, native
+  Intel/Apple Silicon package lifecycles, and post-public validation. The
+  public GitHub release has exactly 34 nonempty digest-bearing assets and is
+  the stable `latest` release.
+
+### Fixed
+- **Native Mac validation now removes its second-home fixture with the
+  privilege required by the root-owned `/Users` parent.** Nested runner-owned
+  directories are removed normally, then only the exact validated top-level
+  fixture directory is removed with `sudo`. Executable provenance coverage
+  rejects the former combined unprivileged cleanup.
+
+### Security
+- **The failed v4.3.11 GitHub distribution remains private and immutable.**
+  Exact source/tag `c88ddc21d902ccf21158585dd60b89d37650424b` passed exact-main
+  CI `32864501691`, trusted-OIDC crates publication `32864502146`, native
+  Apple preflight `32865435959`, Release `32865635948`, and Windows Installers
+  `32866237615`; private Windows validation `32866624445` also passed. Draft
+  `376514152` reached exactly 30 assets. macOS run
+  `32866237569` built, signed, and notarized both native artifacts; both native
+  jobs proved the managed-install rejection and unchanged existing state, then
+  failed while the harness removed its fixture from root-owned `/Users`
+  without privilege. The publisher and public smokes skipped, so no GitHub
+  release became public.
+
+## [4.3.11] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward; the v4.3 report behavior is
+  unchanged.** The v4.3.10 crate, tag, and exact private 30-asset draft remain
+  immutable. v4.3.11 is the sole active candidate for complete cross-platform
+  GitHub distribution.
+
+### Fixed
+- **Native Mac validation now proves the managed-install rejection at both
+  observable boundaries.** It runs the exact `preinstall` extracted from the
+  signed PKG to bind the human recovery diagnostic, then runs PackageKit and
+  requires its generic preinstall failure (`PKInstallErrorDomain Code=112`
+  with `NSFilePath=./preinstall`) while retaining the unchanged managed binary,
+  unchanged managed receipt, absent native payload, and absent native receipt
+  checks.
+
+### Security
+- **The failed v4.3.10 GitHub distribution remains private and immutable.**
+  Exact source/tag `e8b0bb73f895f3c2b2d2f62fd39df5846db8f526` passed exact-main
+  CI `32854836544`, trusted-OIDC crates publication `32854836651`, native
+  Apple preflight `32855676983`, Release `32855768841`, Windows Installers
+  `32856291489`, and private Windows validation `32856682126`. Draft
+  `376446284` reached exactly 30 assets. macOS run `32856291645` signed and
+  notarized both native artifacts, then both native validation jobs failed only
+  because the harness searched PackageKit output for a script-owned human
+  message. No GitHub release became public. PR #28 repaired that exact harness
+  boundary and merged as `e55c71bd35d410cc0abda5419168c5384f92690a`
+  after exact-head CI `32859056143`; exact-main CI `32859831814` passed. A
+  recovery dispatch `32860673370` correctly refused the old tag because its
+  source no longer equaled protected `main`, so the immutable-tag policy
+  requires this patch release instead of moving or reusing v4.3.10.
+
+## [4.3.10] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3
+  report behavior.** The immutable v4.3.9 crate, tag, and exact 30-asset
+  private draft remain preserved. v4.3.10 is the sole active candidate for the
+  complete cross-platform GitHub download release.
+- **Global Windows live-image repair is qualified at the boundary where its
+  immutable download URL exists.** Private validation re-runs the already-
+  frozen MSI/EXE bytes for same-version repair; the automatic post-public
+  validation invokes the real Global update worker against the published exact
+  tag. Production updater custody and channel selection are unchanged.
+
+### Fixed
+- **The final macOS signer accepts checksum-manifest rows in any producer
+  order while still requiring the exact three names once each.** An exact
+  parser rejects missing, extra, duplicate, renamed, malformed-hash, and
+  malformed-delimiter records independently of runner locale or `sort`
+  behavior. Executable fixtures cover every valid ordering and the fail-closed
+  cases.
+- **Private Windows acceptance no longer asks the production update worker to
+  fetch an intentionally unpublished draft asset.** The private matrix retains
+  frozen-byte install, repair, transition, rollback, registration, PATH, and
+  uninstall checks. The public matrix retains the real Global MSI/EXE live-
+  image transaction and now captures worker output when that proof fails.
+
+### Security
+- **The failed v4.3.9 GitHub distribution remains private and immutable.** Tag
+  and main resolve to `a4a75e975ebceba90a585deeb4767a4546504a18`;
+  exact-main CI `32848574652` passed 20/20, trusted-OIDC run `32848574607`
+  published the exact unyanked crate, native Apple credential preflight
+  `32849403638` passed, Release `32849508590` passed all 13 jobs, and Windows
+  Installers `32850002419` assembled exact private draft `376401700` with 30
+  assets. macOS run `32850002313` then stopped before Apple credential use on a
+  locale-sensitive checksum-name comparison even though all three payload
+  hashes passed. Private Windows validation `32850359079` passed every other
+  case but correctly could not run the Global worker against anonymous v4.3.9
+  URLs while the release was still private. The attestation and all macOS
+  publication jobs skipped; no GitHub release or homepage change became public.
+
+## [4.3.9] - 2026-08-25
+
+### Changed
+- **This is a narrow distribution-only fix-forward carrying the unchanged v4.3
+  product behavior.** The immutable v4.3.8 crate, tag, and exact private draft
+  remain preserved. v4.3.9 became the next complete-download candidate and is
+  retained as immutable evidence of the later pre-public stops recorded above.
+
+### Fixed
+- **The macOS package input consumer now accepts the same exact six-file
+  inventory produced by its trusted Release-artifact freezer.** The two
+  checksum-bound shell installer sources are deliberate inputs alongside the
+  two signed Apple archives and their sidecars; the downstream preparation job
+  must validate that complete set instead of enforcing its obsolete four-file
+  archive-only contract.
+- **The Windows Inno Setup bootstrap receives read-only GitHub authorization
+  only where its pinned-installer attestation verification requires it.** Build
+  and packaging remain read-only; the repair restores `github.token` to the
+  verification step without granting Release mutation access, then removes and
+  verifies removal of `GH_TOKEN` before launching the third-party installer.
+
+### Security
+- **The failed v4.3.8 GitHub distribution remains private and immutable.** Its
+  exact source and crate passed CI/OIDC, Release created the correct private
+  24-asset draft, and the macOS workflow stopped in an uncredentialed input-
+  preparation job before package build or publication. No public GitHub
+  release was created. The parallel Windows build completed the Corporate MSI,
+  then failed closed before both Inno EXE builds and before any Windows artifact
+  upload or publication because its hardened job did not pass `GH_TOKEN` to
+  `gh release verify-asset`.
+
+## [4.3.8] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The exact source and unyanked crate are published, and its exact
+  24-asset GitHub draft remains private. The immutable tag is not moved or
+  reused; v4.3.9 fixes forward the next packaging boundary.
+- **The release ledger now records GitHub's draft-visibility contract
+  explicitly.** Only callers with push access receive draft releases from the
+  releases listing. The read-only downstream tokens used by v4.3.7 therefore
+  received zero matching records even though the exact draft existed and was
+  visible to the push-access publisher and maintainer.
+
+### Fixed
+- **The v4.3.8 private-draft visibility and custody repair passed its reviewed
+  source gates.** Fresh no-checkout resolver/freezer jobs successfully bound
+  the private Release while checked-out builders and candidate execution stayed
+  read-only.
+- **Private-draft access is isolated from checkout, build, and candidate
+  execution.** Fresh no-checkout resolver/freezer jobs receive push-capable
+  `contents` access only to enumerate, bind, and freeze the exact private
+  Release. Checked-out builders and every job that executes installer or
+  package bytes remain read-only; only fresh no-checkout publisher steps perform
+  mutations on the already-bound draft.
+
+### Security
+- **The v4.3.8 chain created no public GitHub release.** Tag and main resolve to
+  `0b726a854666ed73e42fda675645a097fa887824`. Exact-main CI `32842065507`
+  passed 20/20; trusted-OIDC run `32842065501` published unyanked v4.3.8 with
+  checksum `f54d59c8ed3e9b02df7da0c412b079262c3f46292bd400432371875ad0b5c535`;
+  native preflight `32842865442` passed. Release `32842969776` passed all 13
+  jobs and created exact private 24-asset draft `376357745`. macOS run
+  `32843468883` then failed deterministically in prepare job `97787965884`:
+  the trusted freezer produced its intended six-file Apple/source inventory,
+  while the consumer still required only four archive files. All macOS build,
+  publish, and smoke jobs skipped. Windows Installers `32843468892` also failed
+  deterministically in build job `97787896541` at `Install the pinned official
+  Inno Setup 6.7.3`: `gh release verify-asset` had no `GH_TOKEN` after build-job
+  hardening. Windows publication skipped, the draft stayed private at exactly
+  24 assets, and nothing became public.
+- **The failed v4.3.7 GitHub distribution remains private and immutable.**
+  Crates.io serves unyanked `tr300` v4.3.7 with checksum
+  `225ccf12c8b1d844f74ffe18ac8164ee4fc3cbe96214e3b864f9606ddbd5554c`.
+  Tag and main both resolve to
+  `b9aa12850720b49c120c6465cefd094a843c5fc4`. Release run `32835470143`
+  passed all 13 jobs and created exact private draft `376309349` with 24
+  nonempty assets. Windows Installers `32835918254` and macOS Universal Package
+  `32835918239` then failed in their initial read-only draft resolvers after
+  receiving zero matching records; Windows validation skipped. No downstream
+  build or mutation occurred, no asset was added, and nothing became public.
+
+## [4.3.7] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.6 crate and tag remain published, and its
+  correct 24-asset GitHub draft remains private. v4.3.7 repaired the checksum
+  handoff, reached its own exact private 24-asset draft, and is now immutable;
+  v4.3.8 later repaired the downstream draft-visibility boundary before the
+  Apple/Windows stops recorded above.
+
+### Fixed
+- **The fresh release publisher now reads the managed shell-installer digest
+  from the checksum manifest using the filename format actually written by
+  `sha256sum`.** GNU text-mode records place `tr300-installer.sh`, without a
+  literal `*`, in field two. The corrected exact-field match propagates the
+  verified 64-hex digest to the downstream Windows and macOS workflows.
+- **The executable release-host fixture now runs through the checksum handoff.**
+  It supplies the real two-space checksum record, executes the production
+  post-create list/by-ID/digest/output tail, and requires the exact managed
+  installer digest in `GITHUB_OUTPUT`, so the v4.3.6 typo fails locally.
+
+### Security
+- **The v4.3.7 chain created no public release.** Its exact source and unyanked
+  crate published successfully, and tagged Release `32835470143` passed all 13
+  jobs before creating exact private draft `376309349`. Both immediate
+  read-only downstream resolvers received zero draft records and failed before
+  build, credential, or mutation work; validation skipped and the 24-asset
+  draft remains private.
+- **The failed v4.3.6 chain created no public release.** Exact-main CI,
+  trusted-OIDC crate publication, native Apple credential preflight, every
+  platform build, both Apple signing/notarization jobs, global assembly, and
+  fixed 24-asset preparation passed. Hosting created and revalidated the exact
+  private draft, then stopped while extracting the already-verified managed
+  installer digest. All downstream workflows skipped; the private draft and
+  immutable tag remain untouched.
+
+## [4.3.6] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** Its immutable crate and tag remain published. Its correctly
+  assembled 24-asset GitHub draft remains private after the host checksum
+  handoff failed. v4.3.7 later repaired that handoff but exposed the downstream
+  draft-visibility boundary; v4.3.8 later repaired that boundary before the
+  subsequent deterministic stops recorded above.
+
+### Fixed
+- **Every pre-public workflow now identifies private drafts through the
+  authenticated, fully paginated releases collection.** Release hosting first
+  proves the exact tag is absent, then binds the created draft URL to exactly
+  one tag/target/title/asset record and its positive numeric release ID.
+  Windows packaging, private Windows validation, native Mac validation, and the
+  final Mac publisher carry that ID forward and re-read `/releases/{id}` before
+  any privileged mutation. Public and post-public tag lookups are unchanged.
+- **Executable release-host regression coverage now models GitHub's real draft
+  visibility.** The extracted production list/create/list sequence runs against
+  a stateful mock where the by-tag endpoint remains 404 for drafts. It accepts
+  one exact draft and rejects a page-two pre-existing release before mutation,
+  duplicates, wrong targets, public/prerelease records, missing or extra assets,
+  and zero-byte assets.
+
+### Security
+- **The failed v4.3.6 chain created no public release.** Its tagged Release run
+  completed every build, both Apple signing/notarization jobs, global assembly,
+  and exact 24-asset preparation. Hosting created and revalidated the correct
+  private draft by numeric ID, then searched a GNU `sha256sum` record for a
+  literal-star filename that the record does not contain. The run failed,
+  downstream workflows skipped, and the draft remains private and immutable
+  evidence.
+
+## [4.3.5] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** Its immutable crate and tag remain published. Its correct
+  24-asset GitHub draft remains private after the host assertion failed;
+  v4.3.6 was its immediate immutable fix-forward, and later immutable repairs
+  and their results are recorded in the newer entries above.
+
+### Fixed
+- **Release metadata validation now preserves the complete cargo-dist manifest.**
+  The uncredentialed 24-asset preparation step validates the stable title, body,
+  and prerelease fields with an explicit `jq` branch that returns the original
+  object on success and errors on malformed input. An executable regression
+  extracts the production validation/projection chain, proves unrelated
+  manifest fields survive unchanged, verifies the projected release metadata,
+  and rejects prerelease, missing, empty, non-string, boolean, and null inputs.
+
+### Security
+- **The failed v4.3.5 tag stopped with a correct private draft and no public
+  release.** Exact-main CI, trusted-OIDC crates publication, native preflight,
+  all six platform builds, both Apple signing/notarization jobs, global
+  assembly, and 24-asset preparation succeeded. Hosting created the exact
+  private draft, then its release-by-tag REST assertion returned 404 because
+  GitHub does not expose drafts through that endpoint. Downstream workflows
+  skipped; the private draft and immutable tag are not moved or reused.
+
+## [4.3.4] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.3 crate and tag remain published. v4.3.4
+  reached crates.io and proved the repaired Apple archive/signing path, but its
+  tagged GitHub packaging run stopped in read-only metadata preparation before
+  draft creation; v4.3.5 is the next complete-download candidate.
+
+### Fixed
+- **Apple archive staging now accepts cargo-dist's exact safe Unix mode
+  encoding.** The pinned producer stores matching POSIX file-type bits together
+  with `0755`/`0644` permissions. Both the fresh signer and downstream universal
+  installer preparation accept only that representation or the equivalent
+  permission-only form, while continuing to reject mismatched types, special
+  permission bits, links, traversal, unexpected members, and oversized output.
+  Extracted-workflow fixtures reproduce the real raw tar headers and exercise
+  both accepted forms plus type-confusion and setuid rejection.
+
+### Security
+- **The failed v4.3.3 tag stopped before credential use or partial release
+  creation.** Exact-main CI, trusted-OIDC crates publication, native preflight,
+  and all six tagged platform builds succeeded. Both Apple signers then rejected
+  the safe producer mode encoding before signing or notarization. No GitHub
+  draft exists for v4.3.3, and its immutable tag is not moved or reused.
+
+## [4.3.3] - 2026-08-25
+
+### Changed
+- **This is a distribution-only fix-forward carrying the unchanged v4.3 product
+  behavior.** The immutable v4.3.2 crate and tag remain published. v4.3.3
+  reached crates.io, but its tagged GitHub packaging run failed closed before
+  credential use; v4.3.4 is the next complete-download candidate.
+
+### Fixed
+- **Release custody now models cargo-dist 0.31.0 checksum bytes exactly.** Raw
+  cargo-dist sidecars and its aggregate checksum end with one blank line after
+  the final checksum record. Fresh Apple signers require that exact two-LF
+  producer form before staging, while the 24-asset preparation step verifies
+  all raw source/Linux/Windows sidecars plus `sha256.sum` before rewriting them
+  to a canonical one-LF public form. Regression fixtures execute the extracted
+  workflow code against the observed producer bytes and reject missing, extra,
+  CRLF, same-length trailing-garbage, signed-sidecar, and aggregate mutations
+  without changing any fixture file.
+
+### Security
+- **The failed v4.3.2 tag stopped before credential use or partial release
+  creation.** Exact-main CI and trusted-OIDC crates publication succeeded, then
+  all six platform archives built; both Apple signers rejected the valid raw
+  two-LF sidecars before signing or notarization. No GitHub draft exists for
+  v4.3.2, and its immutable tag is not moved or reused.
+
+## [4.3.2] - 2026-08-24
+
+### Added
+- **This version carries the complete v4.3 product and distribution change
+  set.** Reports can include deterministic, fault-aware Linux CPU/GPU
+  temperatures (including `soc_thermal`) and mode-bounded NVIDIA GPU
+  temperature on Windows. Windows CPU temperature stays absent/JSON `null`
+  because ACPI zones do not establish CPU identity; macOS thermals remain
+  unavailable. Schema-v1 JSON adds nullable `cpu.temperature_c` and
+  `cpu.gpu_temperature_c`, and `-f/--full` explicitly selects the existing
+  default full collection mode.
+
+### Changed
+- **Distribution status:** exact v4.3.2 passed main CI and published to
+  crates.io through trusted OIDC. Its immutable tag built all six platform
+  archives, but both Apple signer jobs rejected cargo-dist 0.31.0's valid
+  two-LF checksum-sidecar ending before signing, notarization, upload, or draft
+  creation. Version 4.3.3 fixes forward without moving or reusing the tag.
+- **Windows full-mode collection is materially faster on the controlled
+  Alienware benchmark.** Seven alternating runs per version measured medians
+  of 5146.9 ms and 2120.2 ms: 58.8% less elapsed time and a 2.43× runtime
+  ratio. Eleven fast-mode runs measured 257.3 ms and 260.4 ms (+1.2%), which is
+  background-level and supports no fast-mode performance-gain claim.
+- **Managed-to-PKG switching on macOS is an explicit safe sequence:** refresh
+  through the managed installer, choose receipt-aware Complete uninstall, then
+  run the direct PKG. Its preinstall refuses standard managed evidence across
+  `/Users` and eligible local Directory Service homes before payload placement;
+  clean/native upgrades and PKG-to-managed remain supported.
+
+### Fixed
+- **Linux battery selection and macOS fallback parsing are stricter.** Linux
+  accepts well-formed `*_now`/`*_avg` readings, signed/zero current and power,
+  rejects explicit Device/absent/malformed supplies, and selects
+  deterministically. macOS accepts only a recognizable `InternalBattery`
+  record. The historical Raspberry Pi "30%" source remains unverified pending
+  physical sysfs evidence.
+- **The Windows cargo-dist bootstrap accepts the official installer's ordinary
+  NTFS hard-linked alias while still rejecting reparse-point redirection.** The
+  exact shared bootstrap now runs in ordinary Windows CI before a release tag
+  can be qualified.
+- **Every native Apple release path is compatible with macOS system Bash
+  3.2.** Exact input inventories use non-following Python standard-library
+  inspection instead of Bash-4-only associative arrays or `mapfile`; both
+  native Mac CI legs syntax-check every affected inline workflow and tag-only
+  build-matrix block, execute the exact checkout-free signer staging, and run
+  all three exact installer inventories against positive and fail-closed
+  fixtures. Immutable `v4.3.0` and `v4.3.1` stopped before draft
+  creation on the superseded Windows and Apple packaging defects respectively.
+
+### Security
+- **Crate and installer publication use the automatic exact-source custody
+  chain.** Accepted `main` pushes publish crates only through short-lived
+  trusted OIDC after exact CI/package proof. One qualified stable tag then
+  drives the private 24-base → 30-Windows → validated → 34-asset native-Apple
+  chain and post-public smokes without recurring approval clicks or a
+  long-lived crates token. Apple credentialed signers remain fresh and
+  checkout-free.
+
+## [4.3.1] - 2026-08-24
+
+### Added
+- **This crate carries the v4.3 product changes, although its immutable tag did
+  not produce a GitHub download release.** Reports can include deterministic,
+  fault-aware Linux CPU/GPU
+  temperatures (including `soc_thermal`) and mode-bounded NVIDIA GPU
+  temperature on Windows. Windows CPU temperature stays absent/JSON `null`
+  because ACPI zones do not establish CPU identity; macOS thermals remain
+  unavailable. Schema-v1 JSON adds nullable `cpu.temperature_c` and
+  `cpu.gpu_temperature_c`, and `-f/--full` explicitly selects the existing
+  default full collection mode.
+
+### Changed
+- **Distribution status:** exact v4.3.1 passed main CI and published to
+  crates.io through trusted OIDC. All six tagged platform builds then passed,
+  but both fresh Apple signing jobs stopped before signing, upload, or draft
+  creation because macOS system Bash 3.2 rejected Bash-4-only workflow syntax.
+  The tag remains immutable and v4.3.2 fixes forward.
+- **Windows full-mode collection is materially faster on the controlled
+  Alienware benchmark.** Seven alternating runs per version measured medians
+  of 5146.9 ms and 2120.2 ms: 58.8% less elapsed time and a 2.43× runtime
+  ratio. Eleven fast-mode runs measured 257.3 ms and 260.4 ms (+1.2%), which is
+  background-level and supports no fast-mode performance-gain claim.
+- **Managed-to-PKG switching on macOS is now an explicit safe sequence:**
+  refresh through the managed installer, choose receipt-aware Complete
+  uninstall, then run the direct PKG. Its preinstall refuses standard managed
+  evidence across `/Users` and eligible local Directory Service homes before
+  payload placement; clean/native upgrades and PKG-to-managed remain supported.
+
+### Fixed
+- **Linux battery selection and macOS fallback parsing are stricter.** Linux
+  accepts well-formed `*_now`/`*_avg` readings, signed/zero current and power,
+  rejects explicit Device/absent/malformed supplies, and selects
+  deterministically. macOS accepts only a recognizable `InternalBattery`
+  record. The historical Raspberry Pi "30%" source remains unverified pending
+  physical sysfs evidence.
+- **Windows release packaging now accepts the verified cargo-dist executable
+  created by the official installer's normal hard-linked alias.** The v4.3.0
+  tag stopped safely before creating a GitHub Release because a new path guard
+  mistook that NTFS hard link for a symbolic redirect. The shared bootstrap now
+  rejects actual reparse-point redirection while accepting the regular file, and
+  ordinary pull-request/main CI executes that exact Windows bootstrap before a
+  release tag can be qualified.
+
+### Security
+- **Crate and installer publication now use the completed v4.3 custody chain.**
+  Accepted `main` pushes publish crates only through short-lived trusted OIDC
+  after exact CI/package proof. GitHub Releases stay private through the exact
+  24-base → 30-Windows → validated → 34-asset native-Apple chain; only the
+  finalizer can publish, and post-public updater/Linux/macOS smokes remain
+  mandatory. Normal releases require no approval click or long-lived crates
+  token.
+
+## [4.3.0] - 2026-08-24
+
+### Added
+- **Thermal reporting (`CPU TEMP` / `GPU TEMP` rows).** Linux reads CPU
+  package/SoC temperature from hwmon devices (coretemp `Package id`,
+  k10temp/zenpower `Tctl`/`Tdie`, ARM SBC `cpu_thermal`/`soc_thermal`) with a
+  cpu/soc-labeled thermal-zone fallback, and GPU temperature from
+  amdgpu/nouveau/nvidia hwmon devices. The pure-sysfs scan runs in both modes,
+  rejects faulted, malformed, non-finite, and implausible channels, and chooses
+  the hottest valid sensor deterministically within the preferred class.
+  Windows reports only discrete NVIDIA GPU temperature via `nvidia-smi` when
+  an NVIDIA adapter was detected, using the timeout budget for the active
+  collection mode; Windows CPU temperature intentionally remains unavailable
+  because an ACPI thermal-zone instance cannot be trusted to identify the CPU.
+  macOS intentionally reports no thermal data this release (SMC access requires
+  unsafe IOKit or sudo). JSON gains additive schema-v1 keys
+  `cpu.temperature_c` / `cpu.gpu_temperature_c` (null when no trusted sensor
+  answered); saved Markdown mirrors the CPU-section rows.
+- **Explicit `-f/--full` flag** as the symmetric counterpart to `--fast`.
+  Full collection remains the default; the flag conflicts with `--fast`.
+
+### Changed
+- **Windows full-mode report is materially faster on the benchmark machine.**
+  Seven alternating Alienware m16 R2 runs per version produced
+  baseline/candidate medians of 5146.9 ms and 2120.2 ms: about 3026.6 ms
+  (58.8%) less elapsed time, a 2.43× runtime ratio.
+  The BitLocker security-namespace probe now starts concurrently with the main
+  WMI batch under a dedicated 2-second, launch-relative deadline instead of
+  serially consuming the shared timeout. Duplicate WMI/process lookups and
+  unnecessary registry subprocesses are also consolidated. Eleven alternating
+  fast-mode runs per version produced medians of 257.3 ms and 260.4 ms; the
+  measured 1.2% difference is background-level, so this release makes no
+  fast-mode performance-gain claim.
+- **Managed-to-PKG switching is now an explicit, receipt-aware sequence.** A
+  managed user updates or reinstalls v4.3, chooses Complete uninstall, and then
+  runs the PKG. On Unix, Complete validates an exact cargo-dist provider, app,
+  and install prefix before changing profiles, then removes the running binary
+  and receipt as one fail-closed transaction. Raw Cargo remains binary-only;
+  malformed, foreign, linked, or concurrently changed receipt evidence is
+  preserved.
+
+### Fixed
+- **Linux system-battery selection is hardened against phantom supplies.**
+  Selection rejects explicit `scope=Device` and `present=0` evidence, requires
+  a well-formed live `*_now` or `*_avg` measurement (including valid signed
+  current/power readings), cross-validates capacity when a compatible energy
+  or charge pair is available, and uses deterministic BAT*-first ordering. A
+  missing status renders a bare percentage instead of fabricating
+  "(Unknown)". These rules address plausible misattribution paths, but the
+  source of the historical Raspberry Pi "30%" reading is not yet proven and
+  still requires physical sysfs diagnostics.
+- **macOS `pmset` battery parsing requires an `-InternalBattery-N` record**, so
+  a stray percentage elsewhere in `pmset -g batt` output cannot be
+  misattributed to the system battery.
+
+### Security
+- **Privileged supplemental release workflows now bind every build to one
+  trusted stable release commit.** Automatic Windows and macOS packaging runs
+  require a successful same-repository tag push, resolve lightweight and
+  annotated tags to a commit, and require the GitHub Release target and
+  upstream workflow SHA to match before checkout, Apple credential use, or
+  release writes. Manual tagged recovery uses the same binding; executable
+  fixtures exercise the checked-in resolver blocks against fork, event, tag,
+  API-failure, and SHA-mismatch cases.
+- **A stable GitHub Release remains private until Windows installer acceptance
+  proves the exact candidate bytes.** The release host creates a fixed 24-asset
+  draft, the isolated Windows publisher raises it to 30, and the Windows matrix
+  consumes one immutable snapshot that binds every Release asset ID, size, and
+  digest to the exact Windows builder artifact. Only the isolated macOS
+  finalizer can add the four Apple assets and publish, and only after it
+  revalidates the successful Windows validation run, attempt, proof artifact,
+  current protected `main`, tag, CI, and all 30 accepted bytes. The real public
+  updater matrix runs only after publication.
+- **Crates.io publication uses automatic protected-environment OIDC instead of
+  exposing a reusable token to a build runner.** Every same-repository `main`
+  push starts the publication workflow, whose registry-uncredentialed validator waits
+  for that exact commit's successful CI run before continuing.
+  Locked/default-verifying package checks run with read-only GitHub authorization
+  and no registry credential; a fresh runner rejects unsafe source, config, and
+  archive shapes, deterministically matches the candidate crate, and mints a
+  short-lived token only for the absolute `cargo publish --no-verify` command.
+  Post-publication adjudication, after that token is removed, requires the
+  crates.io checksum and trusted-publisher provenance for the exact repository,
+  run, and source SHA. An already-published matching version exits successfully.
+- **Apple release credentials live behind the `apple-signing` environment and
+  fresh no-checkout runners.** Native Apple Silicon and Intel preflights prove
+  both Developer ID identities plus read-only notary authentication. Release
+  signing jobs receive only fixed data artifacts, never a source checkout or
+  repository script while credentials are present.
+- **Windows release builds use one pinned official Inno Setup toolchain.** CI
+  and the installer builder share `install-pinned-inno-setup.ps1`, which fetches
+  JRSoftware 6.7.3 and requires its exact size/SHA-256, GitHub attestation,
+  valid Pyrsys B.V. Authenticode signature, ProductVersion, absolute ISCC path,
+  and installed compiler version. Chocolatey is no longer a trusted installer
+  source.
+- **Atomic Unix shell-profile updates preserve an existing file's privacy
+  mode.** A profile intentionally restricted to its owner is copied to a
+  same-mode temporary file before any content is written, so replacement can
+  no longer widen a private profile to the process's ordinary create mode.
+- **Privileged Windows package launches no longer trust the current directory
+  or `PATH`.** The updater, managed PowerShell takeover, Inno MSI bridge, and
+  hosted transition fixtures resolve the OS-owned absolute
+  `System32\msiexec.exe` and pin its working directory to `System32`. The UAC
+  worker and Inno installers/uninstallers likewise run from their validated
+  executable parent or private staging directory. Existing Global elevation
+  and Corporate user-scope behavior remains intact; regression tests plant
+  hostile executable names and caller directories and verify the actual
+  process boundaries.
+- **The direct macOS PKG now refuses managed ownership before payload
+  installation and never mutates user homes as root.** Native Intel and Apple
+  Silicon runs proved that Apple Installer can retain a new payload after a
+  failing `postinstall`, so even exact descriptor-bound restoration of the old
+  managed state could not make the overall operation atomic. The PKG now ships
+  only a non-mutating `preinstall`, rejects standard-path managed binary or
+  receipt evidence (`~/.cargo/bin/tr300` or
+  `~/.config/tr300/tr300-receipt.json`) in every `/Users` home plus every
+  eligible local Directory Service home (including broken links), and contains
+  no migration probe, rollback helper, or `postinstall`. Clean/native upgrades
+  remain supported, as does exact PKG-to-managed takeover.
 
 ## [4.2.2] - 2026-07-18
 

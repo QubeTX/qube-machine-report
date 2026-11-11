@@ -78,7 +78,6 @@ enum UpdateStrategy {
     InstallerCurl,
     InstallerWget,
     InstallerPowerShell,
-    InstallerPwsh,
     /// Re-runs the Global perMachine MSI (UAC required, replaces v3.15.0+).
     MsiGlobal,
     /// Re-runs the Corporate perUser MSI (no UAC required).
@@ -98,7 +97,6 @@ impl UpdateStrategy {
             UpdateStrategy::InstallerCurl => "curl shell installer",
             UpdateStrategy::InstallerWget => "wget shell installer",
             UpdateStrategy::InstallerPowerShell => "PowerShell installer",
-            UpdateStrategy::InstallerPwsh => "pwsh installer",
             UpdateStrategy::MsiGlobal => "Global MSI installer",
             UpdateStrategy::MsiCorporate => "Corporate MSI installer",
             UpdateStrategy::ExeGlobal => "Global EXE installer",
@@ -113,7 +111,6 @@ impl UpdateStrategy {
             UpdateStrategy::InstallerCurl => "installer_curl",
             UpdateStrategy::InstallerWget => "installer_wget",
             UpdateStrategy::InstallerPowerShell => "installer_powershell",
-            UpdateStrategy::InstallerPwsh => "installer_pwsh",
             UpdateStrategy::MsiGlobal => "msi_global",
             UpdateStrategy::MsiCorporate => "msi_corporate",
             UpdateStrategy::ExeGlobal => "exe_global",
@@ -848,7 +845,6 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
         strategy,
         UpdateStrategy::Cargo
             | UpdateStrategy::InstallerPowerShell
-            | UpdateStrategy::InstallerPwsh
             | UpdateStrategy::MsiCorporate
             | UpdateStrategy::ExeCorporate
     ) {
@@ -890,9 +886,6 @@ fn try_strategy_inner(strategy: UpdateStrategy, latest: &str) -> Result<(), Stra
             try_installer_powershell(latest)?;
             verify_installer_post_install(latest, "PowerShell installer")
         }
-        UpdateStrategy::InstallerPwsh => Err(StrategyError::Preflight(
-            "PATH-resolved pwsh is not permitted for self-update".into(),
-        )),
         UpdateStrategy::MsiGlobal => {
             try_msi_install(&release_asset_url(latest, MSI_GLOBAL_ASSET), latest)
         }
@@ -921,7 +914,6 @@ fn with_windows_live_image_handoff<F>(attempt: F) -> Result<(), StrategyError>
 where
     F: FnOnce() -> Result<(), StrategyError>,
 {
-    cleanup_stale_windows_update_backups();
     let handoff = WindowsLiveImageHandoff::begin()?;
     handoff.finish(attempt())
 }
@@ -977,11 +969,6 @@ pub fn run_windows_update_worker(strategy_id: &str, latest: &str, backup: &std::
         return 2;
     }
 
-    // The worker is elevated for Global channels, so this is also the safe
-    // opportunity to remove a product-private backup whose prior detached
-    // cleanup was interrupted. Locked/live files simply remain for the normal
-    // transaction and are never treated as arbitrary cleanup targets.
-    cleanup_stale_windows_update_backups();
     let handoff = match WindowsLiveImageHandoff::begin_with_backup(backup) {
         Ok(handoff) => handoff,
         Err(error) => {
@@ -1028,6 +1015,28 @@ fn is_worker_release_version(version: &str) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
+/// Select the trusted executable's own absolute directory for the UAC worker.
+/// `ShellExecuteExW` otherwise inherits the caller's current directory into
+/// the elevated process.
+#[cfg(any(windows, test))]
+fn windows_elevated_worker_directory(
+    current_exe: &std::path::Path,
+) -> Result<&std::path::Path, StrategyError> {
+    let is_product = current_exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"));
+    current_exe
+        .parent()
+        .filter(|directory| current_exe.is_absolute() && directory.is_absolute() && is_product)
+        .ok_or_else(|| {
+            StrategyError::Preflight(
+                "refused an elevated worker executable without its trusted absolute product directory"
+                    .to_string(),
+            )
+        })
+}
+
 #[cfg(windows)]
 fn launch_elevated_windows_update_worker(
     strategy: UpdateStrategy,
@@ -1035,7 +1044,7 @@ fn launch_elevated_windows_update_worker(
     backup: &std::path::Path,
 ) -> Result<u32, StrategyError> {
     use std::os::windows::ffi::OsStrExt;
-    use std::ptr::{null, null_mut};
+    use std::ptr::null_mut;
     use winapi::um::errhandlingapi::GetLastError;
     use winapi::um::handleapi::CloseHandle;
     use winapi::um::processthreadsapi::GetExitCodeProcess;
@@ -1061,6 +1070,7 @@ fn launch_elevated_windows_update_worker(
         ))
     })?;
     validate_windows_update_backup(&current, backup)?;
+    let worker_directory = windows_elevated_worker_directory(&current)?;
 
     let backup_text = backup.to_str().ok_or_else(|| {
         StrategyError::Preflight(
@@ -1083,6 +1093,11 @@ fn launch_elevated_windows_update_worker(
         .encode_wide()
         .chain(Some(0))
         .collect();
+    let worker_directory: Vec<u16> = worker_directory
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
     info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
@@ -1090,7 +1105,7 @@ fn launch_elevated_windows_update_worker(
     info.lpVerb = verb.as_ptr();
     info.lpFile = file.as_ptr();
     info.lpParameters = parameters.as_ptr();
-    info.lpDirectory = null();
+    info.lpDirectory = worker_directory.as_ptr();
     info.nShow = SW_HIDE;
 
     let launched = unsafe { ShellExecuteExW(&mut info) };
@@ -1196,43 +1211,14 @@ fn validate_windows_update_backup(
     Ok(())
 }
 
-/// Best-effort maintenance for a prior successful update whose detached
-/// cleanup helper was interrupted. This runs before another user-scoped
-/// transaction or inside the elevated Global worker, and removes only strict
-/// product-private sibling names.
-#[cfg(windows)]
-fn cleanup_stale_windows_update_backups() {
-    let Ok(current) = std::env::current_exe() else {
-        return;
-    };
-    if !current
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("tr300.exe"))
-    {
-        return;
-    }
-    let Some(parent) = current.parent() else {
-        return;
-    };
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(is_windows_update_backup_name)
-        {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-}
-
+// Prior update backups may be the only surviving bytes after incomplete
+// rollback. Never sweep them based on age, PID, lock state, or paired-file
+// presence. Only a verified successful transaction schedules its own cleanup.
 #[cfg(windows)]
 struct WindowsLiveImageHandoff {
     original: std::path::PathBuf,
     backup: std::path::PathBuf,
+    report: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
 #[cfg(windows)]
@@ -1257,7 +1243,12 @@ impl WindowsLiveImageHandoff {
             std::process::id()
         ));
         validate_windows_update_backup(&original, &backup)?;
-        Ok(Self { original, backup })
+        let report = Self::plan_report(&original, &backup)?;
+        Ok(Self {
+            original,
+            backup,
+            report,
+        })
     }
 
     fn begin() -> Result<Self, StrategyError> {
@@ -1271,11 +1262,39 @@ impl WindowsLiveImageHandoff {
             ))
         })?;
         validate_windows_update_backup(&original, backup)?;
+        let report = Self::plan_report(&original, backup)?;
         Self {
             original,
             backup: backup.to_path_buf(),
+            report,
         }
         .rename_live_image()
+    }
+
+    fn plan_report(
+        original: &std::path::Path,
+        backup: &std::path::Path,
+    ) -> Result<Option<(std::path::PathBuf, std::path::PathBuf)>, StrategyError> {
+        let report = crate::migrate::owned_report_sibling(original)
+            .map_err(|error| StrategyError::Preflight(error.to_string()))?;
+        let Some(report) = report else {
+            return Ok(None);
+        };
+        let name = backup
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| StrategyError::Preflight("invalid update backup name".to_string()))?;
+        let report_backup = backup.with_file_name(name.replacen(
+            ".tr300-update-backup-",
+            ".tr300-report-update-backup-",
+            1,
+        ));
+        if std::fs::symlink_metadata(&report_backup).is_ok() {
+            return Err(StrategyError::Preflight(
+                "report update backup already exists".to_string(),
+            ));
+        }
+        Ok(Some((report, report_backup)))
     }
 
     fn rename_live_image(self) -> Result<Self, StrategyError> {
@@ -1291,6 +1310,14 @@ impl WindowsLiveImageHandoff {
                 StrategyError::Runtime(message)
             }
         })?;
+        if let Some((report, backup)) = &self.report {
+            if let Err(error) = std::fs::rename(report, backup) {
+                let restoration = std::fs::rename(&self.backup, &self.original);
+                return Err(StrategyError::Runtime(format!(
+                    "could not stage the report companion before updating: {error}; restoring tr300: {restoration:?}"
+                )));
+            }
+        }
         Ok(self)
     }
 
@@ -1308,7 +1335,7 @@ impl WindowsLiveImageHandoff {
             Err(error) => match self.rollback() {
                 Ok(()) => Err(error.append("the renamed old executable was restored")),
                 Err(rollback) => Err(error.append(format!(
-                    "automatic rollback also failed: {rollback}; the old executable remains at {}",
+                    "automatic rollback was incomplete: {rollback}; verify the installation before retrying. Any unrestored old executable is retained at {}",
                     self.backup.display()
                 ))),
             },
@@ -1316,26 +1343,58 @@ impl WindowsLiveImageHandoff {
     }
 
     fn rollback(&self) -> std::io::Result<()> {
-        if self.original.exists() {
-            std::fs::remove_file(&self.original)?;
+        let restore = |original: &std::path::Path, backup: &std::path::Path| {
+            match std::fs::remove_file(original) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            std::fs::rename(backup, original)
+        };
+        // Attempt both restores even when one encounters a locked replacement.
+        // Unrestored backup bytes remain for explicit recovery; later updates
+        // never sweep another transaction's backups.
+        let report_result = self
+            .report
+            .as_ref()
+            .map(|(original, backup)| restore(original, backup))
+            .unwrap_or_else(|| {
+                let report = self.original.with_file_name("report.exe");
+                match std::fs::symlink_metadata(&report) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error),
+                    Ok(_) => Err(std::io::Error::other(format!(
+                        "report was absent before the update, but {} now exists; preserved the unproven new file. Rollback is incomplete; resolve this companion before retrying",
+                        report.display()
+                    ))),
+                }
+            });
+        let tr300_result = restore(&self.original, &self.backup);
+        match (tr300_result, report_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(first), Err(second)) => Err(std::io::Error::other(format!("{first}; {second}"))),
         }
-        std::fs::rename(&self.backup, &self.original)
     }
 
     fn spawn_cleanup(&self) -> std::io::Result<()> {
         use std::os::windows::process::CommandExt;
 
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let mut command = Command::new(&self.original);
-        command
-            .arg("update-cleanup")
-            .arg("--update-backup")
-            .arg(&self.backup)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW);
-        command.spawn().map(|_| ())
+        for backup in
+            std::iter::once(&self.backup).chain(self.report.as_ref().map(|(_, backup)| backup))
+        {
+            Command::new(&self.original)
+                .arg("update-cleanup")
+                .arg("--update-backup")
+                .arg(backup)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()?;
+        }
+        Ok(())
     }
 }
 
@@ -1360,7 +1419,7 @@ pub fn cleanup_windows_update_backup(backup: &std::path::Path) -> i32 {
     let valid_name = backup
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(is_windows_update_backup_name);
+        .is_some_and(is_windows_any_update_backup_name);
     let current_is_product = current
         .file_name()
         .and_then(|name| name.to_str())
@@ -1377,6 +1436,16 @@ pub fn cleanup_windows_update_backup(backup: &std::path::Path) -> i32 {
         }
     }
     2
+}
+
+#[cfg(any(windows, test))]
+fn is_windows_any_update_backup_name(name: &str) -> bool {
+    is_windows_update_backup_name(name)
+        || name
+            .strip_prefix(".tr300-report-update-backup-")
+            .is_some_and(|suffix| {
+                is_windows_update_backup_name(&format!(".tr300-update-backup-{suffix}"))
+            })
 }
 
 #[cfg(any(windows, test))]
@@ -1418,6 +1487,7 @@ fn run_command_status(launcher: &str, args: &[&str]) -> Result<(), StrategyError
     run_command_status_inner(launcher, args, None)
 }
 
+#[cfg(not(windows))]
 fn run_command_status_with_env(
     launcher: &str,
     args: &[&str],
@@ -1437,7 +1507,11 @@ fn run_command_status_inner(
     if let Some((name, value)) = extra_env {
         command.env(name, value);
     }
-    suppress_stdout_for_json(&mut command);
+    run_prepared_command_status(&mut command, launcher)
+}
+
+fn run_prepared_command_status(command: &mut Command, launcher: &str) -> Result<(), StrategyError> {
+    suppress_stdout_for_json(command);
     match command.status() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StrategyError::Preflight(
             format!("{} not on PATH", launcher),
@@ -1555,26 +1629,15 @@ fn try_installer_wget(_latest: &str) -> Result<(), StrategyError> {
 
 #[cfg(windows)]
 fn trusted_windows_powershell() -> Result<std::path::PathBuf, StrategyError> {
-    let mut system_directory = vec![0u16; winapi::shared::minwindef::MAX_PATH];
-    // SAFETY: `system_directory` is writable for the supplied length. The API
-    // returns the number of UTF-16 code units written, excluding the NUL.
-    let length = unsafe {
-        winapi::um::sysinfoapi::GetSystemDirectoryW(
-            system_directory.as_mut_ptr(),
-            system_directory.len() as u32,
-        )
-    };
-    if length == 0 || length as usize >= system_directory.len() {
-        return Err(StrategyError::Preflight(
-            "could not resolve the trusted Windows system directory".into(),
-        ));
-    }
-    system_directory.truncate(length as usize);
-    use std::os::windows::ffi::OsStringExt;
-    let mut launcher = std::path::PathBuf::from(std::ffi::OsString::from_wide(&system_directory));
-    launcher.push("WindowsPowerShell");
-    launcher.push("v1.0");
-    launcher.push("powershell.exe");
+    let launcher = trusted_windows_system_directory()
+        .map_err(|error| {
+            StrategyError::Preflight(format!(
+                "could not resolve the trusted Windows system directory: {error}"
+            ))
+        })?
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
     if !launcher.is_file() {
         return Err(StrategyError::Preflight(format!(
             "trusted Windows PowerShell launcher is unavailable at {}",
@@ -1582,6 +1645,36 @@ fn trusted_windows_powershell() -> Result<std::path::PathBuf, StrategyError> {
         )));
     }
     Ok(launcher)
+}
+
+#[cfg(any(windows, test))]
+fn windows_powershell_install_command(
+    launcher: &std::path::Path,
+    script: &str,
+    prefix: &str,
+) -> std::io::Result<Command> {
+    let working_directory = launcher
+        .parent()
+        .filter(|directory| launcher.is_absolute() && directory.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "trusted Windows PowerShell path has no absolute system directory",
+            )
+        })?;
+    let mut command = Command::new(launcher);
+    command
+        .current_dir(working_directory)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .env("CARGO_DIST_FORCE_INSTALL_DIR", prefix);
+    Ok(command)
 }
 
 #[cfg(windows)]
@@ -1594,21 +1687,13 @@ fn try_installer_powershell(latest: &str) -> Result<(), StrategyError> {
         StrategyError::Preflight("matching cargo-dist receipt is unavailable".into())
     })?;
     let launcher = trusted_windows_powershell()?;
-    run_command_status_with_env(
-        launcher.to_str().ok_or_else(|| {
-            StrategyError::Preflight("Windows system directory is not valid Unicode".into())
-        })?,
-        &[
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ],
-        "CARGO_DIST_FORCE_INSTALL_DIR",
-        &prefix,
-    )
+    let mut command =
+        windows_powershell_install_command(&launcher, &script, &prefix).map_err(|error| {
+            StrategyError::Preflight(format!(
+                "could not prepare trusted Windows PowerShell: {error}"
+            ))
+        })?;
+    run_prepared_command_status(&mut command, &launcher.to_string_lossy())
 }
 
 #[cfg(not(windows))]
@@ -1878,19 +1963,7 @@ fn post_install_version_ok(installed: &str, expected: &str) -> bool {
 /// process errors, or the output doesn't parse. Cross-platform — used by both
 /// the Windows installer verify and the cargo-path verify.
 fn reexec_installed_version() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    #[cfg(windows)]
-    let exe = {
-        let mut exe = exe;
-        if exe
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(is_windows_update_backup_name)
-        {
-            exe.set_file_name("tr300.exe");
-        }
-        exe
-    };
+    let exe = installed_tr300_path()?;
     let output = Command::new(&exe).arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
@@ -1908,6 +1981,109 @@ fn reexec_installed_version() -> Option<String> {
     }
 }
 
+fn installed_tr300_path() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    let exe = {
+        let mut exe = exe;
+        if exe
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_windows_update_backup_name)
+        {
+            exe.set_file_name("tr300.exe");
+        }
+        exe
+    };
+    Some(exe)
+}
+
+fn verify_report_post_install(expected: &str, label: &str) -> Result<(), StrategyError> {
+    let tr300 = installed_tr300_path().ok_or_else(|| {
+        StrategyError::Runtime(format!(
+            "{label} reported success but the installed TR-300 path could not be resolved"
+        ))
+    })?;
+    #[cfg(windows)]
+    let report = tr300.with_file_name("report.exe");
+    #[cfg(not(windows))]
+    let report = tr300.with_file_name("report");
+
+    let metadata = std::fs::symlink_metadata(&report).map_err(|error| {
+        StrategyError::Runtime(format!(
+            "{label} reported success but the packaged report command is missing at {}: {error}",
+            report.display()
+        ))
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(StrategyError::Runtime(format!(
+            "{label} reported success but the packaged report command is not a regular file: {}",
+            report.display()
+        )));
+    }
+
+    let output = Command::new(&report)
+        .arg("--version")
+        .output()
+        .map_err(|error| {
+            StrategyError::Runtime(format!(
+                "{label} reported success but `{}` could not be run: {error}",
+                report.display()
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(StrategyError::Runtime(format!(
+            "{label} reported success but `report --version` exited with {}",
+            output.status
+        )));
+    }
+    let version_output = String::from_utf8_lossy(&output.stdout);
+    if !report_version_output_ok(&version_output, expected) {
+        return Err(StrategyError::Runtime(format!(
+            "{label} reported success but `report --version` did not identify the report companion at v{expected}"
+        )));
+    }
+
+    // Verify the alias through read-only operations, never a nested update.
+    let help_output = Command::new(&report)
+        .arg("--help")
+        .output()
+        .map_err(|error| {
+            StrategyError::Runtime(format!(
+                "{label} reported success but the alias help could not be checked: {error}"
+            ))
+        })?;
+    if !help_output.status.success()
+        || !report_help_output_ok(&String::from_utf8_lossy(&help_output.stdout))
+    {
+        return Err(StrategyError::Runtime(
+            "the packaged report command did not expose the complete TR-300 CLI".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn report_version_output_ok(output: &str, expected: &str) -> bool {
+    let fields: Vec<_> = output.split_whitespace().collect();
+    matches!(fields.as_slice(), ["tr300", version] if post_install_version_ok(version, expected))
+}
+
+fn report_help_output_ok(output: &str) -> bool {
+    [
+        "Usage: tr300",
+        "[ACTION]",
+        "--fast",
+        "--full",
+        "--json",
+        "--report",
+        "--install",
+        "--update",
+        "--uninstall",
+    ]
+    .iter()
+    .all(|flag| output.contains(flag))
+}
+
 /// Confirm a pinned `cargo install tr300 --version ... --force --locked`
 /// update actually landed.
 ///
@@ -1917,7 +2093,9 @@ fn reexec_installed_version() -> Option<String> {
 /// a mismatch fails this channel without falling into another one.
 fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
     match reexec_installed_version() {
-        Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
+        Some(installed) if post_install_version_ok(&installed, expected) => {
+            verify_report_post_install(expected, "cargo install")
+        }
         Some(installed) => Err(StrategyError::Runtime(format!(
             "cargo install reported success but `tr300 --version` still reports v{installed} (expected v{expected}). Another tr300 may be earlier on PATH; this Cargo-channel update stopped without switching installers."
         ))),
@@ -1932,7 +2110,9 @@ fn verify_cargo_post_install(expected: &str) -> Result<(), StrategyError> {
 /// PATH conflict or locked destination can leave the old executable in place.
 fn verify_installer_post_install(expected: &str, label: &str) -> Result<(), StrategyError> {
     match reexec_installed_version() {
-        Some(installed) if post_install_version_ok(&installed, expected) => Ok(()),
+        Some(installed) if post_install_version_ok(&installed, expected) => {
+            verify_report_post_install(expected, label)
+        }
         Some(installed) => Err(StrategyError::Runtime(format!(
             "{label} reported success but the running install still reports v{installed} (expected v{expected})"
         ))),
@@ -1958,7 +2138,11 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
     let installed = reexec_installed_version()
         .ok_or_else(|| "Failed to run `tr300 --version` to confirm the install".to_string())?;
     if post_install_version_ok(&installed, expected) {
-        Ok(())
+        verify_report_post_install(expected, "Windows installer").map_err(|error| match error {
+            StrategyError::Preflight(message)
+            | StrategyError::Runtime(message)
+            | StrategyError::PolicyBlocked(message) => message,
+        })
     } else {
         Err(format!(
             "Installer exited successfully but `tr300 --version` still reports v{} (expected v{}). The installed binary may be locked by another process — close other tr300 windows / shells and re-run, or reboot to let Windows finish a deferred file replace.",
@@ -1976,6 +2160,117 @@ fn verify_post_install(expected: &str) -> Result<(), String> {
 /// moved the live image to a private sibling, so Restart Manager does not need
 /// to terminate the updater to release the installed path. A deferred
 /// delete/reboot still surfaces as 3010/1641 without claiming success.
+#[cfg(any(windows, test))]
+fn windows_system_executable_path(
+    system_directory: &std::path::Path,
+    executable: &str,
+) -> std::path::PathBuf {
+    system_directory.join(executable)
+}
+
+/// Resolve Windows Installer through the OS-owned system directory instead of
+/// the current directory or PATH. The Global updater calls this after its
+/// strict `runas` handoff, so a bare executable name here would otherwise let
+/// a planted `msiexec.exe` inherit the elevated worker token.
+#[cfg(windows)]
+fn trusted_windows_msiexec_path() -> std::io::Result<std::path::PathBuf> {
+    Ok(windows_system_executable_path(
+        &trusted_windows_system_directory()?,
+        "msiexec.exe",
+    ))
+}
+
+#[cfg(windows)]
+fn trusted_windows_system_directory() -> std::io::Result<std::path::PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use winapi::um::sysinfoapi::GetSystemDirectoryW;
+
+    const INITIAL_CAPACITY: usize = 260;
+    const MAX_DIRECTORY_CAPACITY: usize = 32_768;
+
+    let mut buffer = vec![0_u16; INITIAL_CAPACITY];
+    loop {
+        // SAFETY: buffer is writable for the supplied UTF-16 code-unit count.
+        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
+        if length == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let length = length as usize;
+        if length < buffer.len() {
+            buffer.truncate(length);
+            let directory = std::path::PathBuf::from(OsString::from_wide(&buffer));
+            if !directory.is_absolute() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Windows returned a non-absolute system directory",
+                ));
+            }
+            return Ok(directory);
+        }
+
+        let required = length
+            .checked_add(1)
+            .filter(|size| *size > buffer.len() && *size <= MAX_DIRECTORY_CAPACITY);
+        let Some(required) = required else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Windows returned an invalid system-directory length",
+            ));
+        };
+        buffer.resize(required, 0);
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_msi_install_command(
+    msiexec_path: &std::path::Path,
+    installer_path: &std::path::Path,
+) -> std::io::Result<Command> {
+    let working_directory = msiexec_path
+        .parent()
+        .filter(|directory| directory.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "trusted Windows Installer path has no absolute system directory",
+            )
+        })?;
+    let mut command = Command::new(msiexec_path);
+    command
+        .current_dir(working_directory)
+        .arg("/i")
+        .arg(installer_path)
+        .args(["/passive", "/norestart"]);
+    Ok(command)
+}
+
+/// Launch a downloaded Inno installer from its private staging directory.
+/// The Global installer self-elevates, so inheriting a caller-controlled
+/// current directory would carry that directory into the elevated process's
+/// DLL search path.
+#[cfg(any(windows, test))]
+fn windows_exe_install_command(installer_path: &std::path::Path) -> std::io::Result<Command> {
+    let working_directory = installer_path
+        .parent()
+        .filter(|directory| directory.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "staged Windows installer has no absolute private directory",
+            )
+        })?;
+    let mut command = Command::new(installer_path);
+    command.current_dir(working_directory).args([
+        "/SILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/RESTARTEXITCODE=3010",
+    ]);
+    Ok(command)
+}
+
 #[cfg(windows)]
 fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("msi").map_err(|error| {
@@ -2000,8 +2295,23 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         // replace). For the Global perMachine MSI, msiexec triggers UAC before
         // doing anything; for the Corporate perUser MSI, it installs silently
         // into LocalAppData with no elevation prompt.
-        let mut command = Command::new("msiexec");
-        command.args(["/i", &temp_path.to_string_lossy(), "/passive", "/norestart"]);
+        let msiexec_path = trusted_windows_msiexec_path().map_err(|error| {
+            let detail = format!(
+                "resolving the trusted Windows Installer executable failed: {error}. The installer was not launched and the existing TR-300 installation was left in place"
+            );
+            if likely_endpoint_policy_error(&error) {
+                StrategyError::PolicyBlocked(format!(
+                    "{detail}. Endpoint security or filesystem policy may be responsible. Ask IT to allow the official asset or install it manually: {url}"
+                ))
+            } else {
+                StrategyError::Runtime(detail)
+            }
+        })?;
+        let mut command = windows_msi_install_command(&msiexec_path, temp_path).map_err(|error| {
+            StrategyError::Runtime(format!(
+                "preparing the trusted Windows Installer launch failed: {error}. The installer was not launched and the existing TR-300 installation was left in place"
+            ))
+        })?;
         suppress_stdout_for_json(&mut command);
         let status = command.status().map_err(|error| {
             prelaunch_installer_io_error("launching Windows Installer", temp_path, url, error)
@@ -2068,13 +2378,11 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         eprintln!("  Launching Inno Setup installer...");
         // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
         // suppresses non-critical message boxes; /NORESTART skips reboot prompts.
-        let mut command = Command::new(temp_path);
-        command.args([
-            "/SILENT",
-            "/SUPPRESSMSGBOXES",
-            "/NORESTART",
-            "/RESTARTEXITCODE=3010",
-        ]);
+        let mut command = windows_exe_install_command(temp_path).map_err(|error| {
+            StrategyError::Runtime(format!(
+                "preparing the private Inno Setup launch failed: {error}. The installer was not launched and the existing TR-300 installation was left in place"
+            ))
+        })?;
         suppress_stdout_for_json(&mut command);
         let status = command.status().map_err(|error| {
             prelaunch_installer_io_error("launching the EXE installer", temp_path, url, error)
@@ -2722,6 +3030,165 @@ fn is_corporate_install_path(exe_path: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn incomplete_rollback_recovery_survives_later_update_attempts() {
+        for fail_report in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let first = paired_handoff_fixture(directory.path())
+                .rename_live_image()
+                .unwrap();
+            let (report, report_backup) = first.report.as_ref().unwrap();
+            let (blocked, recovery, expected): (_, _, &[u8]) = if fail_report {
+                (report, report_backup, b"old report")
+            } else {
+                (&first.original, &first.backup, b"old tr300")
+            };
+            std::fs::create_dir(blocked).unwrap();
+            assert!(first.rollback().is_err());
+            assert_eq!(std::fs::read(recovery).unwrap(), expected);
+
+            // Resolve only the deliberate test obstruction, then exercise a
+            // later transaction with distinct backup names in the same folder.
+            // Recovery from either failed payload must remain byte-for-byte.
+            std::fs::remove_dir(blocked).unwrap();
+            std::fs::write(blocked, b"replacement for retry").unwrap();
+            let second = WindowsLiveImageHandoff {
+                original: first.original.clone(),
+                backup: directory.path().join(".tr300-update-backup-3-4.exe"),
+                report: Some((
+                    report.clone(),
+                    directory.path().join(".tr300-report-update-backup-3-4.exe"),
+                )),
+            }
+            .rename_live_image()
+            .unwrap();
+            assert!(second
+                .finish(Err(StrategyError::Runtime(
+                    "simulated retry failure".to_string()
+                )))
+                .is_err());
+            assert_eq!(std::fs::read(recovery).unwrap(), expected);
+        }
+    }
+
+    #[cfg(windows)]
+    fn paired_handoff_fixture(directory: &std::path::Path) -> WindowsLiveImageHandoff {
+        let original = directory.join("tr300.exe");
+        let report = directory.join("report.exe");
+        std::fs::write(&original, b"old tr300").unwrap();
+        std::fs::write(&report, b"old report").unwrap();
+        WindowsLiveImageHandoff {
+            original,
+            backup: directory.join(".tr300-update-backup-1-2.exe"),
+            report: Some((
+                report,
+                directory.join(".tr300-report-update-backup-1-2.exe"),
+            )),
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn update_rollback_reports_a_new_unproven_report_without_deleting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("tr300.exe");
+        let report = directory.path().join("report.exe");
+        std::fs::write(&original, b"old tr300").unwrap();
+        let handoff = WindowsLiveImageHandoff {
+            original: original.clone(),
+            backup: directory.path().join(".tr300-update-backup-1-2.exe"),
+            report: None,
+        }
+        .rename_live_image()
+        .unwrap();
+        std::fs::write(&original, b"new tr300").unwrap();
+        std::fs::write(&report, b"new unproven report").unwrap();
+        let error = handoff.rollback().unwrap_err();
+        assert!(error.to_string().contains("Rollback is incomplete"));
+        assert_eq!(std::fs::read(&original).unwrap(), b"old tr300");
+        assert_eq!(std::fs::read(&report).unwrap(), b"new unproven report");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_update_handoff_restores_both_payloads_after_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let handoff = paired_handoff_fixture(directory.path())
+            .rename_live_image()
+            .unwrap();
+        assert!(!handoff.original.exists());
+        let report = &handoff.report.as_ref().unwrap().0;
+        assert!(!report.exists());
+        std::fs::write(&handoff.original, b"new tr300").unwrap();
+        std::fs::write(report, b"new report").unwrap();
+        handoff.rollback().unwrap();
+        assert_eq!(std::fs::read(&handoff.original).unwrap(), b"old tr300");
+        assert_eq!(std::fs::read(report).unwrap(), b"old report");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_update_handoff_restores_report_even_if_tr300_restore_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let handoff = paired_handoff_fixture(directory.path())
+            .rename_live_image()
+            .unwrap();
+        std::fs::create_dir(&handoff.original).unwrap();
+        assert!(handoff.rollback().is_err());
+        assert_eq!(
+            std::fs::read(&handoff.report.as_ref().unwrap().0).unwrap(),
+            b"old report"
+        );
+        assert_eq!(std::fs::read(&handoff.backup).unwrap(), b"old tr300");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_update_handoff_restores_tr300_when_report_staging_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let handoff = paired_handoff_fixture(directory.path());
+        std::fs::remove_file(&handoff.report.as_ref().unwrap().0).unwrap();
+        assert!(handoff.rename_live_image().is_err());
+        assert_eq!(
+            std::fs::read(directory.path().join("tr300.exe")).unwrap(),
+            b"old tr300"
+        );
+    }
+
+    #[test]
+    fn cleanup_accepts_only_strict_report_backup_names() {
+        assert!(is_windows_any_update_backup_name(
+            ".tr300-report-update-backup-1-2.exe"
+        ));
+        for name in [
+            "report.exe",
+            ".tr300-report-update-backup-x-2.exe",
+            ".tr300-report-update-backup-1-2.cmd",
+            "../.tr300-report-update-backup-1-2.exe",
+        ] {
+            assert!(!is_windows_any_update_backup_name(name));
+        }
+    }
+
+    #[test]
+    fn report_verification_requires_the_delegated_tr300_version() {
+        assert!(report_version_output_ok("tr300 4.4.0\n", "4.4.0"));
+        for output in ["report 4.4.0", "tr300 4.3.12", "other tr300 4.4.0", "tr300"] {
+            assert!(!report_version_output_ok(output, "4.4.0"));
+        }
+    }
+
+    #[test]
+    fn report_verification_requires_maintenance_help_without_running_actions() {
+        let help =
+            "Usage: tr300 [ACTION] --fast --full --json --report --install --update --uninstall";
+        assert!(report_help_output_ok(help));
+        for action in ["[ACTION]", "--install", "--update", "--uninstall"] {
+            assert!(!report_help_output_ok(&help.replace(action, "")));
+        }
+    }
+
     #[test]
     fn release_asset_urls_pin_the_resolved_tag_without_versioning_the_filename() {
         assert_eq!(
@@ -2881,7 +3348,6 @@ TeamIdentifier=M9D5379H93\n";
             UpdateStrategy::InstallerPowerShell.json_method(),
             "installer"
         );
-        assert_eq!(UpdateStrategy::InstallerPwsh.json_method(), "installer");
         // New v3.15.0+ MSI/EXE strategies map to "installer" in the legacy
         // `method` field. External consumers wanting the specific installer
         // type should read the precise `strategy` field instead.
@@ -2948,7 +3414,6 @@ TeamIdentifier=M9D5379H93\n";
             UpdateStrategy::ExeCorporate.label(),
             UpdateStrategy::Cargo.label(),
             UpdateStrategy::InstallerPowerShell.label(),
-            UpdateStrategy::InstallerPwsh.label(),
             UpdateStrategy::InstallerCurl.label(),
             UpdateStrategy::InstallerWget.label(),
             UpdateStrategy::MacPkg.label(),
@@ -3175,6 +3640,157 @@ TeamIdentifier=M9D5379H93\n";
         assert!(!first_dir.exists());
         drop(second);
         assert!(!second_dir.exists());
+    }
+
+    #[test]
+    fn windows_msi_command_uses_an_explicit_system_path_not_a_planted_name() {
+        let fixture = tempfile::tempdir().unwrap();
+        let system_directory = fixture.path().join("Windows").join("System32");
+        let planted_directory = fixture.path().join("search-path-plant");
+        std::fs::create_dir_all(&system_directory).unwrap();
+        std::fs::create_dir_all(&planted_directory).unwrap();
+
+        let trusted = windows_system_executable_path(&system_directory, "msiexec.exe");
+        let planted = planted_directory.join("msiexec.exe");
+        std::fs::write(&trusted, b"trusted fixture").unwrap();
+        std::fs::write(&planted, b"planted fixture").unwrap();
+
+        let installer = fixture.path().join("candidate.msi");
+        let command = windows_msi_install_command(&trusted, &installer).unwrap();
+        assert!(trusted.is_absolute());
+        assert_eq!(command.get_program(), trusted.as_os_str());
+        assert_eq!(command.get_current_dir(), Some(system_directory.as_path()));
+        assert_ne!(command.get_program(), planted.as_os_str());
+        assert_ne!(command.get_program(), std::ffi::OsStr::new("msiexec.exe"));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                std::ffi::OsStr::new("/i"),
+                installer.as_os_str(),
+                std::ffi::OsStr::new("/passive"),
+                std::ffi::OsStr::new("/norestart"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_powershell_command_ignores_planted_launchers_and_preserves_install_context() {
+        let fixture = tempfile::tempdir().unwrap();
+        let directory = fixture.path().join("WindowsPowerShell").join("v1.0");
+        let planted = fixture.path().join("caller-controlled");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::create_dir_all(&planted).unwrap();
+        for name in ["powershell.exe", "pwsh.exe"] {
+            std::fs::write(planted.join(name), b"hostile launcher").unwrap();
+        }
+        let launcher = directory.join("powershell.exe");
+        let prefix = fixture.path().join("install prefix");
+        let script = "$ErrorActionPreference='Stop'; Write-Output 'probe'";
+        let command =
+            windows_powershell_install_command(&launcher, script, prefix.to_str().unwrap())
+                .unwrap();
+        assert_eq!(command.get_program(), launcher.as_os_str());
+        assert_eq!(command.get_current_dir(), Some(directory.as_path()));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
+            ]
+            .map(std::ffi::OsStr::new)
+        );
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "CARGO_DIST_FORCE_INSTALL_DIR"
+                && value == Some(prefix.as_os_str())));
+        assert!(windows_powershell_install_command(
+            std::path::Path::new("powershell.exe"),
+            script,
+            "prefix"
+        )
+        .is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn trusted_windows_powershell_runs_with_a_hostile_search_path() {
+        let fixture = tempfile::tempdir().unwrap();
+        for name in ["powershell.exe", "pwsh.exe"] {
+            std::fs::write(fixture.path().join(name), b"must not execute").unwrap();
+        }
+        let launcher = trusted_windows_powershell().unwrap();
+        assert!(launcher.is_absolute());
+        assert!(launcher.starts_with(trusted_windows_system_directory().unwrap()));
+        let mut command = windows_powershell_install_command(
+            &launcher,
+            "[Console]::Write('trusted-launcher-probe')",
+            fixture.path().to_str().unwrap(),
+        )
+        .unwrap();
+        command.env("PATH", fixture.path());
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "trusted-launcher-probe"
+        );
+    }
+
+    #[test]
+    fn windows_exe_command_uses_private_staging_directory_not_planted_cwd() {
+        let fixture = tempfile::tempdir().unwrap();
+        let staging_directory = fixture.path().join("private-staging");
+        let planted_directory = fixture.path().join("caller-controlled");
+        std::fs::create_dir_all(&staging_directory).unwrap();
+        std::fs::create_dir_all(&planted_directory).unwrap();
+        let installer = staging_directory.join("installer.exe");
+        let planted = planted_directory.join("installer.exe");
+        std::fs::write(&installer, b"trusted fixture").unwrap();
+        std::fs::write(&planted, b"planted fixture").unwrap();
+
+        let command = windows_exe_install_command(&installer).unwrap();
+        assert_eq!(command.get_program(), installer.as_os_str());
+        assert_eq!(command.get_current_dir(), Some(staging_directory.as_path()));
+        assert_ne!(command.get_current_dir(), Some(planted_directory.as_path()));
+        assert_ne!(command.get_program(), planted.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                std::ffi::OsStr::new("/SILENT"),
+                std::ffi::OsStr::new("/SUPPRESSMSGBOXES"),
+                std::ffi::OsStr::new("/NORESTART"),
+                std::ffi::OsStr::new("/RESTARTEXITCODE=3010"),
+            ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn trusted_windows_msiexec_is_the_absolute_native_system_copy() {
+        let path = trusted_windows_msiexec_path().unwrap();
+        assert!(path.is_absolute());
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("msiexec.exe")
+        );
+        assert!(
+            path.is_file(),
+            "missing Windows Installer at {}",
+            path.display()
+        );
+
+        let command =
+            windows_msi_install_command(&path, std::path::Path::new("candidate.msi")).unwrap();
+        assert_eq!(command.get_program(), path.as_os_str());
+        assert_eq!(command.get_current_dir(), path.parent());
     }
 
     #[test]
@@ -3422,6 +4038,26 @@ TeamIdentifier=M9D5379H93\n";
         assert_eq!(windows_quote_command_arg("msi_global"), "msi_global");
         assert_eq!(windows_quote_command_arg(""), r#""""#);
         assert_eq!(windows_quote_command_arg(r#"a\"b"#), r#""a\\\"b""#);
+    }
+
+    #[test]
+    fn elevated_worker_uses_trusted_product_directory_not_caller_cwd() {
+        let fixture = tempfile::tempdir().unwrap();
+        let product_directory = fixture
+            .path()
+            .join("Program Files")
+            .join("tr300")
+            .join("bin");
+        let planted_directory = fixture.path().join("caller-controlled");
+        std::fs::create_dir_all(&product_directory).unwrap();
+        std::fs::create_dir_all(&planted_directory).unwrap();
+        let current_exe = product_directory.join("tr300.exe");
+
+        let directory = windows_elevated_worker_directory(&current_exe).unwrap();
+        assert_eq!(directory, product_directory);
+        assert_ne!(directory, planted_directory);
+        assert!(windows_elevated_worker_directory(std::path::Path::new("tr300.exe")).is_err());
+        assert!(windows_elevated_worker_directory(&product_directory.join("other.exe")).is_err());
     }
 
     #[cfg(windows)]

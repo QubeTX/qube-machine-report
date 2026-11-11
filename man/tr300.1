@@ -1,15 +1,15 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH tr300 1  "tr300 4.2.2"
+.TH tr300 1  "tr300 4.4.1"
 .SH NAME
 tr300 \- TR\-300 Machine Report \- Cross\-platform system information
 .SH SYNOPSIS
-\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-r\fR|\fB\-\-report\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIACTION\fR]
+\fBtr300\fR [\fB\-\-ascii\fR] [\fB\-\-json\fR] [\fB\-\-install\fR] [\fB\-\-uninstall\fR] [\fB\-\-update\fR] [\fB\-t\fR|\fB\-\-title\fR] [\fB\-\-no\-color\fR] [\fB\-\-fast\fR] [\fB\-f\fR|\fB\-\-full\fR] [\fB\-\-no\-elevation\-hint\fR] [\fB\-r\fR|\fB\-\-report\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIACTION\fR]
 .SH DESCRIPTION
 TR\-300 displays comprehensive system information including OS, network, CPU,
 memory, disk usage, and session details in a formatted table.
 .PP
-After installation with \-\-install, you can also use the \*(Aqreport\*(Aq alias.
+The companion \*(Aqreport\*(Aq command is a full alias for \*(Aqtr300\*(Aq, including all reporting, installation, update, and uninstall options.
 .SH OPTIONS
 .TP
 \fB\-\-ascii\fR
@@ -19,10 +19,10 @@ Use ASCII characters instead of Unicode box\-drawing
 Output in JSON format instead of table
 .TP
 \fB\-\-install\fR
-Install tr300 to shell profile (adds \*(Aqreport\*(Aq alias and auto\-run)
+Configure shell\-profile auto\-run
 .TP
 \fB\-\-uninstall\fR
-Remove tr300 from shell profile
+Open uninstall menu (profile\-only or Complete removal)
 .TP
 \fB\-\-update\fR
 Check for updates and install the latest version
@@ -36,11 +36,14 @@ Disable colored output
 \fB\-\-fast\fR
 Fast mode: skip slow platform\-specific collectors for quick auto\-run
 .TP
+\fB\-f\fR, \fB\-\-full\fR
+Explicit full collection (the default when neither \-\-fast nor \-\-full is given; provided as a symmetric counterpart to \-\-fast)
+.TP
 \fB\-\-no\-elevation\-hint\fR
 Suppress the "Run with sudo / Administrator for more details" footer hint
 .TP
 \fB\-r\fR, \fB\-\-report\fR
-Save this full table report as Markdown in Downloads
+Save this full table report as Markdown in Downloads (aliases: \-s, \-\-save)
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)
@@ -60,9 +63,11 @@ update
 .IP \(bu 2
 install
 .IP \(bu 2
-uninstall
+uninstall: Open the uninstall menu for profile\-only or Complete removal
 .RE
 .SH VERSION
-v4.2.2
+v4.4.1
 .SH AUTHORS
 Emmett S <hey@emmetts.dev>
+.SH SEE ALSO
+report(1)
