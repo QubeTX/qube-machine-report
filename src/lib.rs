@@ -35,6 +35,7 @@ pub mod install;
 pub mod migrate;
 pub mod render;
 pub mod report;
+mod trusted_process;
 pub mod update;
 
 pub use collectors::{CollectMode, SystemInfo};

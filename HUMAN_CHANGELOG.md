@@ -13,7 +13,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.4.3] - 2026-11-11
+
+### Fixed
+- System reporting and maintenance use trusted system tools even when the current folder or command search settings contain another program with the same name. Reporting modes and optional hardware checks keep their existing behavior.
+- Managed Windows installs verify the downloaded archive before extraction and prevent inherited PowerShell module settings from selecting a replacement installer component.
+- Temporary native installers receive stronger protection against replacement while an update is being verified and installed.
+
+### Internal
+- Avoid rebuilding the same audit tool on every CI run while continuing to check current vulnerabilities and run the platform and release checks.
+
 ## [4.4.2] - 2026-11-11
+
+> Release status: the crate was published, but downloadable installers remain private while the complete security fixes are consolidated into v4.4.3.
 
 ### Fixed
 - Restore the Mac release build after GitHub retired its older runner image. This update includes the Windows updater, GPU-helper, and secure-connection fixes from the previous version, whose crate was published but whose downloadable installers could not finish.

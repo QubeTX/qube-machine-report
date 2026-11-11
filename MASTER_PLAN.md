@@ -5,9 +5,9 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-11-11
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.1 / 4.4.2
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.2 / 4.4.3
 
-Candidate v4.4.2 carries the Windows/GPU/TLS security fixes and pins supported native Apple release runners. v4.4.1 was published as an exact crate/tag at `b4024e6`, but Release `42970145859` stopped on retired `macos-14` before signing or draft creation. Preserve that history and follow the new exact-source chain under `.tasks/tasks/sec35.md`.
+Candidate v4.4.3 consolidates the completed collector/maintenance/staging security audit before any further merge or tag. v4.4.1 and v4.4.2 are immutable published crates/tags; neither has a complete public GitHub distribution. v4.4.2's signed 24-asset draft remains private after downstream publication was stopped. The native-runner repair is retained. Follow `.tasks/tasks/sec35.md`; publish this one candidate only after all audit fixes and gates pass.
 
 Current release: immutable `v4.4.0` at
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,

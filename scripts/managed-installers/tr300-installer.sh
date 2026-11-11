@@ -9,6 +9,27 @@
 
 set -u
 
+tr300_entry_path=${PATH-}
+tr300_invocation_path=${TR300_INVOCATION_PATH-$tr300_entry_path}
+# The wrapper and its exact cargo-dist child use OS tools, including mktemp.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+unset BASH_ENV ENV ZDOTDIR ZSH_ENV CDPATH 2>/dev/null || true
+unset SHELLOPTS BASHOPTS BASH_XTRACEFD PS4 GLOBIGNORE \
+    PYTHONPATH PYTHONHOME PYTHONSTARTUP PERL5OPT PERL5LIB RUBYOPT RUBYLIB \
+    NODE_OPTIONS NODE_PATH DEVELOPER_DIR TOOLCHAINS SDKROOT \
+    LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT \
+    DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH \
+    DYLD_FALLBACK_LIBRARY_PATH DYLD_FALLBACK_FRAMEWORK_PATH \
+    GCONV_PATH OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES \
+    CURL_HOME WGETRC 2>/dev/null || true
+# A shell may have imported functions before entering this published wrapper.
+unset -f curl wget mktemp mkdir chmod rm cp mv sed awk grep cat tr wc \
+    dirname basename uname pwd head tail id getent ldd tput sudo pkgutil \
+    codesign spctl sh 2>/dev/null || true
+tr300_entry_directory=$(pwd -P)
+tr300_invocation_directory=${TR300_INVOCATION_CWD-$tr300_entry_directory}
+
 tr300_tag='@TR300_TAG@'
 tr300_version='@TR300_VERSION@'
 tr300_dist_installer_sha256='@TR300_DIST_INSTALLER_SHA256@'
@@ -135,6 +156,21 @@ TR300_SHA256SUM_SHIM
     shim_sha256=${shim_output%% *}
     [ "$shim_sha256" = "$tr300_dist_installer_sha256" ] ||
         tr300_fail 'the private checksum shim returned an unexpected digest'
+    # The pinned raw installer also invokes these tools; suppress their user rc
+    # files for that child without modifying the immutable cargo-dist script.
+    for tr300_tool in curl wget; do
+        tr300_tool_path=''
+        for tr300_candidate in "/usr/bin/$tr300_tool" "/bin/$tr300_tool"; do
+            if [ -x "$tr300_candidate" ]; then tr300_tool_path=$tr300_candidate; break; fi
+        done
+        [ -n "$tr300_tool_path" ] || continue
+        case "$tr300_tool" in curl) tr300_tool_option=-q ;; wget) tr300_tool_option=--no-config ;; esac
+        printf '%s\n' '#!/bin/sh' "exec \"$tr300_tool_path\" $tr300_tool_option \"\$@\"" \
+            > "$tr300_sha256sum_directory/$tr300_tool" ||
+            tr300_fail 'could not create a private download-tool shim'
+        /bin/chmod 700 "$tr300_sha256sum_directory/$tr300_tool" ||
+            tr300_fail 'could not protect the private download-tool shim'
+    done
 }
 trap tr300_cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -151,17 +187,17 @@ tr300_download() {
     if command -v curl >/dev/null 2>&1; then
         auth_token=${TR300_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}
         if [ -n "$auth_token" ]; then
-            curl --proto '=https' --tlsv1.2 -fLsS \
+            curl -q --proto '=https' --tlsv1.2 -fLsS \
                 -H "Authorization: Bearer ${auth_token}" "$url" -o "$output"
         else
-            curl --proto '=https' --tlsv1.2 -fLsS "$url" -o "$output"
+            curl -q --proto '=https' --tlsv1.2 -fLsS "$url" -o "$output"
         fi
     elif command -v wget >/dev/null 2>&1; then
         auth_token=${TR300_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}
         if [ -n "$auth_token" ]; then
-            wget -q --header="Authorization: Bearer ${auth_token}" -O "$output" "$url"
+            wget --no-config -q --header="Authorization: Bearer ${auth_token}" -O "$output" "$url"
         else
-            wget -q -O "$output" "$url"
+            wget --no-config -q -O "$output" "$url"
         fi
     else
         tr300_fail 'curl or wget is required'
@@ -441,28 +477,41 @@ tr300_assert_no_unknown_path_owners() {
         native=/usr/local/bin/tr300
     fi
 
-    old_ifs=$IFS
-    IFS=:
-    for directory in ${PATH:-}; do
-        [ -n "$directory" ] || directory=.
+    tr300_scan_owner_path "${PATH-}" "$(pwd -P)"
+    tr300_scan_owner_path "$tr300_entry_path" "$tr300_entry_directory"
+    tr300_scan_owner_path "$tr300_invocation_path" "$tr300_invocation_directory"
+}
+
+tr300_scan_owner_path() {
+    tr300_scan_remaining=$1
+    tr300_scan_directory=$2
+    while :; do
+        case "$tr300_scan_remaining" in
+            *:*) directory=${tr300_scan_remaining%%:*}; tr300_scan_remaining=${tr300_scan_remaining#*:}; tr300_scan_more=1 ;;
+            *) directory=$tr300_scan_remaining; tr300_scan_more=0 ;;
+        esac
+        case "$directory" in
+            /*) ;;
+            '') directory=$tr300_scan_directory ;;
+            *) directory="$tr300_scan_directory/$directory" ;;
+        esac
         candidate="${directory%/}/tr300"
         if [ ! -x "$candidate" ]; then
             # Git Bash cannot represent Unix executable bits in the isolated
             # fixture; production macOS/Linux calls still require `-x`.
             if [ "${TR300_MANAGED_INSTALLER_TEST_ONLY:-}" != 1 ] || [ ! -f "$candidate" ]; then
-                continue
+                [ "$tr300_scan_more" -eq 1 ] && continue
+                break
             fi
         fi
         full=$(tr300_normalize_path "$candidate") || {
-            IFS=$old_ifs
             tr300_fail "could not resolve active PATH copy: $candidate"
         }
         if [ "$full" != "$intended" ] && [ "$full" != "$prior" ] && [ "$full" != "$native" ]; then
-            IFS=$old_ifs
             tr300_fail "an unrecognized portable/PATH copy is active at $full; preserving it instead of guessing ownership"
         fi
+        [ "$tr300_scan_more" -eq 1 ] || break
     done
-    IFS=$old_ifs
 }
 
 tr300_verify_receipt() {
@@ -589,7 +638,7 @@ tr300_take_over_macos_pkg() {
 }
 
 tr300_main() {
-    tr300_temp=$(mktemp -d "${TMPDIR:-/tmp}/tr300-managed-install.XXXXXXXX") \
+    tr300_temp=$(mktemp -d "/tmp/tr300-managed-install.XXXXXXXX") \
         || tr300_fail 'could not create a private staging directory'
     tr300_prepare_macos_pkg
     tr300_save_managed_state
@@ -601,7 +650,10 @@ tr300_main() {
     chmod 700 "$dist_installer" || tr300_fail 'could not protect the managed installer'
 
     tr300_transaction_started=1
-    PATH="${tr300_sha256sum_directory}:${PATH:-/usr/bin:/bin}" \
+    # GNU mktemp uses this private base. Apple's no-template mktemp instead
+    # uses its OS-provided per-user temporary directory, ignoring TMPDIR.
+    PATH="${tr300_sha256sum_directory}:/usr/bin:/bin:/usr/sbin:/sbin" \
+        TMPDIR="$tr300_temp" \
         /bin/sh "$dist_installer" "$@" ||
         tr300_fail 'cargo-dist installation did not complete'
     tr300_verify_receipt

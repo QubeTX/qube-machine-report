@@ -1,7 +1,7 @@
 //! User session information collector
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::collectors::command::{run_output_with_env, CommandTimeout};
+use crate::collectors::command::{run_system_output_with_env, CommandTimeout};
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::env;
@@ -193,7 +193,7 @@ fn get_last_login_linux(username: &str) -> (Option<String>, Option<String>) {
     let c_locale = || [("LC_ALL", "C")];
 
     // Try lastlog2 first (newer systems)
-    if let Some(output) = run_output_with_env(
+    if let Some(output) = run_system_output_with_env(
         "lastlog2",
         ["--user", username],
         c_locale(),
@@ -211,7 +211,7 @@ fn get_last_login_linux(username: &str) -> (Option<String>, Option<String>) {
     }
 
     // Try lastlog (older systems)
-    if let Some(output) = run_output_with_env(
+    if let Some(output) = run_system_output_with_env(
         "lastlog",
         ["-u", username],
         c_locale(),
@@ -230,7 +230,7 @@ fn get_last_login_linux(username: &str) -> (Option<String>, Option<String>) {
 
     // Try last command (also LC_ALL=C — `last`'s output is localized
     // on some distros and our parser keys off positional columns).
-    if let Some(output) = run_output_with_env(
+    if let Some(output) = run_system_output_with_env(
         "last",
         ["-F", "-1", "-w", username],
         c_locale(),
@@ -254,7 +254,7 @@ fn get_last_login_linux(username: &str) -> (Option<String>, Option<String>) {
 #[cfg(target_os = "macos")]
 fn get_last_login_macos(username: &str) -> (Option<String>, Option<String>) {
     // Force stable English weekday/month tokens for the fallback parser.
-    if let Some(output) = run_output_with_env(
+    if let Some(output) = run_system_output_with_env(
         "last",
         ["-1", username],
         [("LC_ALL", "C")],

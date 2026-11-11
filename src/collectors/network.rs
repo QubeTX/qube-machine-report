@@ -1,7 +1,7 @@
 //! Network information collector
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::collectors::command::run_stdout;
+use crate::collectors::command::run_system_stdout;
 use crate::collectors::command::CommandTimeout;
 use crate::collectors::CollectMode;
 use crate::error::Result;
@@ -121,7 +121,7 @@ fn get_machine_ip_windows(wmi_pair: &(Option<String>, Vec<String>)) -> Option<St
     }
 
     // Fallback: try ipconfig
-    if let Some(output) = crate::collectors::command::run_output(
+    if let Some(output) = crate::collectors::command::run_system_output(
         "ipconfig",
         std::iter::empty::<&str>(),
         CommandTimeout::Normal,
@@ -145,14 +145,16 @@ fn get_machine_ip_windows(wmi_pair: &(Option<String>, Vec<String>)) -> Option<St
 #[cfg(target_os = "linux")]
 fn get_machine_ip_linux() -> Option<String> {
     // Ask the kernel which source IP it would use for the default route.
-    if let Some(stdout) = run_stdout("ip", ["route", "get", "1.1.1.1"], CommandTimeout::Normal) {
+    if let Some(stdout) =
+        run_system_stdout("ip", ["route", "get", "1.1.1.1"], CommandTimeout::Normal)
+    {
         if let Some(ip) = parse_route_src_ip(&stdout) {
             return Some(ip);
         }
     }
 
     // Fallback: hostname -I
-    if let Some(stdout) = run_stdout("hostname", ["-I"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_system_stdout("hostname", ["-I"], CommandTimeout::Normal) {
         if let Some(ip) = stdout.split_whitespace().find_map(valid_routable_ip) {
             return Some(ip);
         }
@@ -163,12 +165,12 @@ fn get_machine_ip_linux() -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn get_machine_ip_macos() -> Option<String> {
-    if let Some(stdout) = run_stdout("scutil", ["--nwi"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_system_stdout("scutil", ["--nwi"], CommandTimeout::Normal) {
         if let Some(ip) = parse_scutil_nwi_primary_address(&stdout) {
             return Some(ip);
         }
         if let Some(iface) = parse_scutil_nwi_primary_interface(&stdout) {
-            if let Some(ip) = run_stdout(
+            if let Some(ip) = run_system_stdout(
                 "ipconfig",
                 ["getifaddr", iface.as_str()],
                 CommandTimeout::Normal,
@@ -182,7 +184,9 @@ fn get_machine_ip_macos() -> Option<String> {
 
     // Try ipconfig getifaddr en0 (WiFi) or en1 (Ethernet)
     for iface in &["en0", "en1", "en2"] {
-        if let Some(output) = run_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal) {
+        if let Some(output) =
+            run_system_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal)
+        {
             if let Some(ip) = valid_routable_ip(output.trim()) {
                 return Some(ip);
             }
@@ -190,13 +194,13 @@ fn get_machine_ip_macos() -> Option<String> {
     }
 
     // Fallback: try route
-    if let Some(stdout) = run_stdout("route", ["get", "default"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_system_stdout("route", ["get", "default"], CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.trim().starts_with("interface:") {
                 if let Some(iface) = line.split(':').next_back() {
                     let iface = iface.trim();
                     if let Some(output) =
-                        run_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal)
+                        run_system_stdout("ipconfig", ["getifaddr", iface], CommandTimeout::Normal)
                     {
                         if let Some(ip) = valid_routable_ip(output.trim()) {
                             return Some(ip);
@@ -262,7 +266,7 @@ fn get_dns_servers_windows(wmi_pair: &(Option<String>, Vec<String>)) -> Vec<Stri
     // Fallback: parse ipconfig /all
     let mut servers = Vec::new();
     if let Some(output) =
-        crate::collectors::command::run_output("ipconfig", ["/all"], CommandTimeout::Normal)
+        crate::collectors::command::run_system_output("ipconfig", ["/all"], CommandTimeout::Normal)
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut in_dns_section = false;
@@ -315,7 +319,7 @@ fn get_dns_servers_linux() -> Vec<String> {
 
     // Try systemd-resolved if no servers found
     let mut servers = Vec::new();
-    if let Some(stdout) = run_stdout("resolvectl", ["status"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_system_stdout("resolvectl", ["status"], CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.contains("DNS Servers:") {
                 if let Some((_, ips)) = line.split_once(':') {
@@ -342,7 +346,7 @@ fn get_dns_servers_macos() -> Vec<String> {
     let mut servers = Vec::new();
 
     // Try scutil --dns
-    if let Some(stdout) = run_stdout("scutil", ["--dns"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_system_stdout("scutil", ["--dns"], CommandTimeout::Normal) {
         for line in stdout.lines() {
             let line = line.trim();
             if line.starts_with("nameserver[") {

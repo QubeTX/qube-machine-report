@@ -1,4 +1,4 @@
-TT;DR: Resolve PR #35 against current main and ship v4.4.2 to fix Windows managed updater launcher hijacking. Implementation and release verification are active.
+TT;DR: Resolve PR #35 against current main and ship one consolidated v4.4.3 candidate to fix Windows managed updater launcher hijacking. Implementation and release verification are active.
 
 ## Why
 Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the security fix; expanded in the same session to the concerns in closed PRs #1 and #2.
@@ -7,13 +7,13 @@ Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the secur
 Integrate current main, preserve both command aliases and origin/receipt/checksum/rollback contracts, restrict PowerShell launch to the native system-directory host, add adversarial coverage, patch remaining Unix GPU helper resolution from PR #2, audit PR #1 against existing private staging, update vulnerable TLS dependencies, and publish through the existing protected release chain. Preserve unrelated dirty work in the original checkout by using a separate worktree. Physical hardware acceptance stays in its existing tasks.
 
 ## Plan
-Resolve changelog conflicts while preserving both histories; prepare patch v4.4.1; run local gates and independent review; push the PR branch and pass hosted gates; merge only its reviewed exact head; verify exact-main CI and OIDC; tag that SHA once; follow private 24/30/34 asset assembly and public smokes. Diagnose failures and fix forward under the release skill without bypassing gates or moving tags.
+Complete the bounded collector, maintenance-child-chain, and staging inventories, then consolidate every confirmed fix into unpublished v4.4.3. Preserve source/channel/receipt/rollback and foreign-command ownership semantics. Run one complete local gate and independent review of the final diff, pass exact-head native hosted checks and actual cargo-dist plan, merge the qualified exact head, verify main CI/OIDC, and tag that source once. Follow private 24/30/34 asset assembly and public smokes; record final evidence through the protected docs PR. The user permits a necessary new version but rejects release-driven diagnosis and unnecessary CI-only version bumps.
 
 ## Impact
 Windows managed self-updates use the OS-owned Windows PowerShell executable and working directory instead of a PATH-selected host. Missing trusted hosts fail before launch. Existing install channels, receipt prefixes, installer integrity checks, and both report/tr300 commands remain supported.
 
 ## Acceptance
-Functional bar: current main contains the fix and the complete immutable v4.4.2 distribution is public, with the crate and both command aliases verified.
+Functional bar: current main contains the fix and the complete immutable v4.4.3 distribution is public, with the crate and both command aliases verified.
 Evidence bar: adversarial Windows launcher test, full local gates, exact-head independent review/hosted checks, exact-main CI/OIDC, signed native publication, exact public inventory and smokes.
 Gate ownership: repository release skill and protected branch/release workflows.
 Valid bounded outcomes: complete only with all required evidence; otherwise active/partial with exact failing gate and next action recorded.
@@ -30,14 +30,14 @@ Valid bounded outcomes: complete only with all required evidence; otherwise acti
 | Independent review | review_security and release_gate_review agents | Exact heads 8c8df9a and 578e301a reviewed without blockers | Security and fixture findings addressed | Hosted gates remain separately required | PASS |
 
 ## Verification
-- [ ] Local release gates and adversarial Windows launcher probe pass
-- [ ] Exact-head independent review and hosted CI/Release plan pass; PR merged
-- [ ] Exact-main CI and trusted-OIDC crate publication pass before immutable tag
+- [ ] Current consolidated candidate passes local release gates and adversarial child-chain/staging probes
+- [ ] Consolidated exact head passes independent review and hosted CI/Release plan; PR merged
+- [ ] Consolidated exact-main CI and trusted-OIDC crate publication pass before immutable tag
 - [ ] Complete native release chain, public asset audit, and post-public smokes pass
 - [ ] Protected follow-up documentation records the final evidence
 
 ## Status
-Fix-forward candidate is v4.4.2. Immutable v4.4.1 remains at `b4024e69e7a2def24da3ba2b42ed19a4dcd2b6a1`, with exact unyanked crate checksum `45345d6727f2a4e4999f23921c8f743c0d066c7f45c9dd05d1502414ed95f4f2`. Release `42970145859` cancelled its ARM Apple job before runner assignment because pinned cargo-dist generated retired `macos-14`; five other builds passed, all signers/host skipped, no draft. Do not move/reuse that tag. Candidate v4.4.2 explicitly maps Apple builders to native 15/15-intel and validates the actual JSON matrix in CI and Release with negative fixtures. Local gates and independent review are running before a new protected PR; public GitHub baseline remains v4.4.0.
+Active pre-release qualification of unpublished v4.4.3 in PR #38. Reviewed heads db5d0a4 and 2535c72 pass local gates; actual Release plan 42988722165 passes. First final-head CI 42988722084 passed 18/20; native Mac Rust tests passed, but their new raw-child staging fixture assumed GNU mktemp behavior. Correcting its assertion against Apple's owning implementation before rerunning the exact-head native gate. Nothing has merged/published for v4.4.3. Prior v4.4.2's 24-asset draft 441328198 remains private, and public latest remains v4.4.0. User authorized one necessary new version and normal publishing after complete qualification; do not create versions for these pre-release corrections.
 
 ## Activity
 - 2026-11-10 — Started isolated worktree; inspected PR and current main; preserved original checkout's dirty work (agent: codex).
@@ -62,3 +62,18 @@ Fix-forward candidate is v4.4.2. Immutable v4.4.1 remains at `b4024e69e7a2def24d
 - 2026-11-11 — Automatic OIDC publication 42968537979 passed. Independently verified unyanked 4.4.1 checksum/source, then pushed only immutable tag v4.4.1 at b4024e6. Release 42970145859 is running (agent: codex).
 
 - 2026-11-11 — v4.4.1 release stopped deterministically on retired macos-14 before signing/host. Per release policy, preserved tag/crate and prepared v4.4.2 global runner overrides plus actual-plan guard/negative fixtures. Local pinned dist plan now selects native macos-15 and macos-15-intel (agent: codex).
+
+- 2026-11-11 — Local v4.4.2 gates and independent exact-bc6911b review passed; pushed PR #37. Actual Release plan 42971809550 passes the native matrix guard; CI 42971809468 is running (agent: codex).
+
+- 2026-11-11 — PR #37 passed all 20 and actual Release plan, then merged as e868bb1. Watching new exact-main CI 42972929754 and trusted-OIDC publisher 42972929890 before creating the new immutable v4.4.2 tag (agent: codex).
+
+- 2026-11-11 — v4.4.2 exact-main CI 42972929754 passed 20/20 including both native Apple gates and actual-plan validation. OIDC workflow 42972929890 is packaging/dry-running (agent: codex).
+
+- 2026-11-11 — Automatic publisher 42972929890 passed; independently verified unyanked 4.4.2 checksum/source. Revalidated actual dist plan and pushed only tag v4.4.2 at e868bb1. Release 42974726577 is running (agent: codex).
+
+- 2026-11-11 — Stopped publication after end-to-end review found remaining implicit helper/module search, raw Windows archive binding, and installer custody gaps. Finished all three bounded inventories before implementation; consolidated fixes into unpublished v4.4.3. No further tags until complete qualification (agent: codex).
+- 2026-11-11 — Measured CI: main 11.13 min, Intel PKG fixture 7.95 min; audit-tool install 3.25 min vs audit 0.05 min; crate workflow waits on CI for 11.27 of 13.17 min. Added reuse of the pinned audit binary, retaining a fresh audit and protected-main-only cache saves. No container image builds were found (agent: codex).
+
+- 2026-11-11 — Consolidated local gates pass: 220 library + two companion + 29 integration tests, strict clippy/fmt, audit, 44-file package inventory/dry-run/release build, whole-fast child poisoning, runtime PS module reset, archive digest/retained guard, staging owner/DACL/handle tests, original PATH ownership checks, shell and both PS transaction suites, actual dist runner plan, workflow/shell/provenance gates. Runtime aliases/help match; fast JSON median 318.1 ms in five smoke runs. Independent component reviews found no remaining blocker (agent: codex).
+
+- 2026-11-11 — Opened PR #38 at reviewed db5d0a4; final raw-child TMPDIR binding/fixture committed as 2535c72. Release plan 42988722165 passed; CI 42988722084 passed 18/20, with both native Mac Rust suites green but the new fixture failing on Apple mktemp OS-private-base semantics. Correcting that platform assertion before merge; version remains 4.4.3 (agent: codex).

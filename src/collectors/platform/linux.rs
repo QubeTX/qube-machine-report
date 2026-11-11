@@ -1,7 +1,7 @@
 //! Linux-specific information collectors
 
 use super::{CollectMode, PlatformInfo};
-use crate::collectors::command::{run_stdout, run_stdout_no_args, CommandTimeout};
+use crate::collectors::command::{run_system_stdout, run_system_stdout_no_args, CommandTimeout};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -199,7 +199,7 @@ fn detect_virtualization(mode: CollectMode) -> Option<String> {
     }
 
     if mode == CollectMode::Full {
-        if let Some(value) = run_stdout(
+        if let Some(value) = run_system_stdout(
             "systemd-detect-virt",
             std::iter::empty::<&str>(),
             CommandTimeout::Normal,
@@ -252,7 +252,7 @@ fn get_gpus() -> Vec<String> {
     .into_iter()
     .find(|program| Path::new(program).is_file());
     if let Some(stdout) =
-        lspci.and_then(|program| run_stdout_no_args(program, CommandTimeout::Normal))
+        lspci.and_then(|program| run_system_stdout_no_args(program, CommandTimeout::Normal))
     {
         for line in stdout.lines() {
             if let Some(name) = parse_lspci_gpu_line(line) {
@@ -317,7 +317,7 @@ fn raspberry_pi_gpu_from_compatible(compatible: &[u8]) -> Option<String> {
 /// Get system architecture
 fn get_architecture() -> Option<String> {
     sysinfo::System::cpu_arch().or_else(|| {
-        run_stdout("uname", ["-m"], CommandTimeout::Normal)
+        run_system_stdout("uname", ["-m"], CommandTimeout::Normal)
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })
@@ -395,25 +395,20 @@ fn get_shell() -> Option<String> {
         .to_string_lossy()
         .to_string();
 
-    // Try to get version
-    let version_output = match shell_name.as_str() {
-        "bash" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        "zsh" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        "fish" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
+    // Version probes use the configured protected shell with startup hooks disabled.
+    let version_args: Option<&[&str]> = match shell_name.as_str() {
+        "bash" => Some(&["--version", "-p"]),
+        "zsh" => Some(&["-f", "--version"]),
+        "fish" => Some(&["--no-config", "--version"]),
         _ => None,
     };
+    let version_output = Path::new(&shell_path)
+        .is_absolute()
+        .then_some(version_args)
+        .flatten()
+        .and_then(|args| {
+            crate::collectors::command::run_system_output(&shell_path, args, CommandTimeout::Normal)
+        });
 
     if let Some(output) = version_output {
         let version_str = String::from_utf8_lossy(&output.stdout);
@@ -445,7 +440,7 @@ fn get_shell() -> Option<String> {
 /// Get display resolution
 fn get_display_resolution() -> Option<String> {
     // Try xrandr for X11
-    if let Some(stdout) = run_stdout("xrandr", ["--current"], CommandTimeout::Slow) {
+    if let Some(stdout) = run_system_stdout("xrandr", ["--current"], CommandTimeout::Slow) {
         for line in stdout.lines() {
             if line.contains(" connected") && line.contains('x') {
                 // Find resolution pattern like "1920x1080+0+0"
@@ -472,7 +467,7 @@ fn get_display_resolution() -> Option<String> {
     }
 
     // Try wlr-randr for Wayland
-    if let Some(stdout) = run_stdout_no_args("wlr-randr", CommandTimeout::Slow) {
+    if let Some(stdout) = run_system_stdout_no_args("wlr-randr", CommandTimeout::Slow) {
         for line in stdout.lines() {
             if line.contains("current") {
                 // Find resolution pattern
@@ -776,7 +771,7 @@ fn get_locale() -> Option<String> {
     }
 
     // Try locale command
-    if let Some(stdout) = run_stdout_no_args("locale", CommandTimeout::Normal) {
+    if let Some(stdout) = run_system_stdout_no_args("locale", CommandTimeout::Normal) {
         for line in stdout.lines() {
             if line.starts_with("LANG=") {
                 let lang = line
@@ -794,7 +789,7 @@ fn get_locale() -> Option<String> {
 }
 
 fn detect_terminal_from_ps(current_pid: u32) -> Option<String> {
-    let stdout = run_stdout(
+    let stdout = run_system_stdout(
         "ps",
         ["-e", "-o", "pid=,ppid=,comm="],
         CommandTimeout::Normal,
@@ -919,7 +914,7 @@ fn read_i64_from_file(path: impl AsRef<Path>) -> Option<i64> {
 }
 
 fn get_zfs_health() -> Option<String> {
-    let stdout = run_stdout(
+    let stdout = run_system_stdout(
         "zpool",
         ["list", "-H", "-o", "health"],
         CommandTimeout::Slow,
@@ -1032,13 +1027,11 @@ fn sysfs_summary(paths: &[&str]) -> Option<String> {
 }
 
 fn command_exists(command: &str) -> bool {
-    env::var_os("PATH").is_some_and(|paths| {
-        env::split_paths(&paths).any(|directory| directory.join(command).is_file())
-    })
+    crate::trusted_process::system_command(command).is_ok()
 }
 
 fn get_root_encryption() -> Option<String> {
-    let root = run_stdout(
+    let root = run_system_stdout(
         "findmnt",
         ["-n", "-o", "SOURCE,FSTYPE", "/"],
         CommandTimeout::Normal,
@@ -1048,7 +1041,7 @@ fn get_root_encryption() -> Option<String> {
     let filesystem = fields.next().unwrap_or_default();
 
     if filesystem.eq_ignore_ascii_case("zfs") {
-        let encryption_root = run_stdout(
+        let encryption_root = run_system_stdout(
             "zfs",
             ["get", "-H", "-o", "value", "encryptionroot", source],
             CommandTimeout::Slow,
@@ -1061,7 +1054,7 @@ fn get_root_encryption() -> Option<String> {
     if !source.starts_with("/dev/") {
         return None;
     }
-    let stack = run_stdout(
+    let stack = run_system_stdout(
         "lsblk",
         ["-s", "-n", "-o", "TYPE,FSTYPE", source],
         CommandTimeout::Normal,
@@ -1078,7 +1071,7 @@ fn get_root_encryption() -> Option<String> {
 fn get_dmidecode_summary(fields: &[(&str, &str)]) -> Option<String> {
     let mut value = String::new();
     for (field, separator) in fields {
-        let stdout = run_stdout("dmidecode", ["-s", *field], CommandTimeout::Slow)?;
+        let stdout = run_system_stdout("dmidecode", ["-s", *field], CommandTimeout::Slow)?;
         let part = stdout
             .lines()
             .map(str::trim)
@@ -1096,7 +1089,7 @@ fn get_dmidecode_summary(fields: &[(&str, &str)]) -> Option<String> {
 }
 
 fn get_dmidecode_memory_summary() -> Option<String> {
-    let stdout = run_stdout("dmidecode", ["-t", "memory"], CommandTimeout::Slow)?;
+    let stdout = run_system_stdout("dmidecode", ["-t", "memory"], CommandTimeout::Slow)?;
     parse_dmidecode_memory_summary(&stdout)
 }
 

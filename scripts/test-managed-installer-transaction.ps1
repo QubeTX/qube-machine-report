@@ -10,6 +10,9 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ("tr300-managed-powershell-test-
 try {
     $env:TR300_MANAGED_INSTALLER_TEST_ONLY = '1'
     . (Join-Path $PSScriptRoot 'managed-installers\tr300-installer.ps1')
+    # Fixture ownership scans must not inspect unrelated installations on this host.
+    $Tr300EntryPath = ''
+    $Tr300InvocationPath = ''
 
     # A planted current-directory/PATH executable must never be selected for
     # either elevated Global or user-scoped Corporate MSI removal.
@@ -214,6 +217,23 @@ try {
         if ($_.Exception.Message -eq 'unknown PATH owner was accepted') { throw }
     }
     $env:PATH = $oldPath
+    $savedInvocationPath = $Tr300InvocationPath
+    $savedInvocationDirectory = $Tr300InvocationDirectory
+    try {
+        foreach ($case in @(@{Path='portable'; Directory=$fixture}, @{Path=''; Directory=$unknownDir})) {
+            $Tr300InvocationPath = $case.Path
+            $Tr300InvocationDirectory = $case.Directory
+            $env:PATH = [Environment]::SystemDirectory
+            $refused = $false
+            try { Assert-Tr300NoUnknownPathOwners @() $state } catch { $refused = $true }
+            if (-not $refused) { throw 'a foreign owner in the original invocation PATH/cwd was lost after helper sanitization' }
+        }
+    } finally {
+        $Tr300InvocationPath = $savedInvocationPath
+        $Tr300InvocationDirectory = $savedInvocationDirectory
+        $env:PATH = $oldPath
+    }
+
     Set-Content -LiteralPath $newBinary -Value 'candidate' -NoNewline
     Set-Content -LiteralPath $newReport -Value 'candidate-report' -NoNewline
     Remove-Item -LiteralPath $oldBinary -Force
@@ -337,6 +357,89 @@ try {
     if ($mismatchMessage -ne 'the downloaded cargo-dist installer checksum did not match this release' -or
         (Test-Path -LiteralPath $mismatchExecutionMarker)) {
         throw 'mismatched cargo-dist installer was not rejected before execution'
+    }
+    # Exercise the real nested host and archive guard without installing anything.
+    $archiveInput = Join-Path $fixture 'archive-input'
+    $archiveOutput = Join-Path $fixture 'archive-output'
+    $null = New-Item -ItemType Directory -Path $archiveInput -Force
+    [IO.File]::WriteAllText((Join-Path $archiveInput 'payload.txt'), 'verified fixture')
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = Join-Path $fixture 'fixture.zip'
+    [IO.Compression.ZipFile]::CreateFromDirectory($archiveInput, $archive)
+    $rawFixture = Join-Path $fixture 'raw-fixture.ps1'
+    $guardedFixture = Join-Path $fixture 'guarded-fixture.ps1'
+    $rawText = @'
+param()
+$app_name = 'tr300'
+$url = $env:TR300_GUARD_ARCHIVE_URI
+$dir_path = Join-Path ([IO.Path]::GetTempPath()) 'guard-fixture.zip'
+$wc = New-Object Net.WebClient
+  $wc.downloadFile($url, $dir_path)
+  $writerBlocked = $false
+  try { $writer = [IO.File]::Open($dir_path, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite); $writer.Dispose() } catch { $writerBlocked = $true }
+  if (-not $writerBlocked) { throw 'the archive was writable while being verified and extracted' }
+  [IO.File]::WriteAllText($env:TR300_GUARD_MODULE_SOURCE, (Get-Command Expand-Archive).Module.Path)
+  Expand-Archive -Path $dir_path -DestinationPath $env:TR300_GUARD_OUTPUT -Force
+  # Let the next step know what to copy
+[IO.File]::WriteAllText($env:TR300_GUARD_COMPLETE, 'extraction completed')
+'@
+    [IO.File]::WriteAllText($rawFixture, $rawText)
+    $Tr300DistInstallerSha256 = Get-Tr300Sha256 $rawFixture
+    $Tr300WindowsArchiveSha256 = Get-Tr300Sha256 $archive
+    New-Tr300GuardedDistInstaller $rawFixture $guardedFixture
+    $modulePlant = Join-Path $fixture 'modules\Microsoft.PowerShell.Archive'
+    $null = New-Item -ItemType Directory -Path $modulePlant -Force
+    [IO.File]::WriteAllText((Join-Path $modulePlant 'Microsoft.PowerShell.Archive.psd1'), "@{RootModule='Microsoft.PowerShell.Archive.psm1';ModuleVersion='99.0.0';FunctionsToExport=@('Expand-Archive')}")
+    [IO.File]::WriteAllText((Join-Path $modulePlant 'Microsoft.PowerShell.Archive.psm1'), '[IO.File]::WriteAllText($env:TR300_GUARD_ATTACK, ''loaded hostile module''); function Expand-Archive { param($Path,$DestinationPath,[switch]$Force) }')
+    $previousModules = $env:PSModulePath
+    try {
+        $env:PSModulePath = (Split-Path -Parent $modulePlant) + ';' + $previousModules
+        $env:TR300_GUARD_ARCHIVE_URI = ([uri]$archive).AbsoluteUri
+        $env:TR300_GUARD_OUTPUT = $archiveOutput
+        $env:TR300_GUARD_COMPLETE = Join-Path $fixture 'guard-completed'
+        $env:TR300_GUARD_ATTACK = Join-Path $fixture 'hostile-module-loaded'
+        $env:TR300_GUARD_MODULE_SOURCE = Join-Path $fixture 'archive-module-source'
+        if ((Invoke-Tr300DistInstaller $guardedFixture $fixture $false) -ne 0 -or
+            -not (Test-Path -LiteralPath $env:TR300_GUARD_COMPLETE) -or
+            (Test-Path -LiteralPath $env:TR300_GUARD_ATTACK) -or
+            [IO.File]::ReadAllText((Join-Path $archiveOutput 'payload.txt')) -cne 'verified fixture') {
+            throw 'the verified archive did not survive the nested poisoned-module environment'
+        }
+        $moduleSource = [IO.File]::ReadAllText($env:TR300_GUARD_MODULE_SOURCE)
+        if (-not $moduleSource.StartsWith((Join-Path $PSHOME 'Modules'), [StringComparison]::OrdinalIgnoreCase)) {
+            throw "the nested installer autoloaded an archive module outside its trusted host: $moduleSource"
+        }
+        Remove-Item -LiteralPath $env:TR300_GUARD_COMPLETE
+        [IO.File]::WriteAllText($archive, 'different archive bytes')
+        if ((Invoke-Tr300DistInstaller $guardedFixture $fixture $false) -eq 0 -or
+            (Test-Path -LiteralPath $env:TR300_GUARD_COMPLETE) -or
+            [IO.File]::ReadAllText((Join-Path $archiveOutput 'payload.txt')) -cne 'verified fixture') {
+            throw 'a mismatched archive reached extraction or changed the installed fixture'
+        }
+    } finally { $env:PSModulePath = $previousModules }
+    foreach ($broken in @($rawText.Replace('  $wc.downloadFile($url, $dir_path)', ''), ($rawText + [Environment]::NewLine + '  $wc.downloadFile($url, $dir_path)'))) {
+        [IO.File]::WriteAllText($rawFixture, $broken)
+        $Tr300DistInstallerSha256 = Get-Tr300Sha256 $rawFixture
+        $rejected = $false
+        try { New-Tr300GuardedDistInstaller $rawFixture $guardedFixture } catch { $rejected = $true }
+        if (-not $rejected) { throw 'changed cargo-dist producer anchors were accepted' }
+    }
+    $privateStage = New-Tr300PrivateStaging
+    try {
+        $privateSecurity = Get-Acl -LiteralPath $privateStage
+        if (-not $privateSecurity.AreAccessRulesProtected) { throw 'private staging inherited ambient directory access' }
+        $elevated = (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $permitted = @('S-1-5-18', 'S-1-5-32-544')
+        if (-not $elevated) { $permitted += [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+        $expectedOwner = if ($elevated) { 'S-1-5-32-544' } else { [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+        if ($privateSecurity.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $expectedOwner) { throw 'private staging has an unexpected owner' }
+        foreach ($rule in $privateSecurity.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+            if ($rule.IdentityReference.Value -notin $permitted) { throw 'private staging grants access to an unexpected identity' }
+        }
+    } finally {
+        $nativeBase = if ($elevated) { [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles) } else { [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData) }
+        if (-not ([IO.Path]::GetFullPath($privateStage).StartsWith(([IO.Path]::GetFullPath($nativeBase).TrimEnd('\') + '\tr300-managed-install-'), [StringComparison]::OrdinalIgnoreCase))) { throw 'private staging cleanup escaped its native base' }
+        Remove-Item -LiteralPath $privateStage -Recurse -Force
     }
     Write-Host 'managed PowerShell transaction fixtures: PASS'
 } finally {

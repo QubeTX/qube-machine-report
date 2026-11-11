@@ -24,7 +24,7 @@ closure-docs PR remains pending. Do not close that task or claim personal hardwa
 acceptance from hosted results. Start continuation with
 [`the v4.4.0 handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
 
-Candidate **v4.4.2** carries PR #35 security fixes and repairs cargo-dist's retired Apple ARM runner. v4.4.1 is an exact published crate/immutable tag but has no complete GitHub distribution. Pin and validate actual Apple plan runners as `macos-15` / `macos-15-intel`; the public GitHub baseline above remains authoritative until the full new release chain passes.
+Candidate **v4.4.3** consolidates the completed collector, maintenance, and installer-staging security audit. v4.4.1 and v4.4.2 have immutable published crates/tags; v4.4.2 has only a private 24-asset draft. No further merge/tag until the complete candidate qualifies. Pin and validate actual Apple plan runners as `macos-15` / `macos-15-intel`; the public GitHub baseline above remains authoritative until the full new release chain passes.
 
 ## Task management system
 
@@ -66,8 +66,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Project: TR-300, a standalone Rust machine-report CLI
 - Cargo package name: `tr300`
 - Library import path: `tr300`
-- Current crates.io version, complete GitHub distribution, and working
-  manifest: `4.4.0`. CI `36084969867` and crates `36084969841` attempt 2,
+- Current crates.io / complete GitHub distribution / working manifest:
+  `4.4.2` / `4.4.0` / `4.4.3`. Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
   Release `36085847270`, Windows `36086249950`, private validation
   `36086484931` attempt 2, and Mac publication `36086249996` passed.
 - Prior v4.3.12 distribution ledger: working manifest was `4.3.12` (battery hardening, Windows

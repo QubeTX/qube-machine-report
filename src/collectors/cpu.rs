@@ -2,11 +2,11 @@
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::collectors::command::CommandTimeout;
-// run_stdout is only used by the macOS `get_socket_count` path; the
-// Linux path was migrated to `run_stdout_c_locale` (v3.15.2 audit
+// run_system_stdout is only used by the macOS `get_socket_count` path; the
+// Linux path was migrated to `run_system_stdout_c_locale` (v3.15.2 audit
 // finding F19) and Windows uses platform-native APIs.
 #[cfg(target_os = "macos")]
-use crate::collectors::command::run_stdout;
+use crate::collectors::command::run_system_stdout;
 use crate::collectors::CollectMode;
 use crate::error::Result;
 use std::thread;
@@ -250,7 +250,7 @@ fn get_socket_count() -> Option<usize> {
     // locales rename `Socket(s):` to e.g. `Sockel:` (German),
     // silently breaking the substring match. (audit finding F19,
     // v3.15.8+)
-    if let Some(stdout) = crate::collectors::command::run_stdout_c_locale(
+    if let Some(stdout) = crate::collectors::command::run_system_stdout_c_locale(
         "lscpu",
         std::iter::empty::<&str>(),
         CommandTimeout::Normal,
@@ -281,7 +281,7 @@ fn get_socket_count() -> Option<usize> {
 #[cfg(target_os = "macos")]
 fn get_socket_count() -> Option<usize> {
     // Use sysctl to get package count
-    if let Some(stdout) = run_stdout(
+    if let Some(stdout) = run_system_stdout(
         "/usr/sbin/sysctl",
         ["-n", "hw.packages"],
         CommandTimeout::Normal,

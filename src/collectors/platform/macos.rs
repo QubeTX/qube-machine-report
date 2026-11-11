@@ -1,7 +1,7 @@
 //! macOS-specific information collectors
 
 use super::{CollectMode, PlatformInfo};
-use crate::collectors::command::{run_stdout, CommandTimeout};
+use crate::collectors::command::{run_system_stdout, CommandTimeout};
 use std::env;
 use std::path::Path;
 
@@ -98,7 +98,7 @@ fn get_system_profiler_snapshot(translated: bool) -> Option<serde_json::Value> {
     // capacity. Ask the universal `arch` launcher for the native arm64 slice;
     // fall back to the translated profiler if that unexpectedly fails.
     let json = if translated {
-        run_stdout(
+        run_system_stdout(
             "/usr/bin/arch",
             [
                 "-arm64",
@@ -111,15 +111,15 @@ fn get_system_profiler_snapshot(translated: bool) -> Option<serde_json::Value> {
             ],
             CommandTimeout::Slow,
         )
-        .or_else(|| run_stdout("system_profiler", direct_args, CommandTimeout::Slow))?
+        .or_else(|| run_system_stdout("system_profiler", direct_args, CommandTimeout::Slow))?
     } else {
-        run_stdout("system_profiler", direct_args, CommandTimeout::Slow)?
+        run_system_stdout("system_profiler", direct_args, CommandTimeout::Slow)?
     };
     serde_json::from_str(&json).ok()
 }
 
 fn get_macos_build() -> Option<String> {
-    run_stdout("sw_vers", ["-buildVersion"], CommandTimeout::Normal)
+    run_system_stdout("sw_vers", ["-buildVersion"], CommandTimeout::Normal)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
@@ -127,7 +127,7 @@ fn get_macos_build() -> Option<String> {
 /// Get macOS version codename
 fn get_macos_codename() -> Option<String> {
     // Get the OS version from sw_vers (e.g. "26.0", "15.6", "10.15.7").
-    let version = run_stdout("sw_vers", ["-productVersion"], CommandTimeout::Normal)?
+    let version = run_system_stdout("sw_vers", ["-productVersion"], CommandTimeout::Normal)?
         .trim()
         .to_string();
     let mut parts = version.split('.');
@@ -187,7 +187,7 @@ fn detect_virtualization(snapshot: Option<&serde_json::Value>) -> Option<String>
 
     // A positive kernel signal is authoritative. A zero or failed probe is
     // simply "not detected"; it is not proof of bare metal.
-    let vmm = run_stdout(
+    let vmm = run_system_stdout(
         "/usr/sbin/sysctl",
         ["-n", "kern.hv_vmm_present"],
         CommandTimeout::Normal,
@@ -335,7 +335,7 @@ fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
 
     // Try ioreg for discrete/integrated GPUs
-    if let Some(stdout) = run_stdout(
+    if let Some(stdout) = run_system_stdout(
         "/usr/sbin/ioreg",
         ["-rc", "IOGPUDevice"],
         CommandTimeout::Normal,
@@ -356,7 +356,7 @@ fn get_gpus_fast() -> Vec<String> {
 
     // Fallback for Apple Silicon: use sysctl to detect the chip
     if gpus.is_empty() {
-        if let Some(output) = run_stdout(
+        if let Some(output) = run_system_stdout(
             "/usr/sbin/sysctl",
             ["-n", "machdep.cpu.brand_string"],
             CommandTimeout::Normal,
@@ -374,7 +374,7 @@ fn get_gpus_fast() -> Vec<String> {
 
 /// Get system architecture
 fn get_architecture(translated: bool) -> Option<String> {
-    let host = run_stdout("uname", ["-m"], CommandTimeout::Normal)
+    let host = run_system_stdout("uname", ["-m"], CommandTimeout::Normal)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| std::env::consts::ARCH.to_string());
@@ -386,7 +386,7 @@ fn get_architecture(translated: bool) -> Option<String> {
 }
 
 pub(crate) fn is_rosetta_translated() -> bool {
-    run_stdout(
+    run_system_stdout(
         "/usr/sbin/sysctl",
         ["-n", "sysctl.proc_translated"],
         CommandTimeout::Normal,
@@ -405,7 +405,7 @@ fn format_architecture(host: &str, runtime: &str, translated: bool) -> String {
 }
 
 pub fn get_cpu_brand() -> Option<String> {
-    let brand = run_stdout(
+    let brand = run_system_stdout(
         "/usr/sbin/sysctl",
         ["-n", "machdep.cpu.brand_string"],
         CommandTimeout::Normal,
@@ -420,7 +420,7 @@ pub fn get_cpu_brand() -> Option<String> {
 }
 
 pub fn get_computer_name() -> Option<String> {
-    let name = run_stdout("scutil", ["--get", "ComputerName"], CommandTimeout::Normal)?
+    let name = run_system_stdout("scutil", ["--get", "ComputerName"], CommandTimeout::Normal)?
         .trim()
         .to_string();
     if name.is_empty() {
@@ -431,7 +431,7 @@ pub fn get_computer_name() -> Option<String> {
 }
 
 fn get_machine_model() -> Option<String> {
-    let model = run_stdout(
+    let model = run_system_stdout(
         "/usr/sbin/sysctl",
         ["-n", "hw.model"],
         CommandTimeout::Normal,
@@ -449,7 +449,7 @@ fn get_core_topology() -> Option<String> {
     let mut levels = Vec::new();
     let count = sysctl_usize("hw.nperflevels")?;
     for index in 0..count.min(16) {
-        let name = run_stdout(
+        let name = run_system_stdout(
             "/usr/sbin/sysctl",
             ["-n", &format!("hw.perflevel{}.name", index)],
             CommandTimeout::Normal,
@@ -473,7 +473,7 @@ fn get_core_topology() -> Option<String> {
 }
 
 fn sysctl_usize(name: &str) -> Option<usize> {
-    run_stdout("/usr/sbin/sysctl", ["-n", name], CommandTimeout::Normal)?
+    run_system_stdout("/usr/sbin/sysctl", ["-n", name], CommandTimeout::Normal)?
         .trim()
         .parse()
         .ok()
@@ -523,11 +523,18 @@ fn get_shell() -> Option<String> {
         .to_string_lossy()
         .to_string();
 
-    // Try to get version
-    let version_output = match shell_name.as_str() {
-        "bash" | "zsh" | "fish" => run_stdout(&shell_path, ["--version"], CommandTimeout::Normal),
+    // Version probes use the configured protected shell with startup hooks disabled.
+    let version_args: Option<&[&str]> = match shell_name.as_str() {
+        "bash" => Some(&["--version", "-p"]),
+        "zsh" => Some(&["-f", "--version"]),
+        "fish" => Some(&["--no-config", "--version"]),
         _ => None,
     };
+    let version_output = Path::new(&shell_path)
+        .is_absolute()
+        .then_some(version_args)
+        .flatten()
+        .and_then(|args| run_system_stdout(&shell_path, args, CommandTimeout::Normal));
 
     if let Some(version_str) = version_output {
         if let Some(line) = version_str.lines().next() {
@@ -556,7 +563,7 @@ fn get_shell() -> Option<String> {
 
 /// Get battery status
 fn get_battery() -> Option<String> {
-    let stdout = run_stdout("pmset", ["-g", "batt"], CommandTimeout::Normal)?;
+    let stdout = run_system_stdout("pmset", ["-g", "batt"], CommandTimeout::Normal)?;
     parse_pmset_battery(&stdout)
 }
 
@@ -615,7 +622,7 @@ fn get_locale() -> Option<String> {
 
     // Region preference is a fallback when no process locale exists. Preserve
     // Apple's @rg override rather than silently discarding it.
-    if let Some(output) = run_stdout(
+    if let Some(output) = run_system_stdout(
         "defaults",
         ["read", "-g", "AppleLocale"],
         CommandTimeout::Normal,
@@ -698,7 +705,7 @@ fn find_string_value<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a 
 }
 
 fn get_filevault_status() -> Option<String> {
-    let status = crate::collectors::command::run_stdout_c_locale(
+    let status = crate::collectors::command::run_system_stdout_c_locale(
         "fdesetup",
         ["status"],
         CommandTimeout::Normal,

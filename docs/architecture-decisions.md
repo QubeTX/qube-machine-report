@@ -625,6 +625,28 @@ rent or borrow hardware for every release.
 
 Sources: [GitHub macOS 14 retirement](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/), [pinned cargo-dist custom-runner configuration](https://github.com/axodotdev/cargo-dist/blob/v0.31.0/book/src/reference/config.md#github-custom-runners).
 
+### Implicit process and verified-installer boundaries (v4.4.3; 2026-11-11)
+
+**Context.** PR #35's absolute Windows updater host fixed one executable lookup; the completed collector/maintenance audit also found inherited helper search, PowerShell module autoload, and a raw Windows ZIP without a checksum binding. PR #1's randomized exclusive staging mitigates preplanting but does not itself keep verified bytes unchanged until the installer opens them. The previous two tagged candidates were stopped before complete GitHub publication. These audit findings are consolidated before another candidate is merged or tagged.
+
+**Decision.** Internal OS probes and maintenance helpers use a private system-command boundary: protected platform locations, a safe working directory, trusted child PATH, and removal of noninteractive startup hooks. Native Windows APIs resolve OS and Program Files roots. Each fresh PowerShell script resets module lookup before any cmdlet, because PowerShell startup can augment even an explicitly inherited module path. A configured custom shell keeps its displayed name but is not executed just to discover its version. Public arbitrary-command library helpers, explicit user-selected Cargo/rustup, and interactive shell auto-run retain their separate intentional trust contracts.
+
+The PowerShell managed wrapper binds both the immutable raw script and the exact prepared Windows ZIP. Its narrowly checked pinned-producer guard verifies ZIP bytes before extraction and retains the source read handle through extraction; frozen private validation inputs must satisfy the same digest. The shell chain uses a trusted helper environment and retains mandatory archive verification. Existing receipts, install-channel selection, native Mac trust, rollback, policy refusal, and paired-command verification remain required.
+
+Native updater staging uses an atomic restricted directory. Windows selects native Program Files for an already elevated worker or native LocalAppData for an ordinary user, pins non-reparse local ancestors against deletion, and retains a read-only FILE_SHARE_READ payload handle from hashing through installer completion. A conflicting writer fails closed. Unix uses a root-owned system temporary base and mode 0700. That protects against other UIDs; it does not authenticate a machine or account already controlled by the attacker, and advisory locks would not establish same-UID byte custody. No confirmed UAC escalation is claimed from the old staging behavior.
+
+The raw shell child receives the private wrapper stage as `TMPDIR`. GNU mktemp uses that base; Apple's mktemp prefers its OS-managed per-user temporary directory through `confstr(_CS_DARWIN_USER_TEMP_DIR)`. The native fixture must validate that protected platform-specific parent rather than assuming GNU behavior, and must prove the caller's hostile temp parent is unused on both platforms. This does not introduce another temporary-file shim.
+
+**Verification and revalidation.** Hostile PATH/cwd/startup/module fixtures exercise complete child handoffs. Native tests attempt post-verification writes and replacements; the existing MSI/Inno CI lifecycle fixtures run with the retained read-only source guard. Both native Mac gates and all supported collector platforms remain blocking. Any installer-producer or module/OS-path change must repeat these boundary tests before tagging.
+
+Sources: [PowerShell module-path construction](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath), [Windows handle sharing](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [protected security descriptors](https://learn.microsoft.com/en-us/windows/win32/secauthz/security-descriptor-string-format), [Apple mktemp implementation](https://github.com/apple-oss-distributions/shell_cmds/blob/main/mktemp/mktemp.c).
+
+### Measured CI reuse without removing release gates (2026-11-11)
+
+The v4.4.2 exact-main CI took 11.13 minutes; the Intel direct-PKG fixture consumed 7.95 minutes. The crate workflow's 13.17 minutes included 11.27 minutes waiting for that CI, so adding both durations would double-count most of the wait. Audit-tool installation consumed 3.25 minutes versus 0.05 minutes for the actual audit. These are measurements of runs 42972929754 and 42972929890, not a guaranteed future duration. The native release uses prebuilt hosted OS runners, with no container image build.
+
+Reuse the pinned cargo-audit binary through the already reviewed cache action, validate its exact version, save reusable caches only from protected main, and run a fresh advisory audit every time. Keep the strict 20-job inventory and separate fresh credential/publisher jobs. Potential documentation-only fixture selection and per-platform job consolidation need their own fail-closed change classification and timing proof; this security release does not depend on that larger redesign. CI-only maintenance does not require a new product release.
+
 ### Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)
 
 Source checkout is a workspace lifecycle boundary, not a harmless read. The

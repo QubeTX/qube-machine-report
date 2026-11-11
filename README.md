@@ -408,6 +408,8 @@ prefix, and a macOS PKG opens the verified universal PKG in Apple Installer.
 On Windows, managed PowerShell updates invoke the built-in Windows PowerShell
 executable by its trusted system-directory path rather than selecting a
 PowerShell executable from the current directory or `PATH`.
+Managed Windows installers also verify the downloaded archive before extraction
+and restrict installer module loading to the trusted PowerShell installation.
 
 **Fresh install and update are different operations.** A CLI update is
 latest-only and preserves its proven channel. A fresh installer expresses a new
