@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Hardened shell detection across Linux, macOS, and Windows so report
+  generation no longer executes shell binaries discovered via inherited
+  `SHELL`/`PATH` values. `get_shell()` now reports shell identity only,
+  removing the local privilege-boundary executable-launch risk from
+  environment-controlled shell version probing.
+
 ## [3.15.1] - 2026-05-15
 
 > **Release status: COMPLETE.** All five workflow runs green:

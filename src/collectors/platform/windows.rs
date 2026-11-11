@@ -945,18 +945,6 @@ fn get_shell() -> Option<String> {
     // Check SHELL env var first (for Git Bash, etc.)
     if let Ok(shell) = env::var("SHELL") {
         if shell.contains("bash") {
-            if let Some(version) = run_stdout("bash", ["--version"], CommandTimeout::Normal) {
-                if let Some(line) = version.lines().next() {
-                    if let Some(ver_start) = line.find("version ") {
-                        let ver_part = &line[ver_start + 8..];
-                        if let Some(ver_end) =
-                            ver_part.find(|c: char| !c.is_ascii_digit() && c != '.')
-                        {
-                            return Some(format!("bash {}", &ver_part[..ver_end]));
-                        }
-                    }
-                }
-            }
             return Some("bash".to_string());
         }
     }
