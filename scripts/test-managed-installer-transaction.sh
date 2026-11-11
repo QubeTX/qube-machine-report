@@ -294,14 +294,40 @@ cat > "$tmpdir_child" <<'TR300_TMPDIR_CHILD'
 set -eu
 expected=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 actual=$(CDPATH='' cd -- "$TMPDIR" && pwd -P)
-[ "$actual" = "$expected" ]
+if [ "$actual" != "$expected" ]; then
+    printf 'raw child TMPDIR mismatch: configured=%s actual=%s expected=%s\n' "$TMPDIR" "$actual" "$expected" >&2
+    exit 1
+fi
+case "$(uname -s)" in
+    Darwin)
+        native_temp=$(/usr/bin/getconf DARWIN_USER_TEMP_DIR)
+        created_expected=$(CDPATH='' cd -- "$native_temp" && pwd -P)
+        ;;
+    *) created_expected=$expected ;;
+esac
 created=$(mktemp -d)
 created_parent=$(CDPATH='' cd -- "$(dirname -- "$created")" && pwd -P)
-[ "$created_parent" = "$expected" ]
+if [ "$created_parent" != "$created_expected" ]; then
+    printf 'raw child mktemp parent mismatch: created=%s actual=%s expected=%s wrapper=%s\n' "$created" "$created_parent" "$created_expected" "$expected" >&2
+    exit 1
+fi
+rmdir "$created"
 printf '%s\n' private-child-staging > "$TR300_TMPDIR_RESULT"
 TR300_TMPDIR_CHILD
 mkdir "$fixture/hostile-temp-parent"
 (
+    # Invoked by the EXIT trap below.
+    # shellcheck disable=SC2329
+    tmpdir_fixture_cleanup() {
+        tmpdir_status=$?
+        if [ "$tmpdir_status" -ne 0 ]; then
+            printf '%s\n' 'raw-child TMPDIR fixture failed; captured stdout/stderr:' >&2
+            cat "$fixture/tmpdir-boundary.log" >&2 || true
+        fi
+        tr300_cleanup || true
+        exit "$tmpdir_status"
+    }
+    trap tmpdir_fixture_cleanup EXIT
     TMPDIR="$fixture/hostile-temp-parent"
     TR300_DIST_INSTALLER_PATH=$tmpdir_child
     TR300_TMPDIR_RESULT=$tmpdir_result
@@ -312,11 +338,12 @@ mkdir "$fixture/hostile-temp-parent"
     tr300_cleanup_ran=0
     tr300_prepare_macos_pkg() { :; }
     tr300_save_managed_state() { :; }
+    tr300_restore_managed_state() { :; }
     tr300_assert_no_unknown_path_owners() { :; }
     tr300_verify_receipt() { :; }
     tr300_verify_binaries() { printf '%s\n' "$fixture/harmless-fixture"; }
     tr300_take_over_macos_pkg() { :; }
-    tr300_main > "$fixture/tmpdir-boundary.log"
+    tr300_main > "$fixture/tmpdir-boundary.log" 2>&1
     [ "$(cat "$tmpdir_result")" = private-child-staging ]
     [ -z "$(ls -A "$TMPDIR")" ]
     tr300_cleanup
