@@ -10,11 +10,12 @@
 
 ## Active
 
-- [ ] **Resolve PR #35 and ship the Windows updater security fix** - consolidate the complete audit in unpublished v4.4.4, then pass protected CI/OIDC/native publication (owner codex) #sec35
+- [ ] **Resolve PR #35 and ship the Windows updater security fix** - v4.4.4 is public with 34 audited assets and all runtime gates passed; protected documentation qualification and closure receipts remain (owner codex) #sec35
   - [x] Resolve conflicts and verify trusted PowerShell launch behavior
-  - [ ] Pass consolidated-candidate local and exact-head hosted gates plus independent review
-  - [ ] Merge and verify exact-main CI and trusted-OIDC publication
-  - [ ] Publish the immutable release and verify public distribution
+  - [x] Pass consolidated-candidate local and exact-head hosted gates plus independent review
+  - [x] Merge and verify exact-main CI and trusted-OIDC publication
+  - [x] Publish the immutable release and verify public distribution
+  - [ ] Qualify the protected documentation follow-up and record completion receipts
 
 - [ ] **Audit the public v4.4.0 distribution and close the release ledger** - public byte, MSI EULA, and website audits pass; all nine post-public Windows jobs passed; only protected docs PR/main/idempotent checks remain (needs #r44) (ms #v44) (owner codex) #q44
   - [x] Verify exact public asset inventory, digests, signatures, and latest-release identity

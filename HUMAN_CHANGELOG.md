@@ -16,6 +16,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [4.4.4] - 2026-11-11
 
 ### Fixed
+- Include the broader helper-launch and installer security fixes in the complete public update for every supported platform.
 - Windows managed installs now wait for both command-version checks to finish and use their actual exit status. A successful install no longer fails because PowerShell retained an older command status.
 - Update a shared dependency to include its latest filesystem safety fix.
 
