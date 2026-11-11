@@ -5,27 +5,76 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-11-11
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.3 / 4.4.4
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.4 / 4.4.4 / 4.4.4
 
-Candidate v4.4.4 contains one confirmed fix-forward: managed PowerShell verification must collect the completed native version command and its actual exit status. Build-backed real-payload tests now precede tagging under both PowerShell hosts. v4.4.3 remains an immutable exact crate/tag at 452d60f, with signed archives and private 30-asset draft 441480713; Windows validation 42998302219 stopped on this defect. Both native Mac lifecycles passed, and its external ARM-capacity/Apple-network failures cleared without code changes. No v4.4.4 crate/tag exists yet; keep all remaining corrections in this unpublished candidate.
+Current release: immutable `v4.4.4` at
+`9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release `441625880`
+became latest at `2026-11-11T12:29:18Z` with exactly 34 nonempty audited
+assets. Product publication is complete; documentation closure remains open.
+Continue with
+[`2026-11-11-v4.4.4-security-publication.md`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md)
+and the v4.4.4 verification entry in `TESTING.md`.
 
-Current release: immutable `v4.4.0` at
+PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70` passed CI
+`43005013711` and Release plan `43005012888`; exact-main CI `43006272757`
+and automatic trusted-OIDC publication `43006272686` passed. The exact
+unyanked crate checksum is
+`bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f`.
+Release `43007443270` attempt 3 passed all 13 jobs; Windows assembly
+`43015387367` passed 3/3 and private Windows validation `43015777726`
+passed 16/16. macOS `43015387253` completed all 12 jobs through attempt 6;
+ARM legacy job `130545874243` passed in attempt 5, and Intel legacy job
+`130556746408` passed in attempt 6. Native builds and lifecycle validations
+had passed in attempt 3. Public Windows validation `43030855472` passed 9/9.
+
+The public audit passed all 34 hashes/sizes, 13 sidecars, eight aggregate
+checksum entries, six paired archives plus source, managed-wrapper bindings,
+native proof/public-byte identity, anonymous latest wrapper URLs, homepage
+HTTP 200, and Windows binary smokes. Native macOS CI verified signatures and
+notarization; Windows checks bind those exact public bytes to the native
+proof rather than claiming to execute macOS `codesign` on Windows.
+
+v4.4.4 fixes the confirmed managed PowerShell native-version probe: collect
+the complete native output and its actual exit status before selecting a
+line. The release build now precedes real paired-command fixtures under both
+PowerShell 7 and Windows PowerShell 5. The pinned audit tool is reused from
+a protected-main-written cache while the advisory audit still runs every
+time; the warm v4.4.4 job took 20 seconds, including a three-second scan.
+These changes improve pre-tag feedback without waiving any acceptance gate.
+
+Hosted ARM capacity initially prevented runner assignment. The first legacy
+Intel validation later encountered stapler exit 68. Diagnostic PR #40 stayed
+unmerged: its first native verbose probes passed on Intel and ARM; the quiet
+Intel probe then captured `NSURLErrorDomain -1005` connection loss to Apple
+CloudKit while identical-file calls returned success. The unchanged original
+Intel job passed afterward. This completed the original immutable v4.4.4
+source without merging probe-only code or cutting another version.
+
+This is Phase 1 publication evidence. Next, qualify the protected
+documentation PR, merge only after its checks pass, and record the real
+post-merge exact-main CI and idempotent publisher results. Phase 2 closure
+receipts are still pending. Keep `#q44` and milestone `#v44` open until those
+checks and receipts exist. Do not infer personal hardware/UAC acceptance from
+hosted results. The website's versionless latest links resolve to v4.4.4;
+its existing 1.21.8 production deployment and all four routes remain the
+verified baseline. Physical AMD64 Linux/Pi acceptance and the personal
+Alienware UAC update remain open under `#hw4`.
+
+Tag status (2026-11-11):
+- `v4.4.4` (`9f5110a3e8665f5fa2eb2e1744778c8025dc241f`): tagged/pushed after exact-main CI and OIDC; Release43007443270 created24 assets, Windows43015387367 assembled30, private43015777726 attested16/16, Mac43015387253 solely published34 and completed12/12, and publicWindows43030855472 passed9/9. Public bytes and latest entrypoints pass. Protected documentation qualification remains pending.
+
+Historical v4.4.0 baseline: immutable source/tag
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,
-34 audited assets. PR #32 plus fixed-target publisher PR #33 completed the
-protected CI/OIDC/private 24-to-30-to-validated-to-34 chain. Both `report` and
-`tr300` expose the full CLI across supported platforms; both Windows MSI
-editions embed the complete PolyForm license. Exact evidence and retry context
-are in the v4.4.0 entry of `TESTING.md` and
-[`2026-09-24-v4.4.0-publication-and-closure.md`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
-
-Post-public Windows run `36087344916` passed all nine jobs; `#r44` is complete.
-Next: merge the protected documentation follow-up and verify its
-main/idempotent publisher checks. Keep `#q44` and milestone `#v44` open until
-those remaining gates pass. Implementation and published MSI EULA proof are complete.
-The website's 1.21.8 production deployment passed all four routes and actual
-Chrome MSI-before-EXE ordering checks; no further website change is pending.
-Physical AMD64 Linux/Pi acceptance and the personal Alienware UAC update remain
-open under `#hw4`.
+34 audited assets. PR #32 and publisher PR #33 completed its protected
+CI/OIDC/private/native chain; post-public Windows `36087344916` passed all
+nine jobs. Both aliases expose the full CLI, and both MSI editions embed the
+complete PolyForm license. Its evidence remains in `TESTING.md` and
+[`the v4.4.0 handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
+Failed v4.4.1/v4.4.2/v4.4.3 tags/crates remain immutable. Private v4.4.2 draft
+`441328198` and v4.4.3 30-asset draft `441480713` remain historical/private;
+v4.4.3 source/tag `452d60f33174b9c7f9e282fcafed0ee05072e8ea` passed both
+native Mac lifecycles but stopped private Windows acceptance
+`42998302219` on the native-version-probe defect fixed by v4.4.4.
 
 Historical v4.3 distribution ledger (v4.3.12 is the prior complete baseline):
 (v4.2.2 was its earlier complete GitHub distribution. Release-chain hardening merged

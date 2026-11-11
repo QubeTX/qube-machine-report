@@ -8,23 +8,57 @@ Companion docs:
 - [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-08-25: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
-- [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
+- [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) — current v4.4.4 publication evidence and pending documentation-closure receipts.
+- [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — historical v4 release ledger, enforced Mac freeze, and personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
 Last verified against source: 2026-11-11
 
-Current published release: **v4.4.0**, immutable source/tag
-`f49d50a256842ac6c677d1c743c553b3dd92717f`. Public release `396235243`
-has 34 audited assets and the exact unyanked crate. Both `report` and `tr300`
-support the full CLI, including install/update/uninstall, through the canonical
-implementation. Both Windows MSI editions embed the complete PolyForm license;
-macOS has no EULA screen. The public-byte and published MSI-control audits pass.
-Post-public Windows run `36087344916` passed all nine jobs; the protected
-closure-docs PR remains pending. Do not close that task or claim personal hardware/UAC
-acceptance from hosted results. Start continuation with
-[`the v4.4.0 handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
+Current published release, unyanked crate, and working manifest: **v4.4.4**,
+immutable source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release
+`441625880` became latest at `2026-11-11T12:29:18Z` with exactly 34 audited,
+nonempty assets. PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70`
+passed CI `43005013711` and Release plan `43005012888`; exact-main CI
+`43006272757` and automatic trusted-OIDC publication `43006272686` passed.
+The crate checksum is
+`bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f`.
 
-Candidate **v4.4.4** fixes completed native-version verification in the managed PowerShell wrapper and requires real paired-command fixtures under both hosts after the CI release build. v4.4.3 source/tag `452d60f33174b9c7f9e282fcafed0ee05072e8ea` passed exact CI/OIDC/13-job Release/Windows assembly, but its 30-asset draft `441480713` remains private after four fresh managed takeovers failed the same version probe. Both native Mac lifecycles passed. Keep its tag/crate/draft immutable; no v4.4.4 crate or tag exists until the new candidate qualifies. Public latest remains v4.4.0. Apple builders remain pinned to `macos-15` / `macos-15-intel`.
+Release `43007443270` attempt 3 passed 13/13 jobs; Windows assembly
+`43015387367` passed 3/3, private Windows validation `43015777726` passed
+16/16, and macOS `43015387253` completed all 12 jobs through attempt 6.
+Post-public Windows validation `43030855472` passed 9/9. Native macOS CI
+provided the signing/notarization evidence; the public-byte audit bound those
+proofs to the exact published bytes. Hashes/sizes, 13 sidecars, eight aggregate
+checksum entries, six paired archives plus source, managed-wrapper bindings,
+anonymous latest wrapper URLs, homepage HTTP 200, and Windows binary smokes
+passed. Both `report` and `tr300` retain the full CLI, and both Windows MSI
+editions retain the complete PolyForm license.
+
+This is the Phase 1 publication-evidence update. The protected documentation
+PR's qualification, post-merge exact-main CI/idempotent publisher checks, and
+Phase 2 closure receipts are pending. Keep `#q44` and milestone `#v44` open
+until those real checks are recorded. Hosted evidence does not complete
+personal hardware/UAC acceptance. Continue from
+[`the v4.4.4 publication handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
+
+v4.4.4 fixes completed native-version verification in the managed PowerShell
+wrapper. Pre-tag CI now exercises the actual paired command payload under
+PowerShell 7 and Windows PowerShell 5 after the release build. CI reuses the
+pinned audit tool through a protected-main-written cache but runs the advisory
+audit on every invocation; caching never substitutes for a gate. PR #40 was a
+closed, unmerged diagnostic: an Intel probe recorded Apple CloudKit connection
+loss while identical files passed other calls, then the unchanged original
+Intel job passed. All required native/public jobs completed without merging
+the diagnostic or cutting another version. Apple builders remain pinned to
+`macos-15` / `macos-15-intel`.
+
+Historical v4.4.0 source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`
+and public 34-asset release `396235243` remain the preceding complete
+baseline. v4.4.1, v4.4.2, and v4.4.3 tags/crates remain immutable; the
+v4.4.2 private draft `441328198` and v4.4.3 private 30-asset draft
+`441480713` remain historical and private. v4.4.3 source/tag
+`452d60f33174b9c7f9e282fcafed0ee05072e8ea` passed both native Mac lifecycles
+but stopped Windows acceptance on the version-probe defect fixed in v4.4.4.
 
 ## Task management system
 
@@ -67,7 +101,8 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Cargo package name: `tr300`
 - Library import path: `tr300`
 - Current crates.io / complete GitHub distribution / working manifest:
-  `4.4.3` / `4.4.0` / `4.4.4`. Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
+  `4.4.4` / `4.4.4` / `4.4.4`; current publication evidence is above and in the
+  v4.4.4 handoff. Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
   Release `36085847270`, Windows `36086249950`, private validation
   `36086484931` attempt 2, and Mac publication `36086249996` passed.
 - Prior v4.3.12 distribution ledger: working manifest was `4.3.12` (battery hardening, Windows

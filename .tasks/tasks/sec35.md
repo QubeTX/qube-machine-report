@@ -1,4 +1,4 @@
-TT;DR: Resolve PR #35 against current main and ship one consolidated v4.4.4 candidate to fix Windows managed updater launcher hijacking. Implementation and release verification are active.
+TT;DR: v4.4.4 is published with the reported security fixes and all required native/public runtime gates passed. Protected documentation qualification and the final completion receipt remain.
 
 ## Why
 Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the security fix; expanded in the same session to the concerns in closed PRs #1 and #2.
@@ -7,7 +7,7 @@ Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the secur
 Integrate current main, preserve both command aliases and origin/receipt/checksum/rollback contracts, restrict PowerShell launch to the native system-directory host, add adversarial coverage, patch remaining Unix GPU helper resolution from PR #2, audit PR #1 against existing private staging, update vulnerable TLS dependencies, and publish through the existing protected release chain. Preserve unrelated dirty work in the original checkout by using a separate worktree. Physical hardware acceptance stays in its existing tasks.
 
 ## Plan
-Complete the bounded collector, maintenance-child-chain, and staging inventories, then consolidate every confirmed fix into unpublished v4.4.4. Preserve source/channel/receipt/rollback and foreign-command ownership semantics. Run one complete local gate and independent review of the final diff, pass exact-head native hosted checks and actual cargo-dist plan, merge the qualified exact head, verify main CI/OIDC, and tag that source once. Follow private 24/30/34 asset assembly and public smokes; record final evidence through the protected docs PR. The user permits a necessary new version but rejects release-driven diagnosis and unnecessary CI-only version bumps.
+Implementation inventories, source qualification, publication, and all native/public runtime gates are complete. Remaining dependency window: qualify this protected publication-evidence PR, merge its exact green head, require exact-main CI and the idempotent existing-version proof, then record the dated completion receipt. Keep version4.4.4 and immutable bytes unchanged; physical hardware remains separately owned.
 
 ## Impact
 Windows managed self-updates use the OS-owned Windows PowerShell executable and working directory instead of a PATH-selected host. Missing trusted hosts fail before launch. Existing install channels, receipt prefixes, installer integrity checks, and both report/tr300 commands remain supported.
@@ -22,24 +22,49 @@ Valid bounded outcomes: complete only with all required evidence; otherwise acti
 | Obligation | Observation | Decision | Re-entry |
 |---|---|---|---|
 | Exact-main CI | Linux x86_64 existing report-copy integration test failed spawning a just-copied executable with ETXTBSY; 230 library tests including new security probe passed, PR matrix had passed | One bounded retry permitted by release skill; no tag | Repeated on attempt 2; preparing test-only bounded ETXTBSY handling and explicit writable-file regression before release |
+| Public legacy Mac bridge | Two Intel runs returned stapler exit 68; retry accepted the DMG before the inner-PKG failure. Direct public PKG and DMG inner PKG are byte-identical, with ticket trailer preserved | Freeze repeated Intel retries; use a separate unmerged CI-only native verbose probe of direct, mounted, and copied PKG contexts | Need native tool stdout/stderr and actual-path hashes before any version/producer change; current evidence does not prove an artifact defect |
 
 ## Evidence
 | Criterion | Oracle | Result | Interpretation | Limitation | Status |
 |---|---|---|---|---|---|
 | Initial state | GitHub PR #35 and current remote main | PR ced1ea5 based on pre-v4.4.0; current main 3f0e047 | Two changelog conflicts; code integration automatic | Initial state only | PASS |
 | Independent review | review_security and release_gate_review agents | Exact heads 8c8df9a and 578e301a reviewed without blockers | Security and fixture findings addressed | Hosted gates remain separately required | PASS |
+| v4.4.4 source/crate | Exact-head/main CI and trusted OIDC; independent registry download | PR39, CI43005013711/43006272757; publisher43006272686; checksum/VCS in TESTING.md | Qualified source and public crate match | No broad exploit claim beyond audited scope | PASS |
+| Private/native publication | Exact workflow/run proofs and release API | Release43007443270a3 13/13; Win43015387367 3/3; private43015777726 16/16; Mac43015387253a6 12/12 | Complete34asset publication from9f | Native signature evidence is CI, not Windows codesign | PASS |
+| Public bytes/runtime | Anonymous downloads, hash/sidecar/archive/wrapper comparison; actual public lifecycle jobs | target/public-v4.4.4/audit.json; publicWin43030855472 9/9; native/public hashes and both legacy bridge results | Public latest and both commands verified | Physical hardware/UAC remains separately open | PASS |
+| Documentation closure | Protected evidence PR, exact-main CI, idempotent existing-version publisher | Phase1 record prepared; actual checks not yet run | Record content complete; qualification still required | Preparing a record is not completion | NOT RUN |
 
 ## Verification
 - [x] Current consolidated candidate passes local release gates and adversarial child-chain/staging probes
-- [ ] Consolidated exact head passes independent review and hosted CI/Release plan; PR merged
-- [ ] Consolidated exact-main CI and trusted-OIDC crate publication pass before immutable tag
-- [ ] Complete native release chain, public asset audit, and post-public smokes pass
+- [x] Consolidated exact head passes independent review and hosted CI/Release plan; PR merged
+- [x] Consolidated exact-main CI and trusted-OIDC crate publication pass before immutable tag
+- [x] Complete native release chain, public asset audit, and post-public smokes pass
 - [ ] Protected follow-up documentation records the final evidence
 
 ## Status
-Active unpublished v4.4.4 fix-forward. The bounded private acceptance inventory found one product defect: the managed PowerShell version pipeline truncated native execution and reused/aborted exit status. All four fresh takeover failures share it. Complete output and immediate exit capture fix it; real paired-command tests under both hosts prove unset/zero/stale state, wrong versions, and real nonzero refusal. CI now runs those fixtures after compiling the paired payload. Current-candidate local/hosted qualification is pending; do not publish/tag until it passes. v4.4.3 remains exact crate/tag 452d60f with private 30-asset draft 441480713; Windows: 11 successes, four failures, attestation skipped, both native Mac lifecycle proofs passed. External ARM allocation and Apple stapler-network failures cleared through unchanged-source retries. Public latest remains 4.4.0. No v4.4.4 crate/tag exists.
+Phase 1 publication evidence: product publication and runtime acceptance are complete. Exact source/tag 9f5110a3e8665f5fa2eb2e1744778c8025dc241f is the unyanked v4.4.4 crate (checksum bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f) and public34-asset release441625880. PR39/main/OIDC/Release/Windows/private/native/public gates all passed; exact IDs and byte-identity methodology are in TESTING.md and the November11 handoff.
+
+Mac workflow43015387253 attempt6 passed12/12, including the original Intel legacy job130556746408 and original ARM130545874243. Public Windows43030855472 passed all9 eligible jobs. Closed unmerged diagnosticPR40 captured actual AppleCloudKit NSURLError-1005 connection loss among identical-file successes; no new version or asset change was justified. Its second diagnostic CI was cancelled after both native probe results, not called green acceptance.
+
+Next: qualify this evidence-only protected documentation PR, merge its exact green head, and require exact-main CI plus the automatic idempotent existing-version proof. Only after those real results exist, record the Phase2 task/milestone completion receipt. Keep this task and q44/v44 open through those checks. No source/package/version changes or personal hardware claims are part of this follow-up.
 
 ## Activity
+- 2026-11-11 — All product/runtime gates complete: Mac attempt6 passed12/12 and public Windows43030855472 passed9/9. Prepared publication evidence, current guides/handoff, release-note security summary, and measured CI report. This remains open pending the protected documentation PR/main/idempotent proof and final completion receipt (agent: codex).
+
+- 2026-11-11 — Draft PR #40 first head 24a8589 passed all 20 and actual plan; both native verbose public trust probes pass all four contexts. Re-entered original legacy once with that new evidence: Mac attempt 5 ARM passes, Intel repeats inner-PKG stapler68. Source audit rules out baseline postinstall/environment mutation; next isolated variables are raw/canonical path spelling and exact default/stdout-null launch, with no new payload/version (agent: codex).
+
+- 2026-11-11 — Mac attempt 4 concluded: Intel legacy stapler failure repeated; ARM legacy again cancelled with no runner. Paused that repeated validation route pending the native verbose diagnostic rather than launching another identical check or version. The release stays public/unchanged; full closure remains partial (agent: codex).
+
+- 2026-11-11 — Intel legacy retry again hit stapler 68, after DMG Gatekeeper acceptance; froze repeat retries and audited producer/order/old-client path. Both independent reviews found no byte-level producer defect. Existing protected NVIDIA 7-Zip extracted only the public inner PKG; byte-for-byte equality, size, SHA, and ticket trailer match the direct public PKG. Created a separate unmerged diagnostic worktree/branch for a read-only native verbose direct/mounted/copied probe; no version, main, credentials, or public asset change (agent: codex).
+
+- 2026-11-11 — Both native Mac PKG lifecycles passed; Mac finalizer published exact 34-asset v4.4.4 release 441625880 at 12:29:18Z. Independent anonymous audit passed 34 digests/sizes, 13 sidecars, eight aggregate records, six paired archives, aliases, exact-source rendered wrappers/Windows ZIP binding, and registry source/hash; downloaded Windows pair runtime smokes pass. Linux public smoke passed. Intel legacy bridge hit xcrun stapler exit 68 despite both native pre-public stapler checks passing; ARM bridge queued. Job retry is unavailable while this workflow is active; wait for its conclusion, then retry the exact failed job (agent: codex).
+
+- 2026-11-11 — Windows assembly 43015387367 passed all three jobs; private draft 441625880 has exact 30 assets while public latest remains v4.4.0. Private validation 43015777726 passed all 16, including all four fresh managed takeovers; proof artifact 13853142041 binds source/assets. Mac workflow 43015387253 ARM credential-preflight attempts 1/2 were cancelled before assignment with the same hosted-capacity annotations; targeted unchanged-source attempt 3 is queued. Its package build/native validators/publication have not yet run (agent: codex).
+
+- 2026-11-11 — Release 43007443270 built all six targets and passed Intel archive signing/notarization. ARM signer attempts 1/2 were cancelled with runner_id 0 and explicit hosted macOS ARM capacity annotations before any signing code. Targeted unchanged-source attempt 3 is queued; no extra version/tag or credential-policy change. Complete GitHub publication remains pending (agent: codex).
+
+- 2026-11-11 — Qualified exact head ab014df in PR #39, merged as 9f5110a, passed main CI 43006272757 and OIDC 43006272686, independently verified public crate bytes/source, and pushed only immutable v4.4.4. Watching the native chain before public closure (agent: codex).
+
 - 2026-11-11 — Reproduced the Actions invocation: script-local status shadows the automatic global native result. All five managed verification reads now explicitly use the real global result; both hosts pass direct and nested invocations, including the exact Actions dual-host block/footer and true exit-37 negatives. Independent scoped review passed. Fresh audit also surfaced informational rustix unsoundness warning RUSTSEC-2026-0486; targeted 1.1.6 update clears it within the same unpublished candidate (agent: codex).
 
 - 2026-11-11 — PR #39 exact head 97ff014 passed local gates and independent review; Release plan 43003013700 passed. CI 43003014006 caught the real managed-version check failing in the hosted PowerShell invocation before any merge/crate/tag. Investigating invocation-scope differences within the same unpublished version. The warmed audit job took 20 seconds, including a three-second fresh audit; cached tool installation completed within the same second (agent: codex).

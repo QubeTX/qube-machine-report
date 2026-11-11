@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-The published v4.4.0 release packages a full-alias `report` command beside `tr300`,
+Published v4.4+ releases package a full-alias `report` command beside `tr300`,
 with identical options and maintenance actions. Both Windows MSI editions embed the
 shared `wix/License.rtf` rendering of `LICENSE`; EXEs already use `LICENSE`,
 and the macOS component PKG/compatibility DMG has no EULA screen. Keep RTF
@@ -23,10 +23,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > next session) is in [`MASTER_PLAN.md`](./MASTER_PLAN.md). Per-version
 > verification logs are in [`TESTING.md`](./TESTING.md). Agent-facing
 > repository tour and release checklist are in [`AGENTS.md`](./AGENTS.md).
-> The current cross-machine continuation is
-> [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md).
-> The earlier `001` file remains the historical Mac/shared implementation
-> checkpoint.
+> The current publication continuation is
+> [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
+> The July `001`/`002` handoffs remain historical Mac/shared and personal-fleet
+> checkpoints.
 >
 > **How the edit-time rules are organized (read this).** The deep,
 > subsystem-specific edit-time rules — Windows install, Windows accuracy
@@ -63,19 +63,54 @@ Internal collector and maintenance OS helpers now use `src/trusted_process.rs`; 
 
 Native update staging lives in `src/update/staging.rs`. Windows retains restrictive directory and read-only source handles through native-installer completion; Unix creates mode-0700 staging beneath the trusted system temporary base, with no same-UID custody claim. Managed Windows wrapper rendering also binds the prepared ZIP digest, and private frozen inputs must satisfy it before extraction. See the v4.4.3 architecture addendum and tests before changing either boundary.
 
-Managed PowerShell native-version probes must collect the full native output and capture its actual exit code before selecting a line. `Select-Object -First 1` inside the native pipeline can leave a prior status or abort the process. The pre-tag Windows source gate now requires actual paired-command verification under both PowerShell hosts after compilation, including a correct-looking native probe that exits nonzero. See [Select-Object optimization](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/select-object) and [native exit-status semantics](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables#lastexitcode).
+Managed PowerShell native-version probes must collect the full native output and immediately read the automatic global LASTEXITCODE before selecting a line, so a caller-local status cannot shadow the real result. `Select-Object -First 1` inside the native pipeline can leave a prior status or abort the process. The pre-tag Windows source gate now requires actual paired-command verification under both PowerShell hosts after compilation, including a correct-looking native probe that exits nonzero. See [Select-Object optimization](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/select-object) and [native exit-status semantics](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables#lastexitcode).
+
+CI may reuse the pinned cargo-audit binary from a cache written only by
+protected `main`; it must still run a fresh advisory audit every time. The
+v4.4.4 warm audit job took 20 seconds with a three-second scan. The actual
+release payload's paired-command tests under both PowerShell hosts run before
+tagging. Neither tool reuse nor diagnostic retries waive exact-source CI,
+private Windows acceptance, native Intel/ARM proof, or public smoke gates.
 
 ## Project Overview
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution: **4.4.0**. Current crate: **4.4.3**; working manifest: **4.4.4**. Published v4.4.0 immutable source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`.
-Release `396235243` contains 34 audited assets. The protected CI/OIDC chain,
-private Windows validation, native Intel/ARM Apple lifecycles, public byte audit,
-and published MSI EULA readback passed. Post-public Windows run `36087344916`
-passed all nine jobs; closure documentation PR/main checks remain pending. See
-[`the current handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md)
-and `TESTING.md` for exact evidence. Personal hardware/UAC rows remain open.
+Complete public GitHub distribution, unyanked crate, and working manifest:
+**4.4.4**, immutable source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`.
+Release `441625880` published at `2026-11-11T12:29:18Z` with exactly 34 audited
+assets. PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70` passed CI
+`43005013711` and plan `43005012888`. Exact-main CI `43006272757` and
+trusted-OIDC crates run `43006272686` passed; crate checksum:
+`bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f`.
+Release `43007443270` attempt 3 passed 13/13, Windows assembly `43015387367`
+passed 3/3, private validation `43015777726` passed 16/16, and native macOS
+`43015387253` completed all 12 jobs through attempt 6. Post-public Windows
+`43030855472` passed 9/9. Native macOS signature/notary proof and exact public
+byte identity passed; a Windows audit does not itself run macOS `codesign`.
+The full public asset, checksum, wrapper-binding, anonymous-latest, homepage,
+and Windows runtime audits passed.
+
+PR #40 remained diagnostic and was closed unmerged. Its quiet Intel probe
+captured `NSURLErrorDomain -1005`/CloudKit connection loss while identical
+files passed other calls; the unchanged original Intel job then passed.
+No diagnostic change or further version was needed to complete v4.4.4.
+
+This Phase 1 publication record does not close the documentation task.
+Protected documentation PR qualification, post-merge exact-main CI and
+idempotent publisher checks, and Phase 2 closure receipts remain pending;
+keep `#q44`/`#v44` open. Personal hardware/UAC rows remain open. See
+[`the current handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md)
+and `TESTING.md` for the evidence and remaining receipts.
+
+Historical v4.4.0 source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`,
+release `396235243`, and 34-asset audit remain the preceding complete
+baseline. Exact CI/OIDC `36084969867`/`36084969841` attempt 2, Release
+`36085847270`, Windows assembly `36086249950`, private validation
+`36086484931` attempt 2, Mac `36086249996`, and post-public Windows
+`36087344916` passed, including published MSI EULA readback. Preserve the
+failed v4.4.1/v4.4.2/v4.4.3 tags/crates and the private v4.4.2/v4.4.3
+drafts; they are historical evidence, not publication targets to reuse.
 
 Historical v4.3 release ledger (previous complete baseline v4.3.12):
 PR #14 merged as
@@ -730,7 +765,9 @@ and release-asset gates.
   it to 30, private Windows validation attests those exact bytes, and only
   `macos-installer.yml` may add four native assets and publish the exact 34.
   Require post-public updater/Linux/macOS smokes before homepage/final closure.
-- v4.4.0 is the complete public GitHub distribution; v4.3.12 is the prior baseline. The v4.3.0 through
+- v4.4.4 is the complete public GitHub distribution; v4.4.0 and v4.3.12 are
+  historical complete baselines. Preserve the failed v4.4.1/v4.4.2/v4.4.3
+  tags and private v4.4.2/v4.4.3 drafts. The v4.3.0 through
   v4.3.11 crates/tags stay published and
   immutable; v4.3.5, v4.3.6, v4.3.7, and v4.3.8 each have one exact private 24-asset
   GitHub draft. A read-only downstream token cannot enumerate those drafts

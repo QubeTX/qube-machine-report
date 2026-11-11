@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [4.4.4] - 2026-11-11
 
 ### Fixed
+- Deliver the consolidated trusted-helper, managed-installer, archive-binding, staging, and dependency security hardening from the earlier candidates in the complete public v4.4.4 distribution. (#sec35)
 - Capture complete native `--version` output and immediately save the real global exit status before selecting a line in the managed PowerShell wrapper. Early `Select-Object -First 1` pipeline termination or a caller's script-local status shadow could falsely reject successful fresh managed takeovers. Keep genuine nonzero exits and mismatched versions blocked. (#sec35)
 - Update transitive `rustix` to 1.1.6 to clear the extended-attribute unsoundness warning RUSTSEC-2026-0486. (#sec35)
 

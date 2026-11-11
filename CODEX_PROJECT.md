@@ -11,9 +11,10 @@ package verified on hosted Apple Silicon and Intel. v4.2.2 is the published
 MIC-1 baseline: managed CLI installers are the recommended default, fresh
 installer intent is authoritative only within a proven platform transaction,
 and the Mac native artifact is a direct PKG with a compatibility-only DMG
-bridge. v4.4.0 is the current complete trusted-OIDC/GitHub distribution,
+bridge. v4.4.4 is the current complete trusted-OIDC/GitHub distribution,
 with full `report`/`tr300` aliases and complete PolyForm license text in both
-Windows MSI editions. v4.3.12 is the previous complete baseline. The
+Windows MSI editions, plus the helper/staging and managed PowerShell security
+repairs. v4.4.0 and v4.3.12 remain historical complete baselines. The
 immutable v4.3.0 through v4.3.11 tags failed to complete GitHub distribution:
 first on a Windows release-bootstrap guard, then on Bash-4-only
 syntax in fresh native Apple signer jobs, then on a checksum guard that did not
@@ -54,31 +55,61 @@ Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
-[`the v4.4.0 publication handoff`](./docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md),
+[`the v4.4.4 publication handoff`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
-Unpublished v4.4.4 fixes the confirmed managed PowerShell native-version check and adds real paired-command coverage before tagging. v4.4.3 remains an exact published crate/tag at 452d60f, with a private 30-asset draft; Windows acceptance found the defect while both native Mac lifecycles passed. Complete public distribution remains v4.4.0 until the new candidate finishes all gates.
+Published v4.4.4 fixes the managed PowerShell native-version check and adds
+real paired-command coverage before tagging under both PowerShell hosts.
+v4.4.3 remains an immutable crate/tag at `452d60f`, with private 30-asset
+draft `441480713`; Windows acceptance found that defect while both native Mac
+lifecycles passed. Preserve the failed v4.4.1/v4.4.2/v4.4.3 tags and private
+v4.4.2 draft `441328198`. None is reused or made public by this record.
 
 ## Current Status
 
 - Cargo package / canonical binary / library import: `tr300`; packaged full alias: `report`.
-- Current package, manifest, and public GitHub release: **4.4.0** at immutable
-  `f49d50a256842ac6c677d1c743c553b3dd92717f`, release `396235243`, 34 audited
-  assets. Exact-main CI `36084969867` attempt 2 and trusted-OIDC publication
-  `36084969841` attempt 2 passed; crate checksum is
+- Current package, manifest, and public GitHub release: **4.4.4**, immutable
+  source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Release `441625880`
+  published at `2026-11-11T12:29:18Z` with exactly 34 audited nonempty assets.
+  PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70` passed CI
+  `43005013711` and plan `43005012888`; exact-main CI `43006272757` and
+  automatic trusted-OIDC `43006272686` passed. Crate checksum:
+  `bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f`.
+  Release `43007443270` attempt 3 passed 13/13; Windows assembly
+  `43015387367` passed 3/3; private Windows `43015777726` passed 16/16.
+  macOS `43015387253` completed all 12 jobs through attempt 6, including
+  ARM legacy job `130545874243` attempt 5 and Intel legacy job
+  `130556746408` attempt 6. Public Windows `43030855472` passed 9/9.
+- The public audit passed all 34 hashes/sizes, 13 sidecars, eight aggregate
+  checksum entries, six paired archives plus source, managed-wrapper bindings,
+  native proof/public-byte identity, anonymous latest wrapper URLs, homepage
+  HTTP 200, and Windows binary smokes. Native macOS CI supplies signature and
+  notarization verification; Windows byte-identity checks bind the published
+  files to that proof and do not claim native `codesign` execution on Windows.
+- PR #40 was closed unmerged after diagnostics. Both initial verbose native
+  probes passed; the quiet Intel probe later captured CloudKit
+  `NSURLErrorDomain -1005` connection loss while identical files passed other
+  calls. The unchanged original Intel job passed, completing v4.4.4 without
+  another product change or version.
+- This is the Phase 1 publication-evidence update. The protected documentation
+  PR's qualification, post-merge exact-main CI/idempotent publisher checks,
+  and Phase 2 closure receipts remain pending. `#q44` and `#v44` stay open;
+  hosted release proof does not complete physical hardware/personal UAC rows.
+- Historical complete v4.4.0 source/tag
+  `f49d50a256842ac6c677d1c743c553b3dd92717f`, release `396235243`, had
+  34 audited assets. CI `36084969867` attempt 2, OIDC `36084969841` attempt 2,
+  Release `36085847270`, Windows `36086249950`, private validation
+  `36086484931` attempt 2, Mac `36086249996`, and post-public Windows
+  `36087344916` passed. Its crate checksum remains
   `f9b47301f2e02db3b51221bd93af7530f7dfd770e20fb0d9dca1d9eb619d5402`.
-  Release `36085847270`, Windows assembly `36086249950`, private validation
-  `36086484931` attempt 2, and Mac finalizer `36086249996` passed. Public
-  asset hashes, paired archives, wrapper bindings, and exact MSI licenses pass.
-  Post-public Windows `36087344916` passed all nine jobs; protected closure
-  PR/main checks remain pending. Physical hardware and personal UAC gates stay open.
 - Previous complete v4.3.12 distribution, exact
   source/tag `19246b76f39c53340e6be62a332cedca9bca766c`. Exact-main CI
   `32869031682`, trusted-OIDC publication `32869029189`, native preflight
   `32869891315`, Release `32869971805`, Windows Installers `32870555353`,
   private Windows validation `32870926989`, macOS finalization `32870555348`,
   and post-public Windows/updater validation `32871841072` passed. Release
-  `376540890` has exactly 34 nonempty digest-bearing assets and is `latest`.
+  `376540890` has exactly 34 nonempty digest-bearing assets; it was `latest`
+  at that historical qualification.
   The earlier
   immutable `v4.3.0` through `v4.3.4` tags produced no draft; v4.3.5 and v4.3.6
   own private drafts `376242296` and `376283574`; v4.3.7 owns `376309349`.
@@ -313,13 +344,15 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
-1. Preserve `4.4.0` as the current complete GitHub/crates boundary and
+1. Preserve `4.4.4` as the current complete GitHub/crates boundary, keep
+   v4.4.0 as its preceding complete baseline, and preserve failed
+   v4.4.1/v4.4.2/v4.4.3 tags plus their historical private drafts. Preserve
    `v4.3.0` through `v4.3.11` as immutable failed GitHub-distribution tags. The
    first five produced no draft; v4.3.5 through v4.3.8 produced exact private
    24-asset drafts, and v4.3.9/v4.3.10/v4.3.11 produced exact private 30-asset
    drafts. Keep
    `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.4.0`; date the release-note blocks on the final
+   synchronized at `4.4.4`; date the release-note blocks on the final
    release source commit while keeping status ledgers explicit.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
@@ -333,7 +366,7 @@ do not have to infer platform semantics.
    plus trusted OIDC/public provenance are accepted.
 5. For a future release, create and push only its new tag after exact-main
    CI/crates proof and native Apple Bash-3.2 staging preflight. Existing
-   immutable `v*` tags, including v4.4.0 and v4.3.12, must not move.
+   immutable `v*` tags, including v4.4.4, v4.4.0, and v4.3.12, must not move.
 6. Require `release.yml` to create the private 24-asset draft, Windows Installers
    to produce 30, and private Windows Installer Validation to attest those exact
    bytes and pass every channel/transition gate.
@@ -343,6 +376,13 @@ do not have to infer platform semantics.
 8. Update the homepage only when its source needs a release-specific change;
    its versionless `releases/latest` links remain in the verified website 1.21.8
    production deployment. Keep AMD/Pi physical tasks open and patch forward from findings.
+
+CI reuses only the pinned audit tool from a cache written by protected `main`;
+every run still performs the advisory audit. Actual release-payload paired
+commands under PowerShell 7 and Windows PowerShell 5 are mandatory before
+tagging. Cache reuse and transient service retries do not waive any gate.
+The v4.4.4 warm audit job was 20 seconds, with a three-second scan; those
+measurements describe that run, not a general performance guarantee.
 
 Published v4.2.2 runs: CI 29664547910, crates 29664653519, Release 29664688035,
 native macOS 29664824418, Windows packaging 29664824432, and Windows transition

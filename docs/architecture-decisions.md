@@ -647,7 +647,7 @@ Private v4.4.3 acceptance found four identical fresh managed-takeover failures a
 
 Collect the completed native version output, immediately capture the real exit code, and only then select its first line. Read the automatic global `LASTEXITCODE` explicitly: a caller's script-local variable can shadow the native result when the installer is invoked as a child script. The first v4.4.4 PR gate caught that distinction before merge or tagging; direct `-File` invocation had hidden it. Require both exit zero and the expected version; assigning a success code would conceal a failed command. The CI Windows source gate builds both commands before running the complete verification under both PowerShell hosts. Positive cases use the actual pair with unset/zero/nonzero prior state; negatives reject a wrong expected version and correct-looking output from a native executable that exits 37, for each command separately. Existing jobs and credential boundaries remain intact.
 
-The v4.4.3 tag, crate, and private draft remain immutable. The normal fix-forward is one unpublished v4.4.4 candidate, with all corrections qualified before its merge/tag.
+The v4.4.3 tag, crate, and private draft remain immutable. The consolidated fix-forward v4.4.4 qualified before its single tag and completed the 34-asset public chain at source 9f5110a. The pre-tag scope correction stayed within the same version. Later hosted-capacity and Apple ticket-service connection failures cleared through unchanged-source retries, supported by the closed unmerged native diagnostic PR #40; they did not justify payload changes or another version.
 
 Sources: [Select-Object pipeline optimization](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/select-object), [native exit-status semantics](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables#lastexitcode), [scope lookup and automatic variables](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_scopes).
 
@@ -3669,3 +3669,9 @@ interrupted successful cleanup from incomplete rollback by process lifetime,
 file locks, age, or paired-file presence. Preserve all prior recovery files;
 an interrupted cleanup may therefore leave a small private backup. Regression
 fixtures verify both failed payload restorations survive a later update.
+
+### Public verification and measured CI follow-up (2026-11-11)
+
+The complete v4.4.4 chain and independent public bytes are recorded in TESTING.md. The qualified PR CI took 7.93 minutes, with Intel native testing at 7.87 minutes. Reusing the pinned audit binary reduced an observed audit job to 20 seconds while retaining a fresh scan. The tagged Release took 57.40 minutes, dominated by hosted ARM allocation waits. A separate native diagnostic captured Apple CloudKit HTTPS connection loss with unchanged package bytes and adjacent successful checks; opaque stapler 68 was not treated as proof of an invalid artifact.
+
+The [timing audit](thinking/2026-11-11-ci-release-timing.md) proposes bounded CI-only improvements for duplicate preparation, independent public smokes, diagnostics, and trusted artifact reuse. These are proposals, not a waiver of native acceptance, credential isolation, immutable bytes, or current source-custody rules. No product version bump is required merely to update these records.
