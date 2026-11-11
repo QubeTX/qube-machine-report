@@ -525,7 +525,7 @@ fn get_shell() -> Option<String> {
 
     // Version probes use the configured protected shell with startup hooks disabled.
     let version_args: Option<&[&str]> = match shell_name.as_str() {
-        "bash" => Some(&["-p", "--version"]),
+        "bash" => Some(&["--version", "-p"]),
         "zsh" => Some(&["-f", "--version"]),
         "fish" => Some(&["--no-config", "--version"]),
         _ => None,

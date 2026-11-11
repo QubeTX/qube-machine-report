@@ -650,6 +650,8 @@ tr300_main() {
     chmod 700 "$dist_installer" || tr300_fail 'could not protect the managed installer'
 
     tr300_transaction_started=1
+    # GNU mktemp uses this private base. Apple's no-template mktemp instead
+    # uses its OS-provided per-user temporary directory, ignoring TMPDIR.
     PATH="${tr300_sha256sum_directory}:/usr/bin:/bin:/usr/sbin:/sbin" \
         TMPDIR="$tr300_temp" \
         /bin/sh "$dist_installer" "$@" ||

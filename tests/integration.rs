@@ -302,6 +302,51 @@ fn test_json_output_parses() {
     assert!(value["memory"]["available_bytes"].is_u64());
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn configured_system_bash_reports_its_version_without_running_startup_hooks() {
+    let fixture = tempfile::tempdir().unwrap();
+    let marker = fixture.path().join("bash-startup-executed");
+    let startup = fixture.path().join("bash-startup");
+    std::fs::write(
+        &startup,
+        b"printf executed > \"$TR300_TEST_BASH_ENV_MARKER\"\n",
+    )
+    .unwrap();
+    let shells: Vec<_> = ["/bin/bash", "/usr/bin/bash"]
+        .into_iter()
+        .filter(|shell| std::path::Path::new(shell).is_file())
+        .collect();
+    assert!(!shells.is_empty(), "no protected system Bash is available");
+    let version = predicate::str::is_match(r"^bash [0-9]+\.[0-9]+(?:\.[0-9]+)*$").unwrap();
+
+    for shell in shells {
+        // Drive the production collector's arguments through the CLI. Checking
+        // a separately constructed Bash command would miss option-order bugs.
+        let output = tr300()
+            .args(["--fast", "--json"])
+            .env("SHELL", shell)
+            .env("BASH_ENV", &startup)
+            .env("TR300_TEST_BASH_ENV_MARKER", &marker)
+            .current_dir(fixture.path())
+            .timeout(std::time::Duration::from_secs(30))
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let value: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["collection_mode"], "fast");
+        let reported = value["session"]["shell"].as_str().unwrap();
+        assert!(
+            version.eval(reported),
+            "configured {shell} lost its Bash version: {reported:?}"
+        );
+        assert!(!marker.exists(), "configured {shell} ran BASH_ENV");
+    }
+}
+
 #[test]
 fn test_custom_title() {
     tr300()
