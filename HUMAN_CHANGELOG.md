@@ -25,6 +25,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Linux and Mac GPU checks use system-owned helper locations, preventing a different program on the command search path from being selected. Existing Windows protections for GPU checks and temporary installer files remain in place.
 - Update secure-connection dependencies to fix six reported vulnerabilities.
 
+### Internal
+- Make the Linux release test wait briefly for a temporary test file to become runnable while keeping its security checks intact.
+
 ## [4.4.0] - 2026-09-24
 
 ### Fixed

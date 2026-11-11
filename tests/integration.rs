@@ -171,10 +171,41 @@ fn isolated_report_never_falls_back_to_tr300_on_path() {
         .parent()
         .unwrap();
 
-    Command::new(&launcher)
+    #[cfg(target_os = "linux")]
+    let temporary_writer = {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&launcher)
+            .unwrap();
+        let error = std::process::Command::new(&launcher).output().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::ExecutableFileBusy);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(file);
+        })
+    };
+    let mut command = Command::new(&launcher);
+    command
         .env("PATH", tr300_directory)
-        .args(["--fast", "--json"])
-        .assert()
+        .args(["--fast", "--json"]);
+    // Parallel forks can briefly retain the copy's writable descriptor on Linux.
+    // Retry only ETXTBSY before the fixture has started, preserving every assertion.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let output = loop {
+        match command.output() {
+            Err(error)
+                if cfg!(target_os = "linux")
+                    && error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result => break result.expect("isolated report fixture should start"),
+        }
+    };
+    #[cfg(target_os = "linux")]
+    temporary_writer.join().unwrap();
+    assert_cmd::assert::Assert::new(output)
         .failure()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains(

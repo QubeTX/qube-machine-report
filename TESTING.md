@@ -9,6 +9,8 @@ as passed.
 
 ### v4.4.1 — Windows managed updater launcher security (2026-11-10)
 
+PR #35 merged after exact-head CI `42965125140` (20/20) and Release plan `42965125037`. Initial exact-main CI `42966014094` hit `ETXTBSY` in the existing copied-report integration fixture on both the first run and its single retry; all security tests passed. The automatic publisher stopped before registry credentials. A test-only fix-forward exercises a temporarily writable fixture and bounds retries of that Linux spawn error to one second, preserving all assertions. Version 4.4.1 remains unpublished and untagged until the new exact-main gates succeed.
+
 Candidate PR #35 integrates current main, addresses remaining Unix GPU helper resolution from PR #2, preserves the existing PR #1 private-staging protections, and patches six audited TLS dependency advisories. Windows format/clippy/all-target tests pass (205 library, two companion, 29 integration), including a hostile-PATH PowerShell probe. Advisory audit, actionlint, ShellCheck, exact Mac preinstall-template lint, shell transaction fixtures, and PowerShell transaction fixtures under both hosts pass. Package/release build/provenance, exact-head review/hosted CI, exact-main CI/OIDC, native assembly, and public verification remain pending. Evidence is recorded in `.tasks/tasks/sec35.md` as each gate completes.
 
 ### v4.4.0 — PATH report command and MSI license (2026-09-24)
