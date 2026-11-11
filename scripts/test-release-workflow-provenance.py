@@ -8775,6 +8775,13 @@ if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Va
     require(ci, "cargo install --locked cargo-audit --version 0.22.2", "ci cargo-audit pin")
     require(ci, "cargo-audit-audit 0.22.2", "ci cargo-audit version proof")
     installer_sources = extract_job(ci, "windows-installer-sources", CI_WORKFLOW.name)
+    native_fixture = "Validate managed transactions with the real paired commands in both PowerShell hosts"
+    require(installer_sources, native_fixture, "pre-tag real native managed verification")
+    if installer_sources.index("Build and verify release commands") >= installer_sources.index(native_fixture):
+        raise AssertionError("real native transaction fixtures must follow the paired release build")
+    if installer_sources.count("-NativeBinaryDirectory $nativeDirectory") != 2:
+        raise AssertionError("both PowerShell hosts must require the real paired commands before tagging")
+    require(installer_sources, "WindowsPowerShell\\v1.0\\powershell.exe", "native Windows PowerShell verification host")
     source_guard = "$sourceGuard = [IO.File]::Open($asset, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)"
     if installer_sources.count(source_guard) != 2 or installer_sources.count("finally { $sourceGuard.Dispose() }") != 2:
         raise AssertionError("CI must retain the read-only source guard across both native installer engines")

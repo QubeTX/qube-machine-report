@@ -5,9 +5,9 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-11-11
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.2 / 4.4.3
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.3 / 4.4.4
 
-Candidate v4.4.3 consolidates the completed collector/maintenance/staging security audit before any further merge or tag. v4.4.1 and v4.4.2 are immutable published crates/tags; neither has a complete public GitHub distribution. v4.4.2's signed 24-asset draft remains private after downstream publication was stopped. The native-runner repair is retained. Follow `.tasks/tasks/sec35.md`; publish this one candidate only after all audit fixes and gates pass.
+Candidate v4.4.4 contains one confirmed fix-forward: managed PowerShell verification must collect the completed native version command and its actual exit status. Build-backed real-payload tests now precede tagging under both PowerShell hosts. v4.4.3 remains an immutable exact crate/tag at 452d60f, with signed archives and private 30-asset draft 441480713; Windows validation 42998302219 stopped on this defect. Both native Mac lifecycles passed, and its external ARM-capacity/Apple-network failures cleared without code changes. No v4.4.4 crate/tag exists yet; keep all remaining corrections in this unpublished candidate.
 
 Current release: immutable `v4.4.0` at
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,

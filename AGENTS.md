@@ -24,7 +24,7 @@ closure-docs PR remains pending. Do not close that task or claim personal hardwa
 acceptance from hosted results. Start continuation with
 [`the v4.4.0 handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
 
-Candidate **v4.4.3** consolidates the completed collector, maintenance, and installer-staging security audit. v4.4.1 and v4.4.2 have immutable published crates/tags; v4.4.2 has only a private 24-asset draft. No further merge/tag until the complete candidate qualifies. Pin and validate actual Apple plan runners as `macos-15` / `macos-15-intel`; the public GitHub baseline above remains authoritative until the full new release chain passes.
+Candidate **v4.4.4** fixes completed native-version verification in the managed PowerShell wrapper and requires real paired-command fixtures under both hosts after the CI release build. v4.4.3 source/tag `452d60f33174b9c7f9e282fcafed0ee05072e8ea` passed exact CI/OIDC/13-job Release/Windows assembly, but its 30-asset draft `441480713` remains private after four fresh managed takeovers failed the same version probe. Both native Mac lifecycles passed. Keep its tag/crate/draft immutable; no v4.4.4 crate or tag exists until the new candidate qualifies. Public latest remains v4.4.0. Apple builders remain pinned to `macos-15` / `macos-15-intel`.
 
 ## Task management system
 
@@ -67,7 +67,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Cargo package name: `tr300`
 - Library import path: `tr300`
 - Current crates.io / complete GitHub distribution / working manifest:
-  `4.4.2` / `4.4.0` / `4.4.3`. Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
+  `4.4.3` / `4.4.0` / `4.4.4`. Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
   Release `36085847270`, Windows `36086249950`, private validation
   `36086484931` attempt 2, and Mac publication `36086249996` passed.
 - Prior v4.3.12 distribution ledger: working manifest was `4.3.12` (battery hardening, Windows

@@ -1420,9 +1420,6 @@ jobs:
             $errors | Format-List | Out-String | Write-Host
             throw 'managed PowerShell installer has parser errors'
           }
-      - name: Validate managed PowerShell transaction rollback
-        shell: pwsh
-        run: scripts/test-managed-installer-transaction.ps1
       - name: Build and verify release commands
         shell: pwsh
         run: |
@@ -1441,6 +1438,16 @@ jobs:
           & target\release\report.exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'report help failed' }
           $global:LASTEXITCODE = 0
+      - name: Validate managed transactions with the real paired commands in both PowerShell hosts
+        shell: pwsh
+        run: |
+          $nativeDirectory = [IO.Path]::GetFullPath('target\release')
+          $fixtureScript = [IO.Path]::GetFullPath('scripts\test-managed-installer-transaction.ps1')
+          & $fixtureScript -NativeBinaryDirectory $nativeDirectory
+          if (-not $?) { throw 'PowerShell 7 managed transaction/native verification fixture failed' }
+          $legacyHost = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+          & $legacyHost -NoProfile -NonInteractive -File $fixtureScript -NativeBinaryDirectory $nativeDirectory
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell managed transaction/native verification fixture failed' }
       - name: Compile Global and Corporate MSI sources
         shell: pwsh
         run: |

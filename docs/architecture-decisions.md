@@ -641,6 +641,16 @@ The raw shell child receives the private wrapper stage as `TMPDIR`. GNU mktemp u
 
 Sources: [PowerShell module-path construction](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath), [Windows handle sharing](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [protected security descriptors](https://learn.microsoft.com/en-us/windows/win32/secauthz/security-descriptor-string-format), [Apple mktemp implementation](https://github.com/apple-oss-distributions/shell_cmds/blob/main/mktemp/mktemp.c).
 
+### Completed native PowerShell verification (v4.4.4; 2026-11-11)
+
+Private v4.4.3 acceptance found four identical fresh managed-takeover failures after the raw installer successfully installed the paired binaries. Real-payload reproduction showed that selecting the first line inside the native process pipeline could leave a null/stale exit status in PowerShell 7 or abort native execution in Windows PowerShell 5. The earlier external-host call had incidentally supplied a successful prior status; the explicit .NET child launcher exposed that dependency.
+
+Collect the completed native version output, immediately capture the real exit code, and only then select its first line. Read the automatic global `LASTEXITCODE` explicitly: a caller's script-local variable can shadow the native result when the installer is invoked as a child script. The first v4.4.4 PR gate caught that distinction before merge or tagging; direct `-File` invocation had hidden it. Require both exit zero and the expected version; assigning a success code would conceal a failed command. The CI Windows source gate builds both commands before running the complete verification under both PowerShell hosts. Positive cases use the actual pair with unset/zero/nonzero prior state; negatives reject a wrong expected version and correct-looking output from a native executable that exits 37, for each command separately. Existing jobs and credential boundaries remain intact.
+
+The v4.4.3 tag, crate, and private draft remain immutable. The normal fix-forward is one unpublished v4.4.4 candidate, with all corrections qualified before its merge/tag.
+
+Sources: [Select-Object pipeline optimization](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/select-object), [native exit-status semantics](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables#lastexitcode), [scope lookup and automatic variables](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_scopes).
+
 ### Measured CI reuse without removing release gates (2026-11-11)
 
 The v4.4.2 exact-main CI took 11.13 minutes; the Intel direct-PKG fixture consumed 7.95 minutes. The crate workflow's 13.17 minutes included 11.27 minutes waiting for that CI, so adding both durations would double-count most of the wait. Audit-tool installation consumed 3.25 minutes versus 0.05 minutes for the actual audit. These are measurements of runs 42972929754 and 42972929890, not a guaranteed future duration. The native release uses prebuilt hosted OS runners, with no container image build.
