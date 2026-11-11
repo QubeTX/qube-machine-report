@@ -1,4 +1,4 @@
-TT;DR: Resolve PR #35 against current main and ship one consolidated v4.4.3 candidate to fix Windows managed updater launcher hijacking. Implementation and release verification are active.
+TT;DR: Resolve PR #35 against current main and ship one consolidated v4.4.4 candidate to fix Windows managed updater launcher hijacking. Implementation and release verification are active.
 
 ## Why
 Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the security fix; expanded in the same session to the concerns in closed PRs #1 and #2.
@@ -13,7 +13,7 @@ Complete the bounded collector, maintenance-child-chain, and staging inventories
 Windows managed self-updates use the OS-owned Windows PowerShell executable and working directory instead of a PATH-selected host. Missing trusted hosts fail before launch. Existing install channels, receipt prefixes, installer integrity checks, and both report/tr300 commands remain supported.
 
 ## Acceptance
-Functional bar: current main contains the fix and the complete immutable v4.4.3 distribution is public, with the crate and both command aliases verified.
+Functional bar: current main contains the fix and the complete immutable v4.4.4 distribution is public, with the crate and both command aliases verified.
 Evidence bar: adversarial Windows launcher test, full local gates, exact-head independent review/hosted checks, exact-main CI/OIDC, signed native publication, exact public inventory and smokes.
 Gate ownership: repository release skill and protected branch/release workflows.
 Valid bounded outcomes: complete only with all required evidence; otherwise active/partial with exact failing gate and next action recorded.
@@ -30,14 +30,14 @@ Valid bounded outcomes: complete only with all required evidence; otherwise acti
 | Independent review | review_security and release_gate_review agents | Exact heads 8c8df9a and 578e301a reviewed without blockers | Security and fixture findings addressed | Hosted gates remain separately required | PASS |
 
 ## Verification
-- [ ] Current consolidated candidate passes local release gates and adversarial child-chain/staging probes
+- [x] Current consolidated candidate passes local release gates and adversarial child-chain/staging probes
 - [ ] Consolidated exact head passes independent review and hosted CI/Release plan; PR merged
 - [ ] Consolidated exact-main CI and trusted-OIDC crate publication pass before immutable tag
 - [ ] Complete native release chain, public asset audit, and post-public smokes pass
 - [ ] Protected follow-up documentation records the final evidence
 
 ## Status
-Active pre-release qualification of unpublished v4.4.3 in PR #38. Reviewed heads db5d0a4 and 2535c72 pass local gates; actual Release plan 42988722165 passes. First final-head CI 42988722084 passed 18/20; native Mac Rust tests passed, but their new raw-child staging fixture assumed GNU mktemp behavior. Correcting its assertion against Apple's owning implementation before rerunning the exact-head native gate. Nothing has merged/published for v4.4.3. Prior v4.4.2's 24-asset draft 441328198 remains private, and public latest remains v4.4.0. User authorized one necessary new version and normal publishing after complete qualification; do not create versions for these pre-release corrections.
+Active unpublished v4.4.4 fix-forward. The bounded private acceptance inventory found one product defect: the managed PowerShell version pipeline truncated native execution and reused/aborted exit status. All four fresh takeover failures share it. Complete output and immediate exit capture fix it; real paired-command tests under both hosts prove unset/zero/stale state, wrong versions, and real nonzero refusal. CI now runs those fixtures after compiling the paired payload. Current-candidate local/hosted qualification is pending; do not publish/tag until it passes. v4.4.3 remains exact crate/tag 452d60f with private 30-asset draft 441480713; Windows: 11 successes, four failures, attestation skipped, both native Mac lifecycle proofs passed. External ARM allocation and Apple stapler-network failures cleared through unchanged-source retries. Public latest remains 4.4.0. No v4.4.4 crate/tag exists.
 
 ## Activity
 - 2026-11-10 — Started isolated worktree; inspected PR and current main; preserved original checkout's dirty work (agent: codex).
@@ -77,3 +77,11 @@ Active pre-release qualification of unpublished v4.4.3 in PR #38. Reviewed heads
 - 2026-11-11 — Consolidated local gates pass: 220 library + two companion + 29 integration tests, strict clippy/fmt, audit, 44-file package inventory/dry-run/release build, whole-fast child poisoning, runtime PS module reset, archive digest/retained guard, staging owner/DACL/handle tests, original PATH ownership checks, shell and both PS transaction suites, actual dist runner plan, workflow/shell/provenance gates. Runtime aliases/help match; fast JSON median 318.1 ms in five smoke runs. Independent component reviews found no remaining blocker (agent: codex).
 
 - 2026-11-11 — Opened PR #38 at reviewed db5d0a4; final raw-child TMPDIR binding/fixture committed as 2535c72. Release plan 42988722165 passed; CI 42988722084 passed 18/20, with both native Mac Rust suites green but the new fixture failing on Apple mktemp OS-private-base semantics. Correcting that platform assertion before merge; version remains 4.4.3 (agent: codex).
+
+- 2026-11-11 — Final reviewed head 932341c passed CI 42990549773 (20/20) and plan 42990549754. Resolved bot review after a CLI Bash-version/startup-hook regression; PR #38 merged as exact 452d60f. Watching main CI 42991858691 and automatic OIDC 42991858741 before a single v4.4.3 tag (agent: codex).
+
+- 2026-11-11 — Exact-main CI 42991858691 passed all 20; trusted-OIDC publisher 42991858741 succeeded. Verified public crate checksum 365c676267ecd8aed35a3d46828f0f71b484ecf82e5286eb00ead911ad049834 and VCS source452d60f, then pushed only immutable v4.4.3 at that source. Native chain pending (agent: codex).
+
+- 2026-11-11 — Complete v4.4.3 private acceptance audit found one wrapper defect behind four fresh takeover failures; all other completed Windows cases and both native Mac PKG lifecycles passed. Reproduced with real binaries under PS7/WinPS5; fixed complete output/exit capture and added required build-backed pre-tag fixtures, including native exit37 despite matching version text. Preparing one unpublished v4.4.4 candidate; no new tag yet (agent: codex).
+
+- 2026-11-11 — v4.4.4 local Rust 251 tests/fmt/clippy/package/dry-run/release/audit, workflow/shell/provenance, actualpaired-command PS7/WinPS5 suites, and runtime alias/JSON/ASCII checks all pass. Independent scoped review confirms no weakened guard. Hosted currentcandidate proof pending (agent: codex).

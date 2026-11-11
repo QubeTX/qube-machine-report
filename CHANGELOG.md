@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.4] - 2026-11-11
+
+### Fixed
+- Capture complete native `--version` output and immediately save the real exit status before selecting a line in the managed PowerShell wrapper. Early `Select-Object -First 1` pipeline termination could retain a null/stale status or abort the native process, falsely rejecting successful fresh managed takeovers. Keep genuine nonzero exits and mismatched versions blocked. (#sec35)
+
+### Internal
+- Run build-backed transaction fixtures after compiling both commands, under PowerShell 7 and Windows PowerShell 5. Cover unset/zero/nonzero prior status, repeated complete verification, wrong expected versions, and a compiled correct-looking version probe that actually exits 37 for either command. (#sec35)
+
 ## [4.4.3] - 2026-11-11
+
+> Release status: exact unyanked crate/tag and signed archives passed; the private 30-asset draft stopped on managed PowerShell native-version verification. Preserve it unchanged; fix-forward v4.4.4.
 
 ### Fixed
 - Bind implicit collector and maintenance helpers to protected operating-system locations, safe working directories, and a trusted child search environment across Windows, macOS, and Linux. Preserve collection budgets, optional-probe fallback, and the user's explicitly selected Cargo toolchain. (#sec35)

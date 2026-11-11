@@ -1,3 +1,5 @@
+param([string]$NativeBinaryDirectory)
+
 $ErrorActionPreference = 'Stop'
 
 $oldTestOnly = $env:TR300_MANAGED_INSTALLER_TEST_ONLY
@@ -423,6 +425,95 @@ $wc = New-Object Net.WebClient
         $rejected = $false
         try { New-Tr300GuardedDistInstaller $rawFixture $guardedFixture } catch { $rejected = $true }
         if (-not $rejected) { throw 'changed cargo-dist producer anchors were accepted' }
+    }
+    if ($NativeBinaryDirectory) {
+        # Real payload verification is opt-in for the build-backed CI step;
+        # script-only rollback fixtures remain runnable before compilation.
+        $nativeSource = [IO.Path]::GetFullPath($NativeBinaryDirectory)
+        $nativePrefix = Join-Path $fixture 'native-verification'
+        $nativeBin = Join-Path $nativePrefix 'bin'
+        $nativeConfig = Join-Path $fixture 'native-config'
+        $nativeReceiptDirectory = Join-Path $nativeConfig 'tr300'
+        $null = [IO.Directory]::CreateDirectory($nativeBin)
+        $null = [IO.Directory]::CreateDirectory($nativeReceiptDirectory)
+        foreach ($name in @('tr300.exe', 'report.exe')) {
+            [IO.File]::Copy((Join-Path $nativeSource $name), (Join-Path $nativeBin $name))
+        }
+        $manifest = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\Cargo.toml'))
+        $Tr300Version = [regex]::Match($manifest, '(?m)^version = "([^"]+)"').Groups[1].Value
+        if (-not $Tr300Version) { throw 'the native verification fixture could not resolve the expected package version' }
+        $env:XDG_CONFIG_HOME = $nativeConfig
+        $env:TR300_INSTALL_DIR = $nativePrefix
+        $nativeReceipt = [pscustomobject]@{
+            provider = @{source='cargo-dist'}
+            source = @{app_name='tr300'}
+            version = $Tr300Version
+            install_prefix = $nativePrefix
+        }
+        [IO.File]::WriteAllText((Join-Path $nativeReceiptDirectory 'tr300-receipt.json'), ($nativeReceipt | ConvertTo-Json -Depth 5))
+        foreach ($priorExit in @('unset', '0', '37')) {
+            foreach ($attempt in 1..2) {
+                Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+                Remove-Variable LASTEXITCODE -Scope Script -ErrorAction SilentlyContinue
+                if ($priorExit -ne 'unset') { $script:LASTEXITCODE = [int]$priorExit }
+                $verified = Get-Tr300ManagedBinary
+                if (-not $verified.Equals((Join-Path $nativeBin 'tr300.exe'), [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "real managed payload verification failed with prior native exit state $priorExit on attempt $attempt"
+                }
+            }
+        }
+        $expectedNativeVersion = $Tr300Version
+        try {
+            $Tr300Version = '0.0.0-native-version-rejection'
+            $nativeReceipt.version = $Tr300Version
+            [IO.File]::WriteAllText((Join-Path $nativeReceiptDirectory 'tr300-receipt.json'), ($nativeReceipt | ConvertTo-Json -Depth 5))
+            $rejection = $null
+            try { $null = Get-Tr300ManagedBinary } catch { $rejection = $_.Exception.Message }
+            if ($rejection -cne "managed TR-300 binary did not report the expected version $Tr300Version") {
+                throw 'real managed payload verification accepted the wrong expected version or failed before checking the executable'
+            }
+        } finally {
+            $Tr300Version = $expectedNativeVersion
+            $nativeReceipt.version = $Tr300Version
+            [IO.File]::WriteAllText((Join-Path $nativeReceiptDirectory 'tr300-receipt.json'), ($nativeReceipt | ConvertTo-Json -Depth 5))
+        }
+        # This negative-only native payload prints the exact expected version
+        # but exits nonzero. The positive cases above always use the real pair.
+        $nonzeroSource = Join-Path $fixture 'nonzero-version.rs'
+        $nonzeroBinary = Join-Path $fixture 'nonzero-version.exe'
+        [IO.File]::WriteAllText($nonzeroSource, @'
+fn main() {
+    println!("{}", std::env::var("TR300_TEST_NATIVE_VERSION").expect("fixture version"));
+    std::process::exit(37);
+}
+'@)
+        $compileOutput = @(& rustc --edition=2024 --crate-name tr300_native_exit_fixture $nonzeroSource -o $nonzeroBinary 2>&1)
+        $compileExit = $LASTEXITCODE
+        if ($compileExit -ne 0) { throw "could not compile the native exit fixture: $($compileOutput -join [Environment]::NewLine)" }
+        $previousFixtureVersion = $env:TR300_TEST_NATIVE_VERSION
+        try {
+            $env:TR300_TEST_NATIVE_VERSION = "tr300 $Tr300Version"
+            $nonzeroOutput = @(& $nonzeroBinary --version)
+            $nonzeroExit = $LASTEXITCODE
+            if ($nonzeroExit -ne 37 -or $nonzeroOutput.Count -ne 1 -or $nonzeroOutput[0] -cne "tr300 $Tr300Version") {
+                throw 'the native negative fixture did not print the expected version and exit 37'
+            }
+            foreach ($name in @('tr300.exe', 'report.exe')) {
+                $replacedBinary = Join-Path $nativeBin $name
+                try {
+                    [IO.File]::Copy($nonzeroBinary, $replacedBinary, $true)
+                    $script:LASTEXITCODE = 0
+                    $rejection = $null
+                    try { $null = Get-Tr300ManagedBinary } catch { $rejection = $_.Exception.Message }
+                    $commandName = if ($name -eq 'tr300.exe') { 'TR-300 binary' } else { 'report command' }
+                    if ($rejection -cne "managed $commandName did not report the expected version $Tr300Version") {
+                        throw "managed verification accepted a nonzero $name version exit or failed before checking that executable"
+                    }
+                } finally { [IO.File]::Copy((Join-Path $nativeSource $name), $replacedBinary, $true) }
+            }
+        } finally { $env:TR300_TEST_NATIVE_VERSION = $previousFixtureVersion }
+        Write-Host 'real managed payload version/help/fast-JSON verification: PASS (unset, zero, nonzero native exit states; repeated)'
+        Write-Host 'managed payload version rejection: PASS (wrong expected version; correct version text with native exit 37 for both commands)'
     }
     $privateStage = New-Tr300PrivateStaging
     try {

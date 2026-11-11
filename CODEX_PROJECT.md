@@ -57,7 +57,7 @@ Start the next session with
 [`the v4.4.0 publication handoff`](./docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
-Candidate v4.4.3 consolidates the complete collector/maintenance/staging security audit. v4.4.1 and v4.4.2 crates/tags are immutable; the signed v4.4.2 24-asset draft remains private. The complete public distribution remains v4.4.0 until one fully qualified candidate completes the normal chain.
+Unpublished v4.4.4 fixes the confirmed managed PowerShell native-version check and adds real paired-command coverage before tagging. v4.4.3 remains an exact published crate/tag at 452d60f, with a private 30-asset draft; Windows acceptance found the defect while both native Mac lifecycles passed. Complete public distribution remains v4.4.0 until the new candidate finishes all gates.
 
 ## Current Status
 

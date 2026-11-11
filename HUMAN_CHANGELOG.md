@@ -13,7 +13,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.4.4] - 2026-11-11
+
+### Fixed
+- Windows managed installs now wait for both command-version checks to finish and use their actual exit status. A successful install no longer fails because PowerShell retained an older command status.
+
+### Internal
+- Test the complete installed-command verification with real binaries in both PowerShell versions before tagging. Incorrect versions and real command failures remain blocked.
+
 ## [4.4.3] - 2026-11-11
+
+> Release status: the crate and signed archives were built, but the private installer release stopped on a Windows verification defect. The correction continues as v4.4.4.
 
 ### Fixed
 - System reporting and maintenance use trusted system tools even when the current folder or command search settings contain another program with the same name. Reporting modes and optional hardware checks keep their existing behavior.

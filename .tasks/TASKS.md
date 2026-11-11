@@ -10,7 +10,7 @@
 
 ## Active
 
-- [ ] **Resolve PR #35 and ship the Windows updater security fix** - consolidate the complete audit in unpublished v4.4.3, then pass protected CI/OIDC/native publication (owner codex) #sec35
+- [ ] **Resolve PR #35 and ship the Windows updater security fix** - consolidate the complete audit in unpublished v4.4.4, then pass protected CI/OIDC/native publication (owner codex) #sec35
   - [x] Resolve conflicts and verify trusted PowerShell launch behavior
   - [ ] Pass consolidated-candidate local and exact-head hosted gates plus independent review
   - [ ] Merge and verify exact-main CI and trusted-OIDC publication

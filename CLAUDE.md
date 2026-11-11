@@ -63,12 +63,13 @@ Internal collector and maintenance OS helpers now use `src/trusted_process.rs`; 
 
 Native update staging lives in `src/update/staging.rs`. Windows retains restrictive directory and read-only source handles through native-installer completion; Unix creates mode-0700 staging beneath the trusted system temporary base, with no same-UID custody claim. Managed Windows wrapper rendering also binds the prepared ZIP digest, and private frozen inputs must satisfy it before extraction. See the v4.4.3 architecture addendum and tests before changing either boundary.
 
+Managed PowerShell native-version probes must collect the full native output and capture its actual exit code before selecting a line. `Select-Object -First 1` inside the native pipeline can leave a prior status or abort the process. The pre-tag Windows source gate now requires actual paired-command verification under both PowerShell hosts after compilation, including a correct-looking native probe that exits nonzero. See [Select-Object optimization](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/select-object) and [native exit-status semantics](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables#lastexitcode).
+
 ## Project Overview
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.
 
-Complete public GitHub distribution, crates.io package, and working manifest:
-**4.4.0**, immutable source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`.
+Complete public GitHub distribution: **4.4.0**. Current crate: **4.4.3**; working manifest: **4.4.4**. Published v4.4.0 immutable source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`.
 Release `396235243` contains 34 audited assets. The protected CI/OIDC chain,
 private Windows validation, native Intel/ARM Apple lifecycles, public byte audit,
 and published MSI EULA readback passed. Post-public Windows run `36087344916`

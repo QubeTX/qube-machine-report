@@ -638,16 +638,20 @@ function Get-Tr300ManagedBinary {
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
         throw "managed TR-300 binary is missing: $binary"
     }
-    $reported = (& $binary --version | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $reported -ne "tr300 $Tr300Version") {
+    $versionOutput = @(& $binary --version)
+    $versionExitCode = $LASTEXITCODE
+    $reported = $versionOutput | Select-Object -First 1
+    if ($versionExitCode -ne 0 -or $reported -ne "tr300 $Tr300Version") {
         throw "managed TR-300 binary did not report the expected version $Tr300Version"
     }
     $report = Join-Path $actualPrefix 'bin\report.exe'
     if (-not (Test-Path -LiteralPath $report -PathType Leaf)) {
         throw "managed report command is missing: $report"
     }
-    $reportVersion = (& $report --version | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $reportVersion -ne "tr300 $Tr300Version") {
+    $reportVersionOutput = @(& $report --version)
+    $reportVersionExitCode = $LASTEXITCODE
+    $reportVersion = $reportVersionOutput | Select-Object -First 1
+    if ($reportVersionExitCode -ne 0 -or $reportVersion -ne "tr300 $Tr300Version") {
         throw "managed report command did not report the expected version $Tr300Version"
     }
     $null = & $report --fast --json
