@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-11-10
+
+### Fixed
+- **Windows managed self-updates no longer execute a `pwsh.exe` selected from
+  `PATH`.** The updater now invokes Windows PowerShell only through the absolute
+  system-directory path returned by Windows and does not fall back to a
+  PATH-resolved PowerShell 7 executable, preventing a hostile working directory
+  or `PATH` entry from supplying the updater process.
+
+### Security
+- Resolve the remaining PR #2 GPU-helper risk with fixed trusted Linux `lspci` paths and absolute macOS `ioreg`/`sysctl` paths. Windows already reads GPU registry data through native APIs. PR #1 is superseded by private randomized staging and exclusive file creation. (#sec35)
+- Update locked rustls to 0.23.46, rustls-webpki to 0.103.16, and webpki-roots to 1.0.10, resolving all six advisories reported by the current dependency audit. (#sec35)
+
 ## [4.4.0] - 2026-09-24
 
 ### Fixed

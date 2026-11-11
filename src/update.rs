@@ -78,7 +78,6 @@ enum UpdateStrategy {
     InstallerCurl,
     InstallerWget,
     InstallerPowerShell,
-    InstallerPwsh,
     /// Re-runs the Global perMachine MSI (UAC required, replaces v3.15.0+).
     MsiGlobal,
     /// Re-runs the Corporate perUser MSI (no UAC required).
@@ -98,7 +97,6 @@ impl UpdateStrategy {
             UpdateStrategy::InstallerCurl => "curl shell installer",
             UpdateStrategy::InstallerWget => "wget shell installer",
             UpdateStrategy::InstallerPowerShell => "PowerShell installer",
-            UpdateStrategy::InstallerPwsh => "pwsh installer",
             UpdateStrategy::MsiGlobal => "Global MSI installer",
             UpdateStrategy::MsiCorporate => "Corporate MSI installer",
             UpdateStrategy::ExeGlobal => "Global EXE installer",
@@ -113,7 +111,6 @@ impl UpdateStrategy {
             UpdateStrategy::InstallerCurl => "installer_curl",
             UpdateStrategy::InstallerWget => "installer_wget",
             UpdateStrategy::InstallerPowerShell => "installer_powershell",
-            UpdateStrategy::InstallerPwsh => "installer_pwsh",
             UpdateStrategy::MsiGlobal => "msi_global",
             UpdateStrategy::MsiCorporate => "msi_corporate",
             UpdateStrategy::ExeGlobal => "exe_global",
@@ -756,10 +753,7 @@ fn build_strategy_list(channel: InstallChannel) -> Vec<UpdateStrategy> {
         InstallChannel::ExeGlobal => vec![UpdateStrategy::ExeGlobal],
         InstallChannel::ExeCorporate => vec![UpdateStrategy::ExeCorporate],
         InstallChannel::Cargo => vec![UpdateStrategy::Cargo],
-        InstallChannel::PowerShellInstaller => vec![
-            UpdateStrategy::InstallerPwsh,
-            UpdateStrategy::InstallerPowerShell,
-        ],
+        InstallChannel::PowerShellInstaller => vec![UpdateStrategy::InstallerPowerShell],
         InstallChannel::ShellInstaller => {
             vec![UpdateStrategy::InstallerCurl, UpdateStrategy::InstallerWget]
         }
@@ -851,7 +845,6 @@ fn try_strategy(strategy: UpdateStrategy, latest: &str) -> Result<(), StrategyEr
         strategy,
         UpdateStrategy::Cargo
             | UpdateStrategy::InstallerPowerShell
-            | UpdateStrategy::InstallerPwsh
             | UpdateStrategy::MsiCorporate
             | UpdateStrategy::ExeCorporate
     ) {
@@ -890,11 +883,7 @@ fn try_strategy_inner(strategy: UpdateStrategy, latest: &str) -> Result<(), Stra
             verify_installer_post_install(latest, "shell installer")
         }
         UpdateStrategy::InstallerPowerShell => {
-            try_installer_powershell("powershell", latest)?;
-            verify_installer_post_install(latest, "PowerShell installer")
-        }
-        UpdateStrategy::InstallerPwsh => {
-            try_installer_powershell("pwsh", latest)?;
+            try_installer_powershell(latest)?;
             verify_installer_post_install(latest, "PowerShell installer")
         }
         UpdateStrategy::MsiGlobal => {
@@ -1498,6 +1487,7 @@ fn run_command_status(launcher: &str, args: &[&str]) -> Result<(), StrategyError
     run_command_status_inner(launcher, args, None)
 }
 
+#[cfg(not(windows))]
 fn run_command_status_with_env(
     launcher: &str,
     args: &[&str],
@@ -1517,7 +1507,11 @@ fn run_command_status_inner(
     if let Some((name, value)) = extra_env {
         command.env(name, value);
     }
-    suppress_stdout_for_json(&mut command);
+    run_prepared_command_status(&mut command, launcher)
+}
+
+fn run_prepared_command_status(command: &mut Command, launcher: &str) -> Result<(), StrategyError> {
+    suppress_stdout_for_json(command);
     match command.status() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StrategyError::Preflight(
             format!("{} not on PATH", launcher),
@@ -1634,7 +1628,57 @@ fn try_installer_wget(_latest: &str) -> Result<(), StrategyError> {
 }
 
 #[cfg(windows)]
-fn try_installer_powershell(launcher: &str, latest: &str) -> Result<(), StrategyError> {
+fn trusted_windows_powershell() -> Result<std::path::PathBuf, StrategyError> {
+    let launcher = trusted_windows_system_directory()
+        .map_err(|error| {
+            StrategyError::Preflight(format!(
+                "could not resolve the trusted Windows system directory: {error}"
+            ))
+        })?
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    if !launcher.is_file() {
+        return Err(StrategyError::Preflight(format!(
+            "trusted Windows PowerShell launcher is unavailable at {}",
+            launcher.display()
+        )));
+    }
+    Ok(launcher)
+}
+
+#[cfg(any(windows, test))]
+fn windows_powershell_install_command(
+    launcher: &std::path::Path,
+    script: &str,
+    prefix: &str,
+) -> std::io::Result<Command> {
+    let working_directory = launcher
+        .parent()
+        .filter(|directory| launcher.is_absolute() && directory.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "trusted Windows PowerShell path has no absolute system directory",
+            )
+        })?;
+    let mut command = Command::new(launcher);
+    command
+        .current_dir(working_directory)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .env("CARGO_DIST_FORCE_INSTALL_DIR", prefix);
+    Ok(command)
+}
+
+#[cfg(windows)]
+fn try_installer_powershell(latest: &str) -> Result<(), StrategyError> {
     let script = format!(
         "$ErrorActionPreference='Stop'; irm {} | iex",
         release_asset_url(latest, PS_INSTALLER_ASSET)
@@ -1642,23 +1686,18 @@ fn try_installer_powershell(launcher: &str, latest: &str) -> Result<(), Strategy
     let prefix = cargo_dist_install_prefix().ok_or_else(|| {
         StrategyError::Preflight("matching cargo-dist receipt is unavailable".into())
     })?;
-    run_command_status_with_env(
-        launcher,
-        &[
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ],
-        "CARGO_DIST_FORCE_INSTALL_DIR",
-        &prefix,
-    )
+    let launcher = trusted_windows_powershell()?;
+    let mut command =
+        windows_powershell_install_command(&launcher, &script, &prefix).map_err(|error| {
+            StrategyError::Preflight(format!(
+                "could not prepare trusted Windows PowerShell: {error}"
+            ))
+        })?;
+    run_prepared_command_status(&mut command, &launcher.to_string_lossy())
 }
 
 #[cfg(not(windows))]
-fn try_installer_powershell(_launcher: &str, _latest: &str) -> Result<(), StrategyError> {
+fn try_installer_powershell(_latest: &str) -> Result<(), StrategyError> {
     Err(StrategyError::Preflight(
         "PowerShell installer is Windows-only".into(),
     ))
@@ -2135,6 +2174,14 @@ fn windows_system_executable_path(
 /// a planted `msiexec.exe` inherit the elevated worker token.
 #[cfg(windows)]
 fn trusted_windows_msiexec_path() -> std::io::Result<std::path::PathBuf> {
+    Ok(windows_system_executable_path(
+        &trusted_windows_system_directory()?,
+        "msiexec.exe",
+    ))
+}
+
+#[cfg(windows)]
+fn trusted_windows_system_directory() -> std::io::Result<std::path::PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use winapi::um::sysinfoapi::GetSystemDirectoryW;
@@ -2144,6 +2191,7 @@ fn trusted_windows_msiexec_path() -> std::io::Result<std::path::PathBuf> {
 
     let mut buffer = vec![0_u16; INITIAL_CAPACITY];
     loop {
+        // SAFETY: buffer is writable for the supplied UTF-16 code-unit count.
         let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
         if length == 0 {
             return Err(std::io::Error::last_os_error());
@@ -2159,7 +2207,7 @@ fn trusted_windows_msiexec_path() -> std::io::Result<std::path::PathBuf> {
                     "Windows returned a non-absolute system directory",
                 ));
             }
-            return Ok(windows_system_executable_path(&directory, "msiexec.exe"));
+            return Ok(directory);
         }
 
         let required = length
@@ -3166,10 +3214,7 @@ mod tests {
         );
         assert_eq!(
             build_strategy_list(InstallChannel::PowerShellInstaller),
-            vec![
-                UpdateStrategy::InstallerPwsh,
-                UpdateStrategy::InstallerPowerShell
-            ]
+            vec![UpdateStrategy::InstallerPowerShell]
         );
         assert!(build_strategy_list(InstallChannel::Unknown).is_empty());
     }
@@ -3303,7 +3348,6 @@ TeamIdentifier=M9D5379H93\n";
             UpdateStrategy::InstallerPowerShell.json_method(),
             "installer"
         );
-        assert_eq!(UpdateStrategy::InstallerPwsh.json_method(), "installer");
         // New v3.15.0+ MSI/EXE strategies map to "installer" in the legacy
         // `method` field. External consumers wanting the specific installer
         // type should read the precise `strategy` field instead.
@@ -3370,7 +3414,6 @@ TeamIdentifier=M9D5379H93\n";
             UpdateStrategy::ExeCorporate.label(),
             UpdateStrategy::Cargo.label(),
             UpdateStrategy::InstallerPowerShell.label(),
-            UpdateStrategy::InstallerPwsh.label(),
             UpdateStrategy::InstallerCurl.label(),
             UpdateStrategy::InstallerWget.label(),
             UpdateStrategy::MacPkg.label(),
@@ -3627,6 +3670,77 @@ TeamIdentifier=M9D5379H93\n";
                 std::ffi::OsStr::new("/passive"),
                 std::ffi::OsStr::new("/norestart"),
             ]
+        );
+    }
+
+    #[test]
+    fn windows_powershell_command_ignores_planted_launchers_and_preserves_install_context() {
+        let fixture = tempfile::tempdir().unwrap();
+        let directory = fixture.path().join("WindowsPowerShell").join("v1.0");
+        let planted = fixture.path().join("caller-controlled");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::create_dir_all(&planted).unwrap();
+        for name in ["powershell.exe", "pwsh.exe"] {
+            std::fs::write(planted.join(name), b"hostile launcher").unwrap();
+        }
+        let launcher = directory.join("powershell.exe");
+        let prefix = fixture.path().join("install prefix");
+        let script = "$ErrorActionPreference='Stop'; Write-Output 'probe'";
+        let command =
+            windows_powershell_install_command(&launcher, script, prefix.to_str().unwrap())
+                .unwrap();
+        assert_eq!(command.get_program(), launcher.as_os_str());
+        assert_eq!(command.get_current_dir(), Some(directory.as_path()));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
+            ]
+            .map(std::ffi::OsStr::new)
+        );
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "CARGO_DIST_FORCE_INSTALL_DIR"
+                && value == Some(prefix.as_os_str())));
+        assert!(windows_powershell_install_command(
+            std::path::Path::new("powershell.exe"),
+            script,
+            "prefix"
+        )
+        .is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn trusted_windows_powershell_runs_with_a_hostile_search_path() {
+        let fixture = tempfile::tempdir().unwrap();
+        for name in ["powershell.exe", "pwsh.exe"] {
+            std::fs::write(fixture.path().join(name), b"must not execute").unwrap();
+        }
+        let launcher = trusted_windows_powershell().unwrap();
+        assert!(launcher.is_absolute());
+        assert!(launcher.starts_with(trusted_windows_system_directory().unwrap()));
+        let mut command = windows_powershell_install_command(
+            &launcher,
+            "[Console]::Write('trusted-launcher-probe')",
+            fixture.path().to_str().unwrap(),
+        )
+        .unwrap();
+        command.env("PATH", fixture.path());
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "trusted-launcher-probe"
         );
     }
 

@@ -55,6 +55,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > See [`.claude/skills/ATTRIBUTION.md`](./.claude/skills/ATTRIBUTION.md) for
 > provenance and the upstream-sync rule.
 
+Windows managed updates resolve Windows PowerShell through the native system-directory API, share its bounded absolute-path resolver with MSI, and launch from the trusted PowerShell directory. Never restore PATH-selected PowerShell launchers. API contract: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw
+
 ## Project Overview
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.

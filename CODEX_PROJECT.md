@@ -57,6 +57,8 @@ Start the next session with
 [`the v4.4.0 publication handoff`](./docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
+Candidate v4.4.1 (PR #35) restricts the Windows managed updater to the absolute OS-owned Windows PowerShell host and its trusted working directory. Public release status below remains the verified v4.4.0 baseline until publication succeeds.
+
 ## Current Status
 
 - Cargo package / canonical binary / library import: `tr300`; packaged full alias: `report`.

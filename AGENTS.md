@@ -11,7 +11,7 @@ Companion docs:
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — current v4 release ledger, enforced Mac freeze, and post-release personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-09-24
+Last verified against source: 2026-11-10
 
 Current published release: **v4.4.0**, immutable source/tag
 `f49d50a256842ac6c677d1c743c553b3dd92717f`. Public release `396235243`
@@ -23,6 +23,8 @@ Post-public Windows run `36087344916` passed all nine jobs; the protected
 closure-docs PR remains pending. Do not close that task or claim personal hardware/UAC
 acceptance from hosted results. Start continuation with
 [`the v4.4.0 handoff`](docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md).
+
+Candidate **v4.4.1** (PR #35) hardens Windows managed updates with the OS-owned absolute PowerShell launcher and trusted working directory. The public baseline above remains authoritative until the full release chain passes.
 
 ## Task management system
 

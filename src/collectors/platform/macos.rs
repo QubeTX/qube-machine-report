@@ -188,7 +188,7 @@ fn detect_virtualization(snapshot: Option<&serde_json::Value>) -> Option<String>
     // A positive kernel signal is authoritative. A zero or failed probe is
     // simply "not detected"; it is not proof of bare metal.
     let vmm = run_stdout(
-        "sysctl",
+        "/usr/sbin/sysctl",
         ["-n", "kern.hv_vmm_present"],
         CommandTimeout::Normal,
     )?
@@ -335,7 +335,11 @@ fn get_gpus_fast() -> Vec<String> {
     let mut gpus = Vec::new();
 
     // Try ioreg for discrete/integrated GPUs
-    if let Some(stdout) = run_stdout("ioreg", ["-rc", "IOGPUDevice"], CommandTimeout::Normal) {
+    if let Some(stdout) = run_stdout(
+        "/usr/sbin/ioreg",
+        ["-rc", "IOGPUDevice"],
+        CommandTimeout::Normal,
+    ) {
         for line in stdout.lines() {
             let trimmed = line.trim();
             if trimmed.contains("\"model\"") {
@@ -353,7 +357,7 @@ fn get_gpus_fast() -> Vec<String> {
     // Fallback for Apple Silicon: use sysctl to detect the chip
     if gpus.is_empty() {
         if let Some(output) = run_stdout(
-            "sysctl",
+            "/usr/sbin/sysctl",
             ["-n", "machdep.cpu.brand_string"],
             CommandTimeout::Normal,
         ) {
@@ -383,7 +387,7 @@ fn get_architecture(translated: bool) -> Option<String> {
 
 pub(crate) fn is_rosetta_translated() -> bool {
     run_stdout(
-        "sysctl",
+        "/usr/sbin/sysctl",
         ["-n", "sysctl.proc_translated"],
         CommandTimeout::Normal,
     )
@@ -402,7 +406,7 @@ fn format_architecture(host: &str, runtime: &str, translated: bool) -> String {
 
 pub fn get_cpu_brand() -> Option<String> {
     let brand = run_stdout(
-        "sysctl",
+        "/usr/sbin/sysctl",
         ["-n", "machdep.cpu.brand_string"],
         CommandTimeout::Normal,
     )?
@@ -427,9 +431,13 @@ pub fn get_computer_name() -> Option<String> {
 }
 
 fn get_machine_model() -> Option<String> {
-    let model = run_stdout("sysctl", ["-n", "hw.model"], CommandTimeout::Normal)?
-        .trim()
-        .to_string();
+    let model = run_stdout(
+        "/usr/sbin/sysctl",
+        ["-n", "hw.model"],
+        CommandTimeout::Normal,
+    )?
+    .trim()
+    .to_string();
     if model.is_empty() {
         None
     } else {
@@ -442,7 +450,7 @@ fn get_core_topology() -> Option<String> {
     let count = sysctl_usize("hw.nperflevels")?;
     for index in 0..count.min(16) {
         let name = run_stdout(
-            "sysctl",
+            "/usr/sbin/sysctl",
             ["-n", &format!("hw.perflevel{}.name", index)],
             CommandTimeout::Normal,
         )
@@ -465,7 +473,7 @@ fn get_core_topology() -> Option<String> {
 }
 
 fn sysctl_usize(name: &str) -> Option<usize> {
-    run_stdout("sysctl", ["-n", name], CommandTimeout::Normal)?
+    run_stdout("/usr/sbin/sysctl", ["-n", name], CommandTimeout::Normal)?
         .trim()
         .parse()
         .ok()
@@ -744,6 +752,24 @@ fn format_filevault_progress(label: &str, status: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_probe_ignores_path_and_working_directory_helpers() {
+        if crate::collectors::command::test_helpers::is_probe_child() {
+            let _ = get_gpus_fast();
+            let _ = is_rosetta_translated();
+            let _ = get_architecture(false);
+            let _ = get_machine_model();
+            let _ = get_core_topology();
+            let _ = detect_virtualization(None);
+            let _ = sysctl_usize("hw.ncpu");
+            return;
+        }
+        crate::collectors::command::test_helpers::assert_probe_ignores_path(
+            "collectors::platform::macos::tests::gpu_probe_ignores_path_and_working_directory_helpers",
+            &["ioreg", "sysctl"],
+        );
+    }
 
     #[test]
     fn apple_locale_preserves_region_extension() {

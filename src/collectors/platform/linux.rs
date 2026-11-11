@@ -242,8 +242,18 @@ fn parse_lspci_gpu_line(line: &str) -> Option<String> {
 fn get_gpus() -> Vec<String> {
     let mut gpus = Vec::new();
 
-    // Try lspci for VGA/3D controllers
-    if let Some(stdout) = run_stdout_no_args("lspci", CommandTimeout::Normal) {
+    // Never let PATH or the current directory supply a GPU probe executable.
+    let lspci = [
+        "/usr/bin/lspci",
+        "/usr/sbin/lspci",
+        "/bin/lspci",
+        "/sbin/lspci",
+    ]
+    .into_iter()
+    .find(|program| Path::new(program).is_file());
+    if let Some(stdout) =
+        lspci.and_then(|program| run_stdout_no_args(program, CommandTimeout::Normal))
+    {
         for line in stdout.lines() {
             if let Some(name) = parse_lspci_gpu_line(line) {
                 gpus.push(name);
@@ -1165,6 +1175,18 @@ fn parse_memory_device(lines: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_probe_ignores_path_and_working_directory_helpers() {
+        if crate::collectors::command::test_helpers::is_probe_child() {
+            let _ = get_gpus();
+            return;
+        }
+        crate::collectors::command::test_helpers::assert_probe_ignores_path(
+            "collectors::platform::linux::tests::gpu_probe_ignores_path_and_working_directory_helpers",
+            &["lspci"],
+        );
+    }
 
     #[test]
     fn zfs_health_reports_worst_pool_state() {

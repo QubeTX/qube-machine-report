@@ -295,6 +295,56 @@ where
     }
 }
 
+#[cfg(all(test, unix))]
+pub(crate) mod test_helpers {
+    use std::os::unix::fs::PermissionsExt;
+
+    const CHILD_MARKER: &str = "TR300_TEST_PROBE_CHILD_MARKER";
+    const ATTACK_MARKER: &str = "TR300_TEST_PROBE_ATTACK_MARKER";
+
+    pub(crate) fn is_probe_child() -> bool {
+        let Some(marker) = std::env::var_os(CHILD_MARKER) else {
+            return false;
+        };
+        std::fs::write(marker, b"child probe started").unwrap();
+        true
+    }
+
+    pub(crate) fn assert_probe_ignores_path(test_name: &str, helpers: &[&str]) {
+        let fixture = tempfile::tempdir().unwrap();
+        let child_marker = fixture.path().join("child-started");
+        let attack_marker = fixture.path().join("planted-helper-executed");
+        for helper in helpers {
+            let program = fixture.path().join(helper);
+            std::fs::write(
+                &program,
+                b"#!/bin/sh\nprintf executed > \"$TR300_TEST_PROBE_ATTACK_MARKER\"\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name])
+            .current_dir(fixture.path())
+            .env("PATH", fixture.path())
+            .env(CHILD_MARKER, &child_marker)
+            .env(ATTACK_MARKER, &attack_marker)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "probe child failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(child_marker.is_file(), "the probe child did not execute");
+        assert!(
+            !attack_marker.exists(),
+            "the probe executed a helper from PATH or its working directory"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};

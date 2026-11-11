@@ -4,8 +4,10 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-09-24
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.0 / 4.4.0
+**Last updated:** 2026-11-10
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.0 / 4.4.1
+
+Candidate v4.4.1 / PR #35 resolves the Windows PowerShell launcher security issue. Track exact-head verification and publication under `.tasks/tasks/sec35.md`; no public completion is claimed yet.
 
 Current release: immutable `v4.4.0` at
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,

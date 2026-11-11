@@ -7,6 +7,10 @@ as passed.
 
 ## Per-version verification log
 
+### v4.4.1 — Windows managed updater launcher security (2026-11-10)
+
+Candidate PR #35 integrates current main, addresses remaining Unix GPU helper resolution from PR #2, preserves the existing PR #1 private-staging protections, and patches six audited TLS dependency advisories. Windows format/clippy/all-target tests pass (205 library, two companion, 29 integration), including a hostile-PATH PowerShell probe. Advisory audit, actionlint, ShellCheck, exact Mac preinstall-template lint, shell transaction fixtures, and PowerShell transaction fixtures under both hosts pass. Package/release build/provenance, exact-head review/hosted CI, exact-main CI/OIDC, native assembly, and public verification remain pending. Evidence is recorded in `.tasks/tasks/sec35.md` as each gate completes.
+
 ### v4.4.0 — PATH report command and MSI license (2026-09-24)
 
 Status: **published v4.4.0** at immutable source/tag

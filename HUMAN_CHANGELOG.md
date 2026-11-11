@@ -13,6 +13,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-11-10
+
+### Fixed
+- **Windows one-command installs now update through Windows' trusted built-in
+  PowerShell location.** TR-300 no longer lets the current folder or command
+  search path choose which PowerShell program runs during an update, closing a
+  route by which another local program could run with the updater's access.
+
+### Security
+- Linux and Mac GPU checks use system-owned helper locations, preventing a different program on the command search path from being selected. Existing Windows protections for GPU checks and temporary installer files remain in place.
+- Update secure-connection dependencies to fix six reported vulnerabilities.
+
 ## [4.4.0] - 2026-09-24
 
 ### Fixed
