@@ -285,6 +285,43 @@ fi
 [ ! -e "$mismatch_execution_marker" ]
 tr300_temp=''
 
+# Run the actual raw-child boundary with hostile ambient TMPDIR. The child
+# stages a harmless file only; lifecycle stubs avoid installing any payload.
+tmpdir_child="$fixture/tmpdir-child.sh"
+tmpdir_result="$fixture/tmpdir-result"
+cat > "$tmpdir_child" <<'TR300_TMPDIR_CHILD'
+#!/bin/sh
+set -eu
+expected=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+actual=$(CDPATH='' cd -- "$TMPDIR" && pwd -P)
+[ "$actual" = "$expected" ]
+created=$(mktemp -d)
+created_parent=$(CDPATH='' cd -- "$(dirname -- "$created")" && pwd -P)
+[ "$created_parent" = "$expected" ]
+printf '%s\n' private-child-staging > "$TR300_TMPDIR_RESULT"
+TR300_TMPDIR_CHILD
+mkdir "$fixture/hostile-temp-parent"
+(
+    TMPDIR="$fixture/hostile-temp-parent"
+    TR300_DIST_INSTALLER_PATH=$tmpdir_child
+    TR300_TMPDIR_RESULT=$tmpdir_result
+    export TMPDIR TR300_DIST_INSTALLER_PATH TR300_TMPDIR_RESULT
+    tr300_dist_installer_sha256=$(tr300_sha256 "$tmpdir_child")
+    tr300_prior_binary=''
+    tr300_prior_report=''
+    tr300_cleanup_ran=0
+    tr300_prepare_macos_pkg() { :; }
+    tr300_save_managed_state() { :; }
+    tr300_assert_no_unknown_path_owners() { :; }
+    tr300_verify_receipt() { :; }
+    tr300_verify_binaries() { printf '%s\n' "$fixture/harmless-fixture"; }
+    tr300_take_over_macos_pkg() { :; }
+    tr300_main > "$fixture/tmpdir-boundary.log"
+    [ "$(cat "$tmpdir_result")" = private-child-staging ]
+    [ -z "$(ls -A "$TMPDIR")" ]
+    tr300_cleanup
+)
+
 # A signal immediately after a PKG receipt is retired must exit instead of
 # resuming toward the commit assignment. EXIT owns cleanup, so the forgotten-
 # receipt recovery branch runs exactly once and the transaction stays

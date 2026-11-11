@@ -651,6 +651,7 @@ tr300_main() {
 
     tr300_transaction_started=1
     PATH="${tr300_sha256sum_directory}:/usr/bin:/bin:/usr/sbin:/sbin" \
+        TMPDIR="$tr300_temp" \
         /bin/sh "$dist_installer" "$@" ||
         tr300_fail 'cargo-dist installation did not complete'
     tr300_verify_receipt
