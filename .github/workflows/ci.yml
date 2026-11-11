@@ -1083,8 +1083,11 @@ jobs:
           dist_path=$(command -v dist)
           [[ "$dist_path" == /* && -f "$dist_path" && ! -L "$dist_path" && -x "$dist_path" ]]
           [[ "$("$dist_path" --version)" == 'cargo-dist 0.31.0' ]]
-      - name: Verify dist plan parses
-        run: ~/.cargo/bin/dist plan
+      - name: Verify dist plan and native Apple runners
+        run: |
+          set -euo pipefail
+          ~/.cargo/bin/dist plan --output-format=json > dist-plan.json
+          python3 scripts/check-dist-runners.py dist-plan.json
 
   workflow-validation:
     name: Workflow and shell validation

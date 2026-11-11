@@ -27,6 +27,7 @@ WINDOWS_WORKFLOW = ROOT / ".github" / "workflows" / "windows-installers.yml"
 MACOS_WORKFLOW = ROOT / ".github" / "workflows" / "macos-installer.yml"
 MACOS_INSTALLER_BUILDER = ROOT / "scripts" / "build-sign-notarize-macos-installer.sh"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+DIST_RUNNER_VALIDATOR = ROOT / "scripts" / "check-dist-runners.py"
 CRATES_WORKFLOW = ROOT / ".github" / "workflows" / "crates-publish.yml"
 PINNED_INNO_INSTALLER = ROOT / "scripts" / "install-pinned-inno-setup.ps1"
 PINNED_WINDOWS_CARGO_DIST_INSTALLER = (
@@ -8428,6 +8429,91 @@ def check_ci_lifecycle_guard(ci: str, macos: str) -> None:
     )
 
 
+def check_dist_runner_workflow_contract(release: str, ci: str) -> None:
+    ci_plan = extract_unique_named_run(
+        extract_job(ci, "dist-plan", CI_WORKFLOW.name),
+        "Verify dist plan and native Apple runners",
+        "ci.yml:dist-plan",
+    )
+    require_exact_step(
+        ci_plan,
+        """
+        set -euo pipefail
+        ~/.cargo/bin/dist plan --output-format=json > dist-plan.json
+        python3 scripts/check-dist-runners.py dist-plan.json
+        """,
+        "CI actual cargo-dist runner validation",
+    )
+    release_plan = extract_unique_id_run(
+        extract_job(release, "plan", RELEASE_WORKFLOW.name), "plan", "release.yml:plan"
+    )
+    require_exact_line_sequence(
+        release_plan,
+        """
+        if [[ "$EVENT_NAME" == push ]]; then
+          dist host --steps=create --tag="$RELEASE_TAG" --output-format=json \\
+            > plan-dist-manifest.json
+        else
+          dist plan --output-format=json > plan-dist-manifest.json
+        fi
+        python3 scripts/check-dist-runners.py plan-dist-manifest.json
+        """,
+        "Release actual cargo-dist runner validation",
+    )
+    guard = release_plan.index("python3 scripts/check-dist-runners.py plan-dist-manifest.json")
+    output = release_plan.index('echo "manifest=$(jq -c "." plan-dist-manifest.json)"')
+    if guard >= output:
+        raise AssertionError("release.yml: runner validation must precede matrix output")
+
+
+def run_dist_runner_fixtures() -> None:
+    arm = {"targets": ["aarch64-apple-darwin"], "runner": "macos-15", "host": "aarch64-apple-darwin"}
+    intel = {"targets": ["x86_64-apple-darwin"], "runner": "macos-15-intel", "host": "x86_64-apple-darwin"}
+    cases = [
+        ("native Apple runners", [arm, intel], True),
+        ("retired ARM runner", [{**arm, "runner": "macos-14"}, intel], False),
+        ("ARM on Intel runner", [{**arm, "runner": "macos-15-intel"}, intel], False),
+        ("Intel on ARM runner", [arm, {**intel, "runner": "macos-15"}], False),
+        ("wrong native host", [{**arm, "host": intel["host"]}, intel], False),
+        ("missing Apple target", [arm], False),
+        ("duplicate Apple target", [arm, intel, arm], False),
+        ("merged target entry", [{**arm, "targets": arm["targets"] + intel["targets"]}], False),
+        ("Apple container", [{**arm, "container": {"image": "unreviewed"}}, intel], False),
+        ("unreviewed Apple target", [arm, intel, {**arm, "targets": ["universal2-apple-darwin"]}], False),
+        ("malformed target list", [{**arm, "targets": "aarch64-apple-darwin"}, intel], False),
+        ("missing matrix", None, False),
+    ]
+    with tempfile.TemporaryDirectory(prefix="tr300-dist-runners-") as directory:
+        manifest = Path(directory) / "dist-plan.json"
+        fixtures = []
+        for name, entries, succeeds in cases:
+            payload = {"ci": {"github": {"artifacts_matrix": {"include": entries}}}} if entries is not None else {}
+            fixtures.append((name, payload, succeeds))
+        for name, extra in (
+            ("matrix exclusion", {"exclude": [arm]}),
+            ("extra runner dimension", {"runner": ["macos-14"]}),
+            ("extra target dimension", {"targets": [["aarch64-apple-darwin"]]}),
+        ):
+            fixtures.append((name, {"ci": {"github": {"artifacts_matrix": {"include": [arm, intel], **extra}}}}, False))
+        for name, payload, succeeds in fixtures:
+            manifest.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
+            result = subprocess.run(
+                [sys.executable, str(DIST_RUNNER_VALIDATOR), str(manifest)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode != (0 if succeeds else 1):
+                raise AssertionError(
+                    f"cargo-dist runners {name}: unexpected exit {result.returncode}\n"
+                    f"{result.stdout}{result.stderr}"
+                )
+            if not succeeds:
+                require(result.stderr, "cargo-dist runner validation failed:", name)
+
+
 def check_msiexec_contract(path: Path, workflow: str) -> int:
     label = path.name
     trusted_directory = (
@@ -8508,6 +8594,7 @@ def check_structural_contract(
 ) -> None:
     check_native_apple_bash_contract(release, macos)
     check_ci_job_inventory(ci)
+    check_dist_runner_workflow_contract(release, ci)
     ci_test = extract_job(ci, "test", CI_WORKFLOW.name)
     apple_compatibility = extract_unique_named_step(
         ci_test,
@@ -8762,6 +8849,7 @@ def main() -> None:
         windows_validation,
         windows_cargo_dist_installer,
     )
+    run_dist_runner_fixtures()
     run_crates_manifest_target_fixtures(crates)
     run_release_manifest_preservation_fixtures(release, bash)
     run_release_host_draft_fixtures(release, bash)

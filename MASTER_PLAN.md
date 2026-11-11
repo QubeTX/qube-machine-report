@@ -4,10 +4,10 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-11-10
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.0 / 4.4.1
+**Last updated:** 2026-11-11
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.0 / 4.4.1 / 4.4.2
 
-Candidate v4.4.1 / PR #35 resolves the Windows PowerShell launcher security issue. Track exact-head verification and publication under `.tasks/tasks/sec35.md`; no public completion is claimed yet.
+Candidate v4.4.2 carries the Windows/GPU/TLS security fixes and pins supported native Apple release runners. v4.4.1 was published as an exact crate/tag at `b4024e6`, but Release `42970145859` stopped on retired `macos-14` before signing or draft creation. Preserve that history and follow the new exact-source chain under `.tasks/tasks/sec35.md`.
 
 Current release: immutable `v4.4.0` at
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,

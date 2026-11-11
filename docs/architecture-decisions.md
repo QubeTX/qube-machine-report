@@ -613,6 +613,18 @@ blocking only if CI exposes a GUI-only defect. This avoids a strange
 cross-compilation/signing workaround on Windows without making the maintainer
 rent or borrow hardware for every release.
 
+### Generated native Apple runner contract (v4.4.2; 2026-11-11)
+
+**Context.** The immutable v4.4.1 source passed the native macOS 15 CI matrix and exact crate publication, but pinned cargo-dist 0.31.0 generated an ARM archive build on `macos-14`. GitHub retired that image on November 2; Release `42970145859` cancelled the job before runner assignment, and all signers/host jobs skipped. A successful parse-only plan did not prove its generated runner choices were runnable or native.
+
+**Decision.** Keep cargo-dist 0.31.0 and the customized workflow. Set global `[workspace.metadata.dist.github-custom-runners]` mappings for ARM `macos-15` and Intel `macos-15-intel`. Validate the actual generated matrix in pre-tag CI and in Release before matrix outputs: exactly one single-target Apple job each, matching native `host` and runner, no container. Exercise clean, retired, swapped-architecture, wrong-host, missing, duplicate, and container cases. This applies the existing native coverage policy to cargo-dist's dynamic plan.
+
+**Rejected alternatives.** Retagging v4.4.1 would break immutability; omitting Apple ARM would break the distribution contract; mutable `macos-latest` would hide future architecture/image drift; regenerating or upgrading release tooling would expand a narrow runner repair across signing and publication custody. v4.4.2 fixes forward with unchanged product security behavior.
+
+**Consequences and revalidation.** Both native archive builders and native package/sign/notary/lifecycle gates remain blocking. Any cargo-dist, target, custom-runner, or runner-image change must pass the actual-plan validator and both native Apple paths through complete publication. Revalidate the pinned runner schema when updating cargo-dist; do not infer generated build runners from the separate signer matrix.
+
+Sources: [GitHub macOS 14 retirement](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/), [pinned cargo-dist custom-runner configuration](https://github.com/axodotdev/cargo-dist/blob/v0.31.0/book/src/reference/config.md#github-custom-runners).
+
 ### Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)
 
 Source checkout is a workspace lifecycle boundary, not a harmless read. The

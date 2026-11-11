@@ -13,7 +13,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.4.2] - 2026-11-11
+
+### Fixed
+- Restore the Mac release build after GitHub retired its older runner image. This update includes the Windows updater, GPU-helper, and secure-connection fixes from the previous version, whose crate was published but whose downloadable installers could not finish.
+
+### Internal
+- Check the actual Mac build machines before starting a release so an unsupported or wrong-architecture runner is caught earlier.
+
 ## [4.4.1] - 2026-11-10
+
+> Release status: the crate was published, but downloadable installers stopped at an unavailable Mac build machine. The complete release continues as v4.4.2.
 
 ### Fixed
 - **Windows one-command installs now update through Windows' trusted built-in

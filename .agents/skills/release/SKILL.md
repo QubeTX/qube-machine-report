@@ -82,6 +82,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-release-workflow-provenance.py
 scripts/test-managed-installer-transaction.sh
 ```
 
+Before tagging, generate the actual pinned cargo-dist JSON plan and run `python3 scripts/check-dist-runners.py <plan.json>`. Its Apple jobs must use singleton target sets, matching native host triples, `macos-15` / `macos-15-intel`, and no container. The parse-only v4.4.1 gate missed cargo-dist's retired `macos-14` ARM default; preserve that tag and use the v4.4.2 fix-forward. Both CI and the tag Release plan enforce this same validator; never regenerate away the trust-boundary customizations.
+
 On Windows, also run `scripts/test-managed-installer-transaction.ps1` under
 both `pwsh` and Windows PowerShell and parse
 `scripts/install-pinned-inno-setup.ps1`. Extract the single `PREINSTALL`

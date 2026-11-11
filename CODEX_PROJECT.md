@@ -57,7 +57,7 @@ Start the next session with
 [`the v4.4.0 publication handoff`](./docs/agents/handoff/2026-09-24-v4.4.0-publication-and-closure.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
-Candidate v4.4.1 (PR #35) restricts the Windows managed updater to the absolute OS-owned Windows PowerShell host and its trusted working directory. Public release status below remains the verified v4.4.0 baseline until publication succeeds.
+Candidate v4.4.2 carries the v4.4.1 security fixes and pins/validates supported native Apple release builders. v4.4.1 is an exact unyanked crate and immutable tag at b4024e6, but its GitHub release stopped before signing/draft creation on retired macos-14. The public complete-distribution baseline below remains v4.4.0 until the new chain succeeds.
 
 ## Current Status
 
