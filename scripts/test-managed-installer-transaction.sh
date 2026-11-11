@@ -7,6 +7,14 @@ TR300_MANAGED_INSTALLER_TEST_ONLY=1
 export TR300_MANAGED_INSTALLER_TEST_ONLY
 # shellcheck source=scripts/managed-installers/tr300-installer.sh
 . "$script_dir/managed-installers/tr300-installer.sh"
+# Keep ownership fixtures independent of unrelated installations on this host.
+tr300_entry_path=''
+tr300_invocation_path=''
+# Expand these variables only inside the fresh fixture shell.
+# shellcheck disable=SC2016
+env 'BASH_FUNC_pwd%%=() { printf POISONED_PWD; }' /bin/sh -c \
+    'TR300_MANAGED_INSTALLER_TEST_ONLY=1; export TR300_MANAGED_INSTALLER_TEST_ONLY; . "$1"; [ "$tr300_entry_directory" = "$2" ]' \
+    tr300-wrapper-entry "$script_dir/managed-installers/tr300-installer.sh" "$(pwd -P)"
 
 fixture=$(mktemp -d "${TMPDIR:-/tmp}/tr300-managed-shell-test.XXXXXXXX")
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
@@ -48,6 +56,21 @@ if (tr300_assert_no_unknown_path_owners); then
     exit 1
 fi
 PATH=$old_path
+(
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin
+    tr300_invocation_path=portable
+    tr300_invocation_directory=$fixture
+    if (tr300_assert_no_unknown_path_owners); then
+        echo 'original relative PATH owner was hidden by the protected helper PATH' >&2
+        exit 1
+    fi
+    tr300_invocation_path=''
+    tr300_invocation_directory="$fixture/portable"
+    if (tr300_assert_no_unknown_path_owners); then
+        echo 'original empty PATH owner was hidden by the protected helper cwd' >&2
+        exit 1
+    fi
+)
 tr300_transaction_started=1
 printf '%s\n' candidate > "$tr300_intended_binary"
 printf '%s\n' candidate-report > "$tr300_intended_report"
@@ -232,6 +255,19 @@ shim_sha256=$(
         /usr/bin/awk '{ print $1 }'
 )
 [ "$shim_sha256" = "$expected_dist_installer_sha256" ]
+if [ -x "$tr300_sha256sum_directory/curl" ]; then
+    mkdir "$fixture/curl-config"
+    printf '%s\n' 'write-out = "UNTRUSTED_CURL_CONFIG"' > "$fixture/curl-config/.curlrc"
+    case "$(uname -s)" in
+        MINGW*|MSYS*) curl_fixture_uri="file:///$(cygpath -m "$raw_dist_installer")" ;;
+        *) curl_fixture_uri="file://$raw_dist_installer" ;;
+    esac
+    curl_fixture_output=$(CURL_HOME="$fixture/curl-config" "$tr300_sha256sum_directory/curl" --proto '=file' -fsS "$curl_fixture_uri")
+    [ "$curl_fixture_output" = "$(cat "$raw_dist_installer")" ] || {
+        echo 'the raw installer transport shim loaded a caller curl configuration' >&2
+        exit 1
+    }
+fi
 if [ "$(uname -s)" = Darwin ]; then
     # shellcheck disable=SC2016
     grep -Fq 'exec /usr/bin/shasum -a 256 "$1"' \

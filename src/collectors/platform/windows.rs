@@ -107,7 +107,7 @@ where
 {
     spawn_with_timeout(budget, f).recv()
 }
-use crate::collectors::command::{run_stdout, CommandTimeout};
+use crate::collectors::command::{run_system_powershell, run_system_stdout, CommandTimeout};
 use serde::Deserialize;
 use std::env;
 use winreg::enums::HKEY_LOCAL_MACHINE;
@@ -540,7 +540,7 @@ fn get_gpu_temp_windows(gpus: &[String], mode: CollectMode) -> Option<f64> {
     {
         return None;
     }
-    let stdout = run_stdout(
+    let stdout = run_system_stdout(
         "nvidia-smi",
         [
             "--query-gpu=temperature.gpu",
@@ -1171,13 +1171,8 @@ fn socket_count_wmi_inner() -> Option<usize> {
     // Fallback: PowerShell. Wrap in @(...) so a single-processor machine — where
     // Get-CimInstance returns a scalar with no .Count member on older PowerShell
     // — still yields 1 rather than an empty string that fails to parse.
-    if let Some(stdout) = run_stdout(
-        "powershell",
-        [
-            "-NoProfile",
-            "-Command",
-            "@(Get-CimInstance Win32_Processor).Count",
-        ],
+    if let Some(stdout) = run_system_powershell(
+        "@(Get-CimInstance Win32_Processor).Count",
         CommandTimeout::Slow,
     ) {
         if let Ok(c) = stdout.trim().parse::<usize>() {
@@ -1256,14 +1251,7 @@ fn network_info_wmi_inner() -> (Option<String>, Vec<String>) {
 
     // Fallback: PowerShell for IP
     let mut machine_ip: Option<String> = None;
-    if let Some(stdout) = run_stdout(
-        "powershell",
-        [
-            "-NoProfile", "-Command",
-            "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress",
-        ],
-        CommandTimeout::Slow,
-    )
+    if let Some(stdout) = run_system_powershell("(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress", CommandTimeout::Slow)
     {
         let ip = stdout.trim().to_string();
         if !ip.is_empty() && ip != "127.0.0.1" {
@@ -1273,14 +1261,7 @@ fn network_info_wmi_inner() -> (Option<String>, Vec<String>) {
 
     // Fallback: PowerShell for DNS
     let mut dns_servers = Vec::new();
-    if let Some(stdout) = run_stdout(
-        "powershell",
-        [
-            "-NoProfile", "-Command",
-            "(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -ExpandProperty ServerAddresses) -join \"`n\"",
-        ],
-        CommandTimeout::Slow,
-    )
+    if let Some(stdout) = run_system_powershell("(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -ExpandProperty ServerAddresses) -join \"`n\"", CommandTimeout::Slow)
     {
         for line in stdout.lines() {
             let ip = line.trim();
@@ -1418,11 +1399,8 @@ fn detect_boot_mode() -> Option<String> {
         }
     }
     // Fallback: check bcdedit (fast native command, not PowerShell)
-    if let Some(info) = run_stdout(
-        "cmd",
-        ["/c", "bcdedit", "/enum", "{current}"],
-        CommandTimeout::Normal,
-    ) {
+    if let Some(info) = run_system_stdout("bcdedit", ["/enum", "{current}"], CommandTimeout::Normal)
+    {
         let info = info.to_lowercase();
         if info.contains("winload.efi") {
             return Some("UEFI".to_string());
@@ -1703,11 +1681,7 @@ if ($b) { $battery = "$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))" }
 } | ConvertTo-Json -Compress
 "#;
 
-    let Some(stdout) = run_stdout(
-        "powershell",
-        ["-NoProfile", "-Command", script],
-        CommandTimeout::Slow,
-    ) else {
+    let Some(stdout) = run_system_powershell(script, CommandTimeout::Slow) else {
         return WindowsPowerShellFallback::default();
     };
     parse_batched_powershell_fallback(&stdout).unwrap_or_default()
@@ -1801,13 +1775,8 @@ fn parse_powershell_ram_slots(value: &str) -> Option<String> {
 }
 
 fn get_windows_edition_ps() -> Option<String> {
-    let caption = run_stdout(
-        "powershell",
-        [
-            "-NoProfile",
-            "-Command",
-            "(Get-CimInstance Win32_OperatingSystem).Caption",
-        ],
+    let caption = run_system_powershell(
+        "(Get-CimInstance Win32_OperatingSystem).Caption",
         CommandTimeout::Slow,
     )?
     .trim()
@@ -1820,14 +1789,7 @@ fn get_windows_edition_ps() -> Option<String> {
 }
 
 fn detect_virtualization_ps() -> Option<String> {
-    let info = run_stdout(
-        "powershell",
-        [
-            "-NoProfile", "-Command",
-            "(Get-CimInstance Win32_ComputerSystem).Manufacturer + '|' + (Get-CimInstance Win32_ComputerSystem).Model + '|' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent",
-        ],
-        CommandTimeout::Slow,
-    )?;
+    let info = run_system_powershell("(Get-CimInstance Win32_ComputerSystem).Manufacturer + '|' + (Get-CimInstance Win32_ComputerSystem).Model + '|' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent", CommandTimeout::Slow)?;
     parse_virtualization_from_ps_computer_system(&info)
 }
 
@@ -1859,13 +1821,8 @@ fn parse_virtualization_from_ps_computer_system(info: &str) -> Option<String> {
 
 fn get_gpus_ps() -> Vec<String> {
     let mut gpus = Vec::new();
-    if let Some(stdout) = run_stdout(
-        "powershell",
-        [
-            "-NoProfile",
-            "-Command",
-            "(Get-CimInstance Win32_VideoController).Name -join \"`n\"",
-        ],
+    if let Some(stdout) = run_system_powershell(
+        "(Get-CimInstance Win32_VideoController).Name -join \"`n\"",
         CommandTimeout::Slow,
     ) {
         for line in stdout.lines() {
@@ -1879,14 +1836,7 @@ fn get_gpus_ps() -> Vec<String> {
 }
 
 fn get_battery_ps() -> Option<String> {
-    let battery = run_stdout(
-        "powershell",
-        [
-            "-NoProfile", "-Command",
-            "$b = Get-CimInstance Win32_Battery; if ($b) { \"$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))\" }",
-        ],
-        CommandTimeout::Slow,
-    )?
+    let battery = run_system_powershell("$b = Get-CimInstance Win32_Battery; if ($b) { \"$($b.EstimatedChargeRemaining)% ($($b.BatteryStatus))\" }", CommandTimeout::Slow)?
     .trim()
     .to_string();
     normalize_powershell_battery_status(&battery)
@@ -2130,31 +2080,10 @@ fn get_best_route_interface_index() -> Option<u32> {
 /// `HiberbootEnabled` (DWORD). Returns `true` only when explicitly = 1.
 /// Default-safe: any read or parse error returns `false`.
 pub fn detect_fast_startup() -> bool {
-    let stdout = match run_stdout(
-        "reg",
-        [
-            "query",
-            r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power",
-            "/v",
-            "HiberbootEnabled",
-        ],
-        CommandTimeout::Normal,
-    ) {
-        Some(stdout) => stdout,
-        None => return false,
-    };
-    for line in stdout.lines() {
-        if line.contains("HiberbootEnabled") {
-            // Format: "    HiberbootEnabled    REG_DWORD    0x1"
-            if let Some(value) = line.split_whitespace().last() {
-                let trimmed = value.trim_start_matches("0x");
-                if let Ok(v) = u32::from_str_radix(trimmed, 16) {
-                    return v == 1;
-                }
-            }
-        }
-    }
-    false
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager\Power")
+        .and_then(|key| key.get_value::<u32, _>("HiberbootEnabled"))
+        .is_ok_and(|value| value == 1)
 }
 
 /// Query `Win32_OperatingSystem.LastBootUpTime` and convert it to elapsed
@@ -2410,6 +2339,94 @@ mod powershell_fallback_tests {
 #[cfg(test)]
 mod thermal_tests {
     use super::*;
+
+    #[test]
+    fn nvidia_probe_ignores_hostile_path_working_directory_and_root_environment() {
+        const CHILD_MARKER: &str = "TR300_TEST_NVIDIA_CHILD_MARKER";
+        const ATTACK_MARKER: &str = "TR300_TEST_NVIDIA_ATTACK_MARKER";
+        if let Some(marker) = std::env::var_os(CHILD_MARKER) {
+            std::fs::write(marker, b"probe child started").unwrap();
+            assert_eq!(
+                crate::trusted_process::windows_system_directory().unwrap(),
+                std::path::PathBuf::from(std::env::var_os("TR300_TEST_NVIDIA_SYSTEM").unwrap())
+            );
+            assert_eq!(
+                crate::trusted_process::windows_program_files_x64().ok(),
+                std::env::var_os("TR300_TEST_NVIDIA_PROGRAMS").map(std::path::PathBuf::from)
+            );
+            for mode in [CollectMode::Fast, CollectMode::Full] {
+                assert_eq!(get_gpu_temp_windows(&["Intel fixture".into()], mode), None);
+                let _ = get_gpu_temp_windows(&["NVIDIA fixture".into()], mode);
+            }
+            return;
+        }
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("hostile.rs");
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    if let Some(marker) = std::env::var_os("TR300_TEST_NVIDIA_ATTACK_MARKER") {
+        std::fs::write(marker, b"hostile helper executed").unwrap();
+    }
+    println!("63");
+}
+"#,
+        )
+        .unwrap();
+        let executable = fixture.path().join("nvidia-smi.exe");
+        let compile = std::process::Command::new("rustc")
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            compile.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compile.stderr)
+        );
+        for directory in [
+            fixture.path().join("System32"),
+            fixture.path().join("NVIDIA Corporation").join("NVSMI"),
+        ] {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::copy(&executable, directory.join("nvidia-smi.exe")).unwrap();
+        }
+        let child_marker = fixture.path().join("child-started");
+        let attack_marker = fixture.path().join("hostile-executed");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child
+            .args(["--exact", "collectors::platform::windows::thermal_tests::nvidia_probe_ignores_hostile_path_working_directory_and_root_environment"])
+            .current_dir(fixture.path())
+            .env("PATH", fixture.path())
+            .env("SystemRoot", fixture.path())
+            .env("windir", fixture.path())
+            .env("ProgramFiles", fixture.path())
+            .env("ProgramW6432", fixture.path())
+            .env(CHILD_MARKER, &child_marker)
+            .env(ATTACK_MARKER, &attack_marker)
+            .env("TR300_TEST_NVIDIA_SYSTEM", crate::trusted_process::windows_system_directory().unwrap())
+            .env_remove("TR300_TEST_NVIDIA_PROGRAMS");
+        if let Ok(programs) = crate::trusted_process::windows_program_files_x64() {
+            child.env("TR300_TEST_NVIDIA_PROGRAMS", programs);
+        }
+        let output = child.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            child_marker.is_file(),
+            "the native probe child did not execute"
+        );
+        assert!(
+            !attack_marker.exists(),
+            "the collector executed the planted NVIDIA helper"
+        );
+    }
 
     #[test]
     fn parses_hottest_valid_nvidia_smi_temperature() {

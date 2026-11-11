@@ -93,7 +93,7 @@ fn platform_memory_bytes(
 
 #[cfg(target_os = "macos")]
 fn macos_vm_stat_used_bytes() -> Option<u64> {
-    let stdout = crate::collectors::command::run_stdout(
+    let stdout = crate::collectors::command::run_system_stdout(
         "vm_stat",
         std::iter::empty::<&str>(),
         crate::collectors::command::CommandTimeout::Normal,

@@ -825,6 +825,10 @@ jobs:
           powershell_dist_installer_sha256=$(sha256sum \
             "$OUTPUT_DIRECTORY/tr300-dist-installer.ps1")
           powershell_dist_installer_sha256=${powershell_dist_installer_sha256%% *}
+          windows_archive_sha256=$(sha256sum \
+            "$OUTPUT_DIRECTORY/tr300-x86_64-pc-windows-msvc.zip")
+          windows_archive_sha256=${windows_archive_sha256%% *}
+          [[ "$windows_archive_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$shell_dist_installer_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$powershell_dist_installer_sha256" =~ ^[0-9a-f]{64}$ ]]
           version=${RELEASE_TAG#v}
@@ -836,6 +840,7 @@ jobs:
           sed -e "s/@TR300_TAG@/${RELEASE_TAG}/g" \
             -e "s/@TR300_VERSION@/${version}/g" \
             -e "s/@TR300_DIST_INSTALLER_SHA256@/${powershell_dist_installer_sha256}/g" \
+            -e "s/@TR300_WINDOWS_ARCHIVE_SHA256@/${windows_archive_sha256}/g" \
             scripts/managed-installers/tr300-installer.ps1 \
             > "$OUTPUT_DIRECTORY/tr300-installer.ps1"
           chmod 0755 "$OUTPUT_DIRECTORY/tr300-installer.sh"
@@ -845,6 +850,9 @@ jobs:
             "$OUTPUT_DIRECTORY/tr300-installer.sh"
           grep -Fqx \
             "\$Tr300DistInstallerSha256 = '${powershell_dist_installer_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          grep -Fqx \
+            "\$Tr300WindowsArchiveSha256 = '${windows_archive_sha256}'" \
             "$OUTPUT_DIRECTORY/tr300-installer.ps1"
           if grep -F '@TR300_' "$OUTPUT_DIRECTORY/tr300-installer.sh" \
             "$OUTPUT_DIRECTORY/tr300-installer.ps1"; then

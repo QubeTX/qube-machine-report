@@ -537,12 +537,22 @@ jobs:
               $records[0].digest | sub("^sha256:"; "")
             else error("unexpected PowerShell cargo-dist asset count") end
           ' "$work_directory/release-before.json")
+          windows_archive_sha256=$(jq -er '
+            [.assets[] | select(.name == "tr300-x86_64-pc-windows-msvc.zip")] as $records |
+            if ($records | length) == 1 then
+              $records[0].digest | sub("^sha256:"; "")
+            else error("unexpected Windows archive asset count") end
+          ' "$work_directory/release-before.json")
+          [[ "$windows_archive_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$shell_dist_sha256" =~ ^[0-9a-f]{64}$ &&
              "$powershell_dist_sha256" =~ ^[0-9a-f]{64}$ ]]
           grep -Fqx "tr300_dist_installer_sha256='${shell_dist_sha256}'" \
             "$OUTPUT_DIRECTORY/tr300-installer.sh"
           grep -Fqx \
             "\$Tr300DistInstallerSha256 = '${powershell_dist_sha256}'" \
+            "$OUTPUT_DIRECTORY/tr300-installer.ps1"
+          grep -Fqx \
+            "\$Tr300WindowsArchiveSha256 = '${windows_archive_sha256}'" \
             "$OUTPUT_DIRECTORY/tr300-installer.ps1"
           if grep -Fq '@TR300_' "$OUTPUT_DIRECTORY/tr300-installer.sh" \
             "$OUTPUT_DIRECTORY/tr300-installer.ps1"; then

@@ -12,17 +12,25 @@ param (
     [switch]$Help
 )
 
+$Tr300OriginalPSModulePath = $env:PSModulePath
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 $Tr300Tag = '@TR300_TAG@'
 $Tr300Version = '@TR300_VERSION@'
 $Tr300DistInstallerSha256 = '@TR300_DIST_INSTALLER_SHA256@'
+$Tr300WindowsArchiveSha256 = '@TR300_WINDOWS_ARCHIVE_SHA256@'
 $Tr300ReleaseBase = "https://github.com/QubeTX/qube-machine-report/releases/download/$Tr300Tag"
 $Tr300RecoveryUrl = 'https://github.com/QubeTX/qube-machine-report/releases/latest'
+$Tr300EntryPath = [string]$env:PATH
+$Tr300EntryDirectory = (Get-Location).ProviderPath
+$Tr300InvocationPath = if ($null -ne $env:TR300_INVOCATION_PATH) { [string]$env:TR300_INVOCATION_PATH } else { [Environment]::ExpandEnvironmentVariables($Tr300EntryPath) }
+$Tr300InvocationDirectory = if ($env:TR300_INVOCATION_CWD) { $env:TR300_INVOCATION_CWD } else { $Tr300EntryDirectory }
 
 if ($Help) {
     Write-Information 'TR-300 managed PowerShell installer'
     Write-Information 'Installs the latest managed CLI channel and safely supersedes recognized TR-300 MSI/EXE installs.'
+    $env:PSModulePath = $Tr300OriginalPSModulePath
     return
 }
 
@@ -78,6 +86,128 @@ function Assert-Tr300DistInstallerHash {
     if ($actual -cne $Tr300DistInstallerSha256) {
         throw 'the downloaded cargo-dist installer checksum did not match this release'
     }
+}
+
+function New-Tr300GuardedDistInstaller([string]$Source, [string]$Destination) {
+    if ($Tr300WindowsArchiveSha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+        throw 'the managed installer has an invalid embedded Windows archive checksum'
+    }
+    $stream = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $actual = ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally { $algorithm.Dispose() }
+        if ($actual -cne $Tr300DistInstallerSha256) {
+            throw 'the downloaded cargo-dist installer checksum did not match this release'
+        }
+        $stream.Position = 0
+        $reader = New-Object IO.StreamReader($stream)
+        try { $sourceText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+    $downloadAnchor = '  $wc.downloadFile($url, $dir_path)'
+    $extractedAnchor = '  # Let the next step know what to copy'
+    $startupAnchor = '$app_name = ''tr300'''
+    foreach ($anchor in @($startupAnchor, $downloadAnchor, $extractedAnchor)) {
+        if ([regex]::Matches($sourceText, ('(?m)^' + [regex]::Escape($anchor) + '\r?$')).Count -ne 1) {
+            throw 'the pinned cargo-dist Windows archive guard anchors changed'
+        }
+    }
+    if ($sourceText.IndexOf($downloadAnchor) -ge $sourceText.IndexOf($extractedAnchor)) {
+        throw 'the pinned cargo-dist Windows archive guard anchors are out of order'
+    }
+    $sourceText = $sourceText.Replace($startupAnchor, ('$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules'')' + "`n" + $startupAnchor))
+    $guard = @'
+  $tr300ArchiveGuard = [IO.File]::Open($dir_path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    $tr300ArchiveAlgorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+      $tr300ArchiveHash = ([BitConverter]::ToString($tr300ArchiveAlgorithm.ComputeHash($tr300ArchiveGuard))).Replace('-', '').ToLowerInvariant()
+    } finally { $tr300ArchiveAlgorithm.Dispose() }
+    if ($tr300ArchiveHash -cne '@ARCHIVE_SHA256@') {
+      throw 'the downloaded Windows archive checksum did not match this release'
+    }
+'@
+    $guard = $guard.Replace('@ARCHIVE_SHA256@', $Tr300WindowsArchiveSha256)
+    $closeGuard = @'
+  } finally { $tr300ArchiveGuard.Dispose() }
+'@
+    $sourceText = $sourceText.Replace($downloadAnchor, ($downloadAnchor + "`n" + $guard))
+    $sourceText = $sourceText.Replace($extractedAnchor, ($closeGuard + "`n" + $extractedAnchor))
+    [IO.File]::WriteAllText($Destination, $sourceText, (New-Object Text.UTF8Encoding($false)))
+}
+
+function ConvertTo-Tr300ProcessArgument([string]$Value) {
+    # Windows argv quoting; no shell interprets the resulting argument string.
+    return '"' + ([regex]::Replace(([regex]::Replace($Value, '(\\*)"', '$1$1\"')), '(\\+)$', '$1$1')) + '"'
+}
+
+function Invoke-Tr300DistInstaller([string]$Script, [string]$TempRoot, [bool]$SkipPathChange) {
+    $launcher = Join-Path $PSHOME $(if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' })
+    if (-not [IO.Path]::IsPathRooted($launcher) -or -not [IO.File]::Exists($launcher)) {
+        throw 'the current trusted PowerShell host is unavailable'
+    }
+    $system = [Environment]::SystemDirectory
+    $windows = [IO.Directory]::GetParent($system).FullName
+    $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = $launcher
+    $info.UseShellExecute = $false
+    $info.WorkingDirectory = $PSHOME
+    $childArgs = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script)
+    if ($SkipPathChange) { $childArgs += '-NoModifyPath' }
+    $info.Arguments = ($childArgs | ForEach-Object { ConvertTo-Tr300ProcessArgument $_ }) -join ' '
+    $info.EnvironmentVariables['PATH'] = (@($system, (Join-Path $system 'Wbem'), $windows, $PSHOME) -join ';')
+    $info.EnvironmentVariables['PSModulePath'] = Join-Path $PSHOME 'Modules'
+    $info.EnvironmentVariables['SystemRoot'] = $windows
+    $info.EnvironmentVariables['windir'] = $windows
+    $info.EnvironmentVariables['COMSPEC'] = Join-Path $system 'cmd.exe'
+    $info.EnvironmentVariables['ProgramFiles'] = $programs
+    $info.EnvironmentVariables['ProgramW6432'] = $programs
+    $info.EnvironmentVariables['TEMP'] = $TempRoot
+    $info.EnvironmentVariables['TMP'] = $TempRoot
+    $guardedScript = [IO.File]::Open($Script, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $process = [Diagnostics.Process]::Start($info)
+        try { $process.WaitForExit(); return $process.ExitCode } finally { $process.Dispose() }
+    } finally { $guardedScript.Dispose() }
+}
+
+function New-Tr300PrivateStaging {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    $elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $base = if ($elevated) {
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    } else {
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+    }
+    if ([string]::IsNullOrWhiteSpace($base) -or -not [IO.Path]::IsPathRooted($base)) {
+        throw 'Windows did not provide an absolute private staging base'
+    }
+    $path = Join-Path $base ('tr300-managed-install-' + [guid]::NewGuid().ToString('N'))
+    if ([IO.Directory]::Exists($path) -or [IO.File]::Exists($path)) {
+        throw 'the private staging path already exists'
+    }
+    $security = New-Object Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    if ($elevated) {
+        $security.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    } else {
+        $security.SetOwner($identity.User)
+    }
+    $owners = @((New-Object Security.Principal.SecurityIdentifier('S-1-5-18')), (New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    if (-not $elevated) { $owners += $identity.User }
+    foreach ($sid in $owners) {
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+        $security.AddAccessRule($rule)
+    }
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        [IO.FileSystemAclExtensions]::Create((New-Object IO.DirectoryInfo($path)), $security)
+    } else {
+        $null = [IO.Directory]::CreateDirectory($path, $security)
+    }
+    return $path
 }
 
 function Copy-Tr300DistInstallerToPrivateStaging {
@@ -444,13 +574,23 @@ function Assert-Tr300NoUnknownPathOwners($NativeProducts, $ManagedState) {
     foreach ($product in $NativeProducts) {
         $allowed[[IO.Path]::GetFullPath($product.Binary).ToLowerInvariant()] = $true
     }
-    $commands = @(Get-Command tr300 -All -CommandType Application -ErrorAction SilentlyContinue)
-    foreach ($command in $commands) {
-        $source = if ($command.Source) { $command.Source } else { $command.Path }
-        if (-not $source) { continue }
-        $full = [IO.Path]::GetFullPath([string]$source)
-        if (-not $allowed.ContainsKey($full.ToLowerInvariant())) {
-            throw "an unrecognized portable/PATH copy is active at $full; preserving it instead of guessing ownership"
+    $scans = @(
+        @{ Path = [string]$env:PATH; Directory = (Get-Location).ProviderPath; Expand = $true },
+        @{ Path = $Tr300EntryPath; Directory = $Tr300EntryDirectory; Expand = $true },
+        @{ Path = $Tr300InvocationPath; Directory = $Tr300InvocationDirectory; Expand = $false }
+    )
+    foreach ($scan in $scans) {
+        foreach ($entry in ([string]$scan.Path).Split(';')) {
+            $directory = $entry.Trim().Trim('"')
+            if ($scan.Expand) { $directory = [Environment]::ExpandEnvironmentVariables($directory) }
+            if (-not $directory) { $directory = $scan.Directory }
+            if (-not [IO.Path]::IsPathRooted($directory)) { $directory = Join-Path $scan.Directory $directory }
+            foreach ($extension in @('.exe', '.com', '.cmd', '.bat')) {
+                $full = [IO.Path]::GetFullPath((Join-Path $directory ('tr300' + $extension)))
+                if ([IO.File]::Exists($full) -and -not $allowed.ContainsKey($full.ToLowerInvariant())) {
+                    throw "an unrecognized portable/PATH copy is active at $full; preserving it instead of guessing ownership"
+                }
+            }
         }
     }
 }
@@ -526,34 +666,30 @@ function Get-Tr300ManagedBinary {
 }
 
 if ($env:TR300_MANAGED_INSTALLER_TEST_ONLY -eq '1') {
+    $env:PSModulePath = $Tr300OriginalPSModulePath
     return
 }
 
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("tr300-managed-install-" + [guid]::NewGuid().ToString('N'))
+$tempRoot = $null
 $managedState = $null
 $transactionStarted = $false
 $committed = $false
 $nativeRemovedCount = 0
 try {
-    $null = New-Item -ItemType Directory -Path $tempRoot -Force
+    $tempRoot = New-Tr300PrivateStaging
     $native = @(Get-Tr300NativeProducts)
     $managedState = Save-Tr300ManagedState $tempRoot
     Assert-Tr300NoUnknownPathOwners $native $managedState
     $distInstaller = Join-Path $tempRoot 'tr300-dist-installer.ps1'
     Copy-Tr300DistInstallerToPrivateStaging -Destination $distInstaller
     Assert-Tr300DistInstallerHash -Path $distInstaller
+    $guardedInstaller = Join-Path $tempRoot 'tr300-verified-dist-installer.ps1'
+    New-Tr300GuardedDistInstaller $distInstaller $guardedInstaller
 
     $transactionStarted = $true
-    $launcher = if ($PSVersionTable.PSEdition -eq 'Core') {
-        Join-Path $PSHOME 'pwsh.exe'
-    } else {
-        Join-Path $PSHOME 'powershell.exe'
-    }
-    $childArgs = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $distInstaller)
-    if ($NoModifyPath) { $childArgs += '-NoModifyPath' }
-    & $launcher @childArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo-dist installation exited with code $LASTEXITCODE"
+    $installerExitCode = Invoke-Tr300DistInstaller $guardedInstaller $tempRoot ([bool]$NoModifyPath)
+    if ($installerExitCode -ne 0) {
+        throw "cargo-dist installation exited with code $installerExitCode"
     }
 
     $binary = Get-Tr300ManagedBinary
@@ -627,5 +763,6 @@ try {
     [Console]::Error.WriteLine("Download a fresh installer: $Tr300RecoveryUrl")
     exit 1
 } finally {
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    $env:PSModulePath = $Tr300OriginalPSModulePath
 }

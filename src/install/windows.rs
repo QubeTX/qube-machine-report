@@ -91,10 +91,11 @@ fn get_powershell_profiles() -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
 
     for launcher in ["powershell", "pwsh"] {
-        let Ok(output) = Command::new(launcher)
-            .args(["-NoProfile", "-NonInteractive", "-Command", "$PROFILE"])
-            .output()
+        let Ok(mut command) = crate::trusted_process::powershell_command_for(launcher, "$PROFILE")
         else {
+            continue;
+        };
+        let Ok(output) = command.output() else {
             // Launcher not on PATH; skip this shell flavor.
             continue;
         };
@@ -509,15 +510,13 @@ fn policy_state(policy: &str) -> PolicyState {
 /// PowerShell is not on PATH or the command fails — in which case we skip
 /// the preflight entirely.
 fn detect_execution_policy() -> Option<String> {
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-ExecutionPolicy -Scope CurrentUser",
-        ])
-        .output()
-        .ok()?;
+    let output = crate::trusted_process::powershell_command_for(
+        "powershell",
+        "Get-ExecutionPolicy -Scope CurrentUser",
+    )
+    .ok()?
+    .output()
+    .ok()?;
 
     if !output.status.success() {
         return None;
@@ -536,14 +535,11 @@ fn detect_execution_policy() -> Option<String> {
 /// override the user-scope setting without `Set-ExecutionPolicy` itself
 /// failing).
 fn try_set_execution_policy() -> std::io::Result<TrySetResult> {
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force",
-        ])
-        .output()?;
+    let output = crate::trusted_process::powershell_command_for(
+        "powershell",
+        "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force",
+    )?
+    .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -744,77 +740,54 @@ fn schedule_self_cleanup(
 ) -> io::Result<()> {
     use std::os::windows::process::CommandExt;
 
-    let mut script = "timeout /t 2 /nobreak > nul".to_string();
-    if let Some(report_path) = report_path {
-        script.push_str(&format!(" & del /f /q \"{}\"", report_path.display()));
-    }
-    script.push_str(&format!(" & del /f /q \"{}\"", binary_path.display()));
-    if let Some(dir) = parent_dir {
-        // `rd /q` quietly removes an empty directory. Failure (e.g.,
-        // dir not empty because the user dropped another file in it)
-        // is silently ignored — the binary delete is the
-        // load-bearing part of the cleanup.
-        script.push_str(&format!(" & rd /q \"{}\"", dir.display()));
-    }
-
-    // DETACHED_PROCESS (0x00000008): child has no console window.
-    // CREATE_NEW_PROCESS_GROUP (0x00000200): child doesn't inherit
-    //   our process group, so any Ctrl-C signal sent to the terminal
-    //   after this process exits doesn't propagate.
     const DETACHED_PROCESS: u32 = 0x00000008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-
-    Command::new(trusted_windows_cmd_path()?)
-        .arg("/d")
-        .arg("/s")
-        .arg("/c")
-        .arg(&script)
+    self_cleanup_command(binary_path, report_path, parent_dir)?
         .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()?;
-
     Ok(())
 }
 
-fn trusted_windows_cmd_path() -> io::Result<PathBuf> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use winapi::um::sysinfoapi::GetSystemDirectoryW;
+fn self_cleanup_command(
+    binary_path: &Path,
+    report_path: Option<&Path>,
+    parent_dir: Option<&Path>,
+) -> io::Result<Command> {
+    use std::os::windows::process::CommandExt;
 
-    const INITIAL_CAPACITY: usize = 260;
-    const MAX_DIRECTORY_CAPACITY: usize = 32_768;
-
-    let mut buffer = vec![0_u16; INITIAL_CAPACITY];
-    loop {
-        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
-        if length == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let length = length as usize;
-        if length < buffer.len() {
-            buffer.truncate(length);
-            let directory = PathBuf::from(OsString::from_wide(&buffer));
-            if !directory.is_absolute() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Windows returned a non-absolute system directory",
-                ));
-            }
-            return Ok(directory.join("cmd.exe"));
-        }
-        let Some(required) = length
-            .checked_add(1)
-            .filter(|size| *size > buffer.len() && *size <= MAX_DIRECTORY_CAPACITY)
-        else {
+    for path in std::iter::once(binary_path)
+        .chain(report_path)
+        .chain(parent_dir)
+    {
+        if !path.is_absolute() {
             return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Windows returned an invalid system-directory length",
+                io::ErrorKind::InvalidInput,
+                "cleanup paths must be absolute",
             ));
-        };
-        buffer.resize(required, 0);
+        }
     }
+    let timeout = crate::trusted_process::system_command("timeout")?;
+    let mut command = crate::trusted_process::system_command("cmd")?;
+    command.env("TR300_CLEANUP_TIMEOUT", timeout.get_program());
+    command.env("TR300_CLEANUP_BINARY", binary_path);
+    let mut script = "\"%TR300_CLEANUP_TIMEOUT%\" /t 2 /nobreak > nul".to_string();
+    if let Some(report) = report_path {
+        command.env("TR300_CLEANUP_REPORT", report);
+        script.push_str(" & del /f /q \"%TR300_CLEANUP_REPORT%\"");
+    }
+    script.push_str(" & del /f /q \"%TR300_CLEANUP_BINARY%\"");
+    if let Some(parent) = parent_dir {
+        command.env("TR300_CLEANUP_DIRECTORY", parent);
+        script.push_str(" & rd /q \"%TR300_CLEANUP_DIRECTORY%\"");
+    }
+    // Paths expand once inside quotes; delayed expansion and cmd AutoRun are disabled.
+    command
+        .args(["/d", "/v:off", "/s", "/c"])
+        .raw_arg(format!("\"{script}\""));
+    Ok(command)
 }
 
 /// Identifies which step of install/uninstall failed, so we can render a
@@ -978,6 +951,48 @@ fn fail_install(step: InstallStep, path: &Path, err: io::Error) -> AppError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cleanup_uses_system_helpers_and_keeps_literal_paths() {
+        let fixture = tempfile::tempdir().unwrap();
+        let planted = fixture.path().join("planted");
+        std::fs::create_dir(&planted).unwrap();
+        let marker = fixture.path().join("hostile-timeout-executed");
+        std::fs::write(
+            planted.join("timeout.cmd"),
+            format!("@echo hostile>\"{}\"\r\n", marker.display()),
+        )
+        .unwrap();
+        let payload_directory = fixture.path().join("literal %TR300_TEST_REWRITE% & !name");
+        std::fs::create_dir(&payload_directory).unwrap();
+        let binary = payload_directory.join("tr300.exe");
+        let report = payload_directory.join("report.exe");
+        std::fs::write(&binary, b"fixture").unwrap();
+        std::fs::write(&report, b"fixture").unwrap();
+        let mut command = super::self_cleanup_command(&binary, Some(&report), None).unwrap();
+        assert_eq!(
+            command.get_current_dir(),
+            Some(
+                crate::trusted_process::windows_system_directory()
+                    .unwrap()
+                    .as_path()
+            )
+        );
+        // Preserve the constructed protected cwd and PATH. Ambient process
+        // settings are hostile in the child, but no shell helper uses them.
+        command.env("TR300_TEST_REWRITE", "wrong-directory");
+        command.env("PATH", &planted);
+        let status = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(!binary.exists() && !report.exists());
+        assert!(!marker.exists());
+        assert!(super::self_cleanup_command(Path::new("relative.exe"), None, None).is_err());
+    }
+
     use super::{
         looks_like_onedrive_path, looks_like_redirected_path, policy_state, PolicyState,
         POWERSHELL_ADDITIONS,

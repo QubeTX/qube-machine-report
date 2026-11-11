@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.3] - 2026-11-11
+
+### Fixed
+- Bind implicit collector and maintenance helpers to protected operating-system locations, safe working directories, and a trusted child search environment across Windows, macOS, and Linux. Preserve collection budgets, optional-probe fallback, and the user's explicitly selected Cargo toolchain. (#sec35)
+- Restrict fresh PowerShell module search and the complete managed-installer child chain; bind the Windows ZIP to its prepared release digest before extraction, including private frozen validation inputs. (#sec35)
+- Strengthen native-installer staging permissions and Windows verified-payload custody through installer completion. Randomized exclusive creation remains required; Unix protection is against other users, not an already compromised account. (#sec35)
+
+### Internal
+- Reuse the pinned cargo-audit executable in read-only CI, with protected-main-only cache saves, version validation, and a fresh vulnerability audit on every run. Keep the complete platform and release gate inventory. (#sec35)
+
 ## [4.4.2] - 2026-11-11
+
+> Release status: exact unyanked crate and immutable tag published; signed 24-asset draft remains private. Downstream publication was stopped for the consolidated v4.4.3 audit fixes.
 
 ### Fixed
 - Pin cargo-dist 0.31.0's generated Apple release builders to native `macos-15` and `macos-15-intel`. GitHub retired the default ARM `macos-14` image, cancelling v4.4.1 before runner assignment or any signing/publication. Preserve that immutable tag and exact published crate; v4.4.2 carries all v4.4.1 security fixes through a new complete release. (#sec35)

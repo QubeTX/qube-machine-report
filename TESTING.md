@@ -7,9 +7,15 @@ as passed.
 
 ## Per-version verification log
 
+### v4.4.3 — Consolidated child-process and installer security (2026-11-11)
+
+Unpublished candidate. Complete collector, maintenance-child-chain, and staging inventories were finished before this consolidated implementation batch. Local Windows gates pass: fmt, strict all-target Clippy, 220 library + two companion + 29 integration tests, dependency audit, 44-file package inventory, locked publish dry-run, and both release binaries. The local dirty-tree package allowance applies only to read-only listing/dry-run; the production publisher still requires its exact clean source. Both aliases report 4.4.3 and identical help; fast JSON and full ASCII pass. Five fast JSON runs were 330.3, 337.4, 310.9, 318.1, and 300.1 ms (median 318.1 ms), smoke evidence with no comparative speed claim.
+
+Workflow syntax, ShellCheck including the extracted direct-PKG preinstall and modified inline release/CI guard blocks, full executable provenance fixtures, the exact CI lifecycle guard, shell transactions, and both native PowerShell transaction suites pass. Adversarial tests cover whole fast collection, original/relative/empty PATH ownership data, runtime module autoload, actual ZIP extraction and mismatch refusal, restricted staging owner/DACL, retained source handles, and literal uninstall paths. The actual cargo-dist plan selects the required native Mac runners. Independent component/interaction review reports no remaining blocker; exact-commit review, native exact-head CI, exact-main/OIDC, native packaging, and public verification remain pending. Public latest remains v4.4.0. Personal hardware/UAC acceptance remains open.
+
 ### v4.4.2 — Supported native Apple release runners (2026-11-11)
 
-Candidate carries the v4.4.1 security fixes unchanged and pins the generated cargo-dist Apple matrix to supported native macOS 15 runners. A shared plan validator runs against both CI's real JSON plan and the tag's real release plan, with positive and fail-closed negative fixtures. Local, exact-head, exact-main/OIDC, native assembly, and public gates are pending.
+Exact source/tag e868bb138e290aca95ba7da063468aed558ef213 passed PR #37 CI 42971809468 (20/20), plan 42971809550, main CI 42972929754 (20/20), and trusted-OIDC 42972929890. The unyanked crate checksum is 4a05ef9176144dfd696b95b1f833f09cf04f37c544c4f30e03249cc7021892c9; downloaded VCS metadata matches. Release 42974726577 passed all 13 jobs with supported native Apple runners and signed/notarized archives, producing private 24-asset draft 441328198. Windows 42975873486 and Mac 42975873485 were cancelled before publication for consolidated v4.4.3 audit fixes. Preserve the draft/tag/crate; no complete v4.4.2 GitHub distribution is public.
 
 
 ### v4.4.1 — Windows managed updater launcher security (2026-11-10)

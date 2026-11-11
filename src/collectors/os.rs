@@ -35,7 +35,7 @@ pub fn collect(mode: CollectMode) -> Result<OsInfo> {
     #[cfg(target_os = "macos")]
     let name = "macOS".to_string();
     #[cfg(target_os = "macos")]
-    let version = crate::collectors::command::run_stdout(
+    let version = crate::collectors::command::run_system_stdout(
         "sw_vers",
         ["-productVersion"],
         crate::collectors::command::CommandTimeout::Normal,

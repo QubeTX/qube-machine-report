@@ -13,11 +13,19 @@
 use crate::config::{Config, OutputFormat};
 use crate::VERSION;
 
+#[cfg(windows)]
+use crate::trusted_process::windows_system_directory as trusted_windows_system_directory;
+
 #[cfg(target_os = "macos")]
-use crate::collectors::command::{run_output, CommandTimeout};
+use crate::collectors::command::{run_prepared_output, CommandTimeout};
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(any(windows, target_os = "macos", test))]
+mod staging;
+#[cfg(any(windows, target_os = "macos", test))]
+use staging::StagedInstaller;
 
 static JSON_UPDATE_MODE: AtomicBool = AtomicBool::new(false);
 
@@ -738,9 +746,17 @@ fn parse_numeric_version(version: &str) -> Option<Vec<u64>> {
 // ── Strategy ordering ───────────────────────────────────────────────
 
 fn tool_exists(tool: &str) -> bool {
-    crate::collectors::command::run_output(
-        tool,
-        ["--version"],
+    let command = if matches!(tool, "cargo" | "rustup") {
+        Some(Command::new(tool))
+    } else {
+        crate::trusted_process::system_command(tool).ok()
+    };
+    let Some(mut command) = command else {
+        return false;
+    };
+    command.arg("--version");
+    crate::collectors::command::run_prepared_output(
+        command,
         crate::collectors::command::CommandTimeout::Slow,
     )
     .is_some_and(|output| output.status.success())
@@ -1502,7 +1518,15 @@ fn run_command_status_inner(
     args: &[&str],
     extra_env: Option<(&str, &str)>,
 ) -> Result<(), StrategyError> {
-    let mut command = Command::new(launcher);
+    // Cargo is the explicitly selected user toolchain. OS installer helpers
+    // instead come from the protected system locations and environment.
+    let mut command = if launcher == "cargo" {
+        Command::new(launcher)
+    } else {
+        crate::trusted_process::system_command(launcher).map_err(|error| {
+            StrategyError::Preflight(format!("trusted {launcher} is unavailable: {error}"))
+        })?
+    };
     command.args(args);
     if let Some((name, value)) = extra_env {
         command.env(name, value);
@@ -1576,7 +1600,7 @@ fn try_installer_curl(latest: &str) -> Result<(), StrategyError> {
         return Err(StrategyError::Preflight("bash not on PATH".into()));
     }
     let script = format!(
-        "set -euo pipefail; curl --proto '=https' --tlsv1.2 -fLsS {} | sh",
+        "set -euo pipefail; curl -q --proto '=https' --tlsv1.2 -fLsS {} | sh",
         release_asset_url(latest, SHELL_INSTALLER_ASSET)
     );
     let prefix = cargo_dist_install_prefix().ok_or_else(|| {
@@ -1584,7 +1608,7 @@ fn try_installer_curl(latest: &str) -> Result<(), StrategyError> {
     })?;
     run_command_status_with_env(
         "bash",
-        &["-c", &script],
+        &["-p", "-c", &script],
         "CARGO_DIST_FORCE_INSTALL_DIR",
         &prefix,
     )
@@ -1606,7 +1630,7 @@ fn try_installer_wget(latest: &str) -> Result<(), StrategyError> {
         return Err(StrategyError::Preflight("bash not on PATH".into()));
     }
     let script = format!(
-        "set -euo pipefail; wget -qO- {} | sh",
+        "set -euo pipefail; wget --no-config -qO- {} | sh",
         release_asset_url(latest, SHELL_INSTALLER_ASSET)
     );
     let prefix = cargo_dist_install_prefix().ok_or_else(|| {
@@ -1614,7 +1638,7 @@ fn try_installer_wget(latest: &str) -> Result<(), StrategyError> {
     })?;
     run_command_status_with_env(
         "bash",
-        &["-c", &script],
+        &["-p", "-c", &script],
         "CARGO_DIST_FORCE_INSTALL_DIR",
         &prefix,
     )
@@ -1663,6 +1687,8 @@ fn windows_powershell_install_command(
             )
         })?;
     let mut command = Command::new(launcher);
+    crate::trusted_process::configure_environment(&mut command)?;
+    let script = format!("$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules'); {script}");
     command
         .current_dir(working_directory)
         .args([
@@ -1671,7 +1697,7 @@ fn windows_powershell_install_command(
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            script,
+            &script,
         ])
         .env("CARGO_DIST_FORCE_INSTALL_DIR", prefix);
     Ok(command)
@@ -1827,7 +1853,7 @@ fn parse_sha256_sidecar(content: &str) -> Option<String> {
 }
 
 /// Compute the SHA-256 of `path`, returning the lowercase hex.
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(test)]
 fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let mut file = std::fs::File::open(path)?;
@@ -1845,10 +1871,8 @@ fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
 /// authentication; a future signed-release design would be a separate trust
 /// layer.
 #[cfg(any(windows, target_os = "macos"))]
-fn verify_checksum(
-    installer_path: &std::path::Path,
-    installer_url: &str,
-) -> Result<(), StrategyError> {
+fn verify_checksum(staged: &StagedInstaller, installer_url: &str) -> Result<(), StrategyError> {
+    let installer_path = staged.path();
     eprintln!("  Verifying SHA256 checksum...");
     let sidecar_content = fetch_sha256_sidecar(installer_url).map_err(StrategyError::Runtime)?;
     let expected = parse_sha256_sidecar(&sidecar_content).ok_or_else(|| {
@@ -1857,7 +1881,7 @@ fn verify_checksum(
             installer_url, sidecar_content
         ))
     })?;
-    let actual = compute_sha256(installer_path).map_err(|error| {
+    let actual = staged.seal_and_hash().map_err(|error| {
         prelaunch_installer_io_error(
             "reading the staged installer for checksum verification",
             installer_path,
@@ -1880,29 +1904,6 @@ fn checksum_verdict(actual: &str, expected: &str) -> Result<(), String> {
             "SHA256 mismatch — refusing to run installer.\n         Expected: {}\n         Got:      {}\n         This indicates a corrupted or mismatched release asset.",
             expected, actual
         ))
-    }
-}
-
-#[cfg(any(windows, target_os = "macos", test))]
-struct StagedInstaller {
-    dir: tempfile::TempDir,
-    path: std::path::PathBuf,
-}
-
-#[cfg(any(windows, target_os = "macos", test))]
-impl StagedInstaller {
-    fn new(extension: &str) -> std::io::Result<Self> {
-        let dir = tempfile::Builder::new().prefix("tr300-update-").tempdir()?;
-        let path = dir.path().join(format!("installer.{}", extension));
-        Ok(Self { dir, path })
-    }
-
-    fn path(&self) -> &std::path::Path {
-        &self.path
-    }
-
-    fn close(self) -> std::io::Result<()> {
-        self.dir.close()
     }
 }
 
@@ -2180,49 +2181,6 @@ fn trusted_windows_msiexec_path() -> std::io::Result<std::path::PathBuf> {
     ))
 }
 
-#[cfg(windows)]
-fn trusted_windows_system_directory() -> std::io::Result<std::path::PathBuf> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use winapi::um::sysinfoapi::GetSystemDirectoryW;
-
-    const INITIAL_CAPACITY: usize = 260;
-    const MAX_DIRECTORY_CAPACITY: usize = 32_768;
-
-    let mut buffer = vec![0_u16; INITIAL_CAPACITY];
-    loop {
-        // SAFETY: buffer is writable for the supplied UTF-16 code-unit count.
-        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
-        if length == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-
-        let length = length as usize;
-        if length < buffer.len() {
-            buffer.truncate(length);
-            let directory = std::path::PathBuf::from(OsString::from_wide(&buffer));
-            if !directory.is_absolute() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Windows returned a non-absolute system directory",
-                ));
-            }
-            return Ok(directory);
-        }
-
-        let required = length
-            .checked_add(1)
-            .filter(|size| *size > buffer.len() && *size <= MAX_DIRECTORY_CAPACITY);
-        let Some(required) = required else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Windows returned an invalid system-directory length",
-            ));
-        };
-        buffer.resize(required, 0);
-    }
-}
-
 #[cfg(any(windows, test))]
 fn windows_msi_install_command(
     msiexec_path: &std::path::Path,
@@ -2238,6 +2196,7 @@ fn windows_msi_install_command(
             )
         })?;
     let mut command = Command::new(msiexec_path);
+    crate::trusted_process::configure_environment(&mut command)?;
     command
         .current_dir(working_directory)
         .arg("/i")
@@ -2262,6 +2221,7 @@ fn windows_exe_install_command(installer_path: &std::path::Path) -> std::io::Res
             )
         })?;
     let mut command = Command::new(installer_path);
+    crate::trusted_process::configure_environment(&mut command)?;
     command.current_dir(working_directory).args([
         "/SILENT",
         "/SUPPRESSMSGBOXES",
@@ -2276,7 +2236,7 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("msi").map_err(|error| {
         prelaunch_installer_io_error(
             "creating a private update staging directory",
-            &std::env::temp_dir(),
+            std::path::Path::new("native installer staging"),
             url,
             error,
         )
@@ -2287,7 +2247,7 @@ fn try_msi_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         eprintln!("  Downloading MSI installer...");
         download_to_file(url, temp_path)?;
 
-        verify_checksum(temp_path, url)?;
+        verify_checksum(&staged, url)?;
 
         eprintln!("  Launching Windows Installer...");
         // /passive shows a progress dialog with no user interaction; /norestart
@@ -2362,7 +2322,7 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("exe").map_err(|error| {
         prelaunch_installer_io_error(
             "creating a private update staging directory",
-            &std::env::temp_dir(),
+            std::path::Path::new("native installer staging"),
             url,
             error,
         )
@@ -2373,7 +2333,7 @@ fn try_exe_install(url: &str, latest: &str) -> Result<(), StrategyError> {
         eprintln!("  Downloading EXE installer...");
         download_to_file(url, temp_path)?;
 
-        verify_checksum(temp_path, url)?;
+        verify_checksum(&staged, url)?;
 
         eprintln!("  Launching Inno Setup installer...");
         // /SILENT shows a progress dialog but no wizard pages; /SUPPRESSMSGBOXES
@@ -2420,7 +2380,7 @@ fn try_macos_pkg_install(latest: &str) -> Result<(), StrategyError> {
     let staged = StagedInstaller::new("pkg").map_err(|error| {
         prelaunch_installer_io_error(
             "creating a private update staging directory",
-            &std::env::temp_dir(),
+            std::path::Path::new("native installer staging"),
             &url,
             error,
         )
@@ -2430,7 +2390,7 @@ fn try_macos_pkg_install(latest: &str) -> Result<(), StrategyError> {
     let result = (|| -> Result<(), StrategyError> {
         eprintln!("  Downloading signed macOS PKG...");
         download_to_file(&url, &pkg_path)?;
-        verify_checksum(&pkg_path, &url)?;
+        verify_checksum(&staged, &url)?;
         verify_macos_pkg_signature(&pkg_path)?;
         run_command_status(
             "xcrun",
@@ -2696,8 +2656,23 @@ fn mac_pkg_signature_metadata_matches(details: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
+fn run_system_output<I, S>(
+    program: &str,
+    args: I,
+    timeout: CommandTimeout,
+) -> Option<std::process::Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut command = crate::trusted_process::system_command(program).ok()?;
+    command.args(args);
+    run_prepared_output(command, timeout)
+}
+
+#[cfg(target_os = "macos")]
 fn verify_macos_pkg_signature(path: &std::path::Path) -> Result<(), StrategyError> {
-    let output = run_output(
+    let output = run_system_output(
         "pkgutil",
         ["--check-signature", &path.to_string_lossy()],
         CommandTimeout::Custom(std::time::Duration::from_secs(10)),
@@ -2720,7 +2695,7 @@ fn verify_macos_pkg_signature(path: &std::path::Path) -> Result<(), StrategyErro
 
 #[cfg(target_os = "macos")]
 fn pkgutil_text(args: &[&str]) -> Option<String> {
-    let output = run_output(
+    let output = run_system_output(
         "pkgutil",
         args,
         CommandTimeout::Custom(std::time::Duration::from_secs(5)),
@@ -2735,13 +2710,13 @@ fn pkgutil_text(args: &[&str]) -> Option<String> {
 fn mac_binary_signature_matches_current_product() -> bool {
     let path = "/usr/local/bin/tr300";
     let timeout = CommandTimeout::Custom(std::time::Duration::from_secs(5));
-    let verified = run_output("codesign", ["--verify", "--strict", path], timeout)
+    let verified = run_system_output("codesign", ["--verify", "--strict", path], timeout)
         .is_some_and(|output| output.status.success());
     if !verified {
         return false;
     }
 
-    let Some(display) = run_output("codesign", ["-d", "--verbose=4", path], timeout) else {
+    let Some(display) = run_system_output("codesign", ["-d", "--verbose=4", path], timeout) else {
         return false;
     };
     display.status.success()
@@ -3699,7 +3674,7 @@ TeamIdentifier=M9D5379H93\n";
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                script
+                &format!("$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules'); {script}")
             ]
             .map(std::ffi::OsStr::new)
         );

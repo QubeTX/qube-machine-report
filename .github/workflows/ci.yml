@@ -1047,9 +1047,19 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      # Cache the pinned tool, never the advisory database or audit result.
+      # Only protected main saves a reusable cache; every run still audits.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: cargo-audit-0.22.2
+          cache-targets: false
+          cache-bin: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-audit
         run: |
-          cargo install --locked cargo-audit --version 0.22.2
+          if [ "$(cargo audit --version 2>/dev/null || true)" != 'cargo-audit-audit 0.22.2' ]; then
+            cargo install --locked cargo-audit --version 0.22.2 --force
+          fi
           test "$(cargo audit --version)" = 'cargo-audit-audit 0.22.2'
       - run: cargo audit
 
@@ -1269,11 +1279,13 @@ jobs:
           render_version=0.0.0
           shell_dist_sha256=1111111111111111111111111111111111111111111111111111111111111111
           powershell_dist_sha256=2222222222222222222222222222222222222222222222222222222222222222
+          windows_archive_sha256=3333333333333333333333333333333333333333333333333333333333333333
           sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
             -e "s/@TR300_DIST_INSTALLER_SHA256@/${shell_dist_sha256}/g" \
             "$shell_wrapper" > "$render_dir/tr300-installer.sh"
           sed -e "s/@TR300_TAG@/${render_tag}/g" -e "s/@TR300_VERSION@/${render_version}/g" \
             -e "s/@TR300_DIST_INSTALLER_SHA256@/${powershell_dist_sha256}/g" \
+            -e "s/@TR300_WINDOWS_ARCHIVE_SHA256@/${windows_archive_sha256}/g" \
             "$powershell_wrapper" > "$render_dir/tr300-installer.ps1"
           if grep -R -F '@TR300_' "$render_dir"; then
             echo 'pre-tag managed wrapper render left a placeholder behind' >&2
@@ -1286,6 +1298,8 @@ jobs:
           grep -Fq "\${tr300_release_base}/tr300-dist-installer.sh" "$render_dir/tr300-installer.sh"
           grep -Fq "\$Tr300Tag = '${render_tag}'" "$render_dir/tr300-installer.ps1"
           grep -Fq "\$Tr300DistInstallerSha256 = '${powershell_dist_sha256}'" \
+            "$render_dir/tr300-installer.ps1"
+          grep -Fq "\$Tr300WindowsArchiveSha256 = '${windows_archive_sha256}'" \
             "$render_dir/tr300-installer.ps1"
           grep -Fq "releases/download/\$Tr300Tag\"" "$render_dir/tr300-installer.ps1"
           grep -Fq "\$Tr300ReleaseBase/tr300-dist-installer.ps1" "$render_dir/tr300-installer.ps1"
@@ -1302,7 +1316,7 @@ jobs:
           # shellcheck disable=SC2016
           grep -Fq 'tr300_prepare_sha256sum "$dist_installer"' "$shell_wrapper"
           # shellcheck disable=SC2016
-          grep -Fq 'PATH="${tr300_sha256sum_directory}:${PATH:-/usr/bin:/bin}"' "$shell_wrapper"
+          grep -Fq 'PATH="${tr300_sha256sum_directory}:/usr/bin:/bin:/usr/sbin:/sbin"' "$shell_wrapper"
           # shellcheck disable=SC2016
           grep -Fq 'exec /usr/bin/shasum -a 256 "$1"' "$shell_wrapper"
           grep -Fq 'trap tr300_cleanup EXIT' "$shell_wrapper"
@@ -1327,7 +1341,7 @@ jobs:
           powershell_hash_line=$(grep -nF 'Assert-Tr300DistInstallerHash -Path $distInstaller' \
             "$powershell_wrapper" | cut -d: -f1)
           # shellcheck disable=SC2016
-          powershell_exec_line=$(grep -nF '& $launcher @childArgs' \
+          powershell_exec_line=$(grep -nF '$installerExitCode = Invoke-Tr300DistInstaller $guardedInstaller $tempRoot ([bool]$NoModifyPath)' \
             "$powershell_wrapper" | cut -d: -f1)
           test "$shell_hash_line" -lt "$shell_exec_line"
           test "$powershell_hash_line" -lt "$powershell_exec_line"
@@ -1602,19 +1616,29 @@ jobs:
               Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue
             ) | Where-Object DisplayName -EQ $display
           }
+          # Match the production updater's retained FILE_SHARE_READ-only
+          # source guard while exercising both real installer engines.
           function Install-Msi([string] $path) {
-            $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
-              -ArgumentList @('/i', (Resolve-Path $path).Path, '/qn', '/norestart')
-            if ($p.ExitCode -ne 0) { throw "MSI install failed for ${path}: $($p.ExitCode)" }
+            $asset = (Resolve-Path $path).Path
+            $sourceGuard = [IO.File]::Open($asset, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+              $p = Start-Process -FilePath $msiexecPath -WorkingDirectory $msiexecDirectory -Wait -PassThru `
+                -ArgumentList @('/i', $asset, '/qn', '/norestart')
+              if ($p.ExitCode -ne 0) { throw "MSI install failed for ${path}: $($p.ExitCode)" }
+            } finally { $sourceGuard.Dispose() }
           }
           function Install-Exe([string] $path, [string] $name) {
             $log = Join-Path $env:RUNNER_TEMP "tr300-$name-takeover.log"
             $script:LastInnoLog = $log
-            $p = Start-Process (Resolve-Path $path).Path -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
-            if ($p.ExitCode -ne 0) {
-              Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
-              throw "EXE install failed for ${path}: $($p.ExitCode)"
-            }
+            $asset = (Resolve-Path $path).Path
+            $sourceGuard = [IO.File]::Open($asset, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+              $p = Start-Process $asset -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f $log))
+              if ($p.ExitCode -ne 0) {
+                Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+                throw "EXE install failed for ${path}: $($p.ExitCode)"
+              }
+            } finally { $sourceGuard.Dispose() }
           }
           function Remove-Entry($entry) {
             if ($entry.WindowsInstaller -eq 1) {

@@ -59,6 +59,10 @@ Windows managed updates resolve Windows PowerShell through the native system-dir
 
 Cargo-dist Apple runner policy: explicitly map aarch64 to `macos-15` and x86_64 to `macos-15-intel` in the global manifest table. Validate the actual JSON plan before tag-only builds; a parse-only plan missed retired `macos-14` in v4.4.1. Keep the customized trust-boundary workflow intact. See the dated runner-plan addendum in the architecture ledger.
 
+Internal collector and maintenance OS helpers now use `src/trusted_process.rs`; preserve the public arbitrary-command helper API and the explicit user-selected Cargo toolchain contract. Pin the child helper environment as well as the first executable. Fresh PowerShell scripts reset `PSModulePath` before their first cmdlet because startup can add user module locations; see [Microsoft's module-path construction](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath).
+
+Native update staging lives in `src/update/staging.rs`. Windows retains restrictive directory and read-only source handles through native-installer completion; Unix creates mode-0700 staging beneath the trusted system temporary base, with no same-UID custody claim. Managed Windows wrapper rendering also binds the prepared ZIP digest, and private frozen inputs must satisfy it before extraction. See the v4.4.3 architecture addendum and tests before changing either boundary.
+
 ## Project Overview
 
 TR-300 is a cross-platform system information report tool written in Rust. It displays system information in a compact fixed-width table using Unicode box-drawing characters and bar graphs.

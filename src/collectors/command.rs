@@ -68,11 +68,13 @@ where
     V: AsRef<OsStr>,
 {
     let mut command = Command::new(program);
-    command
-        .args(args)
-        .envs(envs)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.args(args).envs(envs);
+    run_prepared_output(command, timeout)
+}
+
+/// Run an explicitly prepared probe without changing its executable or working directory.
+pub(crate) fn run_prepared_output(mut command: Command, timeout: CommandTimeout) -> Option<Output> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     // Give Unix probes their own process group so timeout cleanup also stops
     // helper processes they spawned. Without this, a shell grandchild can
@@ -295,6 +297,84 @@ where
     }
 }
 
+pub(crate) fn run_system_output<I, S>(
+    program: &str,
+    args: I,
+    timeout: CommandTimeout,
+) -> Option<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    run_system_output_with_env(program, args, std::iter::empty::<(&str, &str)>(), timeout)
+}
+
+pub(crate) fn run_system_output_with_env<I, S, E, K, V>(
+    program: &str,
+    args: I,
+    envs: E,
+    timeout: CommandTimeout,
+) -> Option<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+    E: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    let mut command = crate::trusted_process::system_command(program).ok()?;
+    command.args(args).envs(envs);
+    run_prepared_output(command, timeout)
+}
+
+pub(crate) fn run_system_stdout<I, S>(
+    program: &str,
+    args: I,
+    timeout: CommandTimeout,
+) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = run_system_output(program, args, timeout)?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn run_system_stdout_no_args(program: &str, timeout: CommandTimeout) -> Option<String> {
+    run_system_stdout(program, std::iter::empty::<&str>(), timeout)
+}
+
+#[cfg(windows)]
+pub(crate) fn run_system_powershell(script: &str, timeout: CommandTimeout) -> Option<String> {
+    let command = crate::trusted_process::powershell_command_for("powershell", script).ok()?;
+    let output = run_prepared_output(command, timeout)?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn run_system_stdout_c_locale<I, S>(
+    program: &str,
+    args: I,
+    timeout: CommandTimeout,
+) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = run_system_output_with_env(program, args, [("LC_ALL", "C")], timeout)?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 #[cfg(all(test, unix))]
 pub(crate) mod test_helpers {
     use std::os::unix::fs::PermissionsExt;
@@ -372,6 +452,21 @@ mod tests {
 
         assert!(output.status.success());
         assert!(String::from_utf8_lossy(&output.stdout).contains("ok"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn prepared_probe_keeps_its_explicit_executable_and_working_directory() {
+        let fixture = tempfile::tempdir().unwrap();
+        let system_directory = crate::trusted_process::windows_system_directory().unwrap();
+        let mut command = std::process::Command::new(system_directory.join("cmd.exe"));
+        command.current_dir(fixture.path()).args(["/D", "/C", "cd"]);
+        command.env("PATH", fixture.path());
+        let output = super::run_prepared_output(command, CommandTimeout::Normal).unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .eq_ignore_ascii_case(&fixture.path().to_string_lossy()));
     }
 
     #[test]

@@ -8466,6 +8466,17 @@ def check_dist_runner_workflow_contract(release: str, ci: str) -> None:
         raise AssertionError("release.yml: runner validation must precede matrix output")
 
 
+def check_implicit_collector_process_contract() -> None:
+    """Internal probes must not regress to the public arbitrary-command API."""
+    forbidden = re.compile(r"\b(?:run_output|run_stdout|run_output_with_env|run_stdout_no_args|run_stdout_with_c_locale|run_output_no_args)\s*\(|\bCommand::new\s*\(")
+    for path in sorted((ROOT / "src" / "collectors").rglob("*.rs")):
+        if path.name == "command.rs":
+            continue  # The library's intentionally arbitrary public API remains supported.
+        production = path.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
+        if forbidden.search(production):
+            raise AssertionError(f"{path.relative_to(ROOT)}: implicit probe bypasses trusted system-command boundary")
+
+
 def run_dist_runner_fixtures() -> None:
     arm = {"targets": ["aarch64-apple-darwin"], "runner": "macos-15", "host": "aarch64-apple-darwin"}
     intel = {"targets": ["x86_64-apple-darwin"], "runner": "macos-15-intel", "host": "x86_64-apple-darwin"}
@@ -8763,6 +8774,25 @@ if ($isccSignature.Status -ne [System.Management.Automation.SignatureStatus]::Va
         )
     require(ci, "cargo install --locked cargo-audit --version 0.22.2", "ci cargo-audit pin")
     require(ci, "cargo-audit-audit 0.22.2", "ci cargo-audit version proof")
+    installer_sources = extract_job(ci, "windows-installer-sources", CI_WORKFLOW.name)
+    source_guard = "$sourceGuard = [IO.File]::Open($asset, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)"
+    if installer_sources.count(source_guard) != 2 or installer_sources.count("finally { $sourceGuard.Dispose() }") != 2:
+        raise AssertionError("CI must retain the read-only source guard across both native installer engines")
+    audit = extract_job(ci, "audit", CI_WORKFLOW.name)
+    for needle in (
+        "key: cargo-audit-0.22.2",
+        "cache-targets: false",
+        "cache-bin: true",
+        "save-if: ${{ github.ref == 'refs/heads/main' }}",
+        "cargo audit --version 2>/dev/null || true",
+        "- run: cargo audit",
+    ):
+        require(audit, needle, "CI cached audit tool with fresh audit")
+    for workflow, label in ((release, "Release"), (ci, "CI")):
+        require(workflow, "@TR300_WINDOWS_ARCHIVE_SHA256@/${windows_archive_sha256}/g", f"{label} archive-bound wrapper rendering")
+        require(workflow, "Tr300WindowsArchiveSha256 = '${windows_archive_sha256}'", f"{label} archive-bound wrapper verification")
+    require(release, '$OUTPUT_DIRECTORY/tr300-x86_64-pc-windows-msvc.zip', "Release Windows archive producer")
+    require(windows_validation, "Tr300WindowsArchiveSha256 = '${windows_archive_sha256}'", "Windows frozen archive binding")
 
     check_workflow_contract(WINDOWS_WORKFLOW, windows)
     check_workflow_contract(MACOS_WORKFLOW, macos)
@@ -8850,6 +8880,7 @@ def main() -> None:
         windows_cargo_dist_installer,
     )
     run_dist_runner_fixtures()
+    check_implicit_collector_process_contract()
     run_crates_manifest_target_fixtures(crates)
     run_release_manifest_preservation_fixtures(release, bash)
     run_release_host_draft_fixtures(release, bash)
