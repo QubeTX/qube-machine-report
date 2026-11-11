@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [4.4.4] - 2026-11-11
 
 ### Fixed
-- Capture complete native `--version` output and immediately save the real exit status before selecting a line in the managed PowerShell wrapper. Early `Select-Object -First 1` pipeline termination could retain a null/stale status or abort the native process, falsely rejecting successful fresh managed takeovers. Keep genuine nonzero exits and mismatched versions blocked. (#sec35)
+- Capture complete native `--version` output and immediately save the real global exit status before selecting a line in the managed PowerShell wrapper. Early `Select-Object -First 1` pipeline termination or a caller's script-local status shadow could falsely reject successful fresh managed takeovers. Keep genuine nonzero exits and mismatched versions blocked. (#sec35)
+- Update transitive `rustix` to 1.1.6 to clear the extended-attribute unsoundness warning RUSTSEC-2026-0486. (#sec35)
 
 ### Internal
 - Run build-backed transaction fixtures after compiling both commands, under PowerShell 7 and Windows PowerShell 5. Cover unset/zero/nonzero prior status, repeated complete verification, wrong expected versions, and a compiled correct-looking version probe that actually exits 37 for either command. (#sec35)

@@ -451,6 +451,8 @@ $wc = New-Object Net.WebClient
             install_prefix = $nativePrefix
         }
         [IO.File]::WriteAllText((Join-Path $nativeReceiptDirectory 'tr300-receipt.json'), ($nativeReceipt | ConvertTo-Json -Depth 5))
+        # -File shares script/global scope; invocation with & creates a distinct
+        # script scope. Retain these caller shadows to verify both forms.
         foreach ($priorExit in @('unset', '0', '37')) {
             foreach ($attempt in 1..2) {
                 Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
@@ -488,13 +490,13 @@ fn main() {
 }
 '@)
         $compileOutput = @(& rustc --edition=2024 --crate-name tr300_native_exit_fixture $nonzeroSource -o $nonzeroBinary 2>&1)
-        $compileExit = $LASTEXITCODE
+        $compileExit = $global:LASTEXITCODE
         if ($compileExit -ne 0) { throw "could not compile the native exit fixture: $($compileOutput -join [Environment]::NewLine)" }
         $previousFixtureVersion = $env:TR300_TEST_NATIVE_VERSION
         try {
             $env:TR300_TEST_NATIVE_VERSION = "tr300 $Tr300Version"
             $nonzeroOutput = @(& $nonzeroBinary --version)
-            $nonzeroExit = $LASTEXITCODE
+            $nonzeroExit = $global:LASTEXITCODE
             if ($nonzeroExit -ne 37 -or $nonzeroOutput.Count -ne 1 -or $nonzeroOutput[0] -cne "tr300 $Tr300Version") {
                 throw 'the native negative fixture did not print the expected version and exit 37'
             }

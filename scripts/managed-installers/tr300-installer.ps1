@@ -638,8 +638,10 @@ function Get-Tr300ManagedBinary {
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
         throw "managed TR-300 binary is missing: $binary"
     }
+    # Native commands update the global automatic variable. A caller's local
+    # or script-scoped LASTEXITCODE can shadow that result in nested scripts.
     $versionOutput = @(& $binary --version)
-    $versionExitCode = $LASTEXITCODE
+    $versionExitCode = $global:LASTEXITCODE
     $reported = $versionOutput | Select-Object -First 1
     if ($versionExitCode -ne 0 -or $reported -ne "tr300 $Tr300Version") {
         throw "managed TR-300 binary did not report the expected version $Tr300Version"
@@ -649,21 +651,21 @@ function Get-Tr300ManagedBinary {
         throw "managed report command is missing: $report"
     }
     $reportVersionOutput = @(& $report --version)
-    $reportVersionExitCode = $LASTEXITCODE
+    $reportVersionExitCode = $global:LASTEXITCODE
     $reportVersion = $reportVersionOutput | Select-Object -First 1
     if ($reportVersionExitCode -ne 0 -or $reportVersion -ne "tr300 $Tr300Version") {
         throw "managed report command did not report the expected version $Tr300Version"
     }
     $null = & $report --fast --json
-    if ($LASTEXITCODE -ne 0) {
+    if ($global:LASTEXITCODE -ne 0) {
         throw 'managed report command could not delegate to adjacent tr300'
     }
     $reportHelp = (& $report --help) -join "`n"
-    if ($LASTEXITCODE -ne 0) {
+    if ($global:LASTEXITCODE -ne 0) {
         throw 'managed report help failed'
     }
     $canonicalHelp = (& $binary --help) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $reportHelp -cne $canonicalHelp) {
+    if ($global:LASTEXITCODE -ne 0 -or $reportHelp -cne $canonicalHelp) {
         throw 'report help differs from TR-300'
     }
     return $binary

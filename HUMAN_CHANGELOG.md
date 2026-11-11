@@ -17,6 +17,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - Windows managed installs now wait for both command-version checks to finish and use their actual exit status. A successful install no longer fails because PowerShell retained an older command status.
+- Update a shared dependency to include its latest filesystem safety fix.
 
 ### Internal
 - Test the complete installed-command verification with real binaries in both PowerShell versions before tagging. Incorrect versions and real command failures remain blocked.
