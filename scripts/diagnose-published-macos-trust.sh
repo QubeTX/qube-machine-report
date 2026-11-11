@@ -3,11 +3,19 @@
 # No installer, stapling, signing, or packaged executable is invoked.
 set -euo pipefail
 umask 077
+original_path=${PATH:-}
+original_xcrun_command=$(command -v xcrun || true)
+original_xcrun=$(type -P xcrun || true)
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 
 if [[ $(/usr/bin/uname -s) != Darwin ]]; then
   printf '%s\n' 'This diagnostic requires a native macOS runner.' >&2
+  exit 1
+fi
+if [[ $original_xcrun != /usr/bin/xcrun || ! -f $original_xcrun ]]; then
+  printf 'Unexpected original xcrun selection: command-v=%s physical=%s\n' \
+    "$original_xcrun_command" "$original_xcrun" >&2
   exit 1
 fi
 
@@ -24,12 +32,14 @@ readonly dmg_sha=9ceb5e145ec8e6adef8d5ce14562cd8d8ad0c5e350d32022e94734eb93f2474
 # Match the immutable client's OS-selected per-user temporary parent. The
 # separate 0755 control below deliberately has no private ancestor.
 native_temp=$(/usr/bin/getconf DARWIN_USER_TEMP_DIR)
-native_temp=$(cd -P "$native_temp" && pwd -P)
+native_temp=${native_temp%/}
 stage=$(/usr/bin/mktemp -d "$native_temp/tr300-published-trust.XXXXXX")
 /bin/chmod 0700 "$stage"
 readonly stage
+canonical_stage=$(cd -P "$stage" && pwd -P)
 summary="$stage/summary.md"
 mount_path="$stage/mounted"
+canonical_mount_path="$canonical_stage/mounted"
 control=''
 mount_attempted=0
 failures=0
@@ -65,8 +75,11 @@ finish() {
   # Only this random private mount point is eligible for detachment.
   if [[ $mount_attempted -eq 1 ]]; then
     record_command cleanup-mount-state yes /sbin/mount
-    if [[ $last_status -eq 0 ]] && /usr/bin/grep -Fq " on $mount_path (" "$stage/cleanup-mount-state.log"; then
-      record_command detach-readonly-volume yes /usr/bin/hdiutil detach "$mount_path"
+    if [[ $last_status -eq 0 ]]; then
+      if /usr/bin/grep -Fq " on $mount_path (" "$stage/cleanup-mount-state.log" ||
+          /usr/bin/grep -Fq " on $canonical_mount_path (" "$stage/cleanup-mount-state.log"; then
+        record_command detach-readonly-volume yes /usr/bin/hdiutil detach "$mount_path"
+      fi
     fi
   fi
   printf '\nPinned release: %s (%s)\nEvidence directory: %s\n' "$release_tag" "$release_source" "$stage"
@@ -119,6 +132,28 @@ path_metadata() {
   return "$status"
 }
 
+# shellcheck disable=SC2329 # Invoked through record_command.
+check_alias_identity() {
+  local raw=$1 canonical=$2 raw_id canonical_id
+  raw_id=$(/usr/bin/stat -f '%d:%i' "$raw")
+  canonical_id=$(/usr/bin/stat -f '%d:%i' "$canonical")
+  printf 'Raw path: %s\nCanonical path: %s\nRaw device:inode: %s\nCanonical device:inode: %s\n' \
+    "$raw" "$canonical" "$raw_id" "$canonical_id"
+  [[ -n $raw_id && $raw_id == "$canonical_id" ]]
+}
+
+# shellcheck disable=SC2329 # Invoked through record_command.
+legacy_quiet_command() {
+  # Match the immutable Rust client's JSON child stdout and inherited PATH.
+  # record_command retains stderr and the exit status, not discarded stdout.
+  PATH=$original_path "$@" > /dev/null
+}
+
+# shellcheck disable=SC2329 # Invoked through record_command.
+original_path_command() {
+  PATH=$original_path "$@"
+}
+
 validate_package() {
   local label=$1 path=$2
   record_command "$label-metadata" yes path_metadata "$path"
@@ -128,14 +163,17 @@ validate_package() {
 }
 
 printf 'Read-only public-asset diagnostic for %s, source %s\n' "$release_tag" "$release_source"
-printf 'Native temporary base: %s\nPrivate stage: %s\n' "$native_temp" "$stage"
+printf 'Raw native temporary base: %s\nRaw private stage: %s\nCanonical private stage: %s\n' \
+  "$native_temp" "$stage" "$canonical_stage"
+printf 'Original PATH: %s\nOriginal command-v xcrun: %s\nOriginal physical xcrun: %s\n' \
+  "$original_path" "$original_xcrun_command" "$original_xcrun"
 printf 'DEVELOPER_DIR=%s\nTOOLCHAINS=%s\nSDKROOT=%s\n' \
   "${DEVELOPER_DIR:-<unset>}" "${TOOLCHAINS:-<unset>}" "${SDKROOT:-<unset>}"
 record_command os-version yes /usr/bin/sw_vers
 record_command native-architecture yes /usr/bin/uname -m
 record_command xcode-selection yes /usr/bin/xcode-select -p
-record_command resolved-stapler yes /usr/bin/xcrun --find stapler
 record_command native-temp-metadata yes path_metadata "$stage"
+record_command private-stage-alias-identity yes check_alias_identity "$stage" "$canonical_stage"
 record_command private-stage-mode yes /bin/test "$(/usr/bin/stat -f '%Lp' "$stage")" = 700
 
 /bin/mkdir "$stage/download" "$mount_path" "$stage/writable"
@@ -159,20 +197,39 @@ fi
 # Exercise the legacy client's DMG and mounted-PKG sequence before any PKG
 # control can prime Apple's trust or notarization caches.
 record_command dmg-metadata yes path_metadata "$dmg"
-record_command dmg-codesign yes /usr/bin/codesign --verify --deep --strict --verbose=4 "$dmg"
-record_command dmg-stapler yes /usr/bin/xcrun stapler validate -v "$dmg"
-record_command dmg-spctl yes /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+record_command dmg-codesign yes legacy_quiet_command /usr/bin/codesign --verify --deep --strict "$dmg"
+record_command dmg-stapler-legacy-quiet yes legacy_quiet_command "$original_xcrun" stapler validate "$dmg"
+dmg_quiet_status=$last_status
+record_command dmg-spctl yes legacy_quiet_command /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
 mount_attempted=1
 inner_verified=0
-record_command mount-readonly yes /usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$mount_path" "$dmg"
+record_command mount-readonly yes legacy_quiet_command /usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$mount_path" "$dmg"
 if [[ $last_status -eq 0 ]]; then
   inner="$mount_path/tr300.pkg"
+  canonical_inner="$canonical_mount_path/tr300.pkg"
   record_command verify-mounted-before yes check_asset "$inner" "$pkg_size" "$pkg_sha"
   if [[ $last_status -eq 0 ]]; then
     inner_verified=1
+    record_command verify-canonical-mounted-before yes check_asset "$canonical_inner" "$pkg_size" "$pkg_sha"
+    record_command mounted-alias-identity-before yes check_alias_identity "$inner" "$canonical_inner"
     record_command compare-direct-mounted yes /usr/bin/cmp "$pkg" "$inner"
-    validate_package mounted-private "$inner"
-    copy="$stage/writable/tr300.pkg"
+    record_command mounted-private-metadata yes path_metadata "$inner"
+    record_command mounted-private-pkgutil yes legacy_quiet_command /usr/sbin/pkgutil --check-signature "$inner"
+    # Run quiet A/B before any verbose diagnostic can prime a ticket cache.
+    # A's required failure stays latched even if B or a later retry succeeds.
+    record_command mounted-raw-A-quiet yes legacy_quiet_command "$original_xcrun" stapler validate "$inner"
+    raw_status=$last_status
+    record_command mounted-canonical-B-quiet yes legacy_quiet_command "$original_xcrun" stapler validate "$canonical_inner"
+    canonical_status=$last_status
+    if [[ $raw_status -ne 0 && $canonical_status -eq 0 ]]; then
+      record_command mounted-raw-A-informational-recheck no legacy_quiet_command "$original_xcrun" stapler validate "$inner"
+    fi
+    if [[ $raw_status -ne 0 ]]; then
+      record_command mounted-raw-verbose-after-failure no original_path_command "$original_xcrun" stapler validate -v "$inner"
+    fi
+    record_command mounted-private-stapler yes /usr/bin/xcrun stapler validate -v "$canonical_inner"
+    record_command mounted-private-spctl yes legacy_quiet_command /usr/sbin/spctl --assess --type install --verbose=4 "$inner"
+    copy="$canonical_stage/writable/tr300.pkg"
     /bin/cp "$inner" "$copy"
     /bin/chmod 0600 "$copy"
     record_command verify-copy-before yes check_asset "$copy" "$pkg_size" "$pkg_sha"
@@ -180,7 +237,11 @@ if [[ $last_status -eq 0 ]]; then
     validate_package copy-private "$copy"
   fi
 fi
-validate_package direct-private "$pkg"
+record_command resolved-stapler yes /usr/bin/xcrun --find stapler
+if [[ $dmg_quiet_status -ne 0 ]]; then
+  record_command dmg-verbose-after-failure no original_path_command "$original_xcrun" stapler validate -v "$dmg"
+fi
+validate_package direct-private "$canonical_stage/download/$pkg_name"
 
 if [[ $inner_verified -eq 1 ]]; then
   # Only fixed public package bytes are exposed here. Unlike the native-user
@@ -196,6 +257,8 @@ if [[ $inner_verified -eq 1 ]]; then
   validate_package copy-traversable "$control_pkg"
 
   record_command verify-mounted-after yes check_asset "$inner" "$pkg_size" "$pkg_sha"
+  record_command verify-canonical-mounted-after yes check_asset "$canonical_inner" "$pkg_size" "$pkg_sha"
+  record_command mounted-alias-identity-after yes check_alias_identity "$inner" "$canonical_inner"
   record_command verify-copy-after yes check_asset "$copy" "$pkg_size" "$pkg_sha"
   record_command verify-control-after yes check_asset "$control_pkg" "$pkg_size" "$pkg_sha"
 fi
