@@ -287,50 +287,6 @@ fn get_shell() -> Option<String> {
         .to_string_lossy()
         .to_string();
 
-    // Try to get version
-    let version_output = match shell_name.as_str() {
-        "bash" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        "zsh" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        "fish" => crate::collectors::command::run_output(
-            &shell_path,
-            ["--version"],
-            CommandTimeout::Normal,
-        ),
-        _ => None,
-    };
-
-    if let Some(output) = version_output {
-        let version_str = String::from_utf8_lossy(&output.stdout);
-        if let Some(line) = version_str.lines().next() {
-            // Extract version number
-            for word in line.split_whitespace() {
-                if word
-                    .chars()
-                    .next()
-                    .map(|c| c.is_ascii_digit())
-                    .unwrap_or(false)
-                {
-                    // Take just the version number part
-                    let version: String = word
-                        .chars()
-                        .take_while(|c| c.is_ascii_digit() || *c == '.')
-                        .collect();
-                    if !version.is_empty() {
-                        return Some(format!("{} {}", shell_name, version));
-                    }
-                }
-            }
-        }
-    }
-
     Some(shell_name)
 }
 
