@@ -50,18 +50,43 @@ CloudKit while identical-file calls returned success. The unchanged original
 Intel job passed afterward. This completed the original immutable v4.4.4
 source without merging probe-only code or cutting another version.
 
-This is Phase 1 publication evidence. Next, qualify the protected
-documentation PR, merge only after its checks pass, and record the real
-post-merge exact-main CI and idempotent publisher results. Phase 2 closure
-receipts are still pending. Keep `#q44` and milestone `#v44` open until those
-checks and receipts exist. Do not infer personal hardware/UAC acceptance from
-hosted results. The website's versionless latest links resolve to v4.4.4;
-its existing 1.21.8 production deployment and all four routes remain the
-verified baseline. Physical AMD64 Linux/Pi acceptance and the personal
-Alienware UAC update remain open under `#hw4`.
+Publication evidence is complete. The process simplification now in progress
+must qualify through the real exact-main `CI gate` and `Full CI qualification`
+plus the read-only existing-version proof before it supersedes the blocked
+earlier documentation-main run. Keep `#sec35`, `#q44`, and milestone `#v44`
+open until that evidence and one closure receipt exist. Do not create another
+PR just to record the preceding record PR's CI. Hosted release proof does not
+complete personal hardware/UAC acceptance. The website's versionless latest
+links resolve to v4.4.4; existing website and physical-hardware status remain
+unchanged. AMD64 Linux/Pi and the personal Alienware UAC update remain open
+under `#hw4`.
+
+Current process: `scripts/ci_policy.py` positively selects only the five root
+record guides (`AGENTS.md`, `CLAUDE.md`, `CODEX_PROJECT.md`, `MASTER_PLAN.md`,
+`TESTING.md`) and Markdown under `docs/`/`.tasks/` for lightweight mode.
+Operational skills, scripts/workflows, package inputs, README/license/man/
+changelogs, unknown paths, or ambiguous diff evidence require full mode.
+Stable `CI gate` validates classifier/heavy-job results, then one of
+`Full CI qualification`/`Documentation CI qualification` runs and the other
+is skipped. Release consumers require gate/full marker from the same current
+attempt; registry preflight checks exclusivity. Record-only PR paths also
+skip the Release plan. Only full qualification authorizes release.
+Full CI shares tests, release builds, smokes, and applicable speed checks on
+five original platforms, preserving both native Macs and every installer/
+security boundary. The designed allocation is 15 full or three record-only
+jobs; qualification and hosted timing are pending, not presumed gains.
+
+Local tests and review match the changed boundary. Repository docs, skills,
+CI, and evidence do not automatically create a new product version. New
+published package/artifact bytes retain full gates. Documentation mode only
+proves an existing unyanked package from immutable metadata/bytes and unchanged
+packaged Git inputs, with no Cargo compilation/packaging/dry-run or OIDC.
+Record evidence once and link its checks; diagnose capacity/service failures
+before changing code or versions, and retry failed jobs/dependents on unchanged
+qualified inputs when justified.
 
 Tag status (2026-11-11):
-- `v4.4.4` (`9f5110a3e8665f5fa2eb2e1744778c8025dc241f`): tagged/pushed after exact-main CI and OIDC; Release43007443270 created24 assets, Windows43015387367 assembled30, private43015777726 attested16/16, Mac43015387253 solely published34 and completed12/12, and publicWindows43030855472 passed9/9. Public bytes and latest entrypoints pass. Protected documentation qualification remains pending.
+- `v4.4.4` (`9f5110a3e8665f5fa2eb2e1744778c8025dc241f`): tagged/pushed after exact-main CI and OIDC; Release43007443270 created24 assets, Windows43015387367 assembled30, private43015777726 attested16/16, Mac43015387253 solely published34 and completed12/12, and publicWindows43030855472 passed9/9. Public bytes and latest entrypoints pass. Process-change full main CI, existing-version proof, and the single closure receipt remain pending.
 
 Historical v4.4.0 baseline: immutable source/tag
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,

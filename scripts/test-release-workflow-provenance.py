@@ -71,16 +71,18 @@ BASH_4_ONLY_PATTERNS = (
     ),
 )
 CI_JOB_IDS = (
+    "classify",
     "release-bootstrap-windows",
     "fmt",
     "clippy",
     "test",
-    "build",
-    "speed",
     "audit",
     "dist-plan",
     "workflow-validation",
     "windows-installer-sources",
+    "ci-gate",
+    "full-proof",
+    "docs-proof",
 )
 CI_MATRIX_OSES = {
     "test": (
@@ -90,14 +92,6 @@ CI_MATRIX_OSES = {
         "macos-15-intel",
         "windows-latest",
     ),
-    "build": (
-        "ubuntu-latest",
-        "ubuntu-22.04-arm",
-        "macos-15",
-        "macos-15-intel",
-        "windows-latest",
-    ),
-    "speed": ("ubuntu-latest", "macos-latest", "windows-latest"),
 }
 INNO_MSI_BRIDGE = ROOT / "inno" / "remove-conflicting-msi.pas"
 MANAGED_WINDOWS_INSTALLER = (
@@ -460,10 +454,38 @@ def check_ci_job_inventory(ci: str) -> None:
                 f"found {active_oses!r}"
             )
         expanded_jobs += len(active_oses)
-    if expanded_jobs != 20:
+    if expanded_jobs != 16:
         raise AssertionError(
-            f"ci.yml: expected exactly 20 expanded jobs, found {expanded_jobs}"
+            f"ci.yml: expected 16 declared jobs (15 full / 3 docs allocated), found {expanded_jobs}"
         )
+    if "paths-ignore:" in ci or re.search(r"(?m)^    paths:", ci):
+        raise AssertionError("ci.yml: the stable required workflow must always start")
+    for job_id in CI_JOB_IDS:
+        job = extract_job(ci, job_id, CI_WORKFLOW.name)
+        if job_id not in ("classify", "ci-gate", "full-proof", "docs-proof"):
+            if "    needs: classify\n" not in job or "    if: needs.classify.outputs.mode == 'full'\n" not in job:
+                raise AssertionError(f"ci.yml:{job_id}: expensive work must require full scope")
+    classifier = extract_job(ci, "classify", CI_WORKFLOW.name)
+    for required in ("fetch-depth: 0", "persist-credentials: false", "python3 scripts/test_ci_policy.py", "python3 scripts/ci_policy.py classify", "mode: ${{ steps.scope.outputs.mode }}"):
+        if required not in classifier:
+            raise AssertionError(f"ci.yml: classifier missing {required}")
+    aggregate = extract_job(ci, "ci-gate", CI_WORKFLOW.name)
+    for required in ("name: CI gate", "if: always()", "needs: [classify, release-bootstrap-windows, fmt, clippy, test, audit, dist-plan, workflow-validation, windows-installer-sources]", "CI_NEEDS: ${{ toJSON(needs) }}", "python3 scripts/ci_policy.py gate"):
+        if required not in aggregate:
+            raise AssertionError(f"ci.yml: aggregate missing {required}")
+    for job_id, mode, name in (("full-proof", "full", "Full CI qualification"), ("docs-proof", "docs", "Documentation CI qualification")):
+        job = extract_job(ci, job_id, CI_WORKFLOW.name)
+        for required in (f"name: {name}", "needs: [classify, ci-gate]", f"if: needs.classify.outputs.mode == '{mode}' && needs.ci-gate.result == 'success'"):
+            if required not in job:
+                raise AssertionError(f"ci.yml:{job_id}: missing {required}")
+    test_job = extract_job(ci, "test", CI_WORKFLOW.name)
+    for required in ("cargo test --locked --workspace --all-targets", "cargo build --locked --release --workspace", "CI_BENCHMARK: ${{ matrix.benchmark }}", "python scripts/check-ci-binaries.py"):
+        if required not in test_job:
+            raise AssertionError(f"ci.yml:test: consolidated platform gate missing {required}")
+    if test_job.count("benchmark: true") != 3 or test_job.count("benchmark: false") != 2:
+        raise AssertionError("ci.yml:test: preserve the three benchmark platforms")
+    if test_job.index("python scripts/check-ci-binaries.py") > test_job.index("Validate managed shell checksum enforcement on macOS"):
+        raise AssertionError("ci.yml:test: benchmark must run before native installer fixtures")
 
 
 def native_apple_job_bodies(release: str, macos: str) -> list[tuple[str, str]]:
@@ -2179,7 +2201,43 @@ case "$endpoint" in
             cat "$MOCK_ARTIFACTS_AFTER"
         fi
         ;;
+    repos/*/actions/runs/*/attempts/*/jobs\\?*)
+        if [[ -n ${MOCK_CI_JOBS_JSON:-} ]]; then
+            cat "$MOCK_CI_JOBS_JSON"
+        else
+            python3 - "$endpoint" <<'CI_JOBS_PY'
+import json, os, sys
+from pathlib import Path
+tail = sys.argv[1].split("/actions/runs/", 1)[1]
+run_id, _, attempt, _ = tail.split("/", 3)
+path = os.environ.get("MOCK_CI_RUNS_AFTER") or os.environ["MOCK_CI_RUNS_JSON"]
+run = next(run for run in json.loads(Path(path).read_text())["workflow_runs"] if run["id"] == int(run_id))
+jobs = [{"id": index, "name": name, "status": "completed", "conclusion": conclusion,
+         "run_id": int(run_id), "run_attempt": int(attempt), "head_sha": run["head_sha"]}
+        for index, (name, conclusion) in enumerate((("CI gate", "success"), ("Full CI qualification", "success"),
+                                 ("Documentation CI qualification", "skipped")), start=1)]
+print(json.dumps([{"total_count": len(jobs), "jobs": jobs}]))
+CI_JOBS_PY
+        fi
+        ;;
     repos/*/actions/runs/*)
+        if [[ $* != *'--jq'* && -n ${MOCK_CI_RUNS_JSON:-} ]]; then
+            ci_run_json=$(python3 - "$endpoint" <<'CI_RUN_PY'
+import json, os, sys
+from pathlib import Path
+run_id = int(sys.argv[1].rsplit("/", 1)[1])
+path = os.environ.get("MOCK_CI_RUNS_AFTER") or os.environ["MOCK_CI_RUNS_JSON"]
+runs = json.loads(Path(path).read_text())["workflow_runs"]
+match = next((run for run in runs if run["id"] == run_id), None)
+if match is not None:
+    print(json.dumps(match))
+CI_RUN_PY
+            )
+            if [[ -n $ci_run_json ]]; then
+                printf '%s\\n' "$ci_run_json"
+                exit 0
+            fi
+        fi
         if [[ $* == *'@tsv'* ]]; then
             printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \
                 "$MOCK_RELEASE_RUN_ID" "$MOCK_RELEASE_WORKFLOW_ID" \
@@ -3614,6 +3672,7 @@ def run_windows_publisher_case(
                             "head_repository": {"full_name": REPOSITORY},
                             "head_branch": "main",
                             "head_sha": TRUSTED_SHA,
+                            "run_attempt": 1,
                         }
                     ]
                 }
@@ -4394,6 +4453,9 @@ def write_macos_publisher_gh(bin_dir: Path) -> None:
             if arguments[index:index + 2] == ["--method", "PATCH"]:
                 method = "PATCH"
                 index += 2
+            paginated_jobs = arguments[index:index + 2] == ["--paginate", "--slurp"]
+            if paginated_jobs:
+                index += 2
             endpoint = arguments[index]
             options = arguments[index + 1:]
             repository_prefix = f"repos/{config['repository']}"
@@ -4421,6 +4483,16 @@ def write_macos_publisher_gh(bin_dir: Path) -> None:
             elif endpoint.startswith(f"{repository_prefix}/actions/workflows/") and "/runs?" in endpoint:
                 workflow = endpoint.split("/actions/workflows/", 1)[1].split("/runs?", 1)[0]
                 write_json({"workflow_runs": config["workflow_runs"][workflow]})
+            elif endpoint.startswith(f"{repository_prefix}/actions/runs/") and "/attempts/" in endpoint and endpoint.endswith("/jobs?per_page=100"):
+                if not paginated_jobs or options:
+                    raise SystemExit(98)
+                run_id = endpoint.split("/actions/runs/", 1)[1].split("/", 1)[0]
+                run = config["runs"][run_id]
+                jobs = [{"id": index, "name": name, "status": "completed", "conclusion": conclusion,
+                         "run_id": run["id"], "run_attempt": run["run_attempt"], "head_sha": run["head_sha"]}
+                        for index, (name, conclusion) in enumerate((("CI gate", "success"), ("Full CI qualification", "success"),
+                                                 ("Documentation CI qualification", "skipped")), start=1)]
+                write_json([{"total_count": len(jobs), "jobs": jobs}])
             elif endpoint.startswith(f"{repository_prefix}/actions/runs/") and endpoint.endswith("/artifacts?per_page=100"):
                 run_id = endpoint.split("/actions/runs/", 1)[1].split("/", 1)[0]
                 write_json(config["run_artifacts"][run_id])
@@ -4429,7 +4501,9 @@ def write_macos_publisher_gh(bin_dir: Path) -> None:
                 run = config["runs"].get(run_id)
                 if run is None:
                     raise SystemExit(89)
-                if options[-2:] == ["--jq", ".event"]:
+                if not options:
+                    write_json(run)
+                elif options[-2:] == ["--jq", ".event"]:
                     print(run["event"])
                 else:
                     fields = (
@@ -4736,6 +4810,7 @@ def write_macos_publisher_fixture(
         "runs": {
             str(windows_run_id): windows_run,
             str(validation_run_id): validation_run,
+            str(ci_run_id): ci_run,
         },
         "run_artifacts": {
             str(current_run_id): {
@@ -4867,6 +4942,14 @@ def publisher_gh_read_allowed(arguments: list[str], config: dict[str, object]) -
         return False
     endpoint = arguments[1]
     options = arguments[2:]
+    ci_run = config["workflow_runs"]["ci.yml"][0]
+    ci_endpoint = f"{repository_prefix}/actions/runs/{ci_run['id']}"
+    if arguments[1:3] == ["--paginate", "--slurp"]:
+        return arguments[3:] == [
+            f"{ci_endpoint}/attempts/{ci_run['run_attempt']}/jobs?per_page=100"
+        ]
+    if endpoint == ci_endpoint and not options:
+        return True
     run_projection = (
         "[.id, .workflow_id, .name, .path, .event, .status, .conclusion, "
         ".repository.full_name, .head_repository.full_name, .head_branch, "
@@ -5176,6 +5259,175 @@ def check_macos_publisher_jq_literal_fidelity(publisher: str) -> None:
             )
 
 
+def full_ci_consumer_guards(
+    release: str, windows: str, macos: str
+) -> list[tuple[str, str]]:
+    require(release, """on:
+  pull_request:
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CODEX_PROJECT.md'
+      - 'MASTER_PLAN.md'
+      - 'TESTING.md'
+      - 'docs/**/*.md'
+      - '.tasks/**/*.md'
+  push:
+    tags:
+      - '**[0-9]+.[0-9]+.[0-9]+*'
+""", "Release record-only PR exclusion with unchanged tag trigger")
+    guards: list[tuple[str, str]] = []
+    pattern = re.compile(
+        r"(?m)^          CI_PROOF_REPOSITORY=[^\n]+\n"
+        r".*?^          # End full CI qualification proof\.\n",
+        re.S,
+    )
+    for label, workflow, expected in (
+        ("Release", release, 2), ("Windows publisher", windows, 1),
+        ("macOS finalizer", macos, 1),
+    ):
+        matches = list(pattern.finditer(workflow))
+        if len(matches) != expected:
+            raise AssertionError(f"{label}: expected {expected} full CI qualification guards")
+        for index, match in enumerate(matches, start=1):
+            guards.append((f"{label} guard {index}", textwrap.dedent(match.group())))
+    bodies = {block.split("\n", 1)[1] for _, block in guards}
+    if len(bodies) != 1:
+        raise AssertionError("native release consumers must enforce the same full CI proof")
+    return guards
+
+
+def run_full_ci_qualification_fixtures(
+    release: str, windows: str, macos: str, bash: str
+) -> None:
+    guards = full_ci_consumer_guards(release, windows, macos)
+    run = publisher_run_record(
+        run_id=777, workflow_id=333333, name="CI", path=".github/workflows/ci.yml",
+        event="push",
+    )
+    run["run_attempt"] = 2
+
+    def job(name: str, conclusion: str = "success") -> dict[str, object]:
+        job_id = {"CI gate": 1, "Full CI qualification": 2, "Documentation CI qualification": 3}[name]
+        return {"id": job_id, "name": name, "status": "completed", "conclusion": conclusion,
+                "run_id": 777, "run_attempt": 2, "head_sha": TRUSTED_SHA}
+
+    mutations = (
+        "valid-second-page", "missing-gate", "missing-full", "skipped-gate",
+        "skipped-full", "failed-full", "cancelled-full", "pending-full",
+        "duplicate-full", "wrong-run", "wrong-attempt", "wrong-sha",
+        "docs-only", "malformed-pages", "changed-run-attempt", "changed-run-result",
+        "wrong-run-source", "wrong-run-workflow", "wrong-run-repository",
+        "incomplete-pages", "malformed-job", "duplicate-job-id", "both-modes",
+        "missing-docs-marker", "duplicate-docs-marker",
+    )
+    with tempfile.TemporaryDirectory(prefix="tr300-full-ci-proof-") as raw:
+        directory = Path(raw)
+        bin_dir = directory / "bin"
+        bin_dir.mkdir()
+        mock = bin_dir / "gh"
+        mock.write_text(textwrap.dedent(r'''
+            #!/usr/bin/env python3
+            import json, os, sys
+            from pathlib import Path
+            state = Path(os.environ["FULL_CI_FIXTURE_STATE"])
+            config = json.loads((state / "config.json").read_text())
+            args = sys.argv[1:]
+            with (state / "calls.jsonl").open("a") as log:
+                log.write(json.dumps(args) + "\n")
+            endpoint = "repos/QubeTX/qube-machine-report/actions/runs/777"
+            if args == ["api", "--paginate", "--slurp", endpoint + "/attempts/2/jobs?per_page=100"]:
+                value = config["pages"]
+            elif args == ["api", endpoint]:
+                marker = state / "metadata-read"
+                value = config["after"] if marker.exists() else config["before"]
+                marker.touch()
+            else:
+                raise SystemExit("unexpected or unpaginated CI fixture API: " + repr(args))
+            print(json.dumps(value))
+        ''').lstrip(), encoding="utf-8", newline="\n")
+        mock.chmod(mock.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        for guard_index, (label, block) in enumerate(guards):
+            # All four bodies are byte-identical above. Run every negative once,
+            # plus a real positive through each consumer's repository binding.
+            for mutation in mutations if guard_index == 0 else mutations[:1]:
+                state = directory / (label.replace(" ", "-") + "-" + mutation)
+                state.mkdir()
+                before, after = json.loads(json.dumps(run)), json.loads(json.dumps(run))
+                gate, full = job("CI gate"), job("Full CI qualification")
+                docs = job("Documentation CI qualification", "skipped")
+                pages: object = [{"jobs": [gate]}, {"jobs": [full, docs]}]
+                if mutation == "missing-gate":
+                    pages[0]["jobs"] = []
+                elif mutation == "missing-full":
+                    pages[1]["jobs"] = []
+                elif mutation in ("skipped-gate", "skipped-full", "failed-full", "cancelled-full"):
+                    target = gate if mutation == "skipped-gate" else full
+                    target["conclusion"] = mutation.split("-", 1)[0].replace("failed", "failure")
+                elif mutation == "pending-full":
+                    full.update(status="in_progress", conclusion=None)
+                elif mutation == "duplicate-full":
+                    pages[0]["jobs"].append({**full, "id": 99})
+                elif mutation == "wrong-run":
+                    full["run_id"] = 778
+                elif mutation == "wrong-attempt":
+                    full["run_attempt"] = 1
+                elif mutation == "wrong-sha":
+                    full["head_sha"] = OTHER_SHA
+                elif mutation == "docs-only":
+                    full["conclusion"] = "skipped"
+                    docs["conclusion"] = "success"
+                elif mutation == "both-modes":
+                    docs["conclusion"] = "success"
+                elif mutation == "missing-docs-marker":
+                    pages[1]["jobs"].remove(docs)
+                elif mutation == "duplicate-docs-marker":
+                    pages[1]["jobs"].append({**docs, "id": 99})
+                elif mutation == "malformed-job":
+                    pages[1]["jobs"].append(None)
+                elif mutation == "duplicate-job-id":
+                    full["id"] = gate["id"]
+                elif mutation == "malformed-pages":
+                    pages = {"jobs": [gate, full]}
+                elif mutation == "changed-run-attempt":
+                    after["run_attempt"] = 3
+                elif mutation == "changed-run-result":
+                    after.update(status="in_progress", conclusion=None)
+                elif mutation == "wrong-run-source":
+                    before["head_sha"] = OTHER_SHA
+                elif mutation == "wrong-run-workflow":
+                    before["workflow_id"] = 444444
+                elif mutation == "wrong-run-repository":
+                    before["repository"]["full_name"] = "foreign/repository"
+                if isinstance(pages, list):
+                    total_count = sum(len(page["jobs"]) for page in pages)
+                    for page in pages:
+                        page["total_count"] = total_count
+                    if mutation == "incomplete-pages":
+                        pages[0]["total_count"] += 1
+                (state / "config.json").write_text(
+                    json.dumps({"before": before, "after": after, "pages": pages}),
+                    encoding="utf-8",
+                )
+                script = state / "guard.sh"
+                script.write_text(
+                    "set -euo pipefail\nci_runs=(777)\nworkflow_id=333333\n"
+                    "source_sha=$EXPECTED_SHA\n" + block,
+                    encoding="utf-8", newline="\n",
+                )
+                env = os.environ.copy()
+                env.update(PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+                           FULL_CI_FIXTURE_STATE=state.as_posix(), RUNNER_TEMP=state.as_posix(),
+                           EXPECTED_REPOSITORY=REPOSITORY, REPOSITORY=REPOSITORY,
+                           EXPECTED_SHA=TRUSTED_SHA)
+                result = subprocess.run([bash, str(script)], cwd=ROOT, env=env,
+                                        capture_output=True, text=True, timeout=15, check=False)
+                if (result.returncode == 0) != (mutation == "valid-second-page"):
+                    raise AssertionError(
+                        f"{label}/{mutation}: status {result.returncode}\n{result.stdout}\n{result.stderr}"
+                    )
+
+
 def check_actual_resolvers(
     release: str,
     windows: str,
@@ -5185,6 +5437,7 @@ def check_actual_resolvers(
     bash: str,
     mock_bin: Path,
 ) -> None:
+    run_full_ci_qualification_fixtures(release, windows, macos, bash)
     release_guard = extract_named_run(
         release, "Require a supported stable release tag", RELEASE_WORKFLOW.name
     )
@@ -5288,6 +5541,8 @@ def check_actual_resolvers(
             "SOURCE_SHA": TRUSTED_SHA,
             "PUBLISH_WORKFLOW_RUN_ID": publish_run_id,
             "CI_STATE_PATH": (ci_fixture_directory / "ci-runs.json").as_posix(),
+            "CI_JOBS_PATH": (ci_fixture_directory / "ci-jobs.json").as_posix(),
+            "CI_RUN_PATH": (ci_fixture_directory / "ci-run-final.json").as_posix(),
             "MOCK_CI_RUNS_JSON": ci_runs_before.as_posix(),
             "MOCK_CI_RUNS_AFTER": ci_runs_after.as_posix(),
             "MOCK_CI_STATE_DIR": ci_state.as_posix(),
@@ -5307,6 +5562,7 @@ def check_actual_resolvers(
             "source_sha": TRUSTED_SHA,
             "workflow_run_id": publish_run_id,
             "ci_run_id": ci_run_id,
+            "mode": "full",
         },
     )
 
@@ -8141,6 +8397,159 @@ def run_crates_manifest_target_fixtures(
                     )
 
 
+def run_crates_ci_mode_fixtures(workflow: str) -> None:
+    block = extract_named_run(workflow, "Require successful CI for this exact main commit", CRATES_WORKFLOW.name)
+    program = extract_unique_python_heredoc(block, "CI qualification mode is missing or ambiguous", "crates CI mode")
+    run = {"id": 444444, "workflow_id": 333333, "name": "CI", "path": ".github/workflows/ci.yml",
+           "event": "push", "status": "completed", "conclusion": "success", "head_branch": "main",
+           "head_sha": TRUSTED_SHA, "run_attempt": 2,
+           "repository": {"full_name": REPOSITORY}, "head_repository": {"full_name": REPOSITORY}}
+    base_jobs = [{"name": name, "status": "completed", "conclusion": conclusion,
+                  "run_id": 444444, "run_attempt": 2, "head_sha": TRUSTED_SHA}
+                 for name, conclusion in (("CI gate", "success"), ("Full CI qualification", "success"),
+                                          ("Documentation CI qualification", "skipped"))]
+    for identifier, job in enumerate(base_jobs, start=1):
+        job["id"] = identifier
+    cases: list[tuple[str, object, object, str | None]] = []
+    cases.append(("full", run, [{"total_count": 3, "jobs": base_jobs}], "full"))
+    docs = json.loads(json.dumps(base_jobs))
+    docs[1]["conclusion"], docs[2]["conclusion"] = "skipped", "success"
+    cases.append(("docs", run, [{"total_count": 3, "jobs": docs}], "docs"))
+    for field, value in (("run_attempt", 1), ("run_id", 777777), ("head_sha", "e" * 40), ("status", "in_progress")):
+        jobs = json.loads(json.dumps(base_jobs))
+        jobs[1][field] = value
+        cases.append((f"wrong marker {field}", run, [{"total_count": 3, "jobs": jobs}], None))
+    for label, jobs in (("both success", base_jobs[:2] + [{**base_jobs[2], "conclusion": "success"}]),
+                        ("both skipped", [base_jobs[0], {**base_jobs[1], "conclusion": "skipped"}, base_jobs[2]]),
+                        ("duplicate gate", base_jobs + [base_jobs[0]]),
+                        ("missing gate", base_jobs[1:]),
+                        ("failed gate", [{**base_jobs[0], "conclusion": "failure"}, *base_jobs[1:]])):
+        cases.append((label, run, [{"total_count": len(jobs), "jobs": jobs}], None))
+    cases.extend([
+        ("partial pagination", run, [{"total_count": 4, "jobs": base_jobs}], None),
+        ("malformed pages", run, {"jobs": base_jobs}, None),
+        ("later run attempt", {**run, "run_attempt": 3}, [{"total_count": 3, "jobs": base_jobs}], None),
+        ("foreign run", {**run, "head_repository": {"full_name": "other/repo"}}, [{"total_count": 3, "jobs": base_jobs}], None),
+    ])
+    with tempfile.TemporaryDirectory(prefix="tr300-ci-mode-") as temporary:
+        run_path, jobs_path = Path(temporary) / "run.json", Path(temporary) / "jobs.json"
+        for label, run_value, pages, expected in cases:
+            run_path.write_text(json.dumps(run_value), encoding="utf-8")
+            jobs_path.write_text(json.dumps(pages), encoding="utf-8")
+            result = subprocess.run([sys.executable, "-c", program, str(run_path), str(jobs_path),
+                                     "444444", "2", "333333", TRUSTED_SHA], capture_output=True, text=True, check=False)
+            if expected is None:
+                if result.returncode == 0:
+                    raise AssertionError(f"crates CI mode accepted {label}")
+            elif result.returncode != 0 or result.stdout.strip() != expected:
+                raise AssertionError(f"crates CI mode rejected {label}: {result.stderr}")
+
+
+def run_crates_fast_path_fixtures(workflow: str) -> None:
+    """Exercise the actual data-only program without registry or package execution."""
+    import types
+    from unittest.mock import patch
+
+    block = extract_named_run(workflow, "Verify an existing version without executing package code", CRATES_WORKFLOW.name)
+    program = extract_unique_python_heredoc(block, "verified-existing-version-no-package-execution-or-oidc", "crates fast path")
+    source_sha, tag_sha = "a" * 40, "b" * 40
+    manifest = (ROOT / "Cargo.toml").read_bytes()
+    version_match = re.search(rb'(?m)^version = "([^"]+)"', manifest)
+    if version_match is None:
+        raise AssertionError("missing fixture version")
+    version = version_match.group(1).decode()
+
+    def run(case: str, *, expected: str | None, mode: str = "docs", mutation: str = "") -> None:
+        namespace: dict[str, object] = {"__name__": "crates_fast_path_fixture"}
+        exec(compile(program, "<actual crates fast path>", "exec"), namespace)
+        payload = io.BytesIO()
+        vcs = {"git": {"sha1": "c" * 40 if mutation == "vcs" else tag_sha}, "path_in_vcs": ""}
+        data = json.dumps(vcs).encode()
+        with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+            entry = tarfile.TarInfo(f"tr300-{version}/.cargo_vcs_info.json")
+            entry.size = len(data)
+            archive.addfile(entry, io.BytesIO(data))
+            if mutation == "duplicate":
+                archive.addfile(entry, io.BytesIO(data))
+        public = payload.getvalue()
+        metadata = {"crate": "tr300", "num": version, "yanked": mutation == "yanked",
+                    "checksum": hashlib.sha256(public).hexdigest(),
+                    "trustpub_data": {"provider": "github", "repository": REPOSITORY,
+                                      "sha": "c" * 40 if mutation == "trustpub" else tag_sha, "run_id": 123}}
+        if mutation == "checksum":
+            metadata["checksum"] = "0" * 64
+        calls: list[str] = []
+
+        def fetch(url: str) -> tuple[int, bytes]:
+            calls.append(url)
+            if url.endswith("/download"):
+                return 200, public
+            if url.endswith(f"/{version}"):
+                return (404, b"") if mutation == "missing" else (200, json.dumps({"version": metadata}).encode())
+            return 200, json.dumps({"crate": {"name": "tr300", "trustpub_only": mutation != "policy"}}).encode()
+
+        tag_reads = 0
+        def gh(endpoint: str) -> dict[str, object]:
+            nonlocal tag_reads
+            if endpoint == "git/ref/heads/main":
+                return {"object": {"sha": "c" * 40 if mutation == "main-moved" else source_sha}}
+            if endpoint.startswith("git/ref/tags/"):
+                tag_reads += 1
+                return {"object": {"type": "commit", "sha": "c" * 40 if mutation == "tag-moved" and tag_reads > 1 else tag_sha}}
+            if endpoint.startswith("releases/tags/"):
+                if mutation == "release-missing":
+                    raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
+                return {"tag_name": f"v{version}", "target_commitish": tag_sha,
+                        "draft": mutation == "draft", "prerelease": False}
+            raise AssertionError(f"unexpected GitHub request: {endpoint}")
+
+        def git(*args: str) -> bytes:
+            if args == ("rev-parse", "HEAD"):
+                return (source_sha + "\n").encode()
+            if args[0] == "status":
+                return b"?? planted" if mutation == "dirty" else b""
+            if args[0] == "show":
+                return manifest.replace(b'"/README.md",', b'"/extra",') if mutation == "boundary" else manifest
+            if args[0] == "diff":
+                if list(args[args.index("--") + 1:]) != ["Cargo.lock", "Cargo.toml", "LICENSE", "README.md", "build.rs", "man", "src", "tests", "wix", "wix-corporate"]:
+                    raise AssertionError("package proof lost a protected Git input")
+                return b":100644 100644 old new M\0src/lib.rs\0" if mutation == "code" else b""
+            raise AssertionError(f"unexpected Git operation: {args!r}")
+
+        def ancestor(args: list[str], **_kwargs: object) -> types.SimpleNamespace:
+            if args != ["/usr/bin/git", "merge-base", "--is-ancestor", tag_sha, source_sha]:
+                raise AssertionError(f"unexpected executable in data-only proof: {args!r}")
+            return types.SimpleNamespace(returncode=1 if mutation == "unrelated" else 0)
+
+        namespace.update(fetch=fetch, gh=gh, git=git, subprocess=types.SimpleNamespace(run=ancestor, CalledProcessError=subprocess.CalledProcessError))
+        with tempfile.TemporaryDirectory(prefix="tr300-crates-fast-") as temporary:
+            output = Path(temporary) / "output"
+            with patch.dict(os.environ, SOURCE_SHA=source_sha, CI_MODE=mode, GITHUB_OUTPUT=str(output)):
+                failed = False
+                try:
+                    namespace["main"]()
+                except (SystemExit, KeyError, TypeError, ValueError, tarfile.TarError):
+                    failed = True
+            actual = output.read_text() if output.exists() else ""
+            if expected is None:
+                if not failed or "requires_package=false" in actual:
+                    raise AssertionError(f"crates fast path accepted {case}: {actual!r}")
+            elif failed or f"requires_package={expected}\n" not in actual:
+                raise AssertionError(f"crates fast path failed {case}: {actual!r}")
+            if expected == "false" and not any(url.endswith("/download") for url in calls):
+                raise AssertionError("existing-version success did not verify public bytes")
+
+    run("published docs", expected="false")
+    run("published maintenance source", expected="false", mode="full")
+    run("absent new version", expected="true", mode="full", mutation="missing")
+    run("changed package needs original validator", expected="true", mode="full", mutation="code")
+    run("new include policy needs original validator", expected="true", mode="full", mutation="boundary")
+    run("private release needs original validator", expected="true", mode="full", mutation="release-missing")
+    run("draft release needs original validator", expected="true", mode="full", mutation="draft")
+    for mutation in ("missing", "code", "boundary", "vcs", "duplicate", "trustpub", "checksum", "yanked", "policy", "main-moved", "tag-moved", "draft", "release-missing", "dirty", "unrelated"):
+        run(mutation, expected=None, mutation=mutation)
+
+
 def check_crates_token_boundary(workflow: str) -> None:
     label = CRATES_WORKFLOW.name
     trigger = workflow[: workflow.index("permissions:")]
@@ -8159,13 +8568,14 @@ def check_crates_token_boundary(workflow: str) -> None:
         f"{label} automatic trusted-main publish gate",
     )
     probe_job = extract_job(workflow, "probe-trusted-publisher", label)
+    source_job = extract_job(workflow, "resolve-source", label)
     validation_job = extract_job(workflow, "validate-package", label)
     publish_job = extract_job(workflow, "publish", label)
     validation_package = extract_named_step(
         validation_job, "Package and registry-credential-free dry-run", label
     )
     source_gate = extract_named_step(
-        validation_job, "Require successful CI for this exact main commit", label
+        source_job, "Require successful CI for this exact main commit", label
     )
     candidate = extract_named_step(
         publish_job, "Repackage without execution and prove exact candidate bytes", label
@@ -8200,8 +8610,38 @@ def check_crates_token_boundary(workflow: str) -> None:
     require(probe_job, "id-token: write", f"{label} OIDC probe permission")
     require(workflow, "probe_trusted_publisher", f"{label} post-deletion OIDC probe mode")
 
-    if "id-token: write" in validation_job or "CARGO_REGISTRY_TOKEN" in validation_job:
+    if any("id-token: write" in job or "CARGO_REGISTRY_TOKEN" in job for job in (source_job, validation_job)):
         raise AssertionError(f"{label}: validation regained a credential")
+    require(validation_job, "needs.resolve-source.outputs.mode == 'full'", f"{label} full-only package validation")
+    require(validation_job, "needs.resolve-source.outputs.requires_package == 'true'", f"{label} existing-version fast path")
+    require(publish_job, "needs.resolve-source.outputs.mode == 'full'", f"{label} full-only OIDC job")
+    for needle in (
+        "attempts/$run_attempt/jobs?per_page=100",
+        "gh api --paginate --slurp",
+        'conclusion("CI gate")',
+        'conclusion("Full CI qualification")',
+        'conclusion("Documentation CI qualification")',
+        'job.get("run_attempt") != int(attempt)',
+        'job.get("head_sha") != sha',
+        '"CI qualification mode is missing or ambiguous"',
+    ):
+        require(source_gate, needle, f"{label} current-attempt mode proof")
+    existing = extract_named_step(source_job, "Verify an existing version without executing package code", label)
+    require(existing, "python3 -I - <<'PY'", f"{label} isolated data-only Python imports")
+    for needle in (
+        '"documentation CI cannot publish a missing version; registry lookup must succeed"',
+        '"documentation CI cannot change packaged inputs"',
+        '"merge-base", "--is-ancestor"',
+        '"--raw", "--no-renames", "-z"',
+        'provenance.get("sha") != tag_sha',
+        'hashlib.sha256(public).hexdigest() != checksum',
+        'record.get("git", {}).get("sha1") != tag_sha',
+        'output(False, "verified-existing-version-no-package-execution-or-oidc")',
+    ):
+        require(existing, needle, f"{label} data-only existing-version proof")
+    for forbidden in ("rustup ", '"cargo"', "package --", "publish --", "id-token:"):
+        if forbidden in existing:
+            raise AssertionError(f"{label}: data-only existing-version proof executes {forbidden!r}")
     for needle in (
         "EVENT_NAME: ${{ github.event_name }}",
         "SOURCE_REF: ${{ github.ref }}",
@@ -8889,6 +9329,8 @@ def main() -> None:
     run_dist_runner_fixtures()
     check_implicit_collector_process_contract()
     run_crates_manifest_target_fixtures(crates)
+    run_crates_ci_mode_fixtures(crates)
+    run_crates_fast_path_fixtures(crates)
     run_release_manifest_preservation_fixtures(release, bash)
     run_release_host_draft_fixtures(release, bash)
     run_release_sidecar_normalization_fixtures(release)

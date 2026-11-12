@@ -1,135 +1,138 @@
 ---
 name: tr300-dev-workflow
-description: TR-300's canonical 7-phase development workflow for any non-trivial change, plus the CI gates. Use when starting feature work, planning a multi-PR change, asking "how are changes developed/documented here", setting up task tracking, running the local gate, or reproducing CI. Encodes plan → implementation → documentation → verification → reviewed PR merge, plus the private-draft release and automatic trusted-OIDC publication gates. Triggers on "development workflow", "how do I add a feature", "plan this change", "the F-block", "CI gates", "reproduce CI", "phases". For cutting an actual release, use the `release` skill instead.
+description: Proportionate TR-300 development, documentation, review, and CI guidance. Use when planning or implementing a change, choosing local checks, reproducing CI, updating evidence, or deciding whether maintenance needs a new version. Keeps full native/release gates for code and release inputs while routing a positive allowlist of record-only Markdown to lightweight CI. For publishing new package or installer bytes, use the release skill.
 ---
 
-# TR-300 development workflow + CI
+# TR-300 development workflow and CI
 
-The canonical cadence for any non-trivial change, and the CI gates that guard it. The actual
-release procedure (version bump → reviewed PR → automatic crates publication → tag → private
-draft → exact acceptance → public release) is the separate
-[`release`](../release/SKILL.md) skill; this skill stops at a protected PR merge. Summary +
-pointers are in [`CLAUDE.md`](../../../CLAUDE.md); the historical ledger is in
-[`MASTER_PLAN.md`](../../../MASTER_PLAN.md).
+Use a short plan for work with dependencies or uncertain behavior, implement a
+focused change, test the affected boundary, review it, and merge through the
+protected PR. Scale the plan and local checks to the risk. There is no required
+runtime-specific plan mode, named agent, seven-phase ceremony, fixed number of
+PRs, per-file task explosion, or automatic version/memory update.
 
-## Development Workflow (canonical — follow for every change)
+Keep `.tasks/TASKS.md` and the active task's status, activity, and verification
+accurate when this repository task system is in use. Split dependent work only
+when it has a useful independent deliverable. Do not expand the user's scope.
 
-This is the workflow that proved itself during the v3.10.0 cross-platform accuracy pass. Follow it for any non-trivial change. Lightweight one-line fixes (typos, version bumps) can skip phases 1–2 but never skip phase 5.
+## Choose the CI and version path
 
-### Phase 1 — Plan (read-only)
+[`scripts/ci_policy.py`](../../../scripts/ci_policy.py) is the canonical
+fail-closed classifier. Documentation mode is a positive allowlist: root
+`AGENTS.md`, `CLAUDE.md`, `CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md`,
+and Markdown under `docs/` or `.tasks/`. All changed paths must qualify,
+including both sides of renames. Unknown, missing, or ambiguous diff inputs
+select full mode, as do executable records, symlinks/submodules, or unsupported
+file modes. README, license, man pages, changelogs, `.agents`/`.claude`
+skills, scripts, workflows, dependencies, and package inputs select full mode.
 
-1. Enter Claude Code plan mode. Plans live at `C:\Users\hey\.claude\plans\<descriptive-name>.md` (the runtime tells you the path).
-2. **Explore in parallel.** Spawn up to 3 `Explore` agents simultaneously (single message, multiple tool calls) for codebase context. Each agent gets a focused brief: where the field is collected, what the existing pattern is, what's already best-in-class.
-3. **Research authoritative sources before designing.** For platform-specific work, dispatch parallel `general-purpose` agents (model: `opus`) with WebFetch / WebSearch / Firecrawl / Perplexity access. Require citations from Apple Developer Forums, Microsoft Learn, kernel.org, systemd man pages, freedesktop specs, sysinfo crate issues. Verdicts: ✅ best-in-class / ⚠️ acceptable / ❌ inaccurate.
-4. **Build the plan incrementally.** Sections: Context · What's Already Best-in-Class (don't redo good work) · Per-Platform Fixes · Cross-Platform Reliability · Speed · New Data Points (with skip list) · Files to Modify · Implementation Task Checklist · Testing Strategy · Phasing & Sequencing · Verification.
-5. **Phase the work** into PR-sized chunks (typical: 4–6 PRs). PR #1 is always the foundation primitives that later PRs depend on. Each PR has a docs/version block (`F.1`–`F.6`) at the end.
-6. End with `ExitPlanMode` — do not text-prompt for plan approval.
+The stable `CI gate` first validates classifier and heavy-job results. Then
+exactly one marker runs: `Full CI qualification` or
+`Documentation CI qualification`; the other is skipped. A documentation result cannot authorize a new crate, tag, release
+asset, or native publication. Consumer checks bind exact SHA, run, and current
+attempt rather than treating any green `CI` conclusion as full qualification.
 
-### Phase 2 — Task tracking (`TaskCreate` upfront, `TaskUpdate` as you go)
+Keep the version for repository documentation or infrastructure maintenance
+unless new published package or distribution bytes are needed. Full CI is a
+verification choice, not an automatic version bump. An actual release uses
+[`release`](../release/SKILL.md), with the correct semver bump, immutable tag,
+and full private/native/public acceptance chain.
 
-After plan approval, create:
+## Work and local verification
 
-- **Top-level PR tasks** (one per PR), with `addBlocks`/`addBlockedBy` for sequencing.
-- **Sub-task per plan ID** (`[PR1] D.1 …`, `[PR2] A.3 …`, etc.) with the spec verbatim from the plan plus LOC estimate. The user uses these to track progress, so be granular.
-- **Per-PR doc block tasks** (`F.1`–`F.6`) and **test tasks** (unit + integration + manual matrix).
+- Read the changed code and owning architecture decision before editing.
+  Research primary platform sources when the design depends on uncertain OS
+  behavior. Keep the implementation focused.
+- For record-only Markdown, review facts/links/encoding and run
+  `git diff --check`. Run the classifier's tests when its policy changes.
+  Do not compile Rust or run installers just to record a passed release.
+- For Rust changes, run focused meaningful tests and applicable fmt/clippy;
+  add release-build/runtime/speed checks when the change affects those paths.
+  Full release qualification still requires all supported native CI legs.
+- For workflows, installers, or publishing changes, run applicable parser,
+  lint, provenance, transaction, and native fixtures. Changed operational
+  skills select full CI; being Markdown does not make them record-only.
+- Repeat failed or affected checks and their dependents after a change. Reuse
+  passed evidence for identical inputs; no rule requires restarting unrelated
+  successful work after every edit.
+- Self-review and get a focused independent review for security, unsafe,
+  cross-platform, installer, or workflow changes. Review record-only updates
+  proportionately. Another pass is useful when changes/findings warrant it;
+  no specific agent product or model is required.
 
-`TaskUpdate` to `in_progress` *before* starting any sub-task, and to `completed` *immediately* when done — never batch.
-
-### Phase 3 — Implement (one PR at a time, sequentially)
-
-1. **Read first.** Read every file you'll edit before the first `Edit` call. Don't guess at file structure.
-2. **Edit minimally.** No drive-by refactors, no comments that explain *what* the code does, no error handling for impossible cases.
-3. **`cargo check` after each meaningful change.** Catches issues while context is fresh.
-4. **Run the full local gate after each PR completes** *before* moving to the next PR:
-   ```bash
-   cargo fmt -- --check
-   cargo clippy --all-targets --workspace -- -D warnings
-   cargo test --workspace
-   cargo build --release
-   ./target/release/tr300 --version
-   ./target/release/tr300 --fast --json | head -5
-   ./target/release/tr300 --ascii          # visual smoke test
-   ```
-5. **Time `--fast`** on the local platform; record before/after numbers in the PR description.
-
-### Phase 4 — Per-PR documentation (the F-block — never skip)
-
-Every PR completes this block before commit:
-
-- `F.1` — `CHANGELOG.md` new `## [X.Y.Z] — YYYY-MM-DD` section at the top, Keep-a-Changelog voice, **reference task IDs in parens** for traceability. **Then mirror the same section into `HUMAN_CHANGELOG.md` rewritten in plain English** — same version header and date, but with the technical noise stripped (no run IDs, SHAs, error codes, function or API names, registry paths, GUIDs, line counts, memory deltas, task IDs, or crate identifiers). See the [`tr300-changelog`](../tr300-changelog/SKILL.md) skill for the full strip/keep rules. **Never update one without the other.**
-- `F.2` — `README.md` updates: flag table, sample output, new subsections.
-- `F.3` — `CLAUDE.md` architectural notes for any new pattern (cite man pages / Apple docs / Microsoft Learn URLs inline). For a deep subsystem rule, the home is the matching subsystem skill (`windows-install`, `windows-accuracy`, `windows-distribution-and-update`) with a summary + tripwire in `CLAUDE.md`.
-- `F.4` — `Cargo.toml` `version =` bump (minor for new fields/flags; patch for pure accuracy fixes).
-- `F.5` — Auto memory writes at `C:\Users\hey\.claude\projects\C--Users-hey-git-qube-machine-report\memory\`: keep `project_tr300_overview.md` (project) up-to-date, append to `feedback_tr300_constraints.md` (feedback) when the user adds a hard rule, update `MEMORY.md` index.
-- `F.6` — `TESTING.md` append a `### vX.Y.Z — YYYY-MM-DD` log noting which manual matrix rows were re-verified and on which hardware.
-
-### Phase 5 — Verification + independent review
-
-1. Re-run the full local gate (Phase 3 step 4). Must be green.
-2. **Codex review** (`Agent` tool, `subagent_type: "codex:codex-rescue"`) for non-trivial PRs. Use it to spot-check cross-platform safety / YAML / unsafe blocks where a second pair of eyes catches things stale eyes miss. Note: Codex's `gh pr diff` review path needs the PR to actually exist — open the PR first, then ask Codex to review it. Don't over-rely on its findings; double-check.
-3. Manual matrix run for the platforms touched (`TESTING.md`).
-
-### Phase 6 — Commit + push
-
-- **Local commit**: `git-master` agent. No `ci-tester` needed for local-only operations.
-- **Push to remote**: `ci-tester` agent first. If `[FAIL]`, fix the failures — never skip hooks (`--no-verify`) or bypass signing. Push a focused branch, open a PR, resolve review threads, and merge only after every required check is green.
-- **Do not tag from this development workflow.** A release tag is irreversible and follows exact-current-main CI plus its automatic trusted-OIDC crates publication. Use the [`release`](../release/SKILL.md) skill for that sequence; it pushes only one exact stable `vX.Y.Z` tag.
-
-### Phase 7 — Close out
-
-Mark the parent PR task `completed` in `TaskList`. Move on to the next PR's parent task and start phase 3 again. PR #6 (and other "deferred" tasks) only run if the user explicitly asks after the previous PR lands.
+Update only affected user/agent docs. When writing actual release notes, keep
+`CHANGELOG.md` and `HUMAN_CHANGELOG.md` paired under the same version/date;
+ordinary evidence or infrastructure work does not require a new section or
+version. Never write host-specific memory merely because a checklist says so.
+Commit a clear focused change with normal hooks/signing, push the branch, and
+merge only its reviewed exact head after required checks and actionable review
+threads resolve. Do not tag from this development workflow.
 
 ## CI
 
-Six persistent GitHub Actions workflows guard release quality and publication.
-The one-time Apple secret migration workflow was removed after the completed
-credential cutover:
+The full CI path shares locked all-target tests, a release build, and runtime
+smokes on each of five existing runners: Linux x86_64 `ubuntu-latest`, Linux
+ARM64 `ubuntu-22.04-arm`, macOS ARM `macos-15`, macOS Intel `macos-15-intel`,
+and Windows x86_64 `windows-latest`. Linux x86_64, macOS ARM, and Windows run
+one warmup and five measured fast-mode samples, requiring median below
+1500 ms, before expensive native fixtures. Both native Mac legs retain exact
+system-Bash-3.2 Apple staging/provenance and PKG fixtures. Native Intel remains
+blocking; Rosetta is supplementary.
 
-- **`.github/workflows/ci.yml`** — runs on every push to `main` and every pull request. Jobs:
-  - `fmt` — `cargo fmt --check` (Linux only)
-  - `clippy` — `cargo clippy --all-targets --workspace -- -D warnings` (Linux only)
-  - `test` — `cargo test --workspace --all-targets` on Linux AMD64/ARM64,
-    native macOS ARM/Intel, and Windows. Both native Mac legs additionally run
-    the exact named Apple release-staging block for both Apple targets, execute
-    the exact macOS-installer inventory snippets against positive and negative
-    fixtures, and syntax-check the affected native workflow plus tag-only build
-    matrix blocks with system `/bin/bash` 3.2 through
-    `--apple-staging-compatibility`.
-  - `build` — `cargo build --release` smoke test on every platform, plus `--version` and `--fast --json` invocation to verify the binary actually runs
-  - `speed` — measures `tr300 --fast` median wall-clock across 5 runs on Linux/macOS/Windows; fails the build if any platform's median exceeds the 1500 ms budget. Records numbers in the GitHub Actions step summary so PR reviewers see them.
-  - `audit` — blocking `cargo audit` against RustSec advisories; a finding fails CI
-  - `dist-plan` — runs `dist plan` to verify cargo-dist config parses; catches dist regressions before they bite at tag time
-  - `release-bootstrap-windows` — executes the exact pinned cargo-dist PowerShell
-    bootstrap on Windows Server 2022, including its regular-file/reparse-point
-    and exact-version checks, before a release tag exists
-- **`.github/workflows/crates-publish.yml`** — starts automatically with a same-repository `main` push, then waits without a registry credential for that exact SHA's successful CI run. A read-only Cargo 1.95 validator proves the exact tested package; a fresh `crates-io` runner executes no package code while a short-lived OIDC token exists and verifies public bytes/provenance. Manual dispatch is diagnostics only.
-- **`.github/workflows/release.yml`** — exact stable-tag cargo-dist v0.31.0 builds, fresh checkout-free Apple signers, and a fresh publisher that creates a private 24-asset draft. Preserve the stable-tag, fixed-artifact, MIC-1 alias, private-host, and Apple trust zones after `dist init`.
-- **`.github/workflows/windows-installers.yml`** — adds six exact Windows installer/sidecar assets to the private draft through a separate checkout-free publisher, producing 30 assets.
-- **`.github/workflows/windows-installer-validation.yml`** — freezes those 30 exact bytes and runs pre-public fresh-install plus authenticated direct prior-to-candidate transition/uninstall/takeover checks while public `latest` remains unchanged; after final publication it separately runs the real updater-to-candidate matrix.
-- **`.github/workflows/macos-installer.yml`** — uses data-only prep and fresh `apple-signing` jobs, consumes the exact successful Windows proof, adds the four PKG/DMG assets, verifies the exact 34-asset inventory and every asset byte, and is the sole final publisher.
+The other full jobs retain fmt, clippy, fresh advisory audit, actual validated
+cargo-dist plan, executable workflow/provenance fixtures, pinned Windows
+bootstrap, and both MSI/Inno source/transition tests. Consolidation removes
+eight duplicate allocations (13 split test/build/speed allocations become
+five platform legs): the designed full path has 12 heavy jobs plus
+classifier, `CI gate`, and full qualification (15 allocations); record-only
+mode has classifier, gate, and documentation qualification (three). These
+counts describe the workflow design, not measured elapsed-time improvements.
 
-The Apple compatibility work remains steps inside the existing two Mac `test`
-matrix legs; it does not add a job. The strict CI inventory remains 20 jobs.
-Affected native jobs in `release.yml` and `macos-installer.yml` must remain
-compatible with system Bash 3.2 and therefore must not use `declare -A`,
-`mapfile`, or `readarray`. Their fixed artifact inventories must use
-fail-closed Python `os.scandir` checks with
-`entry.stat(follow_symlinks=False)` to require the exact expected name set and
-nonempty regular files while rejecting hidden extras and linked or non-regular
-entries.
+Record-only mode skips expensive build/installer jobs, and the Release
+workflow ignores the same exact allowlisted PR paths for its plan job. The crate preflight can
+only prove an already published unyanked version using public bytes, VCS and
+trusted-publisher metadata, immutable tag ancestry, and unchanged packaged Git
+inputs. It performs no Cargo compilation/packaging/dry-run and has no OIDC or
+registry publication. Full maintenance with unchanged package inputs may use
+the same fast existing-version proof; only full qualification may reach the
+normal fresh publishing path.
 
-To reproduce the CI gates locally:
+The six persistent workflows retain their separate responsibilities:
 
-```bash
-cargo fmt -- --check
-cargo clippy --all-targets --workspace -- -D warnings
-cargo test --workspace --all-targets
-cargo build --release --workspace
-# Speed check (rough — CI uses 5-run median):
-time ./target/release/tr300 --fast > /dev/null
-```
+- `ci.yml`: classify and qualify the exact PR/main input.
+- `crates-publish.yml`: prove an existing version read-only, or after full CI
+  validate exact package bytes without credentials and pass data to a fresh
+  protected OIDC publisher that executes no package code while credentialed.
+- `release.yml`: require full exact-main qualification and the proven crate,
+  build cargo-dist inputs, sign/notarize Apple archives in fresh checkout-free
+  jobs, and create the private exact 24-asset draft.
+- `windows-installers.yml`: add six Windows assets through the fresh publisher,
+  producing 30 assets.
+- `windows-installer-validation.yml`: attest the exact private 30-asset fresh,
+  transition, rollback, scope, uninstall, and cleanup matrix; after publication,
+  run the actual public updater matrix.
+- `macos-installer.yml`: retain both native Apple acceptance jobs and exact
+  proof custody; its fresh finalizer alone adds four assets and publishes the
+  verified 34-asset result, followed by public smokes.
 
-If a CI job fails, click into the job logs first — `clippy` and `test` failures are usually obvious from the diff. Speed regressions print the per-run times and median in the step summary; correlate against the recent change set.
+Signing/publication jobs retain fresh credential boundaries; checked-out
+builders and candidate execution remain read-only. System Bash 3.2,
+fail-closed fixed inventories, exact IDs/digests, mandatory checksums, scope
+and rollback policy, and both native architectures remain requirements.
+
+## Diagnose and close once
+
+Read failures before changing code. Runner-allocation/capacity annotations or
+an Apple/network-service error with identical artifacts call for targeted
+unchanged-source retries and focused diagnostics. Retry failed jobs and their
+required dependents without discarding successful proof. A reproducible bug
+needs a code fix; a service outage does not justify another product version.
+Never bypass the native/public gates to finish faster.
+
+Keep one verification record and handoff, link the authoritative PR/run checks,
+and record one evidence/closure receipt after the required results exist.
+Do not open a new PR only to record the preceding record PR's checks, then
+repeat. Do not complete a task or milestone over genuinely pending gates.
 
 ### Intel macOS coverage policy (v4.1.0 current; supersedes v3.11.2)
 
@@ -157,4 +160,10 @@ defect.
 
 ## Source of truth
 
-Summary + heading stubs in [`CLAUDE.md`](../../../CLAUDE.md) (§ "Development Workflow", § "CI", § "Intel macOS coverage policy" — preserved as anchors). Historical ledger and the 7-phase cross-reference in [`MASTER_PLAN.md`](../../../MASTER_PLAN.md). If they disagree with this skill, the docs win — fix this skill.
+[`AGENTS.md`](../../../AGENTS.md) defines repository contracts,
+[`CLAUDE.md`](../../../CLAUDE.md) routes edit-time guidance, and
+[`docs/architecture-decisions.md`](../../../docs/architecture-decisions.md)
+records why. The classifier and workflow are authoritative for exact paths,
+marker names, and jobs. `MASTER_PLAN.md` and `TESTING.md` retain release
+history; historical job counts and the retired runtime-specific ceremony do
+not override the current proportionate process.

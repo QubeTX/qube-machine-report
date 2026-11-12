@@ -10,12 +10,12 @@
 > revised) the decision. Verbatim moves from CLAUDE.md preserved word-for-word
 > so `git blame` history continues to make sense.
 >
-> **Coverage reconciled through 2026-08-25.** This is the repository's
+> **Coverage reconciled through 2026-11-11.** This is the repository's
 > canonical ADR ledger: one document organized by decision family rather than
-> one file per decision. v4.3.12 is the current complete crates.io and GitHub
+> one file per decision. v4.4.4 is the current complete crates.io and GitHub
 > distribution at exact source/tag
-> `19246b76f39c53340e6be62a332cedca9bca766c`; the immutable v4.3.0 through
-> v4.3.11 tags remain published history and were not moved or reused.
+> `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`; v4.4.0/v4.3.12 and the
+> immutable v4.3.0 through v4.3.11 tags remain published history and were not moved or reused.
 > PR #14 exact head passed local, hosted, security, review, and benchmark gates,
 > merged as `2f997d2`, and passed exact-main CI. Accepted decisions remain binding
 > until a later dated section explicitly supersedes them. Historical failure
@@ -53,6 +53,7 @@
   - [Enforced Developer ID signing and Apple notarization](#enforced-developer-id-signing-and-apple-notarization)
   - [Post-release personal-hardware evidence boundary](#post-release-personal-hardware-evidence-boundary)
 - [Toolchain & release](#toolchain--release)
+  - [Proportionate CI and release records (2026-11-11)](#proportionate-ci-and-release-records-2026-11-11)
   - [Default branch is `main` (2026-07-17)](#default-branch-is-main-2026-07-17)
   - [Stable-only release chain and privileged supplemental provenance (v4.3 candidate)](#stable-only-release-chain-and-privileged-supplemental-provenance-v43-candidate)
   - [Privileged package launch and rollback boundaries (v4.3 candidate)](#privileged-package-launch-and-rollback-boundaries-v43-candidate)
@@ -651,11 +652,105 @@ The v4.4.3 tag, crate, and private draft remain immutable. The consolidated fix-
 
 Sources: [Select-Object pipeline optimization](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/select-object), [native exit-status semantics](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables#lastexitcode), [scope lookup and automatic variables](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_scopes).
 
+### Proportionate CI and release records (2026-11-11)
+
+**Context.** The v4.4.4 campaign completed all native/private/public gates, but
+record-only follow-ups repeated expensive builds and installers and required
+more PRs to record those follow-ups. Separate test/build/speed jobs repeated
+runner setup. Runtime-specific seven-phase and fixed multi-PR instructions
+also turned small maintenance into a release ceremony. The user explicitly
+authorized simplifying the repository's development and deployment process
+while preserving actual code/release acceptance.
+
+**Decision.** `scripts/ci_policy.py` is the fail-closed change classifier. Its
+positive record-only allowlist is root `AGENTS.md`, `CLAUDE.md`,
+`CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md`, and Markdown below `docs/`
+or `.tasks/`. Every changed path, including both paths of a rename, must
+qualify. Other paths select full mode: in particular README, license/man/
+changelogs, operational `.agents`/`.claude` skills, scripts, workflows,
+dependencies/package inputs, and unknown paths. Missing or ambiguous Git diff
+evidence selects full mode, as do executable records, symlinks/submodules, or
+unsupported file modes. This is a narrow reviewed path allowlist, not a
+blanket exception for Markdown or a negated list of known code extensions.
+
+As in ordinary pull-request CI, the workflow and classifier execute from the
+candidate checkout. This is not an immutable base-policy sandbox or a claim
+that the comparison base passed full CI. Workflow and policy edits require
+full validation and focused independent review before merge. Publication
+consumers separately require full qualification; the documentation registry
+path binds unchanged packaged inputs to the immutable published tag. Do not
+introduce `pull_request_target` execution of candidate code for classification.
+
+Stable `CI gate` validates classifier and heavy-job results. Then exactly one
+mode marker runs: `Full CI qualification` or `Documentation CI qualification`;
+the other is skipped. New crate/tag/native release consumers require the full
+marker and gate from the same exact run/current attempt. Registry preflight
+also checks marker exclusivity. A green documentation run cannot acquire
+publishing authority. The Release workflow skips its PR plan for the same
+exact record-only allowlist; main/tag and actual release inputs retain full
+qualification.
+
+Full CI consolidates tests, release build, and runtime smokes on the five
+existing platforms: Linux x86_64/ARM64, native macOS ARM/Intel, and Windows.
+Linux x86_64/macOS ARM/Windows retain one warmup and five fast samples with a
+1500 ms median limit before expensive native fixtures. Both Mac compatibility
+and PKG legs, Windows bootstrap/MSI/Inno transitions, fmt/clippy, fresh audit,
+actual cargo-dist plan, and executable workflow/provenance gates remain.
+The old 13 split test/build/speed allocations become five platform legs.
+The design removes eight duplicate runner allocations: 12 heavy jobs plus
+classifier/gate/full marker (15 full), or classifier/gate/docs marker (three
+record-only). Hosted results must prove correctness and measure elapsed time;
+these structure counts are not a claimed measured speedup.
+
+A read-only crate preflight checks public unyanked metadata/checksum/download,
+VCS and trusted-publisher provenance, immutable tag ancestry, and unchanged
+packaged Git inputs. Documentation qualification may only prove that existing
+version, without Cargo compilation, package/dry-run, OIDC, or registry writes.
+Full maintenance with unchanged packaged inputs may take that same no-op
+proof; only full qualification can enter the normal new-package validator and
+fresh protected publisher. Fresh checkout-free Apple signers and native asset
+publishers, read-only builders, exact artifact IDs/digests, private 24→30→34
+custody, both native acceptance matrices, and post-public smokes are unchanged.
+
+Use a focused plan and independent review where risk warrants them, with
+proportionate local tests. Reuse passing evidence for identical inputs and
+rerun affected/failed checks and dependents, rather than restarting unrelated
+successful checks. No particular runtime, agent name/model, plan UI, seven
+phases, fixed multi-PR count, F-block, or automatic memory update is required.
+Docs and infrastructure do not automatically bump a product version; a new
+published package/artifact requires a version appropriate to its public change.
+
+Keep one evidence/closure record with authoritative run/PR links and a task
+receipt after real checks pass. Do not create another PR merely to record the
+prior record PR's CI. Actual incomplete gates still block completion. For the
+current campaign, `#sec35`, `#q44`, and `#v44` remain open until the process
+change has passed full exact-main CI and its existing-version proof, followed
+by the one closure receipt; this decision does not declare those results.
+
+**Failure recovery.** Inspect logs and runner-allocation/service annotations
+before changing source or bumping versions. Preserve successful native proof
+and retry failed jobs/dependents on unchanged qualified artifacts when the
+cause is hosted capacity or a service/network interruption. Repeated service
+errors are not automatically a product defect. A real artifact correction
+still fixes forward under immutable tags/assets; no signature, notarization,
+installer, provenance, or public gate is skipped.
+
+**Rejected alternatives.** Broad `**/*.md` skipping would hide operational
+policy/package inputs. Reusing only a green workflow conclusion would let
+documentation authorize release. Dropping native Intel, installer tests, or
+fresh credential boundaries would reduce acceptance. Automatically cutting a
+patch for a service outage or a record update would recreate version churn.
+
+**Qualification status.** Implementation must pass classifier negative tests,
+workflow/provenance tests, full PR/main CI, and the existing-version proof.
+Then a real allowlisted docs-only run must show only its light jobs and no
+publishing authority. No results or elapsed-time savings are presumed here.
+
 ### Measured CI reuse without removing release gates (2026-11-11)
 
 The v4.4.2 exact-main CI took 11.13 minutes; the Intel direct-PKG fixture consumed 7.95 minutes. The crate workflow's 13.17 minutes included 11.27 minutes waiting for that CI, so adding both durations would double-count most of the wait. Audit-tool installation consumed 3.25 minutes versus 0.05 minutes for the actual audit. These are measurements of runs 42972929754 and 42972929890, not a guaranteed future duration. The native release uses prebuilt hosted OS runners, with no container image build.
 
-Reuse the pinned cargo-audit binary through the already reviewed cache action, validate its exact version, save reusable caches only from protected main, and run a fresh advisory audit every time. Keep the strict 20-job inventory and separate fresh credential/publisher jobs. Potential documentation-only fixture selection and per-platform job consolidation need their own fail-closed change classification and timing proof; this security release does not depend on that larger redesign. CI-only maintenance does not require a new product release.
+Reuse the pinned cargo-audit binary through the reviewed cache action, validate its exact version, save reusable caches only from protected main, and run a fresh advisory audit every time. The 20-job layout described here was the v4.4.4 publication baseline. The later dated proportionate-CI decision supersedes that fixed layout while preserving separate fresh credential/publisher jobs. CI-only maintenance does not require a new product release.
 
 ### Hosted packaging lifecycle and tool syntax (v4.1.1 addendum)
 

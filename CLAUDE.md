@@ -10,7 +10,7 @@ checks the actual LicenseAgreementDlg text in every compiled fixture.
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **Companion file:** The canonical architecture decision ledger through
-> 2026-08-25 (single-Rust/product/output semantics, v4 manual-save and
+> 2026-11-11 (single-Rust/product/output semantics, v4 manual-save and
 > origin-preserving update behavior, reusable installer contract, enforced Mac
 > trust, `main` and Actions runtime, protected release/OIDC custody,
 > toolchain/release policy, Windows accuracy/distribution/consolidation,
@@ -96,12 +96,16 @@ captured `NSURLErrorDomain -1005`/CloudKit connection loss while identical
 files passed other calls; the unchanged original Intel job then passed.
 No diagnostic change or further version was needed to complete v4.4.4.
 
-This Phase 1 publication record does not close the documentation task.
-Protected documentation PR qualification, post-merge exact-main CI and
-idempotent publisher checks, and Phase 2 closure receipts remain pending;
-keep `#q44`/`#v44` open. Personal hardware/UAC rows remain open. See
-[`the current handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md)
-and `TESTING.md` for the evidence and remaining receipts.
+The publication evidence is complete; process qualification and its single
+closure receipt remain pending. The simplified CI/publisher change must pass
+its real exact-main `CI gate` plus `Full CI qualification` and the read-only
+existing-version proof before it can supersede the blocked earlier
+documentation-main run. Keep `#sec35`, `#q44`, and milestone `#v44` open until
+that evidence exists; no recursive record-PR sequence is required. Hosted
+proof does not complete personal hardware/UAC acceptance. Continue from
+[`the v4.4.4 publication handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
+
+See `TESTING.md` for the exact publication evidence.
 
 Historical v4.4.0 source/tag `f49d50a256842ac6c677d1c743c553b3dd92717f`,
 release `396235243`, and 34-asset audit remain the preceding complete
@@ -449,7 +453,7 @@ skill didn't trigger. Deep rationale for every rule: [`docs/architecture-decisio
 | `wix/**`, `wix-corporate/**`, `inno/**`, `windows-installers.yml`, `release.yml`, `src/update.rs`, `src/migrate.rs` | `windows-distribution-and-update` | the four product GUIDs are PERMANENT; registry `InstallSource` marker strings in lockstep (installer / `update.rs` / JSON); keep SHA256 + post-install verify; preserve both checked-in `release.yml` customizations (legacy aliases + fail-closed Apple trust) |
 | `CHANGELOG.md`, `HUMAN_CHANGELOG.md` | `tr300-changelog` | update both in the **same commit** (strip technical noise from the human mirror) |
 | `Cargo.toml` `rust-version`, `rust-toolchain.toml` | (§ MSRV policy below) | bump both in lockstep; keep `components = ["rustfmt", "clippy"]` |
-| a non-trivial change end-to-end | `tr300-dev-workflow` | follow the 7 phases; never bypass Git hooks with `git commit --no-verify`; tag only after `ci.yml` green + `crates-publish` resolved |
+| a change end-to-end | `tr300-dev-workflow` | scope the plan/tests/review to the risk; keep hooks/signing; a release needs exact-main full CI and proven crate bytes |
 | cutting / shipping a release | `release` | full ordered release procedure + fix-forward loop |
 
 ### Summaries for the high-traffic Windows subsystems
@@ -591,15 +595,22 @@ Use a **minor pin** (`"1.95"`, not `"1.95.0"` and not `"stable"`). **On every MS
 
 ## Development Workflow
 
-The canonical cadence for any non-trivial change. **Full detail — each phase's sub-steps, the F.1–F.6 documentation block, the parallel-`Explore` + authoritative-research briefs — is the [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md) skill.** Lightweight one-line fixes (typos, version bumps) can skip phases 1–2 but never skip phase 5.
+Use a focused plan when dependencies or uncertainty warrant it, implement the
+change, run relevant checks, obtain proportionate review, and merge the
+protected PR. [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md)
+has the details. There is no mandatory runtime-specific seven-phase ceremony,
+named review/commit agent, fixed number of PRs, per-PR documentation block,
+automatic memory write, or automatic version bump.
 
-1. **Plan** (read-only) — plan mode; parallel `Explore` agents; authoritative-source research before designing; phase into 4–6 PRs; end with `ExitPlanMode`.
-2. **Task tracking** — `TaskCreate` upfront (PR tasks + per-plan-ID sub-tasks + F-block + tests); `TaskUpdate` as you go, never batch.
-3. **Implement** — one PR at a time; read every file before editing; `cargo check` after each meaningful change; run the full local gate per PR.
-4. **Document (F.1–F.6)** — `CHANGELOG.md` + `HUMAN_CHANGELOG.md` in lockstep, `README.md`, `CLAUDE.md` / the matching subsystem skill, `Cargo.toml` version, auto-memory, `TESTING.md`.
-5. **Verify** — re-run the local gate green; Codex review (`codex:codex-rescue`) for non-trivial PRs; manual matrix for touched platforms.
-6. **Commit + push** — `git-master` for the local commit; `ci-tester` `[PASS]` *before* pushing; never `--no-verify`, never bypass signing.
-7. **Close out** — mark the PR task complete; deferred PRs only run on explicit ask.
+Record-only Markdown gets fact/link/encoding review and `git diff --check`.
+Code and operational policy changes get focused local tests plus full CI;
+security/platform/installer/workflow changes get focused independent review.
+Repeat affected or failed checks after a correction, reusing passed evidence
+for identical inputs. New published package/artifact bytes require a release;
+repository-only documentation, skills, CI, and evidence do not automatically
+change the version. Keep paired changelogs aligned when actual release notes
+change. Record one evidence/closure receipt and link its real checks, without
+another PR solely to record the previous record PR's CI.
 
 ## CI
 
@@ -609,22 +620,34 @@ environment-secret cutover. Full job-by-job detail and local-
 repro commands are in the
 [`tr300-dev-workflow`](./.claude/skills/tr300-dev-workflow/SKILL.md) skill):
 
-- **`ci.yml`** — every push to `main` + every PR: `fmt`, locked
-  `clippy --all-targets -D warnings`, locked `test` (Linux AMD64/ARM64 + native
-  macOS ARM/Intel + Windows), locked `build` smoke
-  (+`--version`/`--fast --json`), `speed`
-  (5-run median of `tr300 --fast` < 1500 ms), blocking `audit`, and
-  `dist-plan`, plus `release-bootstrap-windows`, which executes the exact pinned
-  cargo-dist bootstrap on Windows Server 2022. macOS test/build/speed are hard gates; do not restore the old
-  v3.14.5 `continue-on-error` workaround.
-- **`release.yml`** — cargo-dist v0.31.0, exact stable-tag-triggered
+- **`ci.yml`** — classify every main push and PR through
+  `scripts/ci_policy.py`. The positive record-only allowlist is root
+  `AGENTS.md`, `CLAUDE.md`, `CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md`,
+  plus Markdown under `docs/` and `.tasks/`; other paths or ambiguous evidence
+  select full. Full CI shares tests/release build/smokes on five runners:
+  Linux x86_64/ARM64, native macOS ARM/Intel, and Windows. Linux x86_64,
+  macOS ARM, and Windows retain warmup/five-run median below 1500 ms before
+  native fixtures. Existing audit, dist-plan, workflow/provenance, Windows
+  bootstrap/MSI/Inno, and native Mac fixtures remain. Stable `CI gate` first
+  validates classifier/heavy-job results; then exactly one mode marker runs,
+  `Full CI qualification` or `Documentation CI qualification`, with the other
+  skipped. Release consumers require gate/full marker from the same current
+  attempt; registry preflight additionally checks marker exclusivity. The
+  designed allocation is 15 full jobs or three record-only jobs, not a hosted timing
+  claim. Release consumers require full qualification, never docs qualification.
+- **`release.yml`** — skips PR plans for the exact record-only path allowlist;
+  real release inputs retain cargo-dist v0.31.0, exact stable-tag-triggered
   (`vX.Y.Z`); read-only builders with no persisted checkout/signing/publication
   credential plus fresh checkout-free Apple signers and
   publisher. It renders the MIC-1 wrappers and creates only a private exact
   24-asset draft.
-- **`crates-publish.yml`** — starts automatically on a same-repository `main`
-  push, then waits without a registry credential for that exact SHA's CI run
-  to pass before publication can continue. A read-only Cargo 1.95 validator proves the
+- **`crates-publish.yml`** — its read-only preflight waits for the exact-main
+  CI/current attempt and exclusive qualification marker. Documentation mode
+  only proves an existing unyanked version using public metadata/bytes,
+  immutable tag ancestry, and unchanged packaged Git inputs, without Cargo
+  compilation/packaging/dry-run or OIDC. Full unchanged-package maintenance
+  can use that same proof. Only full mode may reach new publication, where a
+  read-only Cargo 1.95 validator proves the
   package bytes; a fresh protected
   `crates-io` runner executes no package code while a short-lived OIDC token is
   present, publishes with `--no-verify`, and verifies public hash/provenance.
@@ -738,7 +761,8 @@ A physical Mac is optional unless CI exposes a GUI-only defect.
 
 ## Release Process
 
-Uses **cargo-dist** (v0.31.0). The full ordered procedure — version bump →
+Uses **cargo-dist** (v0.31.0). For new package/artifact bytes, the procedure —
+version decision →
 reviewed PR → exact-main CI → automatic trusted-OIDC crate publication → tag →
 private 24-asset draft → Windows 30-asset assembly/acceptance → macOS 34-asset
 finalization → public smokes → fix-forward — is the
@@ -750,7 +774,9 @@ Linux/Pi 4 checks remain open. They never substitute for or waive native
 Apple-Silicon/Intel, package/security, exact-SHA CI/crates, Apple notarization,
 and release-asset gates.
 
-- Bump `Cargo.toml` `version`; update the doc set in lockstep (incl. `HUMAN_CHANGELOG.md` — see the `tr300-changelog` skill).
+- A new published version updates package/version records and affected docs
+  in lockstep (including paired changelogs). Repository docs/CI/skills/evidence
+  do not automatically create a product release.
 - Commit `release: vX.Y.Z - <summary>` on a branch; merge the PR only after all
   required checks pass and review threads resolve.
 - A same-repository push to `main` automatically triggers both CI and
@@ -758,7 +784,9 @@ and release-asset gates.
   successful CI result. Require its trusted
   OIDC/public-byte provenance; no manual publication dispatch belongs in the
   normal path.
-- **Tag only after exact-main CI and automatic crates publication are proven.**
+- **Tag only after exact-main `CI gate` plus `Full CI qualification` and
+  automatic crate publication are proven.** Documentation qualification has no
+  authority to publish a new crate or native assets.
   Create `git tag vX.Y.Z` and push the single tag explicitly — never
   `git push --tags`.
 - `release.yml` creates a private 24-asset draft. `windows-installers.yml` takes

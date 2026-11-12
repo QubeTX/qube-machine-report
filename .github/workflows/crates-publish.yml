@@ -43,19 +43,18 @@ jobs:
         shell: bash
         run: test -n "$OIDC_CRATES_TOKEN"
 
-  validate-package:
-    name: Validate and package the exact CI-tested source
+  resolve-source:
+    name: Resolve exact CI qualification and existing publication
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'QubeTX/qube-machine-report'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
     outputs:
-      version: ${{ steps.package.outputs.version }}
+      mode: ${{ steps.source.outputs.mode }}
+      requires_package: ${{ steps.existing.outputs.requires_package }}
       source_sha: ${{ steps.source.outputs.source_sha }}
       run_id: ${{ steps.source.outputs.workflow_run_id }}
-      crate_name: ${{ steps.package.outputs.crate_name }}
-      crate_sha256: ${{ steps.package.outputs.crate_sha256 }}
     steps:
       - name: Require successful CI for this exact main commit
         id: source
@@ -67,6 +66,8 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
           PUBLISH_WORKFLOW_RUN_ID: ${{ github.run_id }}
           CI_STATE_PATH: ${{ runner.temp }}/ci-runs.json
+          CI_JOBS_PATH: ${{ runner.temp }}/ci-jobs.json
+          CI_RUN_PATH: ${{ runner.temp }}/ci-run-final.json
         shell: bash
         run: |
           set -euo pipefail
@@ -118,6 +119,63 @@ jobs:
                    "$head_repository" == "$EXPECTED_REPOSITORY" &&
                    "$head_branch" == main && "$source_sha" == "$SOURCE_SHA" &&
                    "$actual_run_attempt" == "$run_attempt" ]]
+                gh api --paginate --slurp \
+                  "repos/$EXPECTED_REPOSITORY/actions/runs/$ci_run_id/attempts/$run_attempt/jobs?per_page=100" \
+                  > "$CI_JOBS_PATH"
+                gh api "repos/$EXPECTED_REPOSITORY/actions/runs/$ci_run_id" > "$CI_RUN_PATH"
+                mode=$(python3 - "$CI_RUN_PATH" "$CI_JOBS_PATH" "$ci_run_id" "$run_attempt" "$workflow_id" "$SOURCE_SHA" <<'PY'
+          import json
+          import sys
+
+          run_path, jobs_path, run_id, attempt, workflow_id, sha = sys.argv[1:]
+          run = json.load(open(run_path, encoding="utf-8"))
+          pages = json.load(open(jobs_path, encoding="utf-8"))
+          expected = {
+              "id": int(run_id), "workflow_id": int(workflow_id), "name": "CI",
+              "path": ".github/workflows/ci.yml", "event": "push",
+              "status": "completed", "conclusion": "success", "head_branch": "main",
+              "head_sha": sha, "run_attempt": int(attempt),
+          }
+          if not isinstance(run, dict) or any(run.get(k) != v for k, v in expected.items()):
+              raise SystemExit("CI run identity or current attempt changed")
+          if any(type(run.get(k)) is not int for k in ("id", "workflow_id", "run_attempt")):
+              raise SystemExit("malformed CI run identifiers")
+          if any(run.get(k, {}).get("full_name") != "QubeTX/qube-machine-report" for k in ("repository", "head_repository")):
+              raise SystemExit("CI repository identity changed")
+          if not isinstance(pages, list) or not pages or any(not isinstance(p, dict) or not isinstance(p.get("jobs"), list) for p in pages):
+              raise SystemExit("malformed paginated CI jobs")
+          jobs = [job for page in pages for job in page["jobs"]]
+          if any(type(p.get("total_count")) is not int or p["total_count"] != len(jobs) for p in pages):
+              raise SystemExit("incomplete CI jobs pagination")
+          if any(not isinstance(job, dict) for job in jobs):
+              raise SystemExit("malformed CI job")
+          ids = [job.get("id") for job in jobs]
+          if any(type(value) is not int or value <= 0 for value in ids) or len(set(ids)) != len(ids):
+              raise SystemExit("invalid or duplicate CI job identifiers")
+          def conclusion(name):
+              matches = [job for job in jobs if job.get("name") == name]
+              if len(matches) != 1:
+                  raise SystemExit(f"missing or duplicate CI marker: {name}")
+              job = matches[0]
+              if (job.get("run_id") != int(run_id) or job.get("run_attempt") != int(attempt)
+                      or job.get("head_sha") != sha or job.get("status") != "completed"):
+                  raise SystemExit(f"stale or mismatched CI marker: {name}")
+              if any(type(job.get(k)) is not int for k in ("run_id", "run_attempt")):
+                  raise SystemExit(f"malformed CI marker identifiers: {name}")
+              return job.get("conclusion")
+          if conclusion("CI gate") != "success":
+              raise SystemExit("the stable CI gate did not pass")
+          full = conclusion("Full CI qualification")
+          docs = conclusion("Documentation CI qualification")
+          if (full, docs) == ("success", "skipped"):
+              print("full")
+          elif (full, docs) == ("skipped", "success"):
+              print("docs")
+          else:
+              raise SystemExit("CI qualification mode is missing or ambiguous")
+          PY
+                )
+                [[ "$mode" == full || "$mode" == docs ]]
                 remote_main=$(gh api \
                   "repos/$EXPECTED_REPOSITORY/git/ref/heads/main" --jq .object.sha)
                 [[ "$remote_main" == "$SOURCE_SHA" ]]
@@ -125,6 +183,7 @@ jobs:
                   echo "source_sha=$SOURCE_SHA"
                   echo "workflow_run_id=$PUBLISH_WORKFLOW_RUN_ID"
                   echo "ci_run_id=$ci_run_id"
+                  echo "mode=$mode"
                 } >> "$GITHUB_OUTPUT"
                 exit 0
               fi
@@ -136,6 +195,191 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ steps.source.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Verify an existing version without executing package code
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          CI_MODE: ${{ steps.source.outputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY'
+          import gzip
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import subprocess
+          import tarfile
+          import tomllib
+          import urllib.error
+          import urllib.request
+
+          REPOSITORY = "QubeTX/qube-machine-report"
+          INCLUDE = ["/Cargo.lock", "/Cargo.toml", "/LICENSE", "/README.md", "/build.rs",
+                     "/man/**", "/src/**", "/tests/**", "/wix/**", "/wix-corporate/**"]
+          INPUTS = ["Cargo.lock", "Cargo.toml", "LICENSE", "README.md", "build.rs",
+                    "man", "src", "tests", "wix", "wix-corporate"]
+
+          def git(*args):
+              return subprocess.check_output(["/usr/bin/git", *args])
+
+          def gh(endpoint):
+              return json.loads(subprocess.check_output(["gh", "api", f"repos/{REPOSITORY}/{endpoint}"]))
+
+          def fetch(url):
+              request = urllib.request.Request(url, headers={"User-Agent": f"{REPOSITORY} existing-version-proof"})
+              try:
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      body = response.read(32 * 1024 * 1024 + 1)
+                      if len(body) > 32 * 1024 * 1024:
+                          raise SystemExit("registry response exceeds the data-only limit")
+                      return response.status, body
+              except urllib.error.HTTPError as error:
+                  return error.code, b""
+
+          def resolve_tag(version):
+              value = gh(f"git/ref/tags/v{version}")["object"]
+              for _ in range(5):
+                  sha = value.get("sha")
+                  if not isinstance(sha, str) or not re.fullmatch("[0-9a-f]{40}", sha):
+                      raise SystemExit("invalid immutable tag object")
+                  if value.get("type") == "commit":
+                      return sha
+                  if value.get("type") != "tag":
+                      raise SystemExit("unsupported immutable tag object")
+                  value = gh(f"git/tags/{sha}")["object"]
+              raise SystemExit("immutable tag indirection exceeds its bound")
+
+          def output(requires_package, reason):
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+                  handle.write(f"requires_package={'true' if requires_package else 'false'}\n")
+                  handle.write(f"reason={reason}\n")
+              print(reason)
+
+          def main():
+              sha, mode = os.environ["SOURCE_SHA"], os.environ["CI_MODE"]
+              if not re.fullmatch("[0-9a-f]{40}", sha) or mode not in {"docs", "full"}:
+                  raise SystemExit("invalid qualified source or CI mode")
+              if git("rev-parse", "HEAD").decode().strip() != sha or git("status", "--porcelain=v1", "--untracked-files=all"):
+                  raise SystemExit("existing-version proof requires the exact clean source")
+              manifest = tomllib.loads(git("show", f"{sha}:Cargo.toml").decode())
+              package = manifest.get("package", {})
+              version = package.get("version")
+              if package.get("name") != "tr300" or not isinstance(version, str) or not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+                  raise SystemExit("unexpected package identity")
+              status, body = fetch("https://crates.io/api/v1/crates/tr300")
+              policy = json.loads(body) if status == 200 else {}
+              if policy.get("crate", {}).get("name") != "tr300" or policy["crate"].get("trustpub_only") is not True:
+                  raise SystemExit("trusted publishing-only registry policy is missing")
+              status, body = fetch(f"https://crates.io/api/v1/crates/tr300/{version}")
+              if status == 404 and mode == "full":
+                  output(True, "version-absent-requires-full-package-validation")
+                  return
+              if status != 200:
+                  raise SystemExit("documentation CI cannot publish a missing version; registry lookup must succeed")
+              metadata = json.loads(body).get("version", {})
+              if metadata.get("crate") != "tr300" or metadata.get("num") != version or metadata.get("yanked") is not False:
+                  raise SystemExit("the existing registry version is missing, mismatched, or yanked")
+              checksum = metadata.get("checksum")
+              if not isinstance(checksum, str) or not re.fullmatch("[0-9a-f]{64}", checksum):
+                  raise SystemExit("registry checksum is malformed")
+              # A missing release tag can occur between initial publication and
+              # tagging. Full CI retains the original exact-byte adjudication.
+              try:
+                  tag_sha = resolve_tag(version)
+              except subprocess.CalledProcessError:
+                  if mode != "full":
+                      raise SystemExit("documentation CI requires an existing immutable version tag")
+                  output(True, "unreleased-version-requires-full-package-validation")
+                  return
+              try:
+                  release = gh(f"releases/tags/v{version}")
+              except subprocess.CalledProcessError:
+                  if mode != "full":
+                      raise SystemExit("documentation CI requires a public immutable version release")
+                  output(True, "unavailable-release-requires-full-package-validation")
+                  return
+              if (release.get("tag_name") != f"v{version}" or release.get("draft") is not False
+                      or release.get("prerelease") is not False or release.get("target_commitish") != tag_sha):
+                  if mode == "full":
+                      output(True, "nonfinal-release-requires-full-package-validation")
+                      return
+                  raise SystemExit("existing publication is not bound to the immutable version tag")
+              if subprocess.run(["/usr/bin/git", "merge-base", "--is-ancestor", tag_sha, sha], check=False).returncode != 0:
+                  raise SystemExit("the published version is not an ancestor of this source")
+              if package.get("include") != INCLUDE:
+                  if mode == "docs":
+                      raise SystemExit("documentation CI cannot change the package boundary")
+                  output(True, "package-boundary-requires-full-validation")
+                  return
+              changed = git("diff", "--no-ext-diff", "--no-textconv", "--raw", "--no-renames", "-z", tag_sha, sha, "--", *INPUTS)
+              if changed:
+                  if mode == "docs":
+                      raise SystemExit("documentation CI cannot change packaged inputs")
+                  output(True, "packaged-inputs-require-full-validation")
+                  return
+              provenance = metadata.get("trustpub_data", {})
+              if (provenance.get("provider") != "github" or provenance.get("repository") != REPOSITORY
+                      or provenance.get("sha") != tag_sha or not re.fullmatch("[1-9][0-9]*", str(provenance.get("run_id", "")))):
+                  raise SystemExit("existing crate lacks exact trusted-publisher source provenance")
+              status, public = fetch(f"https://crates.io/api/v1/crates/tr300/{version}/download")
+              if status != 200 or hashlib.sha256(public).hexdigest() != checksum:
+                  raise SystemExit("existing crate download does not match its registry checksum")
+              root = f"tr300-{version}"
+              with gzip.GzipFile(fileobj=io.BytesIO(public)) as compressed:
+                  expanded = compressed.read(64 * 1024 * 1024 + 1)
+              if len(expanded) > 64 * 1024 * 1024:
+                  raise SystemExit("existing crate exceeds the expanded data-only limit")
+              with tarfile.open(fileobj=io.BytesIO(expanded), mode="r:") as archive:
+                  members = archive.getmembers()
+                  names = [member.name for member in members]
+                  if (len(members) > 10000 or sum(member.size for member in members) > 64 * 1024 * 1024
+                          or len(names) != len(set(names)) or any(not member.isfile() for member in members)):
+                      raise SystemExit("existing crate has duplicate or non-regular entries")
+                  vcs = archive.getmember(f"{root}/.cargo_vcs_info.json")
+                  if vcs.size > 65536:
+                      raise SystemExit("existing crate VCS record exceeds its bound")
+                  handle = archive.extractfile(vcs)
+                  if handle is None:
+                      raise SystemExit("existing crate lacks its VCS record")
+                  with handle:
+                      record = json.load(handle)
+              if record.get("git", {}).get("sha1") != tag_sha or record.get("git", {}).get("dirty", False) is not False or record.get("path_in_vcs") != "":
+                  raise SystemExit("existing crate VCS record does not bind the immutable version tag")
+              if resolve_tag(version) != tag_sha or gh(f"releases/tags/v{version}").get("target_commitish") != tag_sha:
+                  raise SystemExit("immutable publication changed during verification")
+              if gh("git/ref/heads/main")["object"]["sha"] != sha:
+                  raise SystemExit("protected main moved during existing-version verification")
+              output(False, "verified-existing-version-no-package-execution-or-oidc")
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+  validate-package:
+    name: Validate and package the exact CI-tested source
+    needs: resolve-source
+    if: needs.resolve-source.outputs.mode == 'full' && needs.resolve-source.outputs.requires_package == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      source_sha: ${{ needs.resolve-source.outputs.source_sha }}
+      run_id: ${{ needs.resolve-source.outputs.run_id }}
+      crate_name: ${{ steps.package.outputs.crate_name }}
+      crate_sha256: ${{ steps.package.outputs.crate_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.resolve-source.outputs.source_sha }}
           persist-credentials: false
           submodules: false
           lfs: false
@@ -222,8 +466,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
   publish:
     name: Publish from a fresh no-execution runner
-    needs: validate-package
-    if: needs.validate-package.result == 'success'
+    needs: [resolve-source, validate-package]
+    if: needs.resolve-source.outputs.mode == 'full' && needs.validate-package.result == 'success'
     runs-on: ubuntu-24.04
     environment: crates-io
     permissions:

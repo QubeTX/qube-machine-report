@@ -10,6 +10,12 @@
 
 ## Active
 
+- [ ] **Simplify CI and release qualification** - skip expensive builds for records-only changes, consolidate native build work, preserve publication custody, and deploy through reviewed PR/main checks (owner codex) #cif
+  - [x] Implement strict scope classification and required aggregate qualification
+  - [x] Consolidate native build/performance work and protect every publication consumer
+  - [x] Validate locally and independently review the full workflow change
+  - [ ] Merge, verify full main CI and existing-version proof, then demonstrate docs-only CI
+
 - [ ] **Resolve PR #35 and ship the Windows updater security fix** - v4.4.4 is public with 34 audited assets and all runtime gates passed; protected documentation qualification and closure receipts remain (owner codex) #sec35
   - [x] Resolve conflicts and verify trusted PowerShell launch behavior
   - [x] Pass consolidated-candidate local and exact-head hosted gates plus independent review

@@ -91,10 +91,11 @@ v4.4.2 draft `441328198`. None is reused or made public by this record.
   `NSURLErrorDomain -1005` connection loss while identical files passed other
   calls. The unchanged original Intel job passed, completing v4.4.4 without
   another product change or version.
-- This is the Phase 1 publication-evidence update. The protected documentation
-  PR's qualification, post-merge exact-main CI/idempotent publisher checks,
-  and Phase 2 closure receipts remain pending. `#q44` and `#v44` stay open;
-  hosted release proof does not complete physical hardware/personal UAC rows.
+- Publication evidence is complete. The simplified process change must still
+  pass exact-main `CI gate`/`Full CI qualification` and its read-only existing-
+  version proof before superseding the blocked earlier documentation-main
+  run. Keep `#sec35`, `#q44`, and `#v44` open pending that real qualification
+  and one closure receipt. Hosted results do not close physical/UAC rows.
 - Historical complete v4.4.0 source/tag
   `f49d50a256842ac6c677d1c743c553b3dd92717f`, release `396235243`, had
   34 audited assets. CI `36084969867` attempt 2, OIDC `36084969841` attempt 2,
@@ -344,6 +345,35 @@ do not have to infer platform semantics.
 
 ## Release Contract
 
+Repository work follows `scripts/ci_policy.py`: only root `AGENTS.md`,
+`CLAUDE.md`, `CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md` and Markdown
+under `docs/` or `.tasks/` qualify as record-only. Everything else, including
+operational skills, scripts/workflows, package inputs, README/license/man/
+changelogs, and unknown or ambiguous diff evidence, selects full CI. Renames
+must qualify on both paths. Record-only local checks cover content, links,
+encoding, and `git diff --check`; code/process changes get focused local tests
+and independent review for material boundaries.
+
+The stable `CI gate` validates classifier/heavy-job results, then exactly one
+mode marker runs: `Full CI qualification` or `Documentation CI qualification`;
+the other is skipped. Release consumers require gate/full marker from the
+same exact current attempt; registry preflight checks marker exclusivity.
+Full CI shares tests, release build, and smokes across the five retained platforms;
+three existing speed legs retain the warmup/five-run 1500 ms median gate
+before native fixtures. The designed allocation is 15 full or three
+record-only jobs; hosted timing must establish any elapsed improvement.
+Native acceptance and fresh signing/publishing boundaries remain unchanged.
+The Release workflow skips its PR plan for the same exact record-only
+allowlist, while main/tag and real release inputs retain full qualification.
+
+Documentation mode may only prove the already published unyanked version
+from public metadata/bytes, immutable tag ancestry, and unchanged packaged
+Git inputs, with no Cargo build/package/dry-run, OIDC, or publication. Full
+maintenance with unchanged packaged inputs can use that proof too. Only full
+qualification can authorize new crate/tag/native publication. Docs, skills,
+and infrastructure do not automatically bump the version; the numbered
+sequence below applies when new published package or artifact bytes are needed.
+
 1. Preserve `4.4.4` as the current complete GitHub/crates boundary, keep
    v4.4.0 as its preceding complete baseline, and preserve failed
    v4.4.1/v4.4.2/v4.4.3 tags plus their historical private drafts. Preserve
@@ -358,11 +388,12 @@ do not have to infer platform semantics.
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
    shellcheck, Windows installer fixtures, and archive plus direct-PKG/DMG
    sign/notary/staple/install proof.
-3. Prepare the final release-source correction on a focused PR, rerun the
-   complete local gate, and merge only after every required check and review
+3. Prepare the final release-source correction on a focused PR, repeat the
+   affected local checks, and merge only after every required full CI check and review
    thread passes. Earlier-head checks are not evidence for the merge result.
 4. Let the exact-main push start `CI` and `crates-publish.yml`; the publisher
-   must wait without a registry credential for that exact CI result before exact package bytes
+   must wait without a registry credential for that exact current-attempt
+   stable gate/full qualification before exact package bytes
    plus trusted OIDC/public provenance are accepted.
 5. For a future release, create and push only its new tag after exact-main
    CI/crates proof and native Apple Bash-3.2 staging preflight. Existing
@@ -376,6 +407,14 @@ do not have to infer platform semantics.
 8. Update the homepage only when its source needs a release-specific change;
    its versionless `releases/latest` links remain in the verified website 1.21.8
    production deployment. Keep AMD/Pi physical tasks open and patch forward from findings.
+
+Use one evidence/closure record with authoritative PR/run links and a task
+receipt after the real results exist. No new PR is needed solely to record
+the previous record PR's CI. Diagnose hosted capacity and service failures;
+retry only failed jobs/dependents with unchanged qualified source/artifacts
+when the evidence supports it, preserving passed proof and every native/public
+gate. A reproducible artifact defect may require a new version; a service
+failure alone does not.
 
 CI reuses only the pinned audit tool from a cache written by protected `main`;
 every run still performs the advisory audit. Actual release-payload paired
