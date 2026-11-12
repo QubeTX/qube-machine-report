@@ -34,7 +34,52 @@ External failures were retried without new versions. Two ARM archive-signer and 
 
 The downloaded public Windows pair additionally passed version/help/fast JSON/full ASCII checks. Linux public managed install/update and both public Mac compatibility bridges passed through the chained workflow. The homepage uses versionless latest links and requires no separate CLI-version deployment. Physical AMD64 Linux/Pi and the personal Alienware UAC task remain open.
 
-Publication and runtime verification are complete. Protected documentation follow-up, exact-main CI and idempotent publisher qualification remain tracked under `#sec35`/`#q44` until those checks actually pass. See the [current handoff](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) and [CI timing audit](docs/thinking/2026-11-11-ci-release-timing.md).
+Publication, runtime verification, and process qualification are complete. The following receipt closes the related release records; personal hardware/UAC acceptance remains separate.
+
+### CI simplification and record-only qualification (2026-11-11)
+
+The workflow changes are deployed through PRs #42/#43 without a new product
+version. The corrected full source is
+`51cc61193aaa9494d179d6341851aeb0a52a6371`; documentation probe PR #44 merged as
+`15a0112bf1e240568660d3d502ca3b1a8fcb95e2`. Every run below passed on its first attempt.
+
+| Qualification | CI | Existing-version follow-up | Observed result |
+| --- | --- | --- | --- |
+| Initial workflow PR #42 | [43151114831](https://github.com/QubeTX/qube-machine-report/actions/runs/43151114831) | Not applicable | 15 allocated successes; 620 seconds; Release plan 43151114880 passed |
+| Initial workflow main | [43152393942](https://github.com/QubeTX/qube-machine-report/actions/runs/43152393942) | [43152393968](https://github.com/QubeTX/qube-machine-report/actions/runs/43152393968) | 15 allocated successes; 678 seconds; existing publication proved |
+| Marker correction PR #43 | [43152989819](https://github.com/QubeTX/qube-machine-report/actions/runs/43152989819) | Not applicable | 15 allocated successes; 620 seconds; Release plan 43152989820 passed |
+| Corrected full main | [43154206746](https://github.com/QubeTX/qube-machine-report/actions/runs/43154206746) | [43154206867](https://github.com/QubeTX/qube-machine-report/actions/runs/43154206867) | 15 allocated successes; 664 seconds; existing publication proved |
+| Record-only PR #44 | [43154266882](https://github.com/QubeTX/qube-machine-report/actions/runs/43154266882) | Not applicable | Three successes, nine skipped entries; 18 seconds; no Release plan |
+| Record-only main | [43155508207](https://github.com/QubeTX/qube-machine-report/actions/runs/43155508207) | [43155508130](https://github.com/QubeTX/qube-machine-report/actions/runs/43155508130) | Three successes, nine skipped entries; 25 seconds; existing publication proved |
+
+The first docs probe 43152542124 exposed inherited skip propagation and is
+not counted as qualified evidence. PR #43 fixed both marker conditions with
+explicit `always()` while still requiring successful classification and
+aggregation. The subsequent PR/main runs each passed only the documentation
+marker, with the full marker and all heavy job entries skipped. Full runs
+passed only the full marker. Exact run/attempt/source and complete paginated
+job inventories were checked through the API.
+
+All listed registry follow-ups proved the immutable existing v4.4.4 metadata,
+download checksum, trusted-publisher/VCS provenance, tag ancestry, public
+release, and unchanged packaged Git inputs. Package validation, OIDC probe,
+and fresh publisher jobs were skipped. Main ruleset 27090739 requires a pull
+request and current GitHub Actions `CI gate`; tag rules 21268058/21268059 were
+preserved. Real code, package, workflow, and release changes retain full CI;
+only full qualification can authorize publication.
+
+Full CI allocations fell from 20 to 15; native test/build/performance
+allocations fell from thirteen to five. All five platforms, installer cases,
+three existing performance gates, and credential-isolated publishers remain.
+These measurements establish a fast documentation path and fewer full-mode
+allocations, not a controlled full-build speedup. The final read-only public
+check matched all 34 asset ID/name/size/digest tuples to the audited v4.4.4
+inventory and confirmed the same unyanked crate checksum.
+
+This is the one completion receipt for `#cif`, `#sec35`, `#q44`, and `#v44`.
+Its own normal protected documentation checks remain required, but they do not
+create another record-only PR obligation. Physical hardware/UAC rows remain
+open. Detailed timings are in the [CI timing audit](docs/thinking/2026-11-11-ci-release-timing.md).
 
 ### v4.4.3 — Consolidated child-process and installer security (2026-11-11)
 

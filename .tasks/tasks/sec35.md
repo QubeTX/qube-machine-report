@@ -1,4 +1,4 @@
-TT;DR: v4.4.4 is published with the reported security fixes and all required native/public runtime gates passed. Protected documentation qualification and the final completion receipt remain.
+TT;DR: v4.4.4 is published with the reported security fixes and all required native/public runtime gates passed. Protected process/documentation qualification and the completion receipt are complete.
 
 ## Why
 Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the security fix; expanded in the same session to the concerns in closed PRs #1 and #2.
@@ -7,7 +7,7 @@ Direct operator request on 2026-11-10: fix PR #35 conflicts and deploy the secur
 Integrate current main, preserve both command aliases and origin/receipt/checksum/rollback contracts, restrict PowerShell launch to the native system-directory host, add adversarial coverage, patch remaining Unix GPU helper resolution from PR #2, audit PR #1 against existing private staging, update vulnerable TLS dependencies, and publish through the existing protected release chain. Preserve unrelated dirty work in the original checkout by using a separate worktree. Physical hardware acceptance stays in its existing tasks.
 
 ## Plan
-Implementation inventories, source qualification, publication, and all native/public runtime gates are complete. Remaining dependency window: qualify this protected publication-evidence PR, merge its exact green head, require exact-main CI and the idempotent existing-version proof, then record the dated completion receipt. Keep version4.4.4 and immutable bytes unchanged; physical hardware remains separately owned.
+Implementation, source/publication/runtime acceptance, full process qualification, and actual documentation PR/main/no-op proof are complete. Version 4.4.4 and immutable public bytes are unchanged; physical hardware remains separately owned.
 
 ## Impact
 Windows managed self-updates use the OS-owned Windows PowerShell executable and working directory instead of a PATH-selected host. Missing trusted hosts fail before launch. Existing install channels, receipt prefixes, installer integrity checks, and both report/tr300 commands remain supported.
@@ -29,24 +29,26 @@ Valid bounded outcomes: complete only with all required evidence; otherwise acti
 |---|---|---|---|---|---|
 | Initial state | GitHub PR #35 and current remote main | PR ced1ea5 based on pre-v4.4.0; current main 3f0e047 | Two changelog conflicts; code integration automatic | Initial state only | PASS |
 | Independent review | review_security and release_gate_review agents | Exact heads 8c8df9a and 578e301a reviewed without blockers | Security and fixture findings addressed | Hosted gates remain separately required | PASS |
-| v4.4.4 source/crate | Exact-head/main CI and trusted OIDC; independent registry download | PR39, CI43005013711/43006272757; publisher43006272686; checksum/VCS in TESTING.md | Qualified source and public crate match | No broad exploit claim beyond audited scope | PASS |
+| v4.4.4 source/crate | Exact-head/main CI and trusted OIDC; independent registry download | PR 39, CI 43005013711/43006272757; publisher43006272686; checksum/VCS in TESTING.md | Qualified source and public crate match | No broad exploit claim beyond audited scope | PASS |
 | Private/native publication | Exact workflow/run proofs and release API | Release43007443270a3 13/13; Win43015387367 3/3; private43015777726 16/16; Mac43015387253a6 12/12 | Complete34asset publication from9f | Native signature evidence is CI, not Windows codesign | PASS |
 | Public bytes/runtime | Anonymous downloads, hash/sidecar/archive/wrapper comparison; actual public lifecycle jobs | target/public-v4.4.4/audit.json; publicWin43030855472 9/9; native/public hashes and both legacy bridge results | Public latest and both commands verified | Physical hardware/UAC remains separately open | PASS |
-| Documentation closure | Protected evidence PR, exact-main CI, idempotent existing-version publisher | Phase1 record prepared; actual checks not yet run | Record content complete; qualification still required | Preparing a record is not completion | NOT RUN |
+| Documentation closure | Protected evidence PR, exact-main CI, idempotent existing-version publisher | Full CI 43154206746/proof 43154206867; docs PR 44/main CI 43154266882/43155508207/proof 43155508130 | Full/docs paths and existing publication verified | Physical hardware remains separate | PASS |
 
 ## Verification
 - [x] Current consolidated candidate passes local release gates and adversarial child-chain/staging probes
 - [x] Consolidated exact head passes independent review and hosted CI/Release plan; PR merged
 - [x] Consolidated exact-main CI and trusted-OIDC crate publication pass before immutable tag
 - [x] Complete native release chain, public asset audit, and post-public smokes pass
-- [ ] Protected follow-up documentation records the final evidence
+- [x] Protected follow-up documentation records the final evidence
 
 ## Status
-Phase 1 publication evidence: product publication and runtime acceptance are complete. Exact source/tag 9f5110a3e8665f5fa2eb2e1744778c8025dc241f is the unyanked v4.4.4 crate (checksum bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f) and public34-asset release441625880. PR39/main/OIDC/Release/Windows/private/native/public gates all passed; exact IDs and byte-identity methodology are in TESTING.md and the November11 handoff.
-
-Mac workflow43015387253 attempt6 passed12/12, including the original Intel legacy job130556746408 and original ARM130545874243. Public Windows43030855472 passed all9 eligible jobs. Closed unmerged diagnosticPR40 captured actual AppleCloudKit NSURLError-1005 connection loss among identical-file successes; no new version or asset change was justified. Its second diagnostic CI was cancelled after both native probe results, not called green acceptance.
-
-Next: qualify this evidence-only protected documentation PR, merge its exact green head, and require exact-main CI plus the automatic idempotent existing-version proof. Only after those real results exist, record the Phase2 task/milestone completion receipt. Keep this task and q44/v44 open through those checks. No source/package/version changes or personal hardware claims are part of this follow-up.
+Complete (2026-11-11). Exact v4.4.4 source/tag
+9f5110a3e8665f5fa2eb2e1744778c8025dc241f remains the verified unyanked crate and
+public 34-asset release 441625880. All source/private/native/public gates passed;
+PRs #42/#43 and actual docs PR 44/main now complete process qualification and
+the read-only existing-version proofs. TESTING.md and the November11 handoff
+contain the final evidence. No further version or recursive record PR is
+needed. Personal hardware/UAC tasks remain open.
 
 ## Activity
 - 2026-11-11 — All product/runtime gates complete: Mac attempt6 passed12/12 and public Windows43030855472 passed9/9. Prepared publication evidence, current guides/handoff, release-note security summary, and measured CI report. This remains open pending the protected documentation PR/main/idempotent proof and final completion receipt (agent: codex).
@@ -114,3 +116,4 @@ Next: qualify this evidence-only protected documentation PR, merge its exact gre
 - 2026-11-11 — Complete v4.4.3 private acceptance audit found one wrapper defect behind four fresh takeover failures; all other completed Windows cases and both native Mac PKG lifecycles passed. Reproduced with real binaries under PS7/WinPS5; fixed complete output/exit capture and added required build-backed pre-tag fixtures, including native exit37 despite matching version text. Preparing one unpublished v4.4.4 candidate; no new tag yet (agent: codex).
 
 - 2026-11-11 — v4.4.4 local Rust 251 tests/fmt/clippy/package/dry-run/release/audit, workflow/shell/provenance, actualpaired-command PS7/WinPS5 suites, and runtime alias/JSON/ASCII checks all pass. Independent scoped review confirms no weakened guard. Hosted currentcandidate proof pending (agent: codex).
+- 2026-11-11 — Completed real full/docs qualification: corrected full main CI 43154206746 and proof 43154206867 pass; docs PR 44 CI 43154266882 and main CI 43155508207/proof 43155508130 pass with heavy work and OIDC skipped. Public v4.4.4 inventory/crate unchanged; one completion receipt, separate hardware tasks preserved (agent: codex).

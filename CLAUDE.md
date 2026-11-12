@@ -96,14 +96,15 @@ captured `NSURLErrorDomain -1005`/CloudKit connection loss while identical
 files passed other calls; the unchanged original Intel job then passed.
 No diagnostic change or further version was needed to complete v4.4.4.
 
-The publication evidence is complete; process qualification and its single
-closure receipt remain pending. The simplified CI/publisher change must pass
-its real exact-main `CI gate` plus `Full CI qualification` and the read-only
-existing-version proof before it can supersede the blocked earlier
-documentation-main run. Keep `#sec35`, `#q44`, and milestone `#v44` open until
-that evidence exists; no recursive record-PR sequence is required. Hosted
-proof does not complete personal hardware/UAC acceptance. Continue from
-[`the v4.4.4 publication handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
+Publication and process qualification are complete. PRs #42/#43 deployed the
+reviewed CI changes and passed full main validation plus the read-only
+existing-version proof. Record-only PR #44 then passed on the PR in 18 seconds
+and on main in 25 seconds, with three jobs and no native builds or installer
+tests. Registry follow-ups skipped package validation and OIDC publication.
+The single receipt in [TESTING.md](TESTING.md) closes `#cif`, `#sec35`, `#q44`,
+and milestone `#v44`. Public v4.4.4 bytes are unchanged. Personal hardware/UAC
+acceptance remains open under `#hw4`; see the
+[publication handoff](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
 
 See `TESTING.md` for the exact publication evidence.
 

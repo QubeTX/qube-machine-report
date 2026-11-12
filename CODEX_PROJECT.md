@@ -91,11 +91,12 @@ v4.4.2 draft `441328198`. None is reused or made public by this record.
   `NSURLErrorDomain -1005` connection loss while identical files passed other
   calls. The unchanged original Intel job passed, completing v4.4.4 without
   another product change or version.
-- Publication evidence is complete. The simplified process change must still
-  pass exact-main `CI gate`/`Full CI qualification` and its read-only existing-
-  version proof before superseding the blocked earlier documentation-main
-  run. Keep `#sec35`, `#q44`, and `#v44` open pending that real qualification
-  and one closure receipt. Hosted results do not close physical/UAC rows.
+- Publication and process qualification are complete; `#cif`, `#sec35`,
+  `#q44`, and `#v44` close with the single receipt in `TESTING.md`. Full main
+  CI 43154206746 and read-only proof 43154206867 passed. Documentation-only
+  PR #44 and main each passed three jobs with heavy work skipped; main CI
+  43155508207 and proof 43155508130 passed without Cargo/OIDC.
+  Public v4.4.4 bytes and separate physical/UAC tasks remain unchanged.
 - Historical complete v4.4.0 source/tag
   `f49d50a256842ac6c677d1c743c553b3dd92717f`, release `396235243`, had
   34 audited assets. CI `36084969867` attempt 2, OIDC `36084969841` attempt 2,

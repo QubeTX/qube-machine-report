@@ -8,7 +8,7 @@ Companion docs:
 - [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-11-11: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
-- [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) — current v4.4.4 publication evidence and pending documentation-closure receipts.
+- [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) — current v4.4.4 publication evidence and completed process qualification.
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — historical v4 release ledger, enforced Mac freeze, and personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
@@ -34,14 +34,15 @@ anonymous latest wrapper URLs, homepage HTTP 200, and Windows binary smokes
 passed. Both `report` and `tr300` retain the full CLI, and both Windows MSI
 editions retain the complete PolyForm license.
 
-The publication evidence is complete; process qualification and its single
-closure receipt remain pending. The simplified CI/publisher change must pass
-its real exact-main `CI gate` plus `Full CI qualification` and the read-only
-existing-version proof before it can supersede the blocked earlier
-documentation-main run. Keep `#sec35`, `#q44`, and milestone `#v44` open until
-that evidence exists; no recursive record-PR sequence is required. Hosted
-proof does not complete personal hardware/UAC acceptance. Continue from
-[`the v4.4.4 publication handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
+Publication and process qualification are complete. PRs #42/#43 deployed the
+reviewed CI changes and passed full main validation plus the read-only
+existing-version proof. Record-only PR #44 then passed on the PR in 18 seconds
+and on main in 25 seconds, with three jobs and no native builds or installer
+tests. Registry follow-ups skipped package validation and OIDC publication.
+The single receipt in [TESTING.md](TESTING.md) closes `#cif`, `#sec35`, `#q44`,
+and milestone `#v44`. Public v4.4.4 bytes are unchanged. Personal hardware/UAC
+acceptance remains open under `#hw4`; see the
+[publication handoff](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
 
 v4.4.4 fixes completed native-version verification in the managed PowerShell
 wrapper. Pre-tag CI now exercises the actual paired command payload under
