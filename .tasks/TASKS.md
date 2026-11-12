@@ -10,25 +10,25 @@
 
 ## Active
 
-- [ ] **Simplify CI and release qualification** - skip expensive builds for records-only changes, consolidate native build work, preserve publication custody, and deploy through reviewed PR/main checks (owner codex) #cif
+## Done
+
+- [x] **Simplify CI and release qualification** - documentation builds skipped, native build work consolidated, and publication custody preserved; full/docs PR/main verification complete (owner codex) (done 2026-11-11) #cif
   - [x] Implement strict scope classification and required aggregate qualification
   - [x] Consolidate native build/performance work and protect every publication consumer
   - [x] Validate locally and independently review the full workflow change
-  - [ ] Merge, verify full main CI and existing-version proof, then demonstrate docs-only CI
+  - [x] Merge, verify full main CI and existing-version proof, then demonstrate docs-only CI
 
-- [ ] **Resolve PR #35 and ship the Windows updater security fix** - v4.4.4 is public with 34 audited assets and all runtime gates passed; protected documentation qualification and closure receipts remain (owner codex) #sec35
+- [x] **Resolve PR #35 and ship the Windows updater security fix** - v4.4.4 is public with 34 audited assets and all runtime gates passed; protected full/docs qualification and closure receipts complete (owner codex) (done 2026-11-11) #sec35
   - [x] Resolve conflicts and verify trusted PowerShell launch behavior
   - [x] Pass consolidated-candidate local and exact-head hosted gates plus independent review
   - [x] Merge and verify exact-main CI and trusted-OIDC publication
   - [x] Publish the immutable release and verify public distribution
-  - [ ] Qualify the protected documentation follow-up and record completion receipts
+  - [x] Qualify the protected documentation follow-up and record completion receipts
 
-- [ ] **Audit the public v4.4.0 distribution and close the release ledger** - public byte, MSI EULA, and website audits pass; all nine post-public Windows jobs passed; only protected docs PR/main/idempotent checks remain (needs #r44) (ms #v44) (owner codex) #q44
+- [x] **Audit the public v4.4.0 distribution and close the release ledger** - public byte, MSI EULA, and website audits pass; all nine post-public Windows jobs passed; protected full/docs PR/main/idempotent checks and closure complete (needs #r44) (ms #v44) (owner codex) (done 2026-11-11) #q44
   - [x] Verify exact public asset inventory, digests, signatures, and latest-release identity
   - [x] Verify `report` and `tr300` lifecycle behavior from the published channels
-  - [ ] Record run IDs, public evidence, task closure, and final docs in a protected follow-up PR
-
-## Done
+  - [x] Record run IDs, public evidence, task closure, and final docs in a protected follow-up PR
 
 - [x] **Ship v4.4.0 through the protected release chain** - exact source `f49d50a` is published as the unyanked crate and complete 34-asset release; post-public Windows run `36087344916` passed all nine jobs (needs #v440) (ms #v44) (owner codex) (done 2026-09-24) #r44
   - [x] Merge a reviewed exact-head PR and pass all required checks

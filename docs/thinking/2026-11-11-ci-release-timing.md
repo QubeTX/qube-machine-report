@@ -68,8 +68,8 @@ success condition. Its green workflow conclusion therefore was not qualified
 publication evidence. Both marker jobs now explicitly override inherited
 skips with `always()` while still requiring successful classification, the
 exact mode, and a successful aggregate. The provenance and lightweight policy
-tests guard that condition. Full workflow qualification and a fresh actual
-documentation PR/main round trip remain required before completion.
+tests guard that condition. Full workflow qualification and the fresh actual
+documentation PR/main round trip subsequently passed, as recorded below.
 
 The first exact-main source `8d913502e8470945605f79f94c40247f382dd655`
 subsequently passed [CI 43152393942](https://github.com/QubeTX/qube-machine-report/actions/runs/43152393942):
@@ -89,12 +89,27 @@ then merged as `51cc61193aaa9494d179d6341851aeb0a52a6371`. The next record-only
 probe changes only this timing report so that the hosted system can prove its
 three-job documentation mode independently of a workflow-changing diff.
 
+Corrected main passed full CI [43154206746](https://github.com/QubeTX/qube-machine-report/actions/runs/43154206746) in
+664 seconds and read-only registry proof
+[43154206867](https://github.com/QubeTX/qube-machine-report/actions/runs/43154206867). The fresh documentation-only
+[PR #44](https://github.com/QubeTX/qube-machine-report/pull/44) passed
+[43154266882](https://github.com/QubeTX/qube-machine-report/actions/runs/43154266882) in **18 seconds**. Its merged main
+passed [43155508207](https://github.com/QubeTX/qube-machine-report/actions/runs/43155508207) in **25 seconds** and
+[43155508130](https://github.com/QubeTX/qube-machine-report/actions/runs/43155508130) proved the existing publication. Both docs runs
+allocated exactly three successful jobs with nine skipped job entries,
+including every build/installer job. The PR triggered no separate Release
+plan. Both maintenance publisher runs skipped package validation, OIDC probe,
+and fresh publication. Full CI has 15 allocated jobs versus the prior 20;
+the five combined native allocations replace thirteen separate test/build/
+performance allocations. Full elapsed speedup is not established by these
+uncontrolled samples. The policy and release bookkeeping are complete.
+
 ## Remaining bounded follow-up options
 
 1. Profile the Intel direct-PKG fixture by case before changing its assertions. Remove redundant setup and reuse read-only fixture preparation while retaining every ownership-refusal and native install oracle.
 2. Review repeated read-only builds between PR, exact-main CI, crate validation, and release. Any reuse must bind the exact source, toolchain, target, artifact identity, and digest. Keep the fresh credentialed publishers and their data-only inputs.
 3. Evaluate whether data-only archive signing and duplicate Installer-identity preflights need architecture-specific runners. The universal package builder already signs on Intel. Any change needs an architecture-decision update and native qualification; retain fresh credential isolation and both architectures’ real build/install/update acceptance. This is a proposal, not validation of a changed runner matrix.
-4. Measure the new documentation route and full-run cache behavior. Preserve its explicit classifier, required aggregate, exact-mode publication guards, and existing-version byte/source proof; broad path filters alone remain insufficient.
+4. Continue measuring full-run cache behavior; the documentation route has now been measured on both PR and main. Preserve its explicit classifier, required aggregate, exact-mode publication guards, and existing-version byte/source proof; broad path filters alone remain insufficient.
 
 Keep native Intel/ARM acceptance, installer transitions, integrity checks, and signing/notarization gates. Larger CI maintenance does not require a product version bump unless it changes a published payload or an immutable release must be fixed forward. The current security release follows the established qualified chain.
 

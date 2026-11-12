@@ -723,9 +723,10 @@ published package/artifact requires a version appropriate to its public change.
 Keep one evidence/closure record with authoritative run/PR links and a task
 receipt after real checks pass. Do not create another PR merely to record the
 prior record PR's CI. Actual incomplete gates still block completion. For the
-current campaign, `#sec35`, `#q44`, and `#v44` remain open until the process
-change has passed full exact-main CI and its existing-version proof, followed
-by the one closure receipt; this decision does not declare those results.
+current campaign, full exact-main CI and existing-version proof passed after
+PRs #42/#43; PR #44 then proved the actual documentation PR/main path. The
+single completion receipt in `TESTING.md` closes `#cif`, `#sec35`, `#q44`, and
+`#v44` using those results, without claiming personal hardware acceptance.
 
 **Failure recovery.** Inspect logs and runner-allocation/service annotations
 before changing source or bumping versions. Preserve successful native proof

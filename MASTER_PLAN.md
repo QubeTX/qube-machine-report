@@ -10,7 +10,7 @@
 Current release: immutable `v4.4.4` at
 `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release `441625880`
 became latest at `2026-11-11T12:29:18Z` with exactly 34 nonempty audited
-assets. Product publication is complete; documentation closure remains open.
+assets. Product publication, process qualification, and documentation closure are complete.
 Continue with
 [`2026-11-11-v4.4.4-security-publication.md`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md)
 and the v4.4.4 verification entry in `TESTING.md`.
@@ -50,16 +50,15 @@ CloudKit while identical-file calls returned success. The unchanged original
 Intel job passed afterward. This completed the original immutable v4.4.4
 source without merging probe-only code or cutting another version.
 
-Publication evidence is complete. The process simplification now in progress
-must qualify through the real exact-main `CI gate` and `Full CI qualification`
-plus the read-only existing-version proof before it supersedes the blocked
-earlier documentation-main run. Keep `#sec35`, `#q44`, and milestone `#v44`
-open until that evidence and one closure receipt exist. Do not create another
-PR just to record the preceding record PR's CI. Hosted release proof does not
-complete personal hardware/UAC acceptance. The website's versionless latest
-links resolve to v4.4.4; existing website and physical-hardware status remain
-unchanged. AMD64 Linux/Pi and the personal Alienware UAC update remain open
-under `#hw4`.
+Publication and process qualification are complete. PRs #42/#43 deployed the
+reviewed CI changes and passed full main validation plus the read-only
+existing-version proof. Record-only PR #44 then passed on the PR in 18 seconds
+and on main in 25 seconds, with three jobs and no native builds or installer
+tests. Registry follow-ups skipped package validation and OIDC publication.
+The single receipt in [TESTING.md](TESTING.md) closes `#cif`, `#sec35`, `#q44`,
+and milestone `#v44`. Public v4.4.4 bytes are unchanged. Personal hardware/UAC
+acceptance remains open under `#hw4`; see the
+[publication handoff](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
 
 Current process: `scripts/ci_policy.py` positively selects only the five root
 record guides (`AGENTS.md`, `CLAUDE.md`, `CODEX_PROJECT.md`, `MASTER_PLAN.md`,
@@ -73,8 +72,9 @@ attempt; registry preflight checks exclusivity. Record-only PR paths also
 skip the Release plan. Only full qualification authorizes release.
 Full CI shares tests, release builds, smokes, and applicable speed checks on
 five original platforms, preserving both native Macs and every installer/
-security boundary. The designed allocation is 15 full or three record-only
-jobs; qualification and hosted timing are pending, not presumed gains.
+security boundary. Actual full CI allocated 15 successful jobs; record-only
+PR/main CI each allocated three and took 18/25 seconds. Full-run
+elapsed speedup has not been established; see the timing audit.
 
 Local tests and review match the changed boundary. Repository docs, skills,
 CI, and evidence do not automatically create a new product version. New
@@ -86,7 +86,7 @@ before changing code or versions, and retry failed jobs/dependents on unchanged
 qualified inputs when justified.
 
 Tag status (2026-11-11):
-- `v4.4.4` (`9f5110a3e8665f5fa2eb2e1744778c8025dc241f`): tagged/pushed after exact-main CI and OIDC; Release43007443270 created24 assets, Windows43015387367 assembled30, private43015777726 attested16/16, Mac43015387253 solely published34 and completed12/12, and publicWindows43030855472 passed9/9. Public bytes and latest entrypoints pass. Process-change full main CI, existing-version proof, and the single closure receipt remain pending.
+- `v4.4.4` (`9f5110a3e8665f5fa2eb2e1744778c8025dc241f`): tagged/pushed after exact-main CI and OIDC; Release43007443270 created24 assets, Windows43015387367 assembled30, private43015777726 attested16/16, Mac43015387253 solely published34 and completed12/12, and publicWindows43030855472 passed9/9. Public bytes and latest entrypoints pass. Full/documentation process qualification, existing-version proofs, and the single closure receipt are complete; see TESTING.md.
 
 Historical v4.4.0 baseline: immutable source/tag
 `f49d50a256842ac6c677d1c743c553b3dd92717f`, public release `396235243`,
