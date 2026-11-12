@@ -6,9 +6,9 @@ name: CI
 # Jobs:
 #   fmt        — cargo fmt --check (Linux only; rustfmt is platform-agnostic)
 #   clippy     — cargo clippy --all-targets -- -D warnings (Linux only)
-#   test       — cargo test --workspace (Linux glibc + macOS ARM + Windows)
-#   build      — cargo build --release smoke test on every supported target
-#   speed      — measure tr300 --fast median wall-clock; fail above 1500 ms
+#   classify   — fail-closed records-only scope; cheap policy regression checks
+#   test       — five native test/build legs; reuse release binary for speed
+#   ci-gate    — stable required check; rejects failed/cancelled/unexpected skips
 #   audit      — cargo-audit (blocking dependency-advisory gate)
 #   dist-plan  — verify cargo-dist plan parses (catches dist config errors before tagging)
 #   release-bootstrap-windows — exercise the exact pinned Windows dist bootstrap
@@ -18,6 +18,9 @@ on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -29,7 +32,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify:
+    name: Classify and validate CI scope
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exercise classification and aggregate rejection cases
+        run: python3 scripts/test_ci_policy.py
+      - name: Classify the verified event range
+        id: scope
+        run: python3 scripts/ci_policy.py classify
+
   release-bootstrap-windows:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Windows release bootstrap
     runs-on: windows-2022
     steps:
@@ -41,6 +62,8 @@ jobs:
         run: ./scripts/install-pinned-cargo-dist.ps1
 
   fmt:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Format
     runs-on: ubuntu-latest
     steps:
@@ -53,6 +76,8 @@ jobs:
       - run: cargo fmt --all -- --check
 
   clippy:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Clippy
     runs-on: ubuntu-latest
     steps:
@@ -66,6 +91,8 @@ jobs:
       - run: cargo clippy --locked --all-targets --workspace -- -D warnings
 
   test:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -74,14 +101,19 @@ jobs:
         include:
           - os: ubuntu-latest
             name: "Linux x86_64 glibc"
+            benchmark: true
           - os: ubuntu-22.04-arm
             name: "Linux ARM64 glibc"
+            benchmark: false
           - os: macos-15
             name: "macOS ARM (Apple Silicon)"
+            benchmark: true
           - os: macos-15-intel
             name: "macOS Intel"
+            benchmark: false
           - os: windows-latest
             name: "Windows x86_64"
+            benchmark: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -89,6 +121,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --locked --workspace --all-targets
+      - run: cargo build --locked --release --workspace
+      - name: Smoke both commands and measure the existing release binary
+        env:
+          CI_BENCHMARK: ${{ matrix.benchmark }}
+        shell: bash
+        run: python scripts/check-ci-binaries.py
       - name: Validate managed shell checksum enforcement on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -920,126 +958,9 @@ jobs:
           python3 scripts/test-release-workflow-provenance.py
           --apple-staging-compatibility
 
-  build:
-    name: Release Build (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: "Linux x86_64 glibc"
-          - os: ubuntu-22.04-arm
-            name: "Linux ARM64 glibc"
-          - os: macos-15
-            name: "macOS ARM (Apple Silicon)"
-          - os: macos-15-intel
-            name: "macOS Intel"
-          - os: windows-latest
-            name: "Windows x86_64"
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - run: cargo build --locked --release --workspace
-      - name: Smoke test (--version)
-        shell: bash
-        run: |
-          BIN="./target/release/tr300"
-          [ "${{ runner.os }}" = "Windows" ] && BIN="./target/release/tr300.exe"
-          "$BIN" --version
-          "$BIN" --fast --json | head -5
-
-  speed:
-    name: Auto-run speed (${{ matrix.name }})
-    needs: build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: "Linux"
-            budget_ms: 1500
-          - os: macos-latest
-            name: "macOS ARM"
-            budget_ms: 1500
-          - os: windows-latest
-            name: "Windows"
-            budget_ms: 1500
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - run: cargo build --locked --release --bin tr300
-
-      - name: Time tr300 --fast (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          BIN="./target/release/tr300"
-          # Warm-up
-          "$BIN" --fast >/dev/null
-          # 5 timed runs
-          times=()
-          for i in 1 2 3 4 5; do
-            start=$(date +%s%N)
-            "$BIN" --fast >/dev/null
-            end=$(date +%s%N)
-            elapsed=$(( (end - start) / 1000000 ))
-            times+=("$elapsed")
-            echo "Run $i: ${elapsed}ms"
-          done
-          median=$(printf '%s\n' "${times[@]}" | sort -n | sed -n '3p')
-          budget_ms="${{ matrix.budget_ms }}"
-          echo "Median: ${median}ms"
-          {
-            echo "## tr300 --fast on ${{ matrix.name }}"
-            echo ""
-            echo "Runs: ${times[*]} (ms)"
-            echo "Median: **${median}ms** (budget: ${{ matrix.budget_ms }}ms)"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if (( median > budget_ms )); then
-            echo "::error::--fast median ${median}ms exceeds ${{ matrix.budget_ms }}ms budget"
-            exit 1
-          fi
-
-      - name: Time tr300 --fast (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $bin = ".\target\release\tr300.exe"
-          # Warm-up
-          & $bin --fast | Out-Null
-          # 5 timed runs
-          $times = @()
-          for ($i = 1; $i -le 5; $i++) {
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            & $bin --fast | Out-Null
-            $sw.Stop()
-            $elapsed = [int]$sw.Elapsed.TotalMilliseconds
-            $times += $elapsed
-            Write-Host "Run $i`: ${elapsed}ms"
-          }
-          $sorted = $times | Sort-Object
-          $median = $sorted[2]
-          Write-Host "Median: ${median}ms"
-          $summary = @"
-          ## tr300 --fast on ${{ matrix.name }}
-
-          Runs: $($times -join ', ') (ms)
-          Median: **${median}ms** (budget: ${{ matrix.budget_ms }}ms)
-          "@
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
-          if ($median -gt ${{ matrix.budget_ms }}) {
-            Write-Error "--fast median ${median}ms exceeds ${{ matrix.budget_ms }}ms budget"
-            exit 1
-          }
-
   audit:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Security audit
     runs-on: ubuntu-latest
     steps:
@@ -1064,6 +985,8 @@ jobs:
       - run: cargo audit
 
   dist-plan:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: cargo-dist plan
     runs-on: ubuntu-latest
     steps:
@@ -1100,6 +1023,8 @@ jobs:
           python3 scripts/check-dist-runners.py dist-plan.json
 
   workflow-validation:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Workflow and shell validation
     runs-on: ubuntu-latest
     steps:
@@ -1398,6 +1323,8 @@ jobs:
           grep -Fq 'ConflictingMsiDisplayName' inno/corporate.iss
 
   windows-installer-sources:
+    needs: classify
+    if: needs.classify.outputs.mode == 'full'
     name: Windows installer source gate
     runs-on: windows-2022
     steps:
@@ -1808,3 +1735,33 @@ jobs:
             }
           }
           Remove-Item -LiteralPath $cargoBinary, $receipt -Force
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs: [classify, release-bootstrap-windows, fmt, clippy, test, audit, dist-plan, workflow-validation, windows-installer-sources]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Require the exact successful or intentionally skipped job set
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_policy.py gate
+
+  full-proof:
+    name: Full CI qualification
+    needs: [classify, ci-gate]
+    if: needs.classify.outputs.mode == 'full' && needs.ci-gate.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'All native test/build, performance, installer and security gates passed.'
+
+  docs-proof:
+    name: Documentation CI qualification
+    needs: [classify, ci-gate]
+    if: needs.classify.outputs.mode == 'docs' && needs.ci-gate.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Records-only validation passed; this does not authorize a release.'

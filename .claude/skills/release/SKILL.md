@@ -1,13 +1,28 @@
 ---
 name: release
-description: Cut a TR-300 release end-to-end — from a reviewed main-branch commit through crates.io publication and the private-draft GitHub Release chain. Use whenever the user asks to ship, release, deploy, cut a release, tag a release, publish a version, push a version bump to crates.io, or watch a release CI run. Also use when fixing a CI or release workflow failure during an in-flight release. Encodes the full ordered workflow: pre-release local gates, version bump in lockstep across the documentation set, reviewed PR merge → exact-main CI → automatic OIDC crates publication → tag push → private 24-asset draft → Windows 30-asset assembly and acceptance → macOS 34-asset final publication → post-public smokes → fix-forward loop on failure. Trigger on phrases like "ship v3.14.4", "let's release", "cut the release", "deploy this", "tag and release", "release time", or just "deploy" / "ship it" in this repo's context, even when the user doesn't name a version number.
+description: "Cut a TR-300 release end-to-end — from a reviewed main-branch commit through crates.io publication and the private-draft GitHub Release chain. Use whenever the user asks to ship, release, deploy, cut a release, tag a release, publish a version, push a version bump to crates.io, or watch a release CI run. Also use when fixing a CI or release workflow failure during an in-flight release. Classifies record-only maintenance separately from a new published version; preserves the full release workflow: focused local gates, reviewed PR merge → exact-main CI → automatic OIDC crates publication → tag push → private 24-asset draft → Windows 30-asset assembly and acceptance → macOS 34-asset final publication → post-public smokes → fix-forward loop on failure. Trigger on phrases like \"ship v3.14.4\", \"let's release\", \"cut the release\", \"deploy this\", \"tag and release\", \"release time\", or just \"deploy\" / \"ship it\" in this repo's context, even when the user doesn't name a version number."
 ---
 
 # TR-300 release workflow
 
-Drive a TR-300 release from version-bump through published GitHub Release + crates.io, watching CI at each step and fixing forward when something fails. The canonical source-of-truth for these rules lives in [`AGENTS.md` § "Release checklist"](../../../AGENTS.md) and [`CLAUDE.md` § "Release Process"](../../../CLAUDE.md). This skill encodes the reconciled workflow plus the watch-and-fix-forward loop, so an agent can drive a release with only the user's go-ahead.
+Use the light record-only path for publication records and the full path when publishing new package or installer bytes. Diagnose failures before deciding whether any product change or new version is needed. The canonical source-of-truth for these rules lives in [`AGENTS.md` § "Release checklist"](../../../AGENTS.md) and [`AGENTS.md` § "Release Process"](../../../AGENTS.md). This skill encodes the reconciled workflow plus the watch-and-fix-forward loop, so an agent can drive a release with only the user's go-ahead.
 
-The workflow is twelve ordered steps. Skipping or reordering them tends to fail in non-obvious ways — the pitfalls in § 14 are real failures that shipped at some point.
+The package/tag/private/native/public ordering below applies to a new release.
+Repository documentation and infrastructure maintenance do not automatically
+create a release. The canonical classifier is [`scripts/ci_policy.py`](../../../scripts/ci_policy.py):
+its positive record-only allowlist is the root `AGENTS.md`, `CLAUDE.md`,
+`CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md`, plus Markdown beneath
+`docs/` and `.tasks/`. Any other path selects full CI, including README,
+license/man/changelog files, `.agents`/`.claude` skills, workflows, scripts,
+package inputs, and unknown paths. Missing or ambiguous diff evidence selects
+full CI. Check both old and new paths of a rename; executable records,
+symlinks/submodules, or unsupported file modes also select full.
+
+`CI gate` validates the classifier and heavy-job results. Only after it
+succeeds does exactly one mode marker run: `Full CI qualification` or
+`Documentation CI qualification`; the other is skipped. Only the full marker can authorize a new crate, tag,
+release asset, or native publication. Do not interpret a green documentation
+run as release qualification.
 
 ---
 
@@ -17,56 +32,70 @@ Before starting, confirm:
 
 - Working tree clean on a focused release branch based on current `main`.
 - All feature work for the version you're about to cut is already committed.
-- MSRV is unchanged — OR — both `Cargo.toml` `rust-version` and `rust-toolchain.toml` `channel` were bumped in the same earlier commit. This is the MSRV lockstep rule from [`CLAUDE.md` § "MSRV policy"](../../../CLAUDE.md). Touching one without the other will break either `ci.yml` (rustfmt/clippy missing) or `release.yml` (rustc older than required).
+- MSRV is unchanged — OR — both `Cargo.toml` `rust-version` and `rust-toolchain.toml` `channel` were bumped in the same earlier commit. This is the MSRV lockstep rule from [`AGENTS.md` § "MSRV policy"](../../../AGENTS.md). Touching one without the other will break either `ci.yml` (rustfmt/clippy missing) or `release.yml` (rustc older than required).
 - `gh` CLI is authenticated for this repo (`gh auth status`).
 
 You'll never use `--no-verify`, `--no-gpg-sign`, or `git push --tags` anywhere in this workflow. If a pre-commit hook fails, fix the underlying issue and create a new commit — never amend after a hook failure (the commit didn't actually happen, so amend would touch the previous commit).
 
 ---
 
-## § 2 Pick the version bump
+## § 2 Decide whether a published version changes
 
-| Bump | When | Example from history |
-|---|---|---|
-| Major (`X.Y.Z → (X+1).0.0`) | Public Rust source compatibility breaks even if CLI/JSON remain compatible | v3.17.0 → v4.0.0 (public records gained fields/signatures changed) |
-| Minor (`X.Y.0 → X.(Y+1).0`) | New user-visible flags, fields, behavior, or surface | v3.13.1 → v3.14.0 (positional `update`/`install`/`uninstall` actions) |
-| Patch (`X.Y.Z → X.Y.(Z+1)`) | Accuracy fixes, release-infra fixes, doc-only releases | v3.13.0 → v3.13.1 (`rust-toolchain.toml` MSRV pin) |
+Keep the version for record-only documentation and repository infrastructure
+maintenance unless a new published package or distribution artifact is needed.
+Workflow, skill, CI, or evidence updates are not themselves a product release.
+A full CI classification means broad verification, not an automatic version bump.
 
-If the user said "patch bump" / "minor bump" explicitly, follow their direction. Otherwise propose the bump that matches the diff and ask if there's any reason it should be different.
+For an authorized new release, choose the bump from the resulting public change:
 
----
+| Bump | When |
+|---|---|
+| Major | Public Rust source compatibility breaks |
+| Minor | New public fields, flags, behavior, or API surface |
+| Patch | A fix that must reach new published package or installer bytes |
 
-## § 3 Bump `Cargo.toml`
+Follow an explicit user version request. Otherwise use the smallest correct
+bump and keep pre-tag corrections in that candidate. Immutable published
+versions, tags, and assets are never moved, replaced, or reused.
 
-Update `version = "X.Y.Z"` in `Cargo.toml`. Single edit.
+## § 3 Update package metadata only for that new version
 
----
+When publishing a new version, update `Cargo.toml`, its `Cargo.lock` package
+entry, generated man-page versions, and affected release documentation in
+lockstep. For unchanged-version repository maintenance, leave those version
+fields unchanged and continue to the applicable CI path.
 
 ## § 4 Update the documentation set
 
-The reconciled canonical list is ten files. The first three are mandatory on any user-visible release. Files 4–8 update when the noted condition applies. Files 9–10 are host-specific.
+Update the affected reader-facing documents once. A new product release updates both changelogs and its verification record; record-only or infrastructure maintenance does not require a new release-note/version section or edits to every guide. The list below is a routing guide, not a mandatory per-PR ceremony.
 
 | # | File | What goes in |
 |---|---|---|
 | 1 | `CHANGELOG.md` | Prepend a `## [X.Y.Z] - YYYY-MM-DD` block at the top of the file (above `[Unreleased]` if present, or replacing the `Unreleased` heading). Keep-a-Changelog voice: grouped under `### Added` / `### Changed` / `### Fixed` / `### Internal`. Reference task IDs in parens for traceability. Match the voice of the most recent entry — read it first. |
-| 1b | `HUMAN_CHANGELOG.md` | Mirror the same release block in plain English — same `## [X.Y.Z] - YYYY-MM-DD` header and date, same `### Added` / `### Changed` / `### Fixed` / `### Internal` groupings. Strip CI run IDs, commit SHAs, error codes, function and API names, registry paths, file paths, GUIDs, line counts, memory deltas, task IDs, and dependency identifiers. Keep platform names, edition names (Global / Corporate), installer types, the command names and flags users actually type, and what the user-facing benefit is. One short paragraph per change. See `CLAUDE.md` § "HUMAN_CHANGELOG.md (companion changelog)" for the full strip/keep rules. **Never update `CHANGELOG.md` without also updating this file in the same commit.** |
+| 1b | `HUMAN_CHANGELOG.md` | Mirror the same release/date/groupings in plain English. Strip run IDs, SHAs, APIs, paths, GUIDs, task IDs, and dependency identifiers; keep user commands, platforms/installers, behavior, and benefit. Never update only one changelog. |
 | 2 | `README.md` | Update flag tables, install snippets, or sample output if anything user-visible changed. Skip if release is purely internal. |
 | 3 | `TESTING.md` | Append a `### vX.Y.Z — YYYY-MM-DD` block to the "Per-release verification log" listing local gates that passed, runtime smoke results, and the CI/crates-publish/release.yml run IDs (the IDs come after pushing — fill them in during step 12). Match the format of the most recent entry. |
 | 4 | `CODEX_PROJECT.md` | Only if release/install/update/deployment behavior changed. Otherwise skip. |
-| 5 | `AGENTS.md` | Bump the "Last verified against source" date. Update any drifted fact (current version line, MSRV, dependency versions). |
+| 5 | `AGENTS.md` | Update current facts or operating guidance when they changed. |
 | 6 | `CLAUDE.md` | Add architectural notes for any new pattern introduced this release. Cite source URLs inline (man pages, Apple docs, Microsoft Learn). Skip if no new pattern. |
 | 7 | `MASTER_PLAN.md` | Bump "Last updated" and "Current version" lines. Append or update the "Tag status" bulleted entry **after** the release publishes (the run IDs and asset count come from the actual published runs in step 12). |
 | 8 | `docs/architecture-decisions.md` | Only when rationale or release workflow itself changes. Skip otherwise. |
-| 9 | `/Users/realemmetts/.codex/AGENTS.md` | Only when repo deployment workflow changes AND the path exists on the current host. This is the original macOS author's global Codex guide; Windows hosts silently skip. Check `Test-Path` (or `test -f`) before editing. |
-| 10 | Auto-memory at `~/.claude/projects/<host-flavored-path>/memory/` | Host-specific and optional. `MASTER_PLAN.md` § 0 says: "Don't recreate it on other machines — `CLAUDE.md` is authoritative." Never block a release on this. |
+| 9 | Host-specific guides or memory | Optional only within the user-authorized scope; never a release prerequisite. |
 
-Why so many files: TR-300's docs are organized around different reader audiences (agents, contributors, users, future-you-on-a-fresh-machine) and the project has chosen redundancy over a single source. The release commit is the natural moment to flush updates across all of them so they don't drift.
+Keep the detailed proof in `TESTING.md` and one handoff; other guides should summarize current state and link to that proof rather than requiring further PRs to restate each other.
 
 ---
 
 ## § 5 Run the local release gates
 
-Run these in order. Each must pass before moving on. If any fails, fix and re-run from the start — don't push known-failing code and expect CI to be the gate.
+Choose local checks from the changed behavior. Record-only Markdown needs
+content/link/encoding review, `git diff --check`, and classifier tests when its
+policy changed; it does not need a Rust build or installer run. Code, workflow,
+package, or release changes need their relevant focused tests and independent
+review. A new product release requires the full applicable checks below and
+hosted native proof. Reuse completed checks for an unchanged exact input;
+repeat failed or affected checks and their dependents after a correction,
+not unrelated successful work merely to restart a checklist.
 
 ```bash
 cargo fmt --all -- --check
@@ -144,8 +173,9 @@ the tag-only cargo-dist build matrix, execute the exact named release-staging
 block for both Apple targets, and execute all three exact macOS-installer
 inventory snippets against clean, missing, extra, empty, directory, and symlink
 fixtures. It must retain fail-closed negatives for bad sidecars and linked
-archive members. These are steps inside the existing matrix legs; the strict CI
-inventory remains 20 jobs.
+archive members. These remain steps inside the two native Mac legs of the full five-platform
+CI matrix. Consolidation shares each platform's tests, release build, smokes,
+and applicable speed check on one runner; it does not remove native proof.
 
 Then runtime smoke on the freshly-built binary:
 
@@ -169,21 +199,18 @@ Why both `cargo package --locked --list` and `cargo publish --dry-run --locked` 
 
 ---
 
-## § 6 Codex review and protected PR
+## § 6 Focused independent review and protected PR
 
-For non-trivial diffs (cross-platform `unsafe` code, workflow YAML changes, anything you'd want a second pair of eyes on), invoke Codex review:
+Self-review the diff and seek a focused independent review for security,
+unsafe/platform code, package, or workflow changes. Give the reviewer the
+changed boundary, expected behavior, and relevant evidence. One useful review
+is enough unless new findings or changes justify another pass; no particular
+agent product, model, tool name, plan-mode UI, or multi-PR sequence is required.
+Record-only updates need proportionate content and evidence review.
 
-```
-Agent tool with subagent_type: "codex:codex-rescue"
-```
-
-For release commits this starts with a self-review of the diff. Open a focused
-feature/release PR and run the full review path for any non-trivial code,
-workflow, dependency, installer, or platform change. Merge only a reviewed
-exact commit whose required checks are green and whose review threads are
-resolved.
-
----
+Merge only a focused, reviewed exact commit whose required checks are green
+and whose actionable review threads are resolved. Keep normal hooks and
+signing enabled.
 
 ## § 7 Commit, push the release branch, and merge the protected PR
 
@@ -192,19 +219,6 @@ Commit:
 ```bash
 git add <specific files>   # avoid `git add -A` — sensitive files have slipped in this way
 git commit -m "release: vX.Y.Z - <one-line summary>"
-```
-
-For multi-line bodies, use a HEREDOC so the formatting survives:
-
-```bash
-git commit -m "$(cat <<'EOF'
-release: vX.Y.Z - <one-line summary>
-
-<longer body if needed>
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
 ```
 
 Then push the focused branch, open the PR, and wait for every required exact-head
@@ -231,25 +245,34 @@ gh run list --branch main --limit 5
 gh run watch <run-id>
 ```
 
-Green means all of these passed:
-- `fmt` (cargo fmt --check on Linux)
-- `clippy` (cargo clippy -D warnings on Linux)
-- `test` (Linux AMD64/ARM64, native macOS ARM/Intel, and Windows; both native
-  Mac legs also execute the exact Apple staging and system-Bash-3.2 syntax
-  compatibility fixture)
-- `build` (release build smoke on those same five platform runners)
-- `speed` (5-run median of `tr300 --fast` < 1500 ms on all three platforms)
-- `audit` (cargo audit, blocking)
-- `dist-plan` (cargo-dist config parses)
-- `release-bootstrap-windows` (the exact pinned Windows cargo-dist bootstrap
-  installs and verifies on Windows Server 2022)
-- `workflow-validation` (actionlint, ShellCheck, executable provenance, managed
-  transaction, and macOS preinstall/package-lifecycle guards)
-- `windows-installer-sources` (managed PowerShell transaction plus both WiX and
-  Inno source/transition gates)
+For a new release, require `CI gate` and `Full CI qualification` successful
+from the exact same run and current attempt; `Documentation CI qualification`
+must be skipped. The full path retains fmt, clippy, fresh advisory audit,
+validated actual cargo-dist plan, executable workflow/provenance fixtures,
+Windows bootstrap and both installer engines, and five platform legs:
 
-That is the strict 20-job inventory for the current workflow. Do not treat a
-subset or a still-running matrix leg as a green gate.
+- Linux x86_64 glibc (`ubuntu-latest`)
+- Linux ARM64 glibc (`ubuntu-22.04-arm`)
+- macOS ARM (`macos-15`)
+- macOS Intel (`macos-15-intel`)
+- Windows x86_64 (`windows-latest`)
+
+Each leg runs locked all-target tests, its release build, and runtime smokes
+on the same runner. Linux x86_64, macOS ARM, and Windows retain one warmup plus
+five measured fast runs with the 1500 ms median limit, before expensive native
+fixtures. Both Mac legs retain system-Bash-3.2 compatibility and native PKG
+fixtures. The old 13 separate test/build/speed allocations become five
+platform legs, removing eight duplicate allocations. The historical 20-job
+CI count is not itself an acceptance rule.
+The designed allocation is 12 heavy jobs plus classifier, stable gate, and full
+marker (15 total); record-only mode allocates classifier, stable gate, and docs
+marker (three). These are workflow structure counts, not measured speed claims.
+
+A record-only follow-up instead needs `CI gate` and only
+`Documentation CI qualification`. The Release workflow also ignores those
+exact allowlisted PR paths, so a pure record PR does not schedule its plan job;
+main/tag qualification and real release inputs retain their full checks. It does not execute the expensive Rust,
+packaging, native lifecycle, or audit-tool jobs and cannot authorize a release.
 
 If any job fails:
 
@@ -266,8 +289,14 @@ See § 13 for the fix-forward loop.
 ## § 9 Observe automatic crate publication through trusted OIDC
 
 `crates-publish.yml` starts automatically on a same-repository push to `main`.
-Its registry-uncredentialed validator waits for that exact SHA's `CI` push run to pass,
-then the fresh publisher publishes the tested SHA. There is no normal manual
+A read-only preflight waits for that exact SHA's current `CI` attempt and
+checks the stable gate plus exclusive qualification marker. Documentation mode
+can only prove the existing unyanked version using public checksum/download,
+VCS/trusted-publisher metadata, immutable tag ancestry, and unchanged packaged
+Git inputs. It performs no Cargo compilation, packaging, dry-run, OIDC, or
+registry publication. Full maintenance with those same unchanged inputs may
+use that existing-version path too. Otherwise only full CI may enter the
+existing exact-package validator and fresh publisher. There is no normal manual
 publication step:
 
 ```bash
@@ -284,9 +313,10 @@ mints a short-lived token, publishes, and verifies the public checksum plus
 crates.io trusted-publisher provenance for this repository, run, and SHA. The
 crate must already enforce `trustpub_only=true`.
 
-Two acceptable outcomes are an exact trusted publication or an idempotent
-existing-version proof whose public bytes match the independently reproduced
-historical tag package. Any mismatch or ambiguous registry result fails closed.
+Two acceptable outcomes are an exact trusted new publication after full CI,
+or a read-only/idempotent existing-version proof against the immutable
+historical tag and public bytes. Documentation qualification can reach only
+the latter, never the fresh publisher. Any mismatch or ambiguous registry result fails closed.
 
 A **failed** run halts the release. Diagnose with `gh run view <run-id> --log-failed`. Common failures:
 - exact `main`/CI/package custody changed before OIDC;
@@ -314,7 +344,7 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-**Never** `git push --tags`. The explicit single-tag push is the documented trigger for `release.yml`; a broad `--tags` push can drag stale tags along and is one of the destructive operations called out in [`CLAUDE.md`](../../../CLAUDE.md).
+**Never** `git push --tags`. The explicit single-tag push is the documented trigger for `release.yml`; a broad `--tags` push can drag stale tags along and is one of the destructive operations called out in [`AGENTS.md`](../../../AGENTS.md).
 
 The tag name has a `v` prefix (`v3.14.4`), but the cargo version is bare
 (`3.14.4`). TR-300 supports only exact stable `vX.Y.Z` tags: no prerelease
@@ -401,51 +431,23 @@ If `release.yml` fails, you can't re-tag (tags are immutable). See § 13 for the
 
 ---
 
-## § 12 Append post-release verification log entries
+## § 12 Record evidence and close once
 
-After the GitHub Release publishes successfully, collect:
-- `main` CI run ID (from § 8)
-- crates-publish run ID (from § 9)
-- release.yml run ID (from § 11)
-- windows-installers.yml run ID
-- private windows-installer-validation.yml run ID and exact proof artifact
-- macos-installer.yml run ID, including native Intel/Apple Silicon lifecycle results
-- post-public windows-installer-validation.yml updater-smoke run ID
-- both Apple `Accepted` results and public macOS signature/checksum evidence
-- GitHub Release asset count (should be 34 for v4.2.0+)
+After public gates pass, record the release source/tag, exact PR/main CI and
+crate results, Release/Windows/private/native/public run attempts, immutable
+proof IDs/digests, 34-asset byte audit, and relevant runtime smokes in
+`TESTING.md` plus one handoff. Summarize current status in `MASTER_PLAN.md`
+and update only affected guides. Never mark an unrun gate complete.
 
-Then update two files:
-
-**`TESTING.md`** — append a new `### vX.Y.Z — YYYY-MM-DD` block to the "Per-release verification log" section. Match the format of the most recent entry. Include:
-- One-paragraph summary of what shipped
-- Local gates pass note (the cargo commands from § 5)
-- Runtime smoke results
-- "**CI verification** — `main` CI run <id> passed..."
-- "**Crates.io verification** — crates-publish run <id> published `tr300` X.Y.Z..."
-- "**Release verification** — release.yml run <id> created the private 24-asset draft, windows-installers.yml run <id> assembled 30 assets, private windows-installer-validation.yml run <id> attested the exact draft bytes, macos-installer.yml run <id> passed both native Apple gates and published the exact 34-asset release, and public windows-installer-validation.yml run <id> passed updater smokes"
-
-**`MASTER_PLAN.md`** — locate the "Tag status (as of YYYY-MM-DD)" bulleted list and append a new entry for `vX.Y.Z`:
-```
-- `vX.Y.Z` (`<commit-sha>`): tagged + pushed after exact-main CI and automatic trusted-OIDC crates publication; release.yml run <id> created the private 24-asset draft after fresh Apple signing/notary gates; windows-installers.yml run <id> assembled the exact 30-asset draft; private windows-installer-validation.yml run <id> attested those bytes and passed direct prior-to-candidate transitions while public latest remained prior; macos-installer.yml run <id> added the four direct-PKG/compatibility-DMG assets and solely published the exact 34-asset release; public windows-installer-validation.yml run <id> and published Linux/macOS smokes passed.
-```
-
-Also bump the "Last updated" and "Current version" lines at the top of `MASTER_PLAN.md`.
-
-Then commit and push these doc updates as a follow-up:
-
-```bash
-git add CHANGELOG.md TESTING.md MASTER_PLAN.md   # whichever you touched
-git commit -m "docs: record vX.Y.Z publication status"
-git push -u origin <docs-branch>
-# open/merge a protected docs PR
-```
-
-The follow-up PR must still pass `ci.yml`. Its merge triggers the automatic
-crates workflow, which must cleanly prove and skip the already-published version.
-
-The release is now complete.
-
----
+Use one protected evidence/closure update. Its allowlisted record-only paths
+use documentation CI and the read-only existing-version proof; no new version,
+installer campaign, or repeated product release is needed. Record that
+follow-up's actual checks through its PR/check links and the task receipt.
+Do not open another PR merely to record the previous record PR's own CI, then
+repeat that cycle. Task/milestone completion still waits for the required
+checks and real evidence, including any specifically pending process-change
+qualification. Ordinary independent review, branch protection, and exact-input
+checks remain in force.
 
 ## § 13 Fix-forward loop
 
@@ -473,11 +475,17 @@ validation, or macOS finalization fails non-transiently after the tag is
 pushed:
 
 1. `gh run view <run-id> --log-failed` to diagnose.
-2. Fix the issue and **bump the version as a patch** (`vX.Y.Z → vX.Y.(Z+1)`).
-3. Go back to § 3 and run the workflow again for the patch version.
+2. Establish whether a product/package/artifact correction is required. If
+   published bytes need changing, fix forward with a new patch after the full
+   candidate gates. Keep the existing tag/assets immutable.
+3. Repository-only infrastructure or evidence maintenance does not
+   automatically bump the product version. Qualify that change through full
+   CI where required and preserve all exact-source/custody constraints; do not
+   run unqualified newer workflow code against an older tag.
 
-If a post-public updater or Linux/macOS smoke fails, treat the visible release
-as an incident and fix forward with a patch. Never delete or move the tag,
+If a post-public smoke exposes a reproducible product defect, treat it as an
+incident and publish the validated correction as a new version. Diagnose a
+service or capacity failure before deciding that the product is defective. Never delete or move the tag,
 replace published assets, or manually toggle draft visibility to work around a
 failed chain stage.
 
@@ -487,7 +495,14 @@ The canonical example is v3.13.0 → v3.13.1: v3.13.0's `release.yml` failed bec
 
 ### When CI is flaky vs broken
 
-If a run fails for what looks like a transient reason (network blip, GitHub Actions queue, crates.io API hiccup), `gh run rerun <run-id>` is the lightweight retry. If the rerun also fails with the same error, treat it as a real bug and fix-forward.
+Read the failed job's logs and annotations first. Distinguish a runner that
+never received an assignment, a service/network failure with unchanged bytes,
+and a reproducible product or workflow defect. Preserve successful native
+proof and retry only the failed job and required dependents using the same
+immutable source/artifacts (for example `gh run rerun <run-id> --failed`).
+Repeated capacity or Apple ticket-service errors are not proof that a new
+product version fixes anything. Capture targeted diagnostics before changing
+code; never skip signature, notarization, native lifecycle, or public gates.
 
 ---
 
@@ -541,7 +556,7 @@ These have all bitten previous releases. They're the load-bearing why-not-this-i
 
 When a step is ambiguous or this skill seems out of date, the canonical sources are:
 
-- **[`AGENTS.md` § "Release checklist"](../../../AGENTS.md)** — the canonical ordered procedure with the full 10-file doc list.
+- **[`AGENTS.md` § "Release checklist"](../../../AGENTS.md)** — the canonical release ordering and proportionate documentation routing.
 - **[`CLAUDE.md` § "Release Process"](../../../CLAUDE.md)** + **§ "MSRV policy"** — same procedure plus the MSRV lockstep rule with rationale.
 - **[`MASTER_PLAN.md` § "Status snapshot"](../../../MASTER_PLAN.md)** — historical ledger of what's shipped, the recommended-next-steps queue, and the v3.13.1 narrative that shows fix-forward by patch.
 

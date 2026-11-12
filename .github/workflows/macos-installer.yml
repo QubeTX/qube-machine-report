@@ -3368,6 +3368,65 @@ jobs:
               ' "$work_directory/ci-runs.json"
           )
           [[ ${#ci_runs[@]} -eq 1 && "${ci_runs[0]}" =~ ^[1-9][0-9]*$ ]]
+          CI_PROOF_REPOSITORY=$REPOSITORY
+          # Require full native qualification from this exact current CI attempt.
+          ci_proof="$RUNNER_TEMP/full-ci-qualification"
+          gh api "repos/$CI_PROOF_REPOSITORY/actions/runs/${ci_runs[0]}" > "$ci_proof-before.json"
+          ci_attempt=$(python3 - "$ci_proof-before.json" "${ci_runs[0]}" "$workflow_id" "$CI_PROOF_REPOSITORY" "$source_sha" <<'PY'
+          import json, sys
+          from pathlib import Path
+          run = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          expected = {"id": int(sys.argv[2]), "workflow_id": int(sys.argv[3]), "name": "CI",
+                      "path": ".github/workflows/ci.yml", "event": "push",
+                      "status": "completed", "conclusion": "success",
+                      "head_branch": "main", "head_sha": sys.argv[5]}
+          if any(run.get(key) != value for key, value in expected.items()) or any(
+              run.get(key, {}).get("full_name") != sys.argv[4]
+              for key in ("repository", "head_repository")
+          ):
+              raise SystemExit("CI run identity or result changed before qualification")
+          attempt = run.get("run_attempt")
+          if type(attempt) is not int or attempt < 1:
+              raise SystemExit("CI run has no valid current attempt")
+          print(attempt)
+          PY
+          )
+          gh api --paginate --slurp "repos/$CI_PROOF_REPOSITORY/actions/runs/${ci_runs[0]}/attempts/$ci_attempt/jobs?per_page=100" > "$ci_proof-jobs.json"
+          gh api "repos/$CI_PROOF_REPOSITORY/actions/runs/${ci_runs[0]}" > "$ci_proof-after.json"
+          python3 - "$ci_proof-before.json" "$ci_proof-after.json" "$ci_proof-jobs.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          before, after, pages = [json.loads(Path(path).read_text(encoding="utf-8")) for path in sys.argv[1:]]
+          identity = ("id", "workflow_id", "name", "path", "event", "status", "conclusion",
+                      "head_branch", "head_sha", "run_attempt")
+          if any(before.get(key) != after.get(key) for key in identity) or any(
+              before.get(key, {}).get("full_name") != after.get(key, {}).get("full_name")
+              for key in ("repository", "head_repository")
+          ):
+              raise SystemExit("CI run changed while reading qualification jobs")
+          if not isinstance(pages, list) or not pages or any(
+              not isinstance(page, dict) or not isinstance(page.get("jobs"), list) for page in pages
+          ):
+              raise SystemExit("CI jobs pagination is malformed")
+          jobs = [job for page in pages for job in page["jobs"]]
+          if any(type(page.get("total_count")) is not int or page["total_count"] != len(jobs) for page in pages):
+              raise SystemExit("incomplete CI jobs pagination")
+          if any(not isinstance(job, dict) or type(job.get("id")) is not int or job["id"] < 1 or
+                 not isinstance(job.get("name"), str) or not job["name"] or
+                 not isinstance(job.get("status"), str) or
+                 job.get("run_id") != before["id"] or job.get("run_attempt") != before["run_attempt"] or
+                 job.get("head_sha") != before["head_sha"] for job in jobs):
+              raise SystemExit("malformed or foreign CI job")
+          if len({job["id"] for job in jobs}) != len(jobs):
+              raise SystemExit("duplicate CI jobs across pages")
+          for name, conclusion in (("CI gate", "success"), ("Full CI qualification", "success"),
+                                   ("Documentation CI qualification", "skipped")):
+              matches = [job for job in jobs if job["name"] == name]
+              if len(matches) != 1 or matches[0].get("status") != "completed" or matches[0].get("conclusion") != conclusion:
+                  raise SystemExit("missing, ambiguous, or unqualified current CI job: " + name)
+          print("Exact current CI attempt has successful CI gate and Full CI qualification")
+          PY
+          # End full CI qualification proof.
 
           initial_names=(
             dist-manifest.json sha256.sum source.tar.gz source.tar.gz.sha256

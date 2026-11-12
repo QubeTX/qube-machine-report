@@ -4,8 +4,8 @@ This file is the working guide for AI coding agents in this repository.
 Use this file as the canonical source when `AGENTS.md` and `CLAUDE.md` differ.
 
 Companion docs:
-- [`CLAUDE.md`](./CLAUDE.md) — edit-time rules, the canonical 7-phase development workflow, CI gates, code patterns.
-- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-08-25: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
+- [`CLAUDE.md`](./CLAUDE.md) — edit-time rules, proportionate development/review guidance, CI gates, code patterns.
+- [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-11-11: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
 - [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) — current v4.4.4 publication evidence and pending documentation-closure receipts.
@@ -34,11 +34,13 @@ anonymous latest wrapper URLs, homepage HTTP 200, and Windows binary smokes
 passed. Both `report` and `tr300` retain the full CLI, and both Windows MSI
 editions retain the complete PolyForm license.
 
-This is the Phase 1 publication-evidence update. The protected documentation
-PR's qualification, post-merge exact-main CI/idempotent publisher checks, and
-Phase 2 closure receipts are pending. Keep `#q44` and milestone `#v44` open
-until those real checks are recorded. Hosted evidence does not complete
-personal hardware/UAC acceptance. Continue from
+The publication evidence is complete; process qualification and its single
+closure receipt remain pending. The simplified CI/publisher change must pass
+its real exact-main `CI gate` plus `Full CI qualification` and the read-only
+existing-version proof before it can supersede the blocked earlier
+documentation-main run. Keep `#sec35`, `#q44`, and milestone `#v44` open until
+that evidence exists; no recursive record-PR sequence is required. Hosted
+proof does not complete personal hardware/UAC acceptance. Continue from
 [`the v4.4.4 publication handoff`](docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md).
 
 v4.4.4 fixes completed native-version verification in the managed PowerShell
@@ -1255,23 +1257,75 @@ corresponding `.iss` script. Outputs are the Global and Corporate Setup EXEs.
   without changing Global/Corporate scope silently.
 - All four installer GUIDs (Global+Corp MSI UpgradeCodes, Global+Corp EXE AppIds) plus the two MSI Component GUIDs are permanent — never regenerate. Renaming breaks user upgrade paths.
 
+### Proportionate development and release qualification
+
+Use a focused plan, relevant tests, and independent review for security,
+platform, installer, or workflow changes. No runtime-specific plan mode,
+named agent, seven-phase sequence, fixed multi-PR campaign, or automatic
+memory/version update is required. Local checks follow the changed boundary;
+repeat affected/failed checks and their dependents rather than unrelated
+successful work for unchanged inputs.
+
+`scripts/ci_policy.py` defines the positive record-only allowlist: root
+`AGENTS.md`, `CLAUDE.md`, `CODEX_PROJECT.md`, `MASTER_PLAN.md`, `TESTING.md`,
+and Markdown under `docs/` or `.tasks/`. Every changed path must qualify,
+including both old/new rename paths. README, license/man/changelog files,
+`.agents`/`.claude` skills, scripts, workflows, package inputs, unknown paths,
+and missing/ambiguous diff evidence select full CI. Executable records,
+symlinks/submodules, and unsupported file modes also select full. Operational
+Markdown is not automatically record-only.
+
+The stable `CI gate` validates classifier and heavy-job results. Then exactly
+one marker runs: `Full CI qualification` or `Documentation CI qualification`,
+with the other skipped. Release consumers require the successful gate and full
+marker from the same exact run/current attempt; documentation cannot authorize
+a tag, new crate, release asset, or native publication.
+
+Full CI keeps five native/platform legs (Linux x86_64/ARM64, macOS ARM/Intel,
+Windows), sharing each leg's tests, release build, and smokes on one runner.
+Linux x86_64/macOS ARM/Windows retain warmup plus five fast-mode samples and
+the 1500 ms median gate before native fixtures. Both Mac acceptance legs,
+Windows source/transition tests, audit, workflow/provenance, actual dist plan,
+and fresh signing/publishing boundaries remain intact. The designed job
+allocation is 15 full (12 heavy plus classifier/gate/full marker) or three
+record-only (classifier/gate/docs marker); no elapsed-time gain is claimed
+until hosted measurement.
+
+Record-only work needs fact/link/encoding review and `git diff --check`, not
+Rust builds or installer campaigns. The Release workflow also ignores those
+exact allowlisted PR paths for its plan job. The crates preflight can only
+prove an already published unyanked version from public metadata/bytes, immutable tag
+ancestry, and unchanged packaged Git inputs. It has no Cargo build/package/
+dry-run, OIDC, or publishing job. Full maintenance with unchanged package
+inputs may reuse that same existing-version proof.
+
+Do not bump the product merely for repository docs, skills, CI, or evidence.
+A new version is needed when new published package/distribution bytes are
+required. Record release evidence and one closure receipt, linking actual
+checks instead of creating another PR just to record the previous record
+PR. Diagnose hosted capacity/service failures before code changes; retry only
+failed jobs/dependents with unchanged qualified source/artifacts when the
+evidence supports it. Never waive native or public acceptance.
+
 ### Release checklist
 
 The v4.1.0 release includes real Alienware Windows evidence. AMD64 Linux laptop
-and Raspberry Pi 4 checks remain tracked continuation work. Every hosted-native
-Mac/local/hosted gate below remains blocking for future releases.
+and Raspberry Pi 4 checks remain tracked continuation work. The full checks below apply when publishing new package or distribution
+bytes. Record-only and repository-maintenance paths follow the qualification
+policy above; native acceptance is never waived for an actual release.
 
-1. Update version in `Cargo.toml`.
-2. Update the full documentation set for any user-visible release, install,
-   update, or deployment behavior change: `CHANGELOG.md`,
+1. For an actual new published version, update `Cargo.toml`, its lockfile
+   package entry, generated man pages, and affected release records in lockstep.
+   Repository-only docs/infrastructure changes do not automatically bump it.
+2. Update affected documentation for the release, install, update, or
+   deployment behavior change; do not force unrelated per-PR edits: `CHANGELOG.md`,
    **`HUMAN_CHANGELOG.md`** (plain-English mirror — see
    `CLAUDE.md` § "HUMAN_CHANGELOG.md (companion changelog)" for the
    strip/keep rules; always update both files in the same commit),
    `README.md`, `CODEX_PROJECT.md`, `AGENTS.md`, `CLAUDE.md`,
    `MASTER_PLAN.md`, `TESTING.md`, and `docs/architecture-decisions.md`
-   when rationale or release workflow changes. Update the global Codex
-   guide at `/Users/realemmetts/.codex/AGENTS.md` when repo deployment
-   workflow changes.
+   when rationale or release workflow changes. Host-specific guides or memory
+   are not release prerequisites and stay within user-authorized scope.
 3. Run checks:
    - `cargo fmt --all -- --check`
    - `cargo clippy --locked --all-targets --workspace -- -D warnings`
@@ -1289,7 +1343,8 @@ Mac/local/hosted gate below remains blocking for future releases.
    wait for all required checks. Merge only the reviewed exact commit.
 5. The `main` push starts `ci.yml` and `crates-publish.yml` together. Require the
    registry-uncredentialed crates validator to wait for and prove that exact SHA's green
-   CI, then require the fresh publisher's trusted-OIDC/public-byte provenance.
+   `CI gate` and `Full CI qualification` from the same current attempt, then
+   require the new-version publisher's trusted-OIDC/public-byte provenance.
 6. Tag the proven exact-main SHA with `git tag vX.Y.Z`.
 7. Push tag: `git push origin vX.Y.Z` (do NOT use `git push --tags` for the
    workflow trigger; an explicit single-tag push is sufficient).
@@ -1304,7 +1359,9 @@ Mac/local/hosted gate below remains blocking for future releases.
     four assets and publish the verified 34-asset release.
 11. Require the public Windows updater smoke and published Linux/macOS smokes.
     Only after the deployed release is verified, update/test/push the TR-300
-     homepage and record exact run IDs/evidence in `TESTING.md` and the handoff.
+     homepage when a source change is needed, and record exact run IDs/evidence
+     in `TESTING.md` and one handoff. Qualify one evidence/closure update; link
+     its actual checks in the task receipt without a recursive record PR.
 
 After changing `[workspace.metadata.dist]`, regenerate the workflow with:
 
