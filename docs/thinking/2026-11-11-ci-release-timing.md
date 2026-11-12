@@ -71,6 +71,24 @@ exact mode, and a successful aggregate. The provenance and lightweight policy
 tests guard that condition. Full workflow qualification and a fresh actual
 documentation PR/main round trip remain required before completion.
 
+The first exact-main source `8d913502e8470945605f79f94c40247f382dd655`
+subsequently passed [CI 43152393942](https://github.com/QubeTX/qube-machine-report/actions/runs/43152393942):
+15 allocated jobs succeeded in 678 seconds. Its
+[registry follow-up](https://github.com/QubeTX/qube-machine-report/actions/runs/43152393968)
+successfully verified the immutable existing v4.4.4 publication while the
+package validator, OIDC probe, and fresh publisher jobs were all skipped.
+This is hosted evidence for the no-build maintenance path, not just a local
+simulation of it.
+
+The explicit marker correction in
+[PR #43](https://github.com/QubeTX/qube-machine-report/pull/43) passed
+[full CI 43152989819](https://github.com/QubeTX/qube-machine-report/actions/runs/43152989819)
+on exact head `96712fd1c0fc212a0ef564e3dcd8d52b7ea51674` (15 allocated jobs,
+620 seconds) and [Release plan 43152989820](https://github.com/QubeTX/qube-machine-report/actions/runs/43152989820),
+then merged as `51cc61193aaa9494d179d6341851aeb0a52a6371`. The next record-only
+probe changes only this timing report so that the hosted system can prove its
+three-job documentation mode independently of a workflow-changing diff.
+
 ## Remaining bounded follow-up options
 
 1. Profile the Intel direct-PKG fixture by case before changing its assertions. Remove redundant setup and reuse read-only fixture preparation while retaining every ownership-refusal and native install oracle.
