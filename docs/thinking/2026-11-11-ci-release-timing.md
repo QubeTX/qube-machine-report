@@ -60,9 +60,16 @@ must distinguish cache state and allocation delay from actual test duration.
   nonfinal release selects that original path in full mode and is refused in
   documentation mode.
 
-The record-only route is being qualified with a real documentation PR/main
-round trip before its completion receipt. This record itself is an allowed
-documentation input; it does not change or republish the product.
+The first actual documentation-only probe,
+[CI 43152542124](https://github.com/QubeTX/qube-machine-report/actions/runs/43152542124),
+correctly skipped all heavy jobs and passed classification/aggregation, but
+GitHub also skipped the documentation marker through its inherited default
+success condition. Its green workflow conclusion therefore was not qualified
+publication evidence. Both marker jobs now explicitly override inherited
+skips with `always()` while still requiring successful classification, the
+exact mode, and a successful aggregate. The provenance and lightweight policy
+tests guard that condition. Full workflow qualification and a fresh actual
+documentation PR/main round trip remain required before completion.
 
 ## Remaining bounded follow-up options
 

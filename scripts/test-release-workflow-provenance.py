@@ -475,7 +475,7 @@ def check_ci_job_inventory(ci: str) -> None:
             raise AssertionError(f"ci.yml: aggregate missing {required}")
     for job_id, mode, name in (("full-proof", "full", "Full CI qualification"), ("docs-proof", "docs", "Documentation CI qualification")):
         job = extract_job(ci, job_id, CI_WORKFLOW.name)
-        for required in (f"name: {name}", "needs: [classify, ci-gate]", f"if: needs.classify.outputs.mode == '{mode}' && needs.ci-gate.result == 'success'"):
+        for required in (f"name: {name}", "needs: [classify, ci-gate]", f"if: always() && needs.classify.result == 'success' && needs.classify.outputs.mode == '{mode}' && needs.ci-gate.result == 'success'"):
             if required not in job:
                 raise AssertionError(f"ci.yml:{job_id}: missing {required}")
     test_job = extract_job(ci, "test", CI_WORKFLOW.name)
