@@ -21,12 +21,62 @@ These are individual measurements, not guaranteed durations or an isolated bench
 - Build the real paired Windows commands before the transaction test under both PowerShell hosts. Test direct and nested invocation, stale caller status, wrong version, and actual nonzero exits. The pre-release CI caught the nested-scope defect before another immutable tag.
 - Inspect compact job summaries while waiting; retrieve detailed logs for failures. Waiting is elapsed time, while repeated log retrieval and diagnosis consume tokens.
 
-## Bounded follow-up options
+## CI workflow implementation
+
+[PR #42](https://github.com/QubeTX/qube-machine-report/pull/42) merged the
+reviewed scope classifier, consolidated native jobs, and existing-version
+registry proof without changing v4.4.4 product inputs or published bytes.
+Its exact candidate `acdd74bf8779236b259411f931a88b1dc600e151` passed
+[full CI](https://github.com/QubeTX/qube-machine-report/actions/runs/43151114831)
+on the first attempt: 15 allocated jobs succeeded, the documentation marker
+was skipped, and the separate
+[Release plan](https://github.com/QubeTX/qube-machine-report/actions/runs/43151114880)
+passed. CI elapsed time was 620 seconds (10 minutes 20 seconds).
+
+The measured result proves the smaller job inventory, not a full-run elapsed
+speedup. Native Intel installer fixtures remain on the critical path, and the
+first consolidated runners also built their release caches. Future timings
+must distinguish cache state and allocation delay from actual test duration.
+
+- The five existing platform legs now share tests, a release build, and paired
+  command smokes. Linux x86_64, macOS ARM, and Windows reuse that release binary
+  for the existing warmup/five-sample/1500 ms performance gate. This replaces
+  thirteen separate test/build/speed allocations with five.
+- The positive record-only policy is in
+  [`scripts/ci_policy.py`](../../scripts/ci_policy.py). It permits the five named
+  root record files and Markdown under `docs/` and `.tasks/`; package inputs,
+  operational skills, workflows/scripts, unknown paths and ambiguous history
+  select full validation. The separate Release PR plan uses matching record
+  exclusions, while the required CI workflow always starts.
+- `CI gate` validates all required results. Its full/documentation markers
+  identify the exact mode; release consumers require full qualification from
+  the same run and attempt. Main ruleset
+  [27090739](https://github.com/QubeTX/qube-machine-report/rules/27090739)
+  enforces pull requests and the GitHub Actions `CI gate` against current main.
+- Registry preflight can prove an existing immutable public version from
+  metadata, downloaded checksum/VCS/trusted-publisher provenance, tag ancestry,
+  and unchanged packaged Git inputs without Cargo or OIDC. New/changed package
+  work retains the original full validator and fresh publisher. A private or
+  nonfinal release selects that original path in full mode and is refused in
+  documentation mode.
+
+The first actual documentation-only probe,
+[CI 43152542124](https://github.com/QubeTX/qube-machine-report/actions/runs/43152542124),
+correctly skipped all heavy jobs and passed classification/aggregation, but
+GitHub also skipped the documentation marker through its inherited default
+success condition. Its green workflow conclusion therefore was not qualified
+publication evidence. Both marker jobs now explicitly override inherited
+skips with `always()` while still requiring successful classification, the
+exact mode, and a successful aggregate. The provenance and lightweight policy
+tests guard that condition. Full workflow qualification and a fresh actual
+documentation PR/main round trip remain required before completion.
+
+## Remaining bounded follow-up options
 
 1. Profile the Intel direct-PKG fixture by case before changing its assertions. Remove redundant setup and reuse read-only fixture preparation while retaining every ownership-refusal and native install oracle.
 2. Review repeated read-only builds between PR, exact-main CI, crate validation, and release. Any reuse must bind the exact source, toolchain, target, artifact identity, and digest. Keep the fresh credentialed publishers and their data-only inputs.
 3. Evaluate whether data-only archive signing and duplicate Installer-identity preflights need architecture-specific runners. The universal package builder already signs on Intel. Any change needs an architecture-decision update and native qualification; retain fresh credential isolation and both architectures’ real build/install/update acceptance. This is a proposal, not validation of a changed runner matrix.
-4. Design a fail-closed docs-only path as a CI-only PR. Include branch-protection, the strict 20-job source validator, and the idempotent crates publisher in that design; a path filter alone is insufficient under the current contracts.
+4. Measure the new documentation route and full-run cache behavior. Preserve its explicit classifier, required aggregate, exact-mode publication guards, and existing-version byte/source proof; broad path filters alone remain insufficient.
 
 Keep native Intel/ARM acceptance, installer transitions, integrity checks, and signing/notarization gates. Larger CI maintenance does not require a product version bump unless it changes a published payload or an immutable release must be fixed forward. The current security release follows the established qualified chain.
 

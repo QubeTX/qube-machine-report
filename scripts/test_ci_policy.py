@@ -14,6 +14,12 @@ import ci_policy as policy
 
 
 class PolicyTests(unittest.TestCase):
+    def test_proof_jobs_override_inherited_skips_but_require_success(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        for mode in ("full", "docs"):
+            condition = f"if: always() && needs.classify.result == 'success' && needs.classify.outputs.mode == '{mode}' && needs.ci-gate.result == 'success'"
+            self.assertIn(condition, workflow)
+
     def test_release_plan_exclusions_match_record_policy(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/release.yml").read_text(encoding="utf-8")
         match = re.search(r"  pull_request:\n    paths-ignore:\n(.*?)  push:\n", workflow, re.S)

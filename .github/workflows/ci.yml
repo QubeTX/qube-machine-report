@@ -1750,10 +1750,12 @@ jobs:
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python3 scripts/ci_policy.py gate
 
+  # Explicit status checks override intentionally skipped ancestors. The mode
+  # and successful aggregate remain mandatory; always() alone is not proof.
   full-proof:
     name: Full CI qualification
     needs: [classify, ci-gate]
-    if: needs.classify.outputs.mode == 'full' && needs.ci-gate.result == 'success'
+    if: always() && needs.classify.result == 'success' && needs.classify.outputs.mode == 'full' && needs.ci-gate.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - run: echo 'All native test/build, performance, installer and security gates passed.'
@@ -1761,7 +1763,7 @@ jobs:
   docs-proof:
     name: Documentation CI qualification
     needs: [classify, ci-gate]
-    if: needs.classify.outputs.mode == 'docs' && needs.ci-gate.result == 'success'
+    if: always() && needs.classify.result == 'success' && needs.classify.outputs.mode == 'docs' && needs.ci-gate.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - run: echo 'Records-only validation passed; this does not authorize a release.'
