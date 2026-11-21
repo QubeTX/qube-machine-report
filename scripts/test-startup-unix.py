@@ -18,7 +18,7 @@ import time
 import unicodedata
 
 
-def terminal(argv, env, size=(80, 25), exchanges=()):
+def terminal(argv, env, size=(80, 25), exchanges=(), expected_exit=0):
     """Send input only after an interactive shell has reached its profile marker."""
     pid, master = pty.fork()
     if pid == 0:
@@ -58,7 +58,7 @@ def terminal(argv, env, size=(80, 25), exchanges=()):
                     os.write(master, reply)
         _, status = os.waitpid(pid, 0)
         pid = None
-        assert os.waitstatus_to_exitcode(status) == 0 and not pending, (argv, pending, data)
+        assert os.waitstatus_to_exitcode(status) == expected_exit and not pending, (argv, status, pending, data)
         return data.decode().replace("\r", "")
     finally:
         os.close(master)
@@ -141,7 +141,7 @@ def local(binary):
         subprocess.run([binary, "uninstall"], input=b"1\n", check=True, capture_output=True, env=env)
         subprocess.run([binary, "configure-startup-user"], check=True, capture_output=True, env=env)
         assert "PROCESSOR" in terminal([binary, "--startup"], env)  # Explicit previews still work.
-        assert not terminal([binary, "--startup-hook"], env)
+        assert not terminal([binary, "--startup-hook"], env, expected_exit=3)
         assert "PROCESSOR" not in terminal(["bash", "-i"], env, exchanges=EXIT)
         assert "PROCESSOR" in terminal([binary, "--fast"], env)
         subprocess.run([binary, "install"], check=True, capture_output=True, env=env)
