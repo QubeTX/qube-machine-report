@@ -14,9 +14,9 @@ Companion docs:
 
 Last verified against source: 2026-11-21
 
-TR-300 **4.5.0** is the current public GitHub release and unyanked crate. The tag points to `4409fbc4c71d16c877ca5f0cc3348bbf22c9594e`. The public distribution contains 34 verified assets. [4.5.0 publication record](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md)
+TR-300 **4.5.1** is the current public GitHub release and unyanked crate. The tag points to `55650b8ef9dfd4ef1dd2d53d33da7000a5f0c441`. The public distribution contains 34 verified assets. [4.5.1 publication record](docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md)
 
-The preceding public release was **v4.4.4**,
+The historical security release was **v4.4.4**,
 immutable source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release
 `441625880` became latest at `2026-11-11T12:29:18Z` with exactly 34 audited,
 nonempty assets. PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70`
@@ -106,7 +106,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Cargo package name: `tr300`
 - Library import path: `tr300`
 - Current crates.io / complete GitHub distribution / working manifest:
-  `4.5.0` / `4.5.0` / `4.5.0`. See the [4.5.0 publication record](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md). Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
+  `4.5.1` / `4.5.1` / `4.5.1`. See the [4.5.1 publication record](docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md). Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
   Release `36085847270`, Windows `36086249950`, private validation
   `36086484931` attempt 2, and Mac publication `36086249996` passed.
 - Prior v4.3.12 distribution ledger: working manifest was `4.3.12` (battery hardening, Windows

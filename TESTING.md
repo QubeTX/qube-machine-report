@@ -11,6 +11,8 @@ as passed.
 
 The Windows workspace suite passed 220 library tests, three binary tests and 29 integration tests. The startup fixtures cover Unicode and ASCII dividers, the compact frame, SSH ordering, very short panes and the four-row prompt allowance.
 
+All 34 public downloads matched their hashes. Both Mac architectures, Windows and Linux passed their installer checks. On Windows the public archive produced three local dividers and preserved the heading and prompt at all three test sizes. [4.5.1 publication record](docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md)
+
 ### v4.5.0 — Adaptive terminal startup (published 2026-11-21)
 
 Disposable classic Windows consoles exercised CMD, Windows PowerShell 5.1 and PowerShell 7 at 80×25 and 42×12. The fixtures verified the top of the report, visible prompt space, one banner per console, and quiet command execution. ConPTY checks also covered 120×30, 80×75 and an 11-column pane. A real Linux loopback OpenSSH connection verified an interactive login, a command-only invocation and an explicit PTY command. Final pre-tag CI passed on both the PR and the merged release source. Native package, account and repair checks, the crate checksum, Apple notarization, all 34 public asset checksums, post-public installer tests and the live website check are recorded in the [4.5.0 publication handoff](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md).
