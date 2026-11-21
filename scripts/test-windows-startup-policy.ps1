@@ -68,11 +68,20 @@ try {
         }
         Start-Service seclogon
         $credential = [pscredential]::new("$env:COMPUTERNAME\$name",$secret)
-        $probe = [IO.File]::ReadAllText("$PSScriptRoot/test-windows-startup-account.ps1")
-        $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+        # CreateProcessWithLogonW caps the whole command line at 1024 UTF-16
+        # characters. The installed package ACL protects this temporary test
+        # source while permitting the standard account to read it.
+        $fixturePath = Join-Path (Split-Path -Parent $bin) ('tr300-account-test-' + [guid]::NewGuid().ToString('N') + '.txt')
+        Copy-Item -LiteralPath "$PSScriptRoot/test-windows-startup-account.ps1" -Destination $fixturePath
+        $literal = $fixturePath.Replace("'", "''")
+        $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('$literal')))"
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         $p=Start-Process -FilePath $hosts[0] -Credential $credential -LoadUserProfile -WindowStyle Hidden -Wait -PassThru -WorkingDirectory ([Environment]::SystemDirectory) -ArgumentList @('-NoLogo','-NoProfile','-EncodedCommand',$encoded)
         if ($p.ExitCode -ne 0) { throw "Standard account bootstrap failed at checkpoint $($p.ExitCode)" }
-    } finally { Remove-LocalUser -SID $account.SID }
+    } finally {
+        if ($fixturePath -and (Test-Path -LiteralPath $fixturePath)) { Remove-Item -LiteralPath $fixturePath }
+        Remove-LocalUser -SID $account.SID
+    }
     foreach ($s in $states) {
         if ((Read-Policy $s.Shell 'CurrentUser') -ne 'Restricted' -or
             (Read-Policy $s.Shell 'LocalMachine') -ne 'Restricted') {
