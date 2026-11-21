@@ -248,8 +248,10 @@ the Rust toolchain.
 
 **From crates.io:**
 ```bash
-cargo install tr300
+cargo install tr300 --locked && tr300 install
 ```
+
+Cargo places both commands in its bin directory. The second command enables terminal startup for your account.
 
 **From a specific Git tag:**
 ```bash
@@ -590,24 +592,9 @@ To turn startup off for your account, run `tr300 uninstall` and choose **Remove 
 
 Integration covers Command Prompt, Windows PowerShell and PowerShell 7 on Windows, and Bash, Zsh, Fish and installed PowerShell on macOS/Linux. Shell policies, profile bypass options and custom shells can skip startup. Scripts and redirected output stay quiet. Profile updates preserve configuration outside TR-300’s own blocks.
 
-Windows Global registers shared profiles for the installed system PowerShell hosts. Each account’s execution policy still applies. If policy blocks the profile, Command Prompt startup and both manual commands remain available.
+Windows Global configures Command Prompt for every account. It checks Windows PowerShell and PowerShell 7 separately. A host whose machine policy permits local startup scripts can use a shared profile. On a Windows client with the default restricted policy, setup uses the account’s own profile. An account that uses only SSH can run `tr300 install` if its first PowerShell login precedes account setup. The default Windows OpenSSH Command Prompt receives the machine-wide hook immediately.
 
-Fresh Windows machines default `ExecutionPolicy` to `Restricted`,
-which blocks every `.ps1` including the profile itself, so
-`tr300 install` runs a preflight that adjusts the `CurrentUser`
-scope to `RemoteSigned` when needed. `RemoteSigned` is the minimum
-policy that lets the local profile load — it still requires
-downloaded `.ps1` files to be Authenticode-signed. The change is
-HKCU-only, affects only your user account, and does not require
-admin. If you have deliberately set `AllSigned`, `tr300 install`
-will not silently downgrade it; it prints a notice explaining the
-auto-run will not fire and leaves the policy alone.
-See [Microsoft Learn — about_Execution_Policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies).
-
-To remove these additions, run `tr300 uninstall` or `tr300 --uninstall`.
-The uninstall does not roll back your execution policy — other PowerShell
-tooling typically relies on `RemoteSigned`, so restoring it would surprise
-users.
+On a client with no configured execution policy, account setup can select `RemoteSigned` for that user so PowerShell can load a local profile. Explicit policies and Group Policy take precedence. If policy blocks local profiles, use `tr300` or `report` at the prompt. Removing the startup report retains the account’s execution policy for other tools. [Microsoft PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
 
 Beginning with v4.3 on macOS/Linux, **Complete** also recognizes a
 running cargo-dist-managed copy. It validates the standard receipt's provider,

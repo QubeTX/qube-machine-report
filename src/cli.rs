@@ -38,6 +38,11 @@ pub enum Action {
     /// Refresh the installing user's startup integration after a managed install.
     #[value(hide = true)]
     ConfigureStartupUser,
+    /// Global Windows installer actions run within the original account.
+    #[value(hide = true)]
+    ConfigureStartupAccount,
+    #[value(hide = true)]
+    RemoveStartupAccount,
     #[value(hide = true)]
     ConfigureStartupMachine,
     #[value(hide = true)]

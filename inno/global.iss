@@ -91,6 +91,11 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignore
 Source: "..\target\release\report.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 [Registry]
+; Active Setup enrolls each eligible Explorer user with their own token.
+Root: HKLM64; Subkey: "Software\Microsoft\Active Setup\Installed Components\{{3315638A-7A5F-4591-A9FE-79312ED7859B}"; ValueType: string; ValueData: "TR-300 shell startup"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKLM64; Subkey: "Software\Microsoft\Active Setup\Installed Components\{{3315638A-7A5F-4591-A9FE-79312ED7859B}"; ValueType: string; ValueName: "Version"; ValueData: "{#StringChange(MyAppVersion, ".", ",")},0"; Flags: uninsdeletevalue
+Root: HKLM64; Subkey: "Software\Microsoft\Active Setup\Installed Components\{{3315638A-7A5F-4591-A9FE-79312ED7859B}"; ValueType: string; ValueName: "StubPath"; ValueData: """{app}\bin\{#MyAppExeName}"" configure-startup-account"; Flags: uninsdeletevalue
+
 ; Install-source marker. tr300 update reads HKCU\Software\TR300\InstallSource
 ; and picks the matching installer to download for in-place upgrades. Value
 ; must match the `exe-global` arm in src/update.rs.
@@ -241,6 +246,8 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ExitCode: Integer;
 begin
   if CurStep = ssPostInstall then begin
     { The non-mutating preflight already proved exact ownership. Final strict
@@ -249,6 +256,9 @@ begin
     ConsolidatePriorCli;
     EnvAddPath(ExpandConstant('{app}') + '\bin');
     RunMachineStartup('configure-startup-machine', ExpandConstant('{tmp}\{#MyAppExeName}'));
+    if not ExecAsOriginalUser(ExpandConstant('{app}\bin\{#MyAppExeName}'), 'configure-startup-account',
+        ExpandConstant('{sys}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+      Log('Original-account startup enrollment deferred to Explorer Active Setup.');
   end;
 end;
 

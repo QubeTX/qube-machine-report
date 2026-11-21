@@ -73,6 +73,22 @@ pub fn configure_startup_user() -> Result<()> {
     install()
 }
 
+/// Configure the Global package's personal fallback in the account that owns it.
+#[doc(hidden)]
+pub fn windows_account_startup(enable: bool) -> Result<()> {
+    #[cfg(windows)]
+    {
+        windows::configure_global_account(enable)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = enable;
+        Err(crate::AppError::platform(
+            "This installer action is only used by Windows packages",
+        ))
+    }
+}
+
 #[doc(hidden)]
 pub fn check_machine_startup() -> Result<()> {
     #[cfg(windows)]

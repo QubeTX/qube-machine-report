@@ -10,6 +10,16 @@ use winreg::enums::{
 };
 use winreg::{RegKey, RegValue};
 
+const ACTIVE_SETUP: &str =
+    r"Software\Microsoft\Active Setup\Installed Components\{3315638A-7A5F-4591-A9FE-79312ED7859B}";
+const ACTIVE_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION_MAJOR"),
+    ",",
+    env!("CARGO_PKG_VERSION_MINOR"),
+    ",",
+    env!("CARGO_PKG_VERSION_PATCH"),
+    ",0"
+);
 const CMD_KEY: &str = r"Software\Microsoft\Command Processor";
 const CREATED_PROFILE: &str = "# This profile was created by TR-300.";
 fn cmd_hook(path: &str) -> String {
@@ -20,6 +30,8 @@ fn cmd_hook(path: &str) -> String {
 
 const MACHINE_START: &str = "# TR-300 Machine Report (all users)";
 const MACHINE_END: &str = "# End TR-300 (all users)";
+const ACCOUNT_START: &str = "# TR-300 Machine Report (Global account)";
+const ACCOUNT_END: &str = "# End TR-300 (Global account)";
 
 pub(crate) fn install_machine_startup() -> Result<()> {
     configure_machine(true)
@@ -77,13 +89,21 @@ fn machine_paths() -> Result<MachinePaths> {
     Ok(MachinePaths { exe, profiles })
 }
 
+fn machine_profiles(paths: Vec<PathBuf>, enable: bool) -> Vec<(PathBuf, bool)> {
+    paths
+        .into_iter()
+        .zip(super::policy::HOSTS)
+        .map(|(path, host)| (path, enable && super::policy::machine_enabled(host)))
+        .collect()
+}
+
 pub(crate) fn check_machine_startup() -> Result<()> {
     let MachinePaths { exe, profiles } = machine_paths()?;
     let block = ps_block(&exe, MACHINE_START, MACHINE_END)?;
-    for path in &profiles {
-        match fs::read(path) {
+    for (path, allowed) in machine_profiles(profiles, true) {
+        match fs::read(&path) {
             Ok(old) => {
-                edited_profile(&old, &block, MACHINE_START, MACHINE_END, true)?;
+                edited_profile(&old, &block, MACHINE_START, MACHINE_END, allowed)?;
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => (),
             Err(e) => return Err(e.into()),
@@ -110,15 +130,46 @@ fn configure_machine(enable: bool) -> Result<()> {
         ));
     }
     let block = ps_block(&exe, MACHINE_START, MACHINE_END)?;
-    configure(
-        &profiles,
+    // MSI's registry table owns the stub but leaves its version to this
+    // helper, since Windows Active Setup uses four comma-separated integers.
+    // A repair should never reset the version to a build-time placeholder.
+    let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let key = match machine.open_subkey_with_flags(ACTIVE_SETUP, KEY_SET_VALUE | KEY_QUERY_VALUE) {
+        Ok(k) => Some(k),
+        Err(e) if !enable && e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    let before = match key.as_ref().map(|k| k.get_raw_value("Version")).transpose() {
+        Ok(value) => value,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if let Some(k) = &key {
+        if enable {
+            k.set_value("Version", &ACTIVE_VERSION)?;
+        } else if k.get_value::<String, _>("Version").ok().as_deref() == Some(ACTIVE_VERSION) {
+            k.delete_value("Version")?;
+        }
+    }
+    let result = configure(
+        &machine_profiles(profiles, enable),
         &block,
         MACHINE_START,
         MACHINE_END,
-        RegKey::predef(HKEY_LOCAL_MACHINE),
+        Some(machine),
         &exe,
         enable,
-    )
+    );
+    if result.is_err() {
+        if let Some(k) = key {
+            if let Some(value) = before {
+                k.set_raw_value("Version", &value)?;
+            } else if enable {
+                k.delete_value("Version")?;
+            }
+        }
+    }
+    result
 }
 
 fn reject_reparse(path: &Path) -> Result<()> {
@@ -138,7 +189,7 @@ fn reject_reparse(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn configure_user(profiles: &[PathBuf], enable: bool) -> Result<()> {
+pub(super) fn configure_user(profiles: &[(PathBuf, bool)], enable: bool) -> Result<()> {
     let exe = std::env::current_exe()?;
     let block = ps_block(&exe, MARKER_START, MARKER_END)?;
     configure(
@@ -146,10 +197,84 @@ pub(super) fn configure_user(profiles: &[PathBuf], enable: bool) -> Result<()> {
         &block,
         MARKER_START,
         MARKER_END,
-        RegKey::predef(HKEY_CURRENT_USER),
+        Some(RegKey::predef(HKEY_CURRENT_USER)),
         &exe,
         enable,
     )
+}
+
+/// The bootstrap may also run under MSI service credentials, an elevated
+/// account, or Explorer. Only a normal interactive user may enroll a profile.
+pub(crate) fn configure_global_account(enable: bool) -> Result<()> {
+    use winapi::um::securitybaseapi::{CheckTokenMembership, CreateWellKnownSid};
+    use winapi::um::winnt::{WinInteractiveSid, SECURITY_MAX_SID_SIZE};
+    let mut sid = [0u32; SECURITY_MAX_SID_SIZE.div_ceil(4)];
+    let mut size = std::mem::size_of_val(&sid) as u32;
+    let mut member = 0;
+    // SAFETY: sid is DWORD-aligned with maximum SID capacity. The null token
+    // checks the calling security context for the well-known INTERACTIVE SID.
+    let interactive = unsafe {
+        CreateWellKnownSid(
+            WinInteractiveSid,
+            std::ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut size,
+        ) != 0
+            && CheckTokenMembership(std::ptr::null_mut(), sid.as_mut_ptr().cast(), &mut member) != 0
+            && member != 0
+    };
+    if crate::is_elevated() || !interactive {
+        return Ok(());
+    }
+    let exe = windows_program_files_x64()?.join(r"tr300\bin\tr300.exe");
+    let machine_key = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let stub = machine_key
+        .open_subkey(ACTIVE_SETUP)
+        .and_then(|k| k.get_value::<String, _>("StubPath"));
+    let owned = matches!(stub,Ok(s) if s.eq_ignore_ascii_case(&format!("\"{}\" configure-startup-account",exe.display())));
+    if enable && (!owned || !exe.is_file()) {
+        return Ok(());
+    }
+    let optout = super::super::startup_disabled().unwrap_or(true);
+    let mut plan = super::policy::account_plan(enable, true, !optout);
+    if optout {
+        // Preserve an older opt-in block as user content, but place our guard
+        // before its legacy --fast invocation on eligible hosts.
+        for (path, allowed) in &mut plan.profiles {
+            *allowed &= fs::read(path)
+                .ok()
+                .and_then(|bytes| {
+                    edited_profile(&bytes, "", MARKER_START, MARKER_END, false)
+                        .ok()
+                        .map(|cleaned| cleaned != bytes)
+                })
+                .unwrap_or(false);
+        }
+    }
+    let block = ps_block(&exe, ACCOUNT_START, ACCOUNT_END)?;
+    plan.apply(|profiles| {
+        configure(
+            profiles,
+            &block,
+            ACCOUNT_START,
+            ACCOUNT_END,
+            None,
+            &exe,
+            enable,
+        )
+    })?;
+    if !enable {
+        let user = RegKey::predef(HKEY_CURRENT_USER);
+        let cleared = user
+            .open_subkey_with_flags(ACTIVE_SETUP, KEY_SET_VALUE)
+            .and_then(|key| key.delete_value("Version"));
+        if let Err(e) = cleared {
+            if e.kind() != io::ErrorKind::NotFound {
+                return Err(e.into());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ps_block(exe: &Path, start: &str, end: &str) -> Result<String> {
@@ -168,10 +293,17 @@ fn ps_block(exe: &Path, start: &str, end: &str) -> Result<String> {
             .join(",");
         format!("-join [char[]]@({chars})")
     };
+    let account_guard = if start == ACCOUNT_START {
+        r#"
+    $stub = [Microsoft.Win32.Registry]::GetValue('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Active Setup\Installed Components\{3315638A-7A5F-4591-A9FE-79312ED7859B}', 'StubPath', '')
+    if ($stub -ne ('"' + $binary + '" configure-startup-account')) { return }"#
+    } else {
+        ""
+    };
     let body = format!(
         r#"{start}
 & {{
-    $binary = {binary}
+    $binary = {binary}{account_guard}
     if ([IO.File]::Exists($binary)) {{
         $PSNativeCommandUseErrorActionPreference = $false
         $previous = $ExecutionContext.SessionState.PSVariable.Get('global:LASTEXITCODE')
@@ -332,6 +464,17 @@ fn profile_text(old: &str, block: &str, start: &str, end: &str, enable: bool) ->
         ));
     }
     if enable {
+        if start == ACCOUNT_START {
+            // Preserve directives which must stay first (e.g. using module).
+            // Only insert early when an exact legacy marker would run first.
+            if let Some(pos) = cleaned.match_indices(MARKER_START).find_map(|(pos, _)| {
+                let boundary = pos == 0 || cleaned[..pos].ends_with('\n');
+                (boundary && cleaned[pos..].lines().next() == Some(MARKER_START)).then_some(pos)
+            }) {
+                cleaned.insert_str(pos, &format!("{block}\r\n"));
+                return checked_profile(old, cleaned);
+            }
+        }
         if !cleaned.is_empty() && !cleaned.ends_with('\n') {
             cleaned.insert_str(0, &format!("{block}\r\n"));
             return checked_profile(old, cleaned);
@@ -412,17 +555,17 @@ fn edited_profile(
 }
 
 fn configure(
-    profiles: &[PathBuf],
+    profiles: &[(PathBuf, bool)],
     block: &str,
     start: &str,
     end: &str,
-    hive: RegKey,
+    hive: Option<RegKey>,
     exe: &Path,
     enable: bool,
 ) -> Result<()> {
     // Plan every edit and validate every marker before applying anything.
     let mut edits = Vec::new();
-    for path in profiles {
+    for (path, allowed) in profiles {
         let old = match fs::read(path) {
             Ok(content) => Some(content),
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
@@ -439,26 +582,34 @@ fn configure(
             if owned { &with_creation } else { block },
             start,
             end,
-            enable,
+            *allowed,
         )?;
-        let remove_file = !enable && owned && next.is_empty();
+        let remove_file = !allowed && owned && next.is_empty();
 
         if next != bytes {
             edits.push((path, old, next, remove_file));
         }
     }
-    let key = match hive.open_subkey_with_flags(CMD_KEY, KEY_QUERY_VALUE | KEY_SET_VALUE) {
-        Ok(key) => Some(key),
-        Err(e) if e.kind() == io::ErrorKind::NotFound && !enable => None,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Some(hive.create_subkey(CMD_KEY)?.0),
-        Err(e) => return Err(e.into()),
+    let key = if let Some(hive) = hive {
+        match hive.open_subkey_with_flags(CMD_KEY, KEY_QUERY_VALUE | KEY_SET_VALUE) {
+            Ok(key) => Some(key),
+            Err(e) if e.kind() == io::ErrorKind::NotFound && !enable => None,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Some(hive.create_subkey(CMD_KEY)?.0),
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        None
     };
     let before = match key.as_ref().map(|k| k.get_raw_value("AutoRun")).transpose() {
         Ok(raw) => raw,
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e.into()),
     };
-    let after = cmd_value(before.as_ref(), exe, enable)?;
+    let after = if key.is_some() {
+        cmd_value(before.as_ref(), exe, enable)?
+    } else {
+        None
+    };
     let mut applied = 0;
     let result = (|| -> Result<()> {
         for (path, old, next, remove_file) in &edits {
@@ -656,14 +807,14 @@ mod tests {
         let block = ps_block(&exe, MARKER_START, MARKER_END).unwrap();
         let original = b"# this user code stays exactly as written";
         fs::write(&profile, original).unwrap();
-        let paths = [profile.clone(), second.clone()];
+        let paths = |enabled| [(profile.clone(), enabled), (second.clone(), enabled)];
         let apply = |enabled| {
             configure(
-                &paths,
+                &paths(enabled),
                 &block,
                 MARKER_START,
                 MARKER_END,
-                get_root(),
+                Some(get_root()),
                 &exe,
                 enabled,
             )
@@ -695,13 +846,13 @@ mod tests {
             .share_mode(1)
             .open(&blocked)
             .unwrap();
-        let invalid_paths = [profile.clone(), blocked];
+        let invalid_paths = [(profile.clone(), true), (blocked, true)];
         assert!(configure(
             &invalid_paths,
             &block,
             MARKER_START,
             MARKER_END,
-            get_root(),
+            Some(get_root()),
             &exe,
             true
         )

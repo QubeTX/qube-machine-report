@@ -8,7 +8,7 @@ pub(super) fn run(config: &Config, hook: bool) -> Result<bool> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Ok(false);
     }
-    if install::startup_disabled().unwrap_or(true) {
+    if hook && install::startup_disabled().unwrap_or(true) {
         return Ok(false);
     }
     #[cfg(windows)]

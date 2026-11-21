@@ -44,6 +44,8 @@ fn main() -> Result<()> {
 
     match action {
         Some(Action::ConfigureStartupUser) => return install::configure_startup_user(),
+        Some(Action::ConfigureStartupAccount) => return install::windows_account_startup(true),
+        Some(Action::RemoveStartupAccount) => return install::windows_account_startup(false),
         Some(Action::ConfigureStartupMachine) => return install::machine_startup(true),
         Some(Action::CheckStartupMachine) => return install::check_machine_startup(),
         Some(Action::RemoveStartupMachine) => return install::machine_startup(false),

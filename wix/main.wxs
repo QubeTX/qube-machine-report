@@ -160,6 +160,14 @@
                          unambiguous; it never guesses MSI versus Inno.
                          Value must match the `msi-global` arm in src/update.rs.
                          See wix/corporate.wxs for the perUser sibling. -->
+                    <!-- Explorer runs Active Setup as the signed-in account. The
+                         helper refuses service/elevated identities and honors opt-out. -->
+                    <Component Id='AccountStartupBootstrap' Guid='32C9BF45-F0AB-45DB-BB7A-A6B11232E224' Win64='yes'>
+                        <RegistryKey Root='HKLM' Key='Software\Microsoft\Active Setup\Installed Components\{3315638A-7A5F-4591-A9FE-79312ED7859B}'>
+                            <RegistryValue Type='string' Value='TR-300 shell startup'/>
+                            <RegistryValue Name='StubPath' Type='string' Value='&quot;[Bin]tr300.exe&quot; configure-startup-account' KeyPath='yes'/>
+                        </RegistryKey>
+                    </Component>
                     <Component Id='InstallSourceMarker' Guid='537B3C60-6E17-4EFF-8D56-E0CA97F447B5'>
                         <RegistryValue
                             Root='HKCU'
@@ -228,6 +236,7 @@
             <ComponentRef Id='binary0'/>
             <ComponentRef Id='binaryReport'/>
             <ComponentRef Id='InstallSourceMarker'/>
+            <ComponentRef Id='AccountStartupBootstrap'/>
 
             <Feature
                 Id='Environment'
@@ -290,6 +299,10 @@
         <CustomAction Id='RemoveMachineStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-machine' Execute='deferred' Impersonate='no' Return='check'/>
         <CustomAction Id='UndoConfigureStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-machine' Execute='rollback' Impersonate='no' Return='check'/>
         <CustomAction Id='UndoRemoveStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-machine' Execute='rollback' Impersonate='no' Return='check'/>
+        <CustomAction Id='ConfigureAccountStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-account' Execute='deferred' Impersonate='yes' Return='ignore'/>
+        <CustomAction Id='RemoveAccountStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-account' Execute='deferred' Impersonate='yes' Return='ignore'/>
+        <CustomAction Id='UndoConfigureAccountStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-account' Execute='rollback' Impersonate='yes' Return='ignore'/>
+        <CustomAction Id='UndoRemoveAccountStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-account' Execute='rollback' Impersonate='yes' Return='ignore'/>
         <CustomAction Id='CheckMachineStartupPaths' BinaryKey='MigrationProbe' ExeCommand='check-startup-machine' Execute='immediate' Impersonate='yes' Return='check'/>
         <CustomAction Id='ExpectedStartupFolder' Property='TR300EXPECTEDGLOBAL' Value='[ProgramFiles64Folder]tr300\bin\'/>
         <InstallExecuteSequence>
@@ -298,8 +311,12 @@
             <Custom Action='CheckMachineStartupPaths' Before='PreflightCargoOwnership'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='UndoRemoveStartup' Before='RemoveMachineStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='RemoveMachineStartup' Before='RemoveFiles'><![CDATA[REMOVE~="ALL"]]></Custom>
-            <Custom Action='UndoConfigureStartup' After='InstallFiles'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='UndoConfigureStartup' After='WriteRegistryValues'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='ConfigureMachineStartup' After='UndoConfigureStartup'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='UndoConfigureAccountStartup' After='ConfigureMachineStartup'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='ConfigureAccountStartup' After='UndoConfigureAccountStartup'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='UndoRemoveAccountStartup' Before='RemoveAccountStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
+            <Custom Action='RemoveAccountStartup' Before='RemoveMachineStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='PreflightCargoOwnership' Before='InstallInitialize'>
                 <![CDATA[NOT Installed]]>
             </Custom>

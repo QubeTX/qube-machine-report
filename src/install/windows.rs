@@ -11,7 +11,9 @@ use std::process::Command;
 
 use super::shared::{MARKER_END, MARKER_START};
 
+mod policy;
 mod startup;
+pub(super) use startup::configure_global_account;
 pub(super) use startup::{check_machine_startup, install_machine_startup, remove_machine_startup};
 
 /// Get the installation path for Windows
@@ -37,94 +39,23 @@ pub fn install_path() -> PathBuf {
     PathBuf::from(r"C:\Program Files\tr300\tr300.exe")
 }
 
-/// Get all PowerShell profile paths that should be modified.
-///
-/// Probes both `powershell` (Windows PowerShell 5.1) and `pwsh`
-/// (PowerShell 7+) — they have DIFFERENT `$PROFILE` paths:
-/// - Windows PowerShell: `Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`
-/// - PowerShell 7:       `Documents\PowerShell\Microsoft.PowerShell_profile.ps1`
-///
-/// PowerShell 7 does NOT source the 5.1 profile, so prior to v3.15.3
-/// pwsh-only users (a growing cohort on dev workstations) got a
-/// silent no-op install: the snippet went to a profile their actual
-/// shell never read. Writing to BOTH paths when both shells exist
-/// makes the install resilient to the user's choice of host.
-///
-/// Returns a deduplicated list — if both probes happen to return the
-/// same path (unusual but possible on stripped Windows images),
-/// we only modify it once.
-fn get_powershell_profiles() -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = Vec::new();
-
-    for launcher in ["powershell", "pwsh"] {
-        let Ok(mut command) = crate::trusted_process::powershell_command_for(launcher, "$PROFILE")
-        else {
-            continue;
-        };
-        let Ok(output) = command.output() else {
-            // Launcher not on PATH; skip this shell flavor.
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path_str.is_empty() {
-            continue;
-        }
-        let path = PathBuf::from(path_str);
-        if !paths.iter().any(|p| p == &path) {
-            paths.push(path);
-        }
-    }
-
-    // Fallback: both probes failed (PowerShell entirely missing — rare
-    // on Windows but technically possible on Windows Server Core or
-    // heavily-stripped images). Fall back to the legacy 5.1 location
-    // so the install attempt at least targets a documented path.
-    if paths.is_empty() {
-        if let Some(docs) = dirs::document_dir() {
-            paths.push(
-                docs.join("WindowsPowerShell")
-                    .join("Microsoft.PowerShell_profile.ps1"),
-            );
-        }
-    }
-
-    paths
-}
-
-/// Install tr300 to PowerShell profile
+/// Coordinate validated per-host profile edits with our current-user cmd hook.
 pub fn install() -> Result<()> {
-    // Preflight: ensure the user's execution policy allows the profile to load.
-    // A fresh Windows install defaults to `Restricted`, which blocks every
-    // `.ps1` file — including `$PROFILE` itself — so the auto-run we're about
-    // to write would fail at the next shell start with an UnauthorizedAccess
-    // PSSecurityException. Lift CurrentUser to `RemoteSigned` (the minimum
-    // permissive policy that loads local unsigned scripts) when needed.
-    // Non-fatal: never short-circuits the profile write.
-    run_execution_policy_preflight();
-
-    let profile_paths = get_powershell_profiles();
-    if profile_paths.is_empty() {
-        return Err(AppError::platform(
-            "Could not determine PowerShell profile path",
-        ));
-    }
-
-    // Heads-up if another definition will shadow the packaged `report`
-    // command. Best-effort heuristic — scans each PowerShell profile and PATH. Read-only,
-    // no PowerShell subprocess, so a noisy $PROFILE can't fire side effects
-    // during `tr300 install`.
-    warn_if_report_already_defined(&profile_paths);
-
-    startup::configure_user(&profile_paths, true)?;
-    println!("Configured TR-300 startup for PowerShell and Command Prompt.");
+    let plan = policy::account_plan(true, false, true);
+    let paths = plan
+        .profiles
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect::<Vec<_>>();
+    warn_if_report_already_defined(&paths);
+    plan.apply(|profiles| startup::configure_user(profiles, true))?;
+    println!("Configured TR-300 Command Prompt startup and eligible PowerShell profiles.");
     Ok(())
 }
 
 pub fn uninstall() -> Result<()> {
-    startup::configure_user(&get_powershell_profiles(), false)?;
+    policy::account_plan(false, false, false)
+        .apply(|profiles| startup::configure_user(profiles, false))?;
     println!("Removed TR-300 startup from your PowerShell and Command Prompt.");
     Ok(())
 }
@@ -278,170 +209,6 @@ fn looks_like_our_install_dir(dir: &str) -> bool {
     lower.contains(r"\program files\tr300\")
         || lower.contains(r"\appdata\local\programs\tr300\")
         || lower.contains(r"\.cargo\bin")
-}
-
-/// Coarse classification of a PowerShell execution-policy string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PolicyState {
-    /// `Restricted` or `Undefined` — the default on Windows Client; blocks
-    /// every `.ps1` including `$PROFILE`. Safe to auto-fix to `RemoteSigned`.
-    BlockedDefault,
-    /// `AllSigned` — a deliberate hardening choice. Blocks our unsigned
-    /// profile snippet, but we won't silently downgrade it.
-    BlockedAllSigned,
-    /// `RemoteSigned`, `Unrestricted`, or `Bypass` — already permissive
-    /// enough for the profile snippet to load.
-    Permissive,
-    /// Anything else (future PowerShell versions, unparseable output). Treat
-    /// as permissive to avoid acting on values we don't understand.
-    Unknown,
-}
-
-/// Outcome of a `Set-ExecutionPolicy` attempt.
-#[derive(Debug)]
-enum TrySetResult {
-    /// The post-set policy is now permissive.
-    Succeeded,
-    /// The post-set policy is still blocking (typically a GPO override at
-    /// `MachinePolicy` or `UserPolicy` scope wins precedence over CurrentUser).
-    StillBlocked { new_policy: String },
-}
-
-/// Classify an execution-policy string. Case-insensitive — different
-/// PowerShell versions have occasionally capitalized output differently.
-fn policy_state(policy: &str) -> PolicyState {
-    match policy.trim().to_ascii_lowercase().as_str() {
-        "restricted" | "undefined" => PolicyState::BlockedDefault,
-        "allsigned" => PolicyState::BlockedAllSigned,
-        "remotesigned" | "unrestricted" | "bypass" => PolicyState::Permissive,
-        "" => PolicyState::Unknown,
-        _ => PolicyState::Unknown,
-    }
-}
-
-/// Read the current `CurrentUser` execution policy. Returns `None` if
-/// PowerShell is not on PATH or the command fails — in which case we skip
-/// the preflight entirely.
-fn detect_execution_policy() -> Option<String> {
-    let output = crate::trusted_process::powershell_command_for(
-        "powershell",
-        "if ((Get-ExecutionPolicy -Scope MachinePolicy) -ne 'Undefined' -or (Get-ExecutionPolicy -Scope UserPolicy) -ne 'Undefined') { 'GroupPolicy' } else { Get-ExecutionPolicy -Scope CurrentUser }",
-    )
-    .ok()?
-    .output()
-    .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let policy = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if policy.is_empty() {
-        None
-    } else {
-        Some(policy)
-    }
-}
-
-/// Attempt to set `CurrentUser` execution policy to `RemoteSigned`, then
-/// verify the change actually took effect (a higher-precedence GPO can
-/// override the user-scope setting without `Set-ExecutionPolicy` itself
-/// failing).
-fn try_set_execution_policy() -> std::io::Result<TrySetResult> {
-    let output = crate::trusted_process::powershell_command_for(
-        "powershell",
-        "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force",
-    )?
-    .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(std::io::Error::other(if stderr.is_empty() {
-            "Set-ExecutionPolicy failed".to_string()
-        } else {
-            stderr
-        }));
-    }
-
-    // Re-detect to confirm the change actually applied (GPO can win).
-    let new_policy = detect_execution_policy().unwrap_or_else(|| "Unknown".to_string());
-    Ok(match policy_state(&new_policy) {
-        PolicyState::Permissive | PolicyState::Unknown => TrySetResult::Succeeded,
-        PolicyState::BlockedDefault | PolicyState::BlockedAllSigned => {
-            TrySetResult::StillBlocked { new_policy }
-        }
-    })
-}
-
-/// Inspect execution policy and adjust it to the minimum needed for the
-/// auto-run profile snippet to load. Prints only when action is taken or a
-/// problem is detected. Never propagates an error — the alias-write half of
-/// `install()` still succeeds even when the policy can't be fixed.
-fn run_execution_policy_preflight() {
-    let Some(current) = detect_execution_policy() else {
-        return;
-    };
-
-    match policy_state(&current) {
-        PolicyState::Permissive | PolicyState::Unknown => {
-            // Happy path — stay quiet.
-        }
-        PolicyState::BlockedDefault => match try_set_execution_policy() {
-            Ok(TrySetResult::Succeeded) => {
-                println!(
-                    "Set PowerShell CurrentUser execution policy: {} -> RemoteSigned",
-                    current
-                );
-                println!("  (required to load $PROFILE; only your account, no admin needed)");
-            }
-            Ok(TrySetResult::StillBlocked { new_policy }) => {
-                eprintln!(
-                    "Warning: tried to set CurrentUser execution policy to RemoteSigned, but it's still '{}'.",
-                    new_policy
-                );
-                eprintln!(
-                    "  This usually means a Group Policy (MachinePolicy/UserPolicy) is enforcing a stricter setting."
-                );
-                eprintln!(
-                "  The packaged 'report' command still works manually, but the auto-run on new shells won't fire."
-                );
-                eprintln!("  To fix: from an elevated PowerShell, run");
-                eprintln!(
-                    "    Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned"
-                );
-                eprintln!("  or coordinate with IT if a domain policy is in force.");
-            }
-            Err(e) => {
-                eprintln!(
-                    "Warning: could not adjust PowerShell execution policy ({}).",
-                    e
-                );
-                eprintln!(
-                    "  The packaged 'report' command still works manually, but the auto-run on new shells won't fire"
-                );
-                eprintln!("  until you run (no admin needed):");
-                eprintln!(
-                    "    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned"
-                );
-            }
-        },
-        PolicyState::BlockedAllSigned => {
-            eprintln!(
-                "Notice: PowerShell CurrentUser execution policy is 'AllSigned' — TR-300 will not change this."
-            );
-            eprintln!(
-                "  AllSigned blocks the unsigned auto-run snippet in $PROFILE, so the auto-run on new shells won't fire."
-            );
-            eprintln!(
-                "  The packaged 'report' command still works manually. If you'd like to opt into the auto-run, you can either:"
-            );
-            eprintln!("    - sign the TR-300 block in your profile yourself, or");
-            eprintln!("    - relax the policy (no admin needed):");
-            eprintln!(
-                "        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned"
-            );
-        }
-    }
 }
 
 /// Perform complete uninstall (profile + binary + directory)
@@ -806,65 +573,8 @@ mod tests {
         assert!(super::self_cleanup_command(Path::new("relative.exe"), None, None).is_err());
     }
 
-    use super::{looks_like_onedrive_path, looks_like_redirected_path, policy_state, PolicyState};
+    use super::{looks_like_onedrive_path, looks_like_redirected_path};
     use std::path::Path;
-
-    #[test]
-    fn restricted_is_blocked_default() {
-        assert_eq!(policy_state("Restricted"), PolicyState::BlockedDefault);
-    }
-
-    #[test]
-    fn undefined_is_blocked_default() {
-        // Scope precedence resolves Undefined to Restricted on Windows Client.
-        assert_eq!(policy_state("Undefined"), PolicyState::BlockedDefault);
-    }
-
-    #[test]
-    fn allsigned_is_its_own_state() {
-        // Deliberate hardening — we must not silently downgrade.
-        assert_eq!(policy_state("AllSigned"), PolicyState::BlockedAllSigned);
-    }
-
-    #[test]
-    fn remotesigned_is_permissive() {
-        assert_eq!(policy_state("RemoteSigned"), PolicyState::Permissive);
-    }
-
-    #[test]
-    fn unrestricted_is_permissive() {
-        assert_eq!(policy_state("Unrestricted"), PolicyState::Permissive);
-    }
-
-    #[test]
-    fn bypass_is_permissive() {
-        assert_eq!(policy_state("Bypass"), PolicyState::Permissive);
-    }
-
-    #[test]
-    fn empty_string_is_unknown() {
-        assert_eq!(policy_state(""), PolicyState::Unknown);
-    }
-
-    #[test]
-    fn unrecognized_value_is_unknown() {
-        // Future PowerShell versions might introduce new policies; we
-        // shouldn't act on values we don't understand.
-        assert_eq!(policy_state("NotARealPolicy"), PolicyState::Unknown);
-    }
-
-    #[test]
-    fn classification_is_case_insensitive() {
-        assert_eq!(policy_state("restricted"), PolicyState::BlockedDefault);
-        assert_eq!(policy_state("REMOTESIGNED"), PolicyState::Permissive);
-        assert_eq!(policy_state("AllSIGNED"), PolicyState::BlockedAllSigned);
-    }
-
-    #[test]
-    fn surrounding_whitespace_does_not_confuse_classification() {
-        // Get-ExecutionPolicy output is trimmed at the call site, but defensive.
-        assert_eq!(policy_state("  Restricted  "), PolicyState::BlockedDefault);
-    }
 
     #[test]
     fn onedrive_kfm_path_is_detected() {

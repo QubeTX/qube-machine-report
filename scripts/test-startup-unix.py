@@ -140,7 +140,8 @@ def local(binary):
         # Exercise the same profile-only opt-out and installer refresh used by updates.
         subprocess.run([binary, "uninstall"], input=b"1\n", check=True, capture_output=True, env=env)
         subprocess.run([binary, "configure-startup-user"], check=True, capture_output=True, env=env)
-        assert not terminal([binary, "--startup"], env)
+        assert "PROCESSOR" in terminal([binary, "--startup"], env)  # Explicit previews still work.
+        assert not terminal([binary, "--startup-hook"], env)
         assert "PROCESSOR" not in terminal(["bash", "-i"], env, exchanges=EXIT)
         assert "PROCESSOR" in terminal([binary, "--fast"], env)
         subprocess.run([binary, "install"], check=True, capture_output=True, env=env)
