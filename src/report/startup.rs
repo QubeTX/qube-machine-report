@@ -231,44 +231,71 @@ fn render(
         .unwrap_or(32)
         .clamp(32, 64);
     let width = available.min(19 + data_width);
-    let table = width >= 38 && budget >= 6;
+    // Spend spare rows on a closed frame only after selecting useful facts.
+    // The hostname itself always costs one row.
+    let spare = budget - facts.len() - 1;
+    let framed = width >= 38 && spare >= 2;
+    let full_header = framed && spare >= 6;
     let renderer = TableRenderer::new(12, width.saturating_sub(19), config.box_chars());
-    let headed = table && budget >= facts.len() + 7;
     let section_changes = |a: &str, b: &str| !session.remote && section(a) != section(b);
     let dividers = facts
         .windows(2)
         .filter(|pair| section_changes(&pair[0].0, &pair[1].0))
         .count();
-    let divided = headed && budget >= facts.len() + 7 + dividers;
+    let divided = full_header && spare >= 6 + dividers;
     let mut output = String::new();
-    let heading = fit(&info.hostname, if table { width - 2 } else { width });
-    if headed {
+    let heading_width = if framed { width - 2 } else { width };
+    let branded = format!("TR-300 | {}", info.hostname);
+    let heading = if !full_header && width >= 32 && budget >= 5 && branded.width() <= heading_width
+    {
+        fit(&branded, heading_width)
+    } else {
+        fit(&info.hostname, heading_width)
+    };
+    if full_header {
         output.push_str(&renderer.render_top_header());
         output.push_str(&renderer.render_header_bottom());
         output.push_str(&renderer.render_centered(&fit(config.title(), width - 2)));
         output.push_str(&renderer.render_centered(&fit(config.subtitle(), width - 2)));
         output.push_str(&renderer.render_centered(&heading));
         output.push_str(&renderer.render_top_divider());
-    } else if table {
+    } else if framed {
+        let chars = config.box_chars();
+        output.push(chars.top_left);
+        output.extend(std::iter::repeat_n(chars.horizontal, width - 2));
+        output.push(chars.top_right);
+        output.push('\n');
         output.push_str(&renderer.render_centered(&heading));
+        if spare >= 3 {
+            output.push_str(&renderer.render_top_divider());
+        }
     } else {
         output.push_str(&heading);
         output.push('\n');
     }
+    let label_width = if width >= 26 {
+        facts
+            .iter()
+            .map(|(label, _)| label.len())
+            .max()
+            .unwrap_or(0)
+    } else {
+        0
+    };
     let mut previous = None;
     for (label, value) in &facts {
         if divided && previous.is_some_and(|p| section_changes(p, label)) {
             output.push_str(&renderer.render_middle_divider());
         }
         previous = Some(label.as_str());
-        if table {
+        if framed {
             output.push_str(&renderer.render_row(label, &fit(value, width - 19)));
         } else {
-            output.push_str(&fit(&format!("{label} {value}"), width));
+            output.push_str(&fit(&format!("{label:label_width$} {value}"), width));
             output.push('\n');
         }
     }
-    if headed {
+    if framed {
         output.push_str(&renderer.render_footer());
     }
     output
@@ -287,7 +314,11 @@ mod tests {
         let output = render(&info, &Config::default(), Some((80, 7)), &session);
         assert_eq!(
             output.lines().collect::<Vec<_>>(),
-            ["host", "SERVER IP 2001:db8::2", "BATTERY 63% (Discharging)"]
+            [
+                "host",
+                "SERVER IP 2001:db8::2",
+                "BATTERY   63% (Discharging)"
+            ]
         );
         let output = render(&info, &Config::default(), Some((80, 100)), &session);
         for value in [
@@ -320,6 +351,54 @@ mod tests {
                 assert!(!output.contains("GPU"));
             }
         }
+    }
+
+    #[test]
+    fn compact_layout_examples() {
+        let mut info = fixture_info();
+        info.hostname = "SHAGHV-PC".into();
+        let config = Config::default();
+        let session = Session::default();
+        for (cols, rows) in [(120, 30), (80, 25), (22, 9)] {
+            let out = render(&info, &config, Some((cols, rows)), &session);
+            let lines: Vec<_> = out.lines().collect();
+            let heading = if cols < 32 {
+                "SHAGHV-PC"
+            } else {
+                "TR-300 | SHAGHV-PC"
+            };
+            assert_eq!(lines[0], heading);
+            assert!(lines
+                .iter()
+                .all(|line| !line.starts_with('│') && line.width() < usize::from(cols)));
+            assert!(lines.len() <= usize::from(rows - 4));
+        }
+
+        // A typical fast sample fits all fields in 120x30 with spare rows for
+        // a compact heading and a complete frame, but not the tall title block.
+        info.os_edition = None;
+        info.os_codename = None;
+        info.os_build = None;
+        info.last_login = None;
+        info.bios = None;
+        info.motherboard = None;
+        info.shell = None;
+        info.locale = None;
+        info.encryption = None;
+        info.ram_slots = None;
+        info.display_resolution = None;
+        info.terminal = None;
+        info.zfs_health = None;
+        info.load_1m = None;
+        info.boot_mode = None;
+        info.hypervisor = None;
+        let out = render(&info, &config, Some((120, 30)), &session);
+        assert!(
+            out.starts_with('┌') && out.lines().last().unwrap().starts_with('└'),
+            "{out}"
+        );
+        assert!(out.contains("SHAGHV-PC") && out.contains("TR-300"));
+        assert!(out.lines().count() <= 26);
     }
 
     #[test]

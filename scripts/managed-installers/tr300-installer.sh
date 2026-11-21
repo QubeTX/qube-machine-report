@@ -52,7 +52,9 @@ tr300_pkg_receipt_forgotten=0
 tr300_pkg_report_present=0
 tr300_pkg_startup_tool=''
 tr300_pkg_runtime=/Library/PrivilegedHelperTools/com.qubetx.tr300.startup
+tr300_pkg_agent=/Library/LaunchAgents/com.qubetx.tr300.startup.plist
 tr300_pkg_startup_removed=0
+tr300_pkg_recovery_retained=0
 tr300_sha256sum_directory=''
 
 tr300_cleanup() {
@@ -77,9 +79,17 @@ tr300_cleanup() {
                 fi
             fi
             if [ "$tr300_pkg_startup_removed" -eq 1 ]; then
-                if [ -f "$tr300_pkg_startup_tool/tr300" ]; then
-                    sudo /bin/ln "$tr300_pkg_startup_tool/tr300" "$tr300_pkg_runtime" ||
+                if sudo /bin/test -f "$tr300_pkg_startup_tool/tr300"; then
+                    sudo /bin/ln "$tr300_pkg_startup_tool/tr300" "$tr300_pkg_runtime" || {
+                        tr300_pkg_recovery_retained=1
                         printf '%s\n' 'TR-300 warning: could not restore the protected machine startup runtime' >&2
+                    }
+                fi
+                if sudo /bin/test -f "$tr300_pkg_startup_tool/agent.plist"; then
+                    sudo /bin/ln "$tr300_pkg_startup_tool/agent.plist" "$tr300_pkg_agent" || {
+                        tr300_pkg_recovery_retained=1
+                        printf '%s\n' 'TR-300 warning: could not restore package LaunchAgent' >&2
+                    }
                 fi
                 tr300_pkg_startup_is_exact &&
                     sudo "$tr300_pkg_runtime" configure-startup-machine ||
@@ -87,8 +97,10 @@ tr300_cleanup() {
             fi
         fi
     fi
-    if [ -n "$tr300_pkg_startup_tool" ]; then
-        sudo /bin/rm -f "$tr300_pkg_startup_tool/tr300"
+    if [ "$tr300_pkg_recovery_retained" -eq 1 ]; then
+        printf 'TR-300: protected startup recovery files remain at %s\n' "$tr300_pkg_startup_tool" >&2
+    elif [ -n "$tr300_pkg_startup_tool" ]; then
+        sudo /bin/rm -f "$tr300_pkg_startup_tool/tr300" "$tr300_pkg_startup_tool/agent.plist"
         sudo /bin/rmdir "$tr300_pkg_startup_tool"
     fi
     if [ -n "$tr300_temp" ]; then
@@ -605,17 +617,21 @@ tr300_pkg_is_exact_product() {
 }
 
 tr300_pkg_startup_is_exact() {
-    for trusted in /Library /Library/PrivilegedHelperTools "$tr300_pkg_runtime"; do
+    for trusted in /Library /Library/PrivilegedHelperTools "$tr300_pkg_runtime" /Library/LaunchAgents "$tr300_pkg_agent"; do
         [ ! -L "$trusted" ] && [ "$(/usr/bin/stat -f %u "$trusted")" = 0 ] || return 1
         mode=$(/usr/bin/stat -f %p "$trusted") || return 1
         [ "$((0$mode & 022))" -eq 0 ] || return 1
         acl=$(/bin/ls -lde "$trusted") || return 1
-        if printf '%s\n' "$acl" | /usr/bin/grep -Eq ' allow .*([[:<:]]write|add_file|add_subdirectory|delete_child|chown|writesecurity)'; then return 1; fi
+        if printf '%s\n' "$acl" | /usr/bin/grep -Eq ' allow .*(write|add_file|add_subdirectory|delete|append|chown)'; then return 1; fi
     done
     [ -f "$tr300_pkg_runtime" ] && [ -x "$tr300_pkg_runtime" ] || return 1
     /usr/sbin/pkgutil --file-info "$tr300_pkg_runtime" |
         /usr/bin/grep -Eq '^(pkgid|package-id):[[:space:]]*com\.qubetx\.tr300\.pkg$' || return 1
     /usr/bin/codesign --verify --strict -R='anchor apple generic and identifier "com.qubetx.tr300" and certificate leaf[subject.OU] = "M9D5379H93"' "$tr300_pkg_runtime" || return 1
+    printf '%s\n' "$payload_files" | sed 's#^\./##; s#^/##' | grep -Fxq "${tr300_pkg_agent#/}" || return 1
+    /usr/sbin/pkgutil --file-info "$tr300_pkg_agent" |
+        /usr/bin/grep -Eq '^(pkgid|package-id):[[:space:]]*com\.qubetx\.tr300\.pkg$' || return 1
+    printf '%s\n' '<plist version="1.0"><dict><key>Label</key><string>com.qubetx.tr300.startup</string><key>ProgramArguments</key><array><string>/Library/PrivilegedHelperTools/com.qubetx.tr300.startup</string><string>configure-startup-machine</string></array><key>LimitLoadToSessionType</key><string>Aqua</string><key>RunAtLoad</key><true/></dict></plist>' | /usr/bin/cmp -s - "$tr300_pkg_agent" || return 1
     /usr/bin/cmp -s "$tr300_pkg_runtime" /usr/local/bin/tr300
 }
 
@@ -660,6 +676,8 @@ tr300_take_over_macos_pkg() {
         sudo "$tr300_pkg_runtime" remove-startup-machine ||
             tr300_fail 'could not remove receipt-owned machine startup integration'
         tr300_pkg_startup_removed=1
+        sudo /bin/mv "$tr300_pkg_agent" "$tr300_pkg_startup_tool/agent.plist" ||
+            tr300_fail 'could not stage receipt-owned package LaunchAgent'
         sudo /bin/mv "$tr300_pkg_runtime" "$tr300_pkg_startup_tool/tr300" ||
             tr300_fail 'could not stage protected PKG startup runtime for removal'
     fi

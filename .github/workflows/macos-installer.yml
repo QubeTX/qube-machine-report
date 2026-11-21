@@ -1524,6 +1524,9 @@ jobs:
           install -m 0755 "$PREPARED_DIRECTORY/preinstall" "$package_scripts/preinstall"
           install -d -m 0755 "$payload/Library/PrivilegedHelperTools"
           install -m 0755 "$tr300_universal" "$payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
+          install -d -m 0755 "$payload/Library/LaunchAgents"
+          printf '%s\n' '<plist version="1.0"><dict><key>Label</key><string>com.qubetx.tr300.startup</string><key>ProgramArguments</key><array><string>/Library/PrivilegedHelperTools/com.qubetx.tr300.startup</string><string>configure-startup-machine</string></array><key>LimitLoadToSessionType</key><string>Aqua</string><key>RunAtLoad</key><true/></dict></plist>' > "$payload/Library/LaunchAgents/com.qubetx.tr300.startup.plist"
+          chmod 0644 "$payload/Library/LaunchAgents/com.qubetx.tr300.startup.plist"
           printf '%s\n' '#!/bin/sh' 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' > "$package_scripts/postinstall"
           chmod 0755 "$package_scripts/postinstall"
 
@@ -1949,7 +1952,8 @@ jobs:
           test ! -L "$expanded_pkg/Bom"
           payload_inventory="$RUNNER_TEMP/tr300-direct-pkg-payload-inventory"
           lsbom -s -f "$expanded_pkg/Bom" | sed 's#^\./##' > "$payload_inventory"
-          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 3 ] ||
+          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 4 ] ||
+            ! grep -Fqx 'Library/LaunchAgents/com.qubetx.tr300.startup.plist' "$payload_inventory" ||
             ! grep -Fqx 'Library/PrivilegedHelperTools/com.qubetx.tr300.startup' "$payload_inventory" ||
             ! grep -Fqx 'usr/local/bin/report' "$payload_inventory" ||
             ! grep -Fqx 'usr/local/bin/tr300' "$payload_inventory"; then
@@ -2419,7 +2423,7 @@ jobs:
           done
           env -u GH_TOKEN -u GITHUB_TOKEN /bin/bash "$ssh_fixture_dir/test-startup-unix-ssh.sh" /usr/local/bin/tr300 machine
           sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup remove-startup-machine
-          sudo rm -f /Library/PrivilegedHelperTools/com.qubetx.tr300.startup
+          sudo rm -f /Library/PrivilegedHelperTools/com.qubetx.tr300.startup /Library/LaunchAgents/com.qubetx.tr300.startup.plist
           sudo rm -f /usr/local/bin/report /usr/local/bin/tr300
           sudo pkgutil --forget com.qubetx.tr300.pkg >/dev/null
           test ! -e /usr/local/bin/tr300
@@ -2557,6 +2561,9 @@ jobs:
             sh "$managed_installer"
           test ! -e /usr/local/bin/tr300
           test ! -e /usr/local/bin/report
+          test ! -e /Library/PrivilegedHelperTools/com.qubetx.tr300.startup
+          test ! -e /Library/LaunchAgents/com.qubetx.tr300.startup.plist
+          ! grep -Fqx '# TR-300 system startup' /private/etc/zshrc
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'managed takeover left the package receipt behind' >&2
             exit 1
@@ -3768,7 +3775,7 @@ jobs:
         shell: bash
         run: |
           sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup remove-startup-machine
-          sudo rm -f /Library/PrivilegedHelperTools/com.qubetx.tr300.startup
+          sudo rm -f /Library/PrivilegedHelperTools/com.qubetx.tr300.startup /Library/LaunchAgents/com.qubetx.tr300.startup.plist
           sudo rm -f /usr/local/bin/report /usr/local/bin/tr300
           sudo pkgutil --forget com.qubetx.tr300.pkg
           test ! -e /usr/local/bin/tr300

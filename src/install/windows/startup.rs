@@ -78,7 +78,28 @@ fn machine_paths() -> Result<MachinePaths> {
 }
 
 pub(crate) fn check_machine_startup() -> Result<()> {
-    machine_paths().map(|_| ())
+    let MachinePaths { exe, profiles } = machine_paths()?;
+    let block = ps_block(&exe, MACHINE_START, MACHINE_END)?;
+    for path in &profiles {
+        match fs::read(path) {
+            Ok(old) => {
+                edited_profile(&old, &block, MACHINE_START, MACHINE_END, true)?;
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let hive = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let current = match hive
+        .open_subkey_with_flags(CMD_KEY, KEY_QUERY_VALUE)
+        .and_then(|k| k.get_raw_value("AutoRun"))
+    {
+        Ok(value) => Some(value),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    cmd_value(current.as_ref(), &exe, true)?;
+    Ok(())
 }
 
 fn configure_machine(enable: bool) -> Result<()> {
@@ -152,7 +173,8 @@ fn ps_block(exe: &Path, start: &str, end: &str) -> Result<String> {
 & {{
     $binary = {binary}
     if ([IO.File]::Exists($binary)) {{
-        $previous = Microsoft.PowerShell.Utility\Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction Ignore
+        $PSNativeCommandUseErrorActionPreference = $false
+        $previous = $ExecutionContext.SessionState.PSVariable.Get('global:LASTEXITCODE')
         $hadExit = $null -ne $previous
         if ($hadExit) {{ $savedExit = $previous.Value }}
         try {{
@@ -160,7 +182,7 @@ fn ps_block(exe: &Path, start: &str, end: &str) -> Result<String> {
             if ($LASTEXITCODE -in 0, 3) {{ $env:TR300_AUTORUN_RAN = '1' }}
         }} finally {{
             if ($hadExit) {{ $global:LASTEXITCODE = $savedExit }}
-            else {{ Microsoft.PowerShell.Utility\Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction Ignore }}
+            else {{ $ExecutionContext.SessionState.PSVariable.Remove('global:LASTEXITCODE') }}
         }}
     }}
 }}
@@ -709,7 +731,7 @@ mod tests {
                 } else {
                     "$null -ne (Get-Variable LASTEXITCODE -Scope Global -ErrorAction Ignore)"
                 };
-                let script = format!("{initial}; $env:TR300_AUTORUN_RAN=$null\n{hook}\nif (({verify}) -or $env:TR300_AUTORUN_RAN -ne '1') {{ exit 11 }}; exit 0");
+                let script = format!("$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true; {initial}; $env:TR300_AUTORUN_RAN=$null\n{hook}\nif (({verify}) -or $env:TR300_AUTORUN_RAN -ne '1') {{ exit 11 }}; exit 0");
                 let Ok(mut command) = crate::trusted_process::powershell_command_for(host, &script)
                 else {
                     continue;

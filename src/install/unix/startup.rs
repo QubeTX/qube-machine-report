@@ -113,7 +113,7 @@ end"#
     }
 @PATH@
     $savedExit = Get-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
-    $priorExit = $savedExit.Value
+    $priorExit = if ($null -ne $savedExit) { $savedExit.Value }
     try {
         $ttyName = & /usr/bin/tty 2>$null
         if ($LASTEXITCODE -eq 0 -and $env:TR300_AUTORUN_TTY -cne $ttyName) {
@@ -312,13 +312,123 @@ fi"#;
         Ok(false)
     }
 
-    pub(in crate::install::unix) fn change(enable: bool) -> Result<()> {
-        if unsafe { libc::geteuid() } != 0 {
+    fn local_accounts() -> Result<Vec<(u32, u32, std::path::PathBuf)>> {
+        use uzers::os::unix::UserExt;
+        let result = Command::new("/usr/bin/dscl")
+            .env_clear()
+            .args([".", "-list", "/Users", "UniqueID"])
+            .output()?;
+        if !result.status.success() {
             return Err(profile_error(
-                "machine startup requires administrator privileges",
+                "cannot enumerate local accounts for Bash startup",
             ));
         }
-        if enable && !protected(Path::new(BINARY))? {
+        let mut accounts = Vec::new();
+        for line in String::from_utf8_lossy(&result.stdout).lines() {
+            let Some(id) = line
+                .split_ascii_whitespace()
+                .last()
+                .and_then(|id| id.parse::<i64>().ok())
+            else {
+                return Err(profile_error("invalid local account UID"));
+            };
+            if !(501..=u32::MAX as i64).contains(&id) {
+                continue;
+            }
+            let uid = id as u32;
+            let user = uzers::get_user_by_uid(uid)
+                .ok_or_else(|| profile_error("local account lookup failed"))?;
+            let home = user.home_dir();
+            if !home.is_absolute() || !home.is_dir() {
+                continue;
+            }
+            accounts.push((uid, user.primary_group_id(), home.to_owned()));
+        }
+        Ok(accounts)
+    }
+
+    fn change_account_as(uid: u32, gid: u32, home: &Path, enable: bool) -> Result<bool> {
+        use std::os::unix::process::CommandExt;
+        let command = if enable {
+            "configure-startup-machine"
+        } else {
+            "remove-startup-machine"
+        };
+        let result = Command::new(BINARY)
+            .env_clear()
+            .env("HOME", home)
+            .env("TR300_ACCOUNT_ACK", "1")
+            .env("PATH", "/usr/bin:/bin")
+            .arg(command)
+            .current_dir("/")
+            .uid(uid)
+            .gid(gid)
+            .output()?;
+        if !result.status.success() {
+            return Err(profile_error(format!(
+                "could not configure Bash for UID {uid}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            )));
+        }
+        Ok(result.stdout == b"TR300_ACCOUNT_CHANGED\n")
+    }
+
+    /// Apple's Bash only reads /etc/bashrc on login via /etc/profile. Run as
+    /// the account itself for its non-login .bashrc, including LaunchAgent
+    /// enrollment for users created after the package was installed.
+    fn change_own_bash_profile(enable: bool) -> Result<bool> {
+        let home = dirs::home_dir().ok_or_else(|| profile_error("cannot determine Bash home"))?;
+        if enable && crate::install::startup_disabled()? {
+            return Ok(false);
+        }
+        let path = home.join(".bashrc");
+        let (path, before) = match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                let (resolved, _) = super::super::resolve_profile_target(&path)?;
+                let snapshot =
+                    super::super::read_profile_snapshot(&path, &resolved, "Bash profile")?;
+                (resolved, Some(snapshot.contents))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (path, None),
+            Err(error) => return Err(error.into()),
+        };
+        let before_text = before.as_deref().unwrap_or("");
+        let marker = "# TR-300 package Bash startup";
+        let end = "# End TR-300 package Bash startup";
+        let block = block(ProfileSyntax::Posix)?
+            .replace(START, marker)
+            .replace(END, end);
+        let mut after = before_text.to_owned();
+        let owned = format!("{block}\n");
+        if after.contains(marker) || after.contains(end) {
+            if !after.contains(&owned) {
+                return Err(profile_error("modified package Bash startup block"));
+            }
+            if enable {
+                return Ok(false);
+            }
+            after = after.replace(&owned, "");
+        } else if enable {
+            if !after.is_empty() && !after.ends_with('\n') {
+                after.push('\n');
+            }
+            after.push_str(&owned);
+        } else {
+            return Ok(false);
+        }
+        super::super::super::atomic_write(&path, &after)?;
+        Ok(true)
+    }
+
+    pub(in crate::install::unix) fn change(enable: bool) -> Result<()> {
+        if unsafe { libc::geteuid() } != 0 {
+            let changed = change_own_bash_profile(enable)?;
+            if changed && std::env::var_os("TR300_ACCOUNT_ACK").is_some() {
+                println!("TR300_ACCOUNT_CHANGED");
+            }
+            return Ok(());
+        }
+        if !protected(Path::new(BINARY))? {
             return Err(profile_error(
                 "the machine startup runtime is not protected",
             ));
@@ -389,7 +499,19 @@ fi"#;
                 if !after.is_empty() && !after.ends_with('\n') {
                     after.push('\n');
                 }
-                let block = block(shell)?;
+                let mut block = block(shell)?;
+                if matches!(name, "/private/etc/profile" | "/private/etc/zshrc") {
+                    let enroll = format!(
+                        r#"case "$-" in *i*)
+    if [ -t 0 ] && [ -t 1 ] && [ -x '{BINARY}' ] && [ "${{EUID:-$(/usr/bin/id -u)}}" -ge 501 ] &&
+       ! /usr/bin/grep -Fqx '# TR-300 package Bash startup' "$HOME/.bashrc" 2>/dev/null; then
+        '{BINARY}' configure-startup-machine >/dev/null 2>&1 || :
+    fi
+    ;;
+esac"#
+                    );
+                    block = block.replacen(START, &format!("{START}\n{enroll}"), 1);
+                }
                 after.push_str(&block);
                 after.push('\n');
             }
@@ -430,6 +552,7 @@ fi"#;
             Ok(())
         };
         let mut profiles_changed = 0;
+        let mut accounts_changed = Vec::new();
         let mut fish_changed = Vec::new();
         let result = (|| {
             for (path, before, after) in &changes {
@@ -451,9 +574,19 @@ fi"#;
                     fish_changed.push(config);
                 }
             }
+            for (uid, gid, home) in local_accounts()? {
+                if change_account_as(uid, gid, &home, enable)? {
+                    accounts_changed.push((uid, gid, home));
+                }
+            }
             Ok(())
         })();
         if let Err(error) = result {
+            for (uid, gid, home) in accounts_changed.into_iter().rev() {
+                if let Err(restore) = change_account_as(uid, gid, &home, !enable) {
+                    eprintln!("TR-300: could not restore Bash startup for UID {uid}: {restore}");
+                }
+            }
             for config in fish_changed.into_iter().rev() {
                 if let Err(restore) = install_fish_fragment(Path::new(config), !enable) {
                     eprintln!("TR-300: could not restore {config}: {restore}");

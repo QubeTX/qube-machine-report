@@ -128,6 +128,10 @@ jobs:
         run: |
           python3 scripts/test-startup-unix.py local target/release/tr300
           bash scripts/test-startup-unix-ssh.sh target/release/tr300
+      - name: Exercise fresh macOS package startup and first SSH login
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/test-macos-startup-package.sh
       - name: Exercise Windows OpenSSH login and command startup
         if: runner.os == 'Windows'
         shell: pwsh
@@ -1103,16 +1107,14 @@ jobs:
           grep -Fq 'tr300_restore_managed_state' "$shell_wrapper"
           test ! -e scripts/macos-pkg-rollback.c
           test ! -e scripts/test-macos-pkg-rollback.sh
-          if grep -Eq 'tr300-migration-probe|tr300-pkg-rollback|macos-pkg-rollback|pkg_scripts.*/postinstall|POSTINSTALL' "$builder"; then
+          if grep -Eq 'tr300-migration-probe|tr300-pkg-rollback|macos-pkg-rollback' "$builder"; then
             echo 'direct PKG must not ship post-payload managed-state migration code' >&2
             exit 1
           fi
           # Validation names the retired members only to prove they are absent;
           # the executable provenance fixture forbids them in prep/build jobs.
-          if grep -Eq 'pkg_scripts.*/postinstall|POSTINSTALL' "$workflow"; then
-            echo 'direct PKG workflow must not prepare or install a postinstall script' >&2
-            exit 1
-          fi
+          grep -Fq 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' "$builder"
+          grep -Fq 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' "$workflow"
           grep -Fq 'managed_state_present()' "$builder"
           # shellcheck disable=SC2016
           grep -Fq 'for home in /Users/* /Users/.[!.]* /Users/..?*; do' "$builder"
@@ -1597,8 +1599,12 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
           }
           foreach ($case in $cases) {
+            $globalStartup = $case.Name -eq 'global'
+            & scripts/test-windows-startup-registration.ps1 -Registered $false
             Install-Msi $case.Msi
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             Install-Exe $case.Exe $case.Name
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             $entries = @(Entries $case.Display)
             if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -eq 1) {
               Get-Content -LiteralPath $script:LastInnoLog -ErrorAction SilentlyContinue
@@ -1610,9 +1616,12 @@ jobs:
             $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
             if ($marker -notlike 'exe-*') { throw "current EXE marker did not win: $marker" }
             Remove-Entry $entries[0]
+            & scripts/test-windows-startup-registration.ps1 -Registered $false
 
             Install-Exe $case.Exe $case.Name
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             Install-Msi $case.Msi
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             $entries = @(Entries $case.Display)
             if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -ne 1) {
               $summary = $entries | ForEach-Object {
@@ -1623,6 +1632,7 @@ jobs:
             $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
             if ($marker -notlike 'msi-*') { throw "current MSI marker did not win: $marker" }
             Remove-Entry $entries[0]
+            & scripts/test-windows-startup-registration.ps1 -Registered $false
           }
       - name: Prove cross-edition native choices fail before mutation
         shell: pwsh

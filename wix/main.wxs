@@ -295,7 +295,7 @@
         <InstallExecuteSequence>
             <Custom Action='ExpectedStartupFolder' After='CostFinalize'>1</Custom>
             <Custom Action='CheckStartupDestination' After='ExpectedStartupFolder'><![CDATA[NOT (Bin ~= TR300EXPECTEDGLOBAL)]]></Custom>
-            <Custom Action='CheckMachineStartupPaths' Before='InstallInitialize'>1</Custom>
+            <Custom Action='CheckMachineStartupPaths' Before='PreflightCargoOwnership'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='UndoRemoveStartup' Before='RemoveMachineStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='RemoveMachineStartup' Before='RemoveFiles'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='UndoConfigureStartup' After='InstallFiles'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>

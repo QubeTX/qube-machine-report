@@ -117,11 +117,6 @@ begin
     Result := 'Global startup requires the standard Program Files installation directory.';
     exit;
   end;
-  if not Exec(Binary, 'check-startup-machine', ExpandConstant('{tmp}'),
-      SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then begin
-    Result := 'The Global binary and PowerShell profile locations must be protected from unprivileged writes.';
-    exit;
-  end;
   if not ExecAsOriginalUser(Binary,
       'migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination "' +
       ExpandConstant('{app}\bin\{#MyAppExeName}') + '"',
@@ -131,10 +126,17 @@ begin
       'Setup stopped before changing the existing installation.';
     exit;
   end;
-  if ExitCode <> 0 then
+  if ExitCode <> 0 then begin
     Result := 'The existing TR-300 managed/Cargo ownership evidence is ' +
       'ambiguous. Setup stopped before changing anything. Use ' +
       'https://github.com/QubeTX/qube-machine-report/releases/latest';
+    exit;
+  end;
+  if not Exec(Binary, 'check-startup-machine', ExpandConstant('{tmp}'),
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then begin
+    Result := 'The Global binary and PowerShell profile locations must be protected from unprivileged writes.';
+    exit;
+  end;
 end;
 
 #include "remove-conflicting-msi.pas"

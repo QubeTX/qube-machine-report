@@ -190,6 +190,9 @@ install -m 755 "$universal" "${payload}/usr/local/bin/tr300"
 install -m 755 "$universal_report" "${payload}/usr/local/bin/report"
 install -d -m 0755 "${payload}/Library/PrivilegedHelperTools"
 install -m 0755 "$universal" "${payload}/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
+install -d -m 0755 "${payload}/Library/LaunchAgents"
+printf '%s\n' '<plist version="1.0"><dict><key>Label</key><string>com.qubetx.tr300.startup</string><key>ProgramArguments</key><array><string>/Library/PrivilegedHelperTools/com.qubetx.tr300.startup</string><string>configure-startup-machine</string></array><key>LimitLoadToSessionType</key><string>Aqua</string><key>RunAtLoad</key><true/></dict></plist>' > "${payload}/Library/LaunchAgents/com.qubetx.tr300.startup.plist"
+chmod 0644 "${payload}/Library/LaunchAgents/com.qubetx.tr300.startup.plist"
 pkg_scripts="${work_dir}/pkg-scripts"
 mkdir -m 755 "$pkg_scripts"
 cat > "${pkg_scripts}/preinstall" <<'PREINSTALL'
@@ -503,14 +506,14 @@ done < "$accounts_file"
 # This signed helper is executed across accounts. Every preexisting parent
 # must exclude non-root writes before Apple Installer can place a payload.
 startup_runtime=/Library/PrivilegedHelperTools/com.qubetx.tr300.startup
-for trusted in /Library /Library/PrivilegedHelperTools "$startup_runtime"; do
+for trusted in /Library /Library/PrivilegedHelperTools "$startup_runtime" /Library/LaunchAgents /Library/LaunchAgents/com.qubetx.tr300.startup.plist; do
     if [ -e "$trusted" ] || [ -L "$trusted" ]; then
         [ ! -L "$trusted" ] && [ "$(/usr/bin/stat -f %u "$trusted")" = 0 ] ||
             fail_closed 'unprotected machine startup runtime path.'
         file_mode=$(/usr/bin/stat -f %p "$trusted") || fail_closed 'cannot read startup path mode.'
         [ "$((0$file_mode & 022))" -eq 0 ] || fail_closed 'writable machine startup runtime path.'
         access_list=$(/bin/ls -lde "$trusted") || fail_closed 'cannot read startup path permissions.'
-        if printf '%s\n' "$access_list" | /usr/bin/grep -Eq ' allow .*([[:<:]]write|add_file|add_subdirectory|delete_child|chown|writesecurity)'; then
+        if printf '%s\n' "$access_list" | /usr/bin/grep -Eq ' allow .*(write|add_file|add_subdirectory|delete|append|chown)'; then
             fail_closed 'startup runtime path permits writes through an access control list.'
         fi
     fi
@@ -524,6 +527,17 @@ if [ -e "$startup_runtime" ]; then
         fail_closed 'conflicting startup runtime ownership.'
     /usr/bin/codesign --verify --strict -R='anchor apple generic and identifier "com.qubetx.tr300" and certificate leaf[subject.OU] = "M9D5379H93"' "$startup_runtime" ||
         fail_closed 'conflicting startup runtime signature.'
+fi
+startup_agent=/Library/LaunchAgents/com.qubetx.tr300.startup.plist
+if [ -e "$startup_agent" ]; then
+    [ -f "$startup_agent" ] || fail_closed 'unexpected startup LaunchAgent type.'
+    /usr/sbin/pkgutil --files com.qubetx.tr300.pkg | /usr/bin/sed 's#^\./##;s#^/##' |
+        /usr/bin/grep -Fxq "${startup_agent#/}" || fail_closed 'foreign startup LaunchAgent exists.'
+    /usr/sbin/pkgutil --file-info "$startup_agent" |
+        /usr/bin/grep -Eq '^(pkgid|package-id):[[:space:]]*com\.qubetx\.tr300\.pkg$' ||
+        fail_closed 'conflicting startup LaunchAgent ownership.'
+    printf '%s\n' '<plist version="1.0"><dict><key>Label</key><string>com.qubetx.tr300.startup</string><key>ProgramArguments</key><array><string>/Library/PrivilegedHelperTools/com.qubetx.tr300.startup</string><string>configure-startup-machine</string></array><key>LimitLoadToSessionType</key><string>Aqua</string><key>RunAtLoad</key><true/></dict></plist>' | /usr/bin/cmp -s - "$startup_agent" ||
+        fail_closed 'modified startup LaunchAgent; preserving it.'
 fi
 # report is a generic command name. A pre-v4.4 package receipt owns only
 # tr300 and must never authorize replacing another product's report command.
