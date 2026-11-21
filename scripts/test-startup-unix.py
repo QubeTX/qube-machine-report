@@ -95,21 +95,19 @@ def local(binary):
             if shutil.which(shell):
                 out = terminal([shell, "-i"], env, exchanges=EXIT)
                 assert out.count("PROCESSOR") == 1, out
-        # A raw PTY has no xterm display to answer .NET cursor queries. Make
-        # the first actual PowerShell prompt read the exit from the terminal;
-        # the editor never takes over input before the test can close the host.
+        # Exit from the first real PowerShell prompt. This proves interactive
+        # startup without making its optional editor talk to a raw capture PTY.
         with (home / ".config/powershell/profile.ps1").open("a") as stream:
-            stream.write("\nRemove-Module PSReadLine -ErrorAction SilentlyContinue\n"
-                         "function global:prompt {\n"
-                         "    [Console]::WriteLine('TR300_READY')\n"
-                         "    if ([IO.StreamReader]::new([Console]::OpenStandardInput()).ReadLine() -ceq 'exit') { [Environment]::Exit(0) }\n"
-                         "    throw 'Expected exit from the interactive PTY'\n}\n")
+            stream.write("\nfunction global:prompt {\n"
+                         "    [Console]::WriteLine('TR300_FIRST_PROMPT')\n"
+                         "    [Console]::Out.Flush()\n"
+                         "    [Environment]::Exit(0)\n}\n")
         ps_env = {**env, "TERM": "dumb", "POWERSHELL_TELEMETRY_OPTOUT": "1"}
         pwsh = shutil.which("pwsh")
         assert pwsh, "PowerShell 7 is required on this hosted qualification runner"
         for switches in [[], ["-i"]]:
-            out = terminal([pwsh, "-NoLogo", *switches], ps_env, exchanges=EXIT)
-            assert out.count("PROCESSOR") == 1, out
+            out = terminal([pwsh, "-NoLogo", *switches], ps_env)
+            assert out.count("PROCESSOR") == 1 and "TR300_FIRST_PROMPT" in out, out
         script = home / "command.ps1"
         script.write_text("Write-Output 'PS_COMMAND_OK'\n")
         for switches in [["-Command", "'PS_COMMAND_OK'"], ["-File", str(script)], [str(script)]]:
