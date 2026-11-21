@@ -8,13 +8,15 @@ Companion docs:
 - [`docs/architecture-decisions.md`](./docs/architecture-decisions.md) — canonical ADR ledger through 2026-11-11: cross-platform/product/output semantics, origin-preserving updates and reusable installer contract, v4 save/Mac trust and evidence boundaries, protected release/OIDC custody, `main` plus Actions runtime, toolchain/release policy, Windows accuracy/distribution/consolidation, thermals/battery/probe budgets, and install safety. Open this before undoing or revising a decision; it records context, rejected alternatives, consequences, evidence, and revalidation triggers.
 - [`MASTER_PLAN.md`](./MASTER_PLAN.md) — what's shipped, what's pending, where to pick up next session.
 - [`TESTING.md`](./TESTING.md) — manual cross-platform verification matrix + per-release verification log.
-- [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) — current v4.4.4 publication evidence and completed process qualification.
+- [`docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md`](./docs/agents/handoff/2026-11-11-v4.4.4-security-publication.md) — historical v4.4.4 publication evidence and completed process qualification.
 - [`docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md`](./docs/agents/handoff/2026-07-14-002-v4-release-and-personal-fleet-continuation.md) — historical v4 release ledger, enforced Mac freeze, and personal-fleet continuation.
 - [`docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md`](./docs/agents/handoff/2026-07-14-001-macos-hardening-alienware-continuation.md) — historical Mac/shared implementation checkpoint.
 
-Last verified against source: 2026-11-11
+Last verified against source: 2026-11-21
 
-Current published release, unyanked crate, and working manifest: **v4.4.4**,
+TR-300 **4.5.0** is the current public GitHub release and unyanked crate. The tag points to `4409fbc4c71d16c877ca5f0cc3348bbf22c9594e`. The public distribution contains 34 verified assets. [4.5.0 publication record](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md)
+
+The preceding public release was **v4.4.4**,
 immutable source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release
 `441625880` became latest at `2026-11-11T12:29:18Z` with exactly 34 audited,
 nonempty assets. PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70`
@@ -104,8 +106,7 @@ operating guidance: https://github.com/RealEmmettS/shaughv-tasks/tree/main/skill
 - Cargo package name: `tr300`
 - Library import path: `tr300`
 - Current crates.io / complete GitHub distribution / working manifest:
-  `4.4.4` / `4.4.4` / `4.4.4`; current publication evidence is above and in the
-  v4.4.4 handoff. Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
+  `4.5.0` / `4.5.0` / `4.5.0`. See the [4.5.0 publication record](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md). Historical v4.4.0 qualification: CI `36084969867` and crates `36084969841` attempt 2,
   Release `36085847270`, Windows `36086249950`, private validation
   `36086484931` attempt 2, and Mac publication `36086249996` passed.
 - Prior v4.3.12 distribution ledger: working manifest was `4.3.12` (battery hardening, Windows
