@@ -74,7 +74,7 @@ try {
         $fixturePath = Join-Path (Split-Path -Parent $bin) ('tr300-account-test-' + [guid]::NewGuid().ToString('N') + '.txt')
         Copy-Item -LiteralPath "$PSScriptRoot/test-windows-startup-account.ps1" -Destination $fixturePath
         $literal = $fixturePath.Replace("'", "''")
-        $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('$literal')))"
+        $command = '$env:TR300_POLICY_FIXTURE=' + "'$literal'" + '; & ([scriptblock]::Create([IO.File]::ReadAllText($env:TR300_POLICY_FIXTURE)))'
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         $stderr = Join-Path $env:RUNNER_TEMP "$name-stderr.txt"
         $stdout = Join-Path $env:RUNNER_TEMP "$name-stdout.txt"

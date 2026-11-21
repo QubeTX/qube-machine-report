@@ -203,6 +203,43 @@ pub(super) fn configure_user(profiles: &[(PathBuf, bool)], enable: bool) -> Resu
     )
 }
 
+/// Alternate-credential installers can load the correct HKCU hive while
+/// leaving USERPROFILE from the launching administrator. PowerShell and
+/// expandable shell-folder registry values would then resolve another home.
+fn token_matches_profile_environment() -> io::Result<bool> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use winapi::um::processthreadsapi::{GetCurrentProcess, OpenProcessToken};
+    use winapi::um::winnt::{HANDLE, TOKEN_QUERY};
+    #[link(name = "userenv")]
+    unsafe extern "system" {
+        fn GetUserProfileDirectoryW(token: HANDLE, data: *mut u16, size: *mut u32) -> i32;
+    }
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: OpenProcessToken writes a new handle, then OwnedHandle closes it.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let owned = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+    let token = owned.as_raw_handle().cast();
+    let mut size = 0;
+    // SAFETY: null requests the required count, including terminating NUL.
+    unsafe { GetUserProfileDirectoryW(token, std::ptr::null_mut(), &mut size) };
+    if !(2..=32768).contains(&size) {
+        return Ok(false);
+    }
+    let mut buf = vec![0u16; size as usize];
+    // SAFETY: the owned token and indicated buffer are valid for this call.
+    if unsafe { GetUserProfileDirectoryW(token, buf.as_mut_ptr(), &mut size) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let Some(length) = buf.iter().position(|&c| c == 0) else {
+        return Ok(false);
+    };
+    let actual = std::ffi::OsString::from_wide(&buf[..length]);
+    Ok(std::env::var_os("USERPROFILE").is_some_and(|p| p.eq_ignore_ascii_case(&actual)))
+}
+
 /// The bootstrap may also run under MSI service credentials, an elevated
 /// account, or Explorer. Only a normal interactive user may enroll a profile.
 pub(crate) fn configure_global_account(enable: bool) -> Result<()> {
@@ -223,7 +260,8 @@ pub(crate) fn configure_global_account(enable: bool) -> Result<()> {
             && CheckTokenMembership(std::ptr::null_mut(), sid.as_mut_ptr().cast(), &mut member) != 0
             && member != 0
     };
-    if crate::is_elevated() || !interactive {
+    if crate::is_elevated() || !interactive || !token_matches_profile_environment().unwrap_or(false)
+    {
         return Ok(());
     }
     let exe = windows_program_files_x64()?.join(r"tr300\bin\tr300.exe");
