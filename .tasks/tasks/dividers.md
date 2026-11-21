@@ -2,7 +2,7 @@
 
 ## Status
 
-Preparing the 4.5.1 layout patch for the standard release channels.
+4.5.1 is public. The Global MSI upgrade awaits Windows elevation consent. [Release evidence](../../docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md)
 
 ## Activity
 
@@ -10,5 +10,5 @@ Grouped hardware, operating system, resources and session details. Reserve a sin
 
 ## Verification
 
-- [ ] Check the candidate in compact, framed, ASCII and interactive SSH views.
+- [x] Check the candidate in compact, framed, ASCII and interactive SSH views.
 - [ ] Publish the verified installers and check the installed update on Windows.

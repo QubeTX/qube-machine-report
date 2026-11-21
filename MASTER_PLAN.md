@@ -5,11 +5,11 @@
 > `docs/architecture-decisions.md`.
 
 **Last updated:** 2026-11-21
-**Complete public GitHub distribution / crates.io / working manifest:** 4.5.0 / 4.5.0 / 4.5.0
+**Complete public GitHub distribution / crates.io / working manifest:** 4.5.1 / 4.5.1 / 4.5.1
 
-Release `v4.5.0` at `4409fbc4c71d16c877ca5f0cc3348bbf22c9594e` is public. All 34 assets, the published installer lifecycles, and the production website were verified. [Publication checkpoint](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md)
+TR-300 **4.5.1** is the current public GitHub release and unyanked crate. The tag points to `55650b8ef9dfd4ef1dd2d53d33da7000a5f0c441`. The public distribution contains 34 verified assets. [4.5.1 publication record](docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md) The preceding [4.5.0 startup release](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md) introduced the adaptive report.
 
-Previous GitHub release: immutable `v4.4.4` at
+Historical security release: immutable `v4.4.4` at
 `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release `441625880`
 became latest at `2026-11-11T12:29:18Z` with exactly 34 nonempty audited
 assets. Product publication, process qualification, and documentation closure are complete.

@@ -55,7 +55,7 @@ Alienware Windows evidence is captured;
 AMD64 Linux laptop and Raspberry Pi 4 checks remain separate and open.
 
 Start the next session with
-[`the v4.5.0 publication handoff`](./docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md),
+[`the v4.5.1 publication handoff`](./docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md),
 then `AGENTS.md`, `CLAUDE.md`, `MASTER_PLAN.md`, and `TESTING.md`.
 
 Published v4.4.4 fixes the managed PowerShell native-version check and adds
@@ -68,8 +68,8 @@ v4.4.2 draft `441328198`. None is reused or made public by this record.
 ## Current Status
 
 - Cargo package / canonical binary / library import: `tr300`; packaged full alias: `report`.
-- TR-300 **4.5.0** is the current public GitHub release and unyanked crate. The tag points to `4409fbc4c71d16c877ca5f0cc3348bbf22c9594e`. The public distribution contains 34 verified assets. [4.5.0 publication record](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md)
-- Previous release: **4.4.4**, immutable
+- TR-300 **4.5.1** is the current public GitHub release and unyanked crate. The tag points to `55650b8ef9dfd4ef1dd2d53d33da7000a5f0c441`. The public distribution contains 34 verified assets. [4.5.1 publication record](docs/agents/handoff/2026-11-21-v4.5.1-startup-dividers.md)
+- Historical security release: **4.4.4**, immutable
   source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Release `441625880`
   published at `2026-11-11T12:29:18Z` with exactly 34 audited nonempty assets.
   PR #39 head `ab014dfc81327ab7a2b3fc0051b2de129db07b70` passed CI
@@ -376,15 +376,15 @@ qualification can authorize new crate/tag/native publication. Docs, skills,
 and infrastructure do not automatically bump the version; the numbered
 sequence below applies when new published package or artifact bytes are needed.
 
-1. Preserve `4.5.0` as the current complete GitHub/crates release, keep
-   v4.4.4 as its preceding complete baseline, and preserve failed
+1. Preserve `4.5.1` as the current complete GitHub/crates release, keep
+   v4.5.0 as its preceding complete baseline, and preserve failed
    v4.4.1/v4.4.2/v4.4.3 tags plus their historical private drafts. Preserve
    `v4.3.0` through `v4.3.11` as immutable failed GitHub-distribution tags. The
    first five produced no draft; v4.3.5 through v4.3.8 produced exact private
    24-asset drafts, and v4.3.9/v4.3.10/v4.3.11 produced exact private 30-asset
    drafts. Keep
    `Cargo.toml`, `Cargo.lock`, generated man page, and the full docs set
-   synchronized at `4.5.0`; date the release-note blocks on the final
+   synchronized at `4.5.1`; date the release-note blocks on the final
    release source commit while keeping status ledgers explicit.
 2. Run locked fmt, clippy, tests, native Apple Silicon/Intel release builds and smokes,
    package list, publish dry-run, security audit, cargo-dist plan, actionlint,
