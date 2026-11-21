@@ -1619,7 +1619,7 @@ jobs:
             & scripts/test-windows-startup-registration.ps1 -Registered $false
             Install-Msi $case.Msi
             & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
-            if ($globalStartup) { & scripts/test-windows-startup-policy.ps1 }
+            if ($globalStartup) { & scripts/test-windows-startup-policy.ps1 -Package $case.Msi }
             Install-Exe $case.Exe $case.Name
             & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             $entries = @(Entries $case.Display)

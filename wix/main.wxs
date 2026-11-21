@@ -303,12 +303,18 @@
         <CustomAction Id='RemoveAccountStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-account' Execute='deferred' Impersonate='yes' Return='ignore'/>
         <CustomAction Id='UndoConfigureAccountStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-account' Execute='rollback' Impersonate='yes' Return='ignore'/>
         <CustomAction Id='UndoRemoveAccountStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-account' Execute='rollback' Impersonate='yes' Return='ignore'/>
+        <!-- Repair starts with a working installation. Never schedule a fresh
+             install's blanket undo against those existing hooks. Commit runs
+             only after the MSI execute script succeeds. The machine helper
+             restores its own changes on error; account enrollment is optional. -->
+        <CustomAction Id='RepairMachineStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-machine' Execute='commit' Impersonate='no' Return='check'/>
+        <CustomAction Id='RepairAccountStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-account' Execute='commit' Impersonate='yes' Return='ignore'/>
         <CustomAction Id='CheckMachineStartupPaths' BinaryKey='MigrationProbe' ExeCommand='check-startup-machine' Execute='immediate' Impersonate='yes' Return='check'/>
         <CustomAction Id='ExpectedStartupFolder' Property='TR300EXPECTEDGLOBAL' Value='[ProgramFiles64Folder]tr300\bin\'/>
         <InstallExecuteSequence>
             <Custom Action='ExpectedStartupFolder' After='CostFinalize'>1</Custom>
             <Custom Action='CheckStartupDestination' After='ExpectedStartupFolder'><![CDATA[NOT (Bin ~= TR300EXPECTEDGLOBAL)]]></Custom>
-            <Custom Action='CheckMachineStartupPaths' Before='PreflightCargoOwnership'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='CheckMachineStartupPaths' Before='PreflightCargoOwnership'><![CDATA[(NOT Installed OR REINSTALL) AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='UndoRemoveStartup' Before='RemoveMachineStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='RemoveMachineStartup' Before='RemoveFiles'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='UndoConfigureStartup' After='WriteRegistryValues'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
@@ -317,6 +323,8 @@
             <Custom Action='ConfigureAccountStartup' After='UndoConfigureAccountStartup'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='UndoRemoveAccountStartup' Before='RemoveAccountStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
             <Custom Action='RemoveAccountStartup' Before='RemoveMachineStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
+            <Custom Action='RepairMachineStartup' Before='RepairAccountStartup'><![CDATA[Installed AND REINSTALL AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='RepairAccountStartup' Before='InstallFinalize'><![CDATA[Installed AND REINSTALL AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='PreflightCargoOwnership' Before='InstallInitialize'>
                 <![CDATA[NOT Installed]]>
             </Custom>

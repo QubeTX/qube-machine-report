@@ -481,12 +481,27 @@ fn strip_cmd_hook(text: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn profile_text(old: &str, block: &str, start: &str, end: &str, enable: bool) -> Result<String> {
+    const ADDED_NEWLINE: &str = "# TR-300 added the newline immediately before this block.";
     let mut inside = false;
+    let mut added_newline = false;
     let mut cleaned = String::new();
-    for line in old.split_inclusive('\n') {
+    let mut lines = old.split_inclusive('\n').peekable();
+    while let Some(line) = lines.next() {
         match line.trim_end_matches(['\r', '\n']) {
-            marker if marker == start && !inside => inside = true,
-            marker if marker == end && inside => inside = false,
+            marker if marker == start && !inside => {
+                inside = true;
+                added_newline = lines
+                    .peek()
+                    .is_some_and(|line| line.trim_end_matches(['\r', '\n']) == ADDED_NEWLINE);
+            }
+            marker if marker == end && inside => {
+                inside = false;
+                // A later user edit may have added another statement after the
+                // block. Keep its line boundary when removing the hook.
+                if added_newline && lines.peek().is_none() && cleaned.ends_with("\r\n") {
+                    cleaned.truncate(cleaned.len() - 2);
+                }
+            }
             marker if marker == start || marker == end => {
                 return Err(AppError::platform(
                     "Unbalanced TR-300 PowerShell profile markers",
@@ -514,10 +529,16 @@ fn profile_text(old: &str, block: &str, start: &str, end: &str, enable: bool) ->
             }
         }
         if !cleaned.is_empty() && !cleaned.ends_with('\n') {
-            cleaned.insert_str(0, &format!("{block}\r\n"));
-            return checked_profile(old, cleaned);
+            // Keep PowerShell's using statements, #requires directives and
+            // parameter declarations ahead of executable profile statements.
+            cleaned.push_str("\r\n");
+            cleaned.push_str(start);
+            cleaned.push_str("\r\n");
+            cleaned.push_str(ADDED_NEWLINE);
+            cleaned.push_str(&block[start.len()..]);
+        } else {
+            cleaned.push_str(block);
         }
-        cleaned.push_str(block);
         cleaned.push_str("\r\n");
     }
     checked_profile(old, cleaned)
@@ -714,6 +735,74 @@ fn configure(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn profiles_preserve_powershell_prologue_and_legacy_order() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("fixture.psm1"), "# fixture module").unwrap();
+        let prologue = "#requires -Version 5.1\r\nusing namespace System.IO\r\nusing module './fixture.psm1'\r\nparam([string] $arg)\r\n$answer = 42";
+        let exe = Path::new(r"C:\test\tr300.exe");
+        let legacy = format!("{MARKER_START}\r\n'legacy'\r\n{MARKER_END}");
+        let mut index = 0;
+        for (start, end) in [
+            (ACCOUNT_START, ACCOUNT_END),
+            (MARKER_START, MARKER_END),
+            (MACHINE_START, MACHINE_END),
+        ] {
+            let block = ps_block(exe, start, end).unwrap();
+            for has_legacy in [false, true] {
+                // Personal enrollment replaces its own legacy block.
+                if has_legacy && start == MARKER_START {
+                    continue;
+                }
+                for ending in ["", "\n", "\r\n"] {
+                    let mut original = prologue.to_owned();
+                    if has_legacy {
+                        original.push_str("\r\n");
+                        original.push_str(&legacy);
+                    }
+                    original.push_str(ending);
+                    let enabled = profile_text(&original, &block, start, end, true).unwrap();
+                    assert!(enabled.starts_with(prologue));
+                    if has_legacy && start == ACCOUNT_START {
+                        assert!(enabled.find(start).unwrap() < enabled.find(&legacy).unwrap());
+                    }
+                    assert_eq!(
+                        profile_text(&enabled, &block, start, end, true).unwrap(),
+                        enabled
+                    );
+                    assert_eq!(
+                        profile_text(&enabled, &block, start, end, false).unwrap(),
+                        original
+                    );
+                    fs::write(dir.path().join(format!("case-{index}.ps1")), enabled).unwrap();
+                    index += 1;
+                }
+            }
+        }
+
+        let parser = r#"foreach ($file in Get-ChildItem -LiteralPath $env:TR300_PARSER_FIXTURES -Filter '*.ps1') {
+            $parseErrors = $null
+            [void][Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$parseErrors)
+            if ($parseErrors) { [Console]::Error.WriteLine(($parseErrors | Out-String)); exit 1 }
+        }"#;
+        for host in ["powershell", "pwsh"] {
+            let mut command = match crate::trusted_process::powershell_command_for(host, parser) {
+                Ok(command) => command,
+                Err(error) if host == "pwsh" && error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => panic!("{host} parser unavailable: {error}"),
+            };
+            let result = command
+                .env("TR300_PARSER_FIXTURES", dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{host}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+    }
 
     #[test]
     fn round_trip_profile_encodings_and_markers() {
