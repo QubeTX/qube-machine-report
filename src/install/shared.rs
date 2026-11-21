@@ -47,6 +47,7 @@ pub(crate) const AUTORUN_SENTINEL_VAR: &str = "TR300_AUTORUN_RAN";
 /// `START ... END` blocks and this safely drops them. Without that
 /// pre-check, a hand-edited rc file missing `MARKER_END` would silently
 /// lose every line from `MARKER_START` to EOF.
+#[cfg(test)]
 pub(crate) fn remove_delimited_block<'a>(
     lines: &[&'a str],
     start: &str,

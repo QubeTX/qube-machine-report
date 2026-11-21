@@ -35,6 +35,15 @@ pub enum Action {
     /// parent invokes this through ShellExecuteExW with the `runas` verb.
     #[value(hide = true)]
     UpdateWorker,
+    /// Refresh the installing user's startup integration after a managed install.
+    #[value(hide = true)]
+    ConfigureStartupUser,
+    #[value(hide = true)]
+    ConfigureStartupMachine,
+    #[value(hide = true)]
+    CheckStartupMachine,
+    #[value(hide = true)]
+    RemoveStartupMachine,
 }
 
 /// TR-300: Cross-platform system information report
@@ -88,6 +97,14 @@ pub struct Cli {
     /// Fast mode: skip slow platform-specific collectors for quick auto-run
     #[arg(long)]
     pub fast: bool,
+
+    /// Show the fast startup report sized for this interactive terminal
+    #[arg(long, conflicts_with_all = ["fast", "full", "json", "save_report", "install", "update", "uninstall", "action"])]
+    pub startup: bool,
+
+    // Installer hook variant distinguishes a displayed report from a skipped one.
+    #[arg(long, hide = true, conflicts_with_all = ["startup", "fast", "full", "json", "save_report", "install", "update", "uninstall", "action"])]
+    pub startup_hook: bool,
 
     /// Explicit full collection (the default when neither --fast nor --full
     /// is given; provided as a symmetric counterpart to --fast)

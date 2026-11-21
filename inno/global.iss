@@ -23,6 +23,7 @@
 #define MyAppPublisher "Emmett S"
 #define MyAppURL "https://github.com/QubeTX/qube-machine-report"
 #define MyAppExeName "tr300.exe"
+#define PayloadDigest GetSHA256OfFile(SourcePath + "\..\target\release\tr300.exe")
 
 [Setup]
 ; AppId is the immutable identity of the Global EXE installer.
@@ -42,7 +43,8 @@ DefaultDirName={commonpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 ; CLI tool — no start menu group, no desktop shortcut.
 DisableProgramGroupPage=yes
-DisableDirPage=auto
+DisableDirPage=yes
+UsePreviousAppDir=no
 ; Require admin (perMachine scope). Triggers UAC prompt at install start.
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=
@@ -111,6 +113,15 @@ begin
   Result := '';
   ExtractTemporaryFile('{#MyAppExeName}');
   Binary := ExpandConstant('{tmp}\{#MyAppExeName}');
+  if CompareText(ExpandConstant('{app}'), ExpandConstant('{commonpf}\tr300')) <> 0 then begin
+    Result := 'Global startup requires the standard Program Files installation directory.';
+    exit;
+  end;
+  if not Exec(Binary, 'check-startup-machine', ExpandConstant('{tmp}'),
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then begin
+    Result := 'The Global binary and PowerShell profile locations must be protected from unprivileged writes.';
+    exit;
+  end;
   if not ExecAsOriginalUser(Binary,
       'migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination "' +
       ExpandConstant('{app}\bin\{#MyAppExeName}') + '"',
@@ -212,6 +223,21 @@ begin
   RegWriteExpandStringValue(HKEY_LOCAL_MACHINE, EnvironmentKey, 'Path', Paths);
 end;
 
+procedure RunMachineStartup(Action: string; Helper: string);
+var
+  Expected: string;
+  ExitCode: Integer;
+begin
+  Expected := ExpandConstant('{commonpf}\tr300');
+  if CompareText(ExpandConstant('{app}'), Expected) <> 0 then
+    RaiseException('Global startup requires the standard Program Files installation directory.');
+  if not Exec(Helper, Action, ExpandConstant('{sys}'),
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Could not start the Global shell configuration helper.');
+  if ExitCode <> 0 then
+    RaiseException('Global shell configuration failed (exit ' + IntToStr(ExitCode) + ').');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
@@ -220,11 +246,22 @@ begin
       identity exist, before PATH advertises the new channel. }
     ConsolidatePriorCli;
     EnvAddPath(ExpandConstant('{app}') + '\bin');
+    RunMachineStartup('configure-startup-machine', ExpandConstant('{tmp}\{#MyAppExeName}'));
   end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then begin
+    { The uninstaller runs elevated. Copy into its private temporary directory
+      and compare to the digest recorded in the package before execution. }
+    if not CopyFile(ExpandConstant('{app}\bin\{#MyAppExeName}'),
+        ExpandConstant('{tmp}\tr300-startup-cleanup.exe'), False) then
+      RaiseException('Could not read the installed Global startup helper.');
+    if CompareText(GetSHA256OfFile(ExpandConstant('{tmp}\tr300-startup-cleanup.exe')), '{#PayloadDigest}') <> 0 then
+      RaiseException('The Global startup helper differs from this installer.');
+    RunMachineStartup('remove-startup-machine', ExpandConstant('{tmp}\tr300-startup-cleanup.exe'));
+  end;
   if CurUninstallStep = usPostUninstall then
     EnvRemovePath(ExpandConstant('{app}') + '\bin');
 end;

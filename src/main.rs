@@ -4,6 +4,7 @@
 //! in a visually appealing Unicode box-drawing table format.
 
 use clap::Parser;
+mod startup;
 use tr300::{
     cli::{Action, Cli},
     collectors::{CollectMode, SystemInfo},
@@ -40,6 +41,23 @@ fn main() -> Result<()> {
     // explicitly drop the guard before `process::exit` for the same guarantee.
     #[cfg(windows)]
     let _cp_guard = enable_utf8_console();
+
+    match action {
+        Some(Action::ConfigureStartupUser) => return install::configure_startup_user(),
+        Some(Action::ConfigureStartupMachine) => return install::machine_startup(true),
+        Some(Action::CheckStartupMachine) => return install::check_machine_startup(),
+        Some(Action::RemoveStartupMachine) => return install::machine_startup(false),
+        _ => {}
+    }
+    if cli.startup || cli.startup_hook {
+        let displayed = startup::run(&config, cli.startup_hook)?;
+        if cli.startup_hook && !displayed {
+            #[cfg(windows)]
+            drop(_cp_guard);
+            std::process::exit(3);
+        }
+        return Ok(());
+    }
 
     // Handle action commands (early exit)
     if action == Some(Action::MigrateCleanup) {
@@ -149,17 +167,14 @@ fn run_report(config: &Config, mode: CollectMode, save_report: bool) -> Result<(
 fn run_install() -> Result<()> {
     println!("Installing TR-300...");
     install::install()?;
+    install::set_startup_disabled(false)?;
     println!("Installation complete!");
     println!();
     println!("The following changes were made:");
     println!("  - Configured auto-run on new interactive shells");
     println!("  - Refreshed the TR-300 profile block (legacy 'report' aliases are retired)");
     println!();
-    #[cfg(target_os = "macos")]
-    println!("Please restart your shell or run 'source ~/.zshrc' (or the profile shown above)");
-    #[cfg(not(target_os = "macos"))]
-    println!("Please restart your shell or run 'source ~/.bashrc' (or the profile shown above)");
-    println!("to activate the changes.");
+    println!("Open a new interactive terminal or SSH session to see your startup report.");
     Ok(())
 }
 
@@ -178,9 +193,10 @@ fn run_uninstall() -> Result<()> {
         UninstallOption::ProfileOnly => {
             println!();
             println!("Removing shell profile modifications...");
+            install::set_startup_disabled(true)?;
             install::uninstall()?;
             println!();
-            println!("TR-300 auto-run has been removed from your shell profile.");
+            println!("TR-300 startup reports are disabled for your account.");
             println!("The tr300 binary remains installed and can be run manually.");
             Ok(())
         }

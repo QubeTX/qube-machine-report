@@ -50,6 +50,9 @@ tr300_pkg_present=0
 tr300_pkg_payload_removed=0
 tr300_pkg_receipt_forgotten=0
 tr300_pkg_report_present=0
+tr300_pkg_startup_tool=''
+tr300_pkg_runtime=/Library/PrivilegedHelperTools/com.qubetx.tr300.startup
+tr300_pkg_startup_removed=0
 tr300_sha256sum_directory=''
 
 tr300_cleanup() {
@@ -73,7 +76,20 @@ tr300_cleanup() {
                         printf '%s\n' 'TR-300 warning: restoring the prior PKG report command also failed' >&2
                 fi
             fi
+            if [ "$tr300_pkg_startup_removed" -eq 1 ]; then
+                if [ -f "$tr300_pkg_startup_tool/tr300" ]; then
+                    sudo /bin/ln "$tr300_pkg_startup_tool/tr300" "$tr300_pkg_runtime" ||
+                        printf '%s\n' 'TR-300 warning: could not restore the protected machine startup runtime' >&2
+                fi
+                tr300_pkg_startup_is_exact &&
+                    sudo "$tr300_pkg_runtime" configure-startup-machine ||
+                    printf '%s\n' 'TR-300 warning: restoring machine shell startup also failed' >&2
+            fi
         fi
+    fi
+    if [ -n "$tr300_pkg_startup_tool" ]; then
+        sudo /bin/rm -f "$tr300_pkg_startup_tool/tr300"
+        sudo /bin/rmdir "$tr300_pkg_startup_tool"
     fi
     if [ -n "$tr300_temp" ]; then
         rm -rf "$tr300_temp" >/dev/null 2>&1 || true
@@ -588,6 +604,21 @@ tr300_pkg_is_exact_product() {
     fi
 }
 
+tr300_pkg_startup_is_exact() {
+    for trusted in /Library /Library/PrivilegedHelperTools "$tr300_pkg_runtime"; do
+        [ ! -L "$trusted" ] && [ "$(/usr/bin/stat -f %u "$trusted")" = 0 ] || return 1
+        mode=$(/usr/bin/stat -f %p "$trusted") || return 1
+        [ "$((0$mode & 022))" -eq 0 ] || return 1
+        acl=$(/bin/ls -lde "$trusted") || return 1
+        if printf '%s\n' "$acl" | /usr/bin/grep -Eq ' allow .*([[:<:]]write|add_file|add_subdirectory|delete_child|chown|writesecurity)'; then return 1; fi
+    done
+    [ -f "$tr300_pkg_runtime" ] && [ -x "$tr300_pkg_runtime" ] || return 1
+    /usr/sbin/pkgutil --file-info "$tr300_pkg_runtime" |
+        /usr/bin/grep -Eq '^(pkgid|package-id):[[:space:]]*com\.qubetx\.tr300\.pkg$' || return 1
+    /usr/bin/codesign --verify --strict -R='anchor apple generic and identifier "com.qubetx.tr300" and certificate leaf[subject.OU] = "M9D5379H93"' "$tr300_pkg_runtime" || return 1
+    /usr/bin/cmp -s "$tr300_pkg_runtime" /usr/local/bin/tr300
+}
+
 tr300_prepare_macos_pkg() {
     [ "$(uname -s)" = Darwin ] || return 0
     command -v pkgutil >/dev/null 2>&1 || tr300_fail 'pkgutil is unavailable on macOS'
@@ -622,6 +653,16 @@ tr300_take_over_macos_pkg() {
 
     printf '%s\n' 'Switching TR-300 ownership from macos-dmg-pkg to shell-installer...'
     sudo -v || tr300_fail 'administrator authorization was cancelled; the existing PKG was preserved'
+    if printf '%s\n' "$payload_files" | sed 's#^\./##; s#^/##' | grep -Fxq "${tr300_pkg_runtime#/}"; then
+        tr300_pkg_startup_is_exact || tr300_fail 'could not prove protected PKG startup runtime ownership'
+        tr300_pkg_startup_tool=$(sudo /usr/bin/mktemp -d '/private/tmp/tr300-startup.XXXXXXXX') ||
+            tr300_fail 'could not allocate protected startup recovery directory'
+        sudo "$tr300_pkg_runtime" remove-startup-machine ||
+            tr300_fail 'could not remove receipt-owned machine startup integration'
+        tr300_pkg_startup_removed=1
+        sudo /bin/mv "$tr300_pkg_runtime" "$tr300_pkg_startup_tool/tr300" ||
+            tr300_fail 'could not stage protected PKG startup runtime for removal'
+    fi
     tr300_remove_owned_pkg_payloads
     sudo pkgutil --forget com.qubetx.tr300.pkg >/dev/null \
         || tr300_fail 'could not forget the TR-300 PKG receipt'
@@ -669,6 +710,11 @@ tr300_main() {
     tr300_verify_binaries >/dev/null || tr300_fail 'final managed TR-300 verification did not complete'
     tr300_assert_no_unknown_path_owners
     tr300_committed=1
+    # The verified command owns profile discovery and the user's opt-out.
+    # A locked profile must not roll back a working binary or a committed takeover.
+    if ! "$managed_binary" configure-startup-user; then
+        printf '%s\n' 'TR-300 installed, but shell startup setup was incomplete. Run tr300 install to retry.' >&2
+    fi
     printf '%s\n' "TR-300 ${tr300_version} is installed through the managed shell channel: ${managed_binary}"
 }
 

@@ -11,42 +11,8 @@ use std::process::Command;
 
 use super::shared::{MARKER_END, MARKER_START};
 
-/// PowerShell profile content to add.
-///
-/// The auto-run block has three load-bearing guards in the `if`
-/// condition:
-/// - `Get-Command tr300 -ErrorAction SilentlyContinue` — silently
-///   skip when the binary is no longer on PATH (post-uninstall,
-///   `cargo uninstall`, manual delete). Without this, every new
-///   PowerShell session prints `The term 'tr300' is not recognized
-///   ...` until the user finds and removes this block.
-/// - `-not $env:TR300_AUTORUN_RAN` + `$env:TR300_AUTORUN_RAN = '1'`
-///   — recursion sentinel. Nested PowerShell sessions (`pwsh
-///   -Command ...` from VS Code, a CI step, a Windows Terminal nested
-///   tab) inherit the env var and the guard short-circuits so the
-///   table doesn't render multiple times per top-level session.
-/// - `[Environment]::UserInteractive` — filters non-interactive
-///   invocations (a CI step running `pwsh -Command "..."` to introspect
-///   the user profile, a scheduled task that loads the profile). The
-///   prior `$Host.Name -eq 'ConsoleHost'` check passed in all those
-///   cases, so the table got dumped into CI logs.
-///
-/// The literal `# TR-300 Machine Report` / `# End TR-300` markers
-/// must appear at the boundaries — pinned by
-/// `shell_additions_contains_shared_markers` below.
-const POWERSHELL_ADDITIONS: &str = "# TR-300 Machine Report\r\n\
-    # Auto-run on interactive shell; guards prevent error spam when the\r\n\
-    # binary is missing, recursion in nested shells, and rendering in\r\n\
-    # scripted (non-interactive) invocations.\r\n\
-    if (\r\n\
-    \x20   (Get-Command tr300 -ErrorAction SilentlyContinue) -and\r\n\
-    \x20   -not $env:TR300_AUTORUN_RAN -and\r\n\
-    \x20   [Environment]::UserInteractive\r\n\
-    ) {\r\n\
-    \x20   $env:TR300_AUTORUN_RAN = '1'\r\n\
-    \x20   tr300 --fast\r\n\
-    }\r\n\
-    # End TR-300";
+mod startup;
+pub(super) use startup::{check_machine_startup, install_machine_startup, remove_machine_startup};
 
 /// Get the installation path for Windows
 pub fn install_path() -> PathBuf {
@@ -152,168 +118,15 @@ pub fn install() -> Result<()> {
     // during `tr300 install`.
     warn_if_report_already_defined(&profile_paths);
 
-    let mut modified = Vec::with_capacity(profile_paths.len());
-    for profile_path in &profile_paths {
-        install_into_profile(profile_path)?;
-        modified.push(profile_path.display().to_string());
-    }
-
-    if modified.len() == 1 {
-        println!("Modified PowerShell profile:");
-    } else {
-        println!("Modified PowerShell profiles:");
-    }
-    for path in &modified {
-        println!("  - {}", path);
-    }
-
+    startup::configure_user(&profile_paths, true)?;
+    println!("Configured TR-300 startup for PowerShell and Command Prompt.");
     Ok(())
 }
 
-/// Write the TR-300 block into one PowerShell profile.
-///
-/// Extracted from `install()` so the v3.15.3+ multi-profile path
-/// (Windows PowerShell 5.1 AND PowerShell 7 when both are present)
-/// can iterate without duplicating the read / sanity-check / write
-/// pipeline.
-fn install_into_profile(profile_path: &Path) -> Result<()> {
-    // Create profile directory if needed
-    if let Some(parent) = profile_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)
-                .map_err(|e| fail_install(InstallStep::CreateProfileDir, parent, e))?;
-        }
-    }
-
-    // Read existing profile or create empty
-    let existing_content = if profile_path.exists() {
-        fs::read_to_string(profile_path)
-            .map_err(|e| fail_install(InstallStep::ReadProfile, profile_path, e))?
-    } else {
-        String::new()
-    };
-
-    // Refuse to mutate a mutilated marker block; otherwise the block
-    // parser would silently drop every line from `MARKER_START` to EOF.
-    super::check_marker_balance(&existing_content, MARKER_START, MARKER_END)
-        .map_err(AppError::platform)?;
-
-    // One-time backup of the original profile before any modification.
-    let _ = super::backup_once(profile_path);
-
-    let cleaned_content = remove_tr300_block(&existing_content);
-
-    // Append TR-300 config to cleaned content
-    let new_content = if cleaned_content.trim().is_empty() {
-        POWERSHELL_ADDITIONS.to_string()
-    } else {
-        format!(
-            "{}\r\n\r\n{}",
-            cleaned_content.trim_end(),
-            POWERSHELL_ADDITIONS
-        )
-    };
-
-    super::atomic_write(profile_path, &new_content)
-        .map_err(|e| fail_install(InstallStep::WriteProfile, profile_path, e))?;
-
-    Ok(())
-}
-
-/// Uninstall tr300 from PowerShell profile(s).
-///
-/// Iterates over all probed profile paths (Windows PowerShell 5.1 +
-/// PowerShell 7) so that an install performed on a dual-shell machine
-/// is fully cleaned up.
 pub fn uninstall() -> Result<()> {
-    let profile_paths = get_powershell_profiles();
-    if profile_paths.is_empty() {
-        println!("No PowerShell profile found.");
-        return Ok(());
-    }
-
-    let mut cleaned = Vec::new();
-    for profile_path in &profile_paths {
-        if !profile_path.exists() {
-            continue;
-        }
-        let content = fs::read_to_string(profile_path)
-            .map_err(|e| fail_install(InstallStep::ReadProfile, profile_path, e))?;
-
-        if !content.contains(MARKER_START) {
-            continue;
-        }
-
-        // Refuse to mutate a mutilated marker block — same hazard as
-        // on install. Without this, an uninstall on a hand-edited
-        // profile would drop everything from `MARKER_START` to EOF.
-        super::check_marker_balance(&content, MARKER_START, MARKER_END)
-            .map_err(AppError::platform)?;
-
-        let lines: Vec<&str> = content.lines().collect();
-        let mut new_lines = super::shared::remove_delimited_block(&lines, MARKER_START, MARKER_END);
-
-        // Clean up extra blank lines at the end
-        while new_lines.last().map(|s| s.is_empty()).unwrap_or(false) {
-            new_lines.pop();
-        }
-
-        let new_content = if new_lines.is_empty() {
-            String::new()
-        } else {
-            new_lines.join("\r\n") + "\r\n"
-        };
-
-        super::atomic_write(profile_path, &new_content)
-            .map_err(|e| fail_install(InstallStep::WriteProfile, profile_path, e))?;
-
-        cleaned.push(profile_path.display().to_string());
-    }
-
-    if cleaned.is_empty() {
-        println!("No TR-300 configuration found in PowerShell profile(s).");
-    } else if cleaned.len() == 1 {
-        println!("Cleaned PowerShell profile:");
-        for path in &cleaned {
-            println!("  - {}", path);
-        }
-    } else {
-        println!("Cleaned PowerShell profiles:");
-        for path in &cleaned {
-            println!("  - {}", path);
-        }
-    }
-
+    startup::configure_user(&get_powershell_profiles(), false)?;
+    println!("Removed TR-300 startup from your PowerShell and Command Prompt.");
     Ok(())
-}
-
-/// Remove existing TR-300 blocks from content
-fn remove_tr300_block(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let lines = super::shared::remove_delimited_block(&lines, MARKER_START, MARKER_END);
-
-    // Clean up multiple consecutive blank lines
-    let mut result = Vec::new();
-    let mut prev_blank = false;
-    for line in lines {
-        let is_blank = line.trim().is_empty();
-        if is_blank && prev_blank {
-            continue;
-        }
-        result.push(line);
-        prev_blank = is_blank;
-    }
-
-    // Remove trailing blank lines
-    while result.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
-        result.pop();
-    }
-
-    if result.is_empty() {
-        String::new()
-    } else {
-        result.join("\r\n") + "\r\n"
-    }
 }
 
 /// Find the location of the currently running binary
@@ -512,7 +325,7 @@ fn policy_state(policy: &str) -> PolicyState {
 fn detect_execution_policy() -> Option<String> {
     let output = crate::trusted_process::powershell_command_for(
         "powershell",
-        "Get-ExecutionPolicy -Scope CurrentUser",
+        "if ((Get-ExecutionPolicy -Scope MachinePolicy) -ne 'Undefined' -or (Get-ExecutionPolicy -Scope UserPolicy) -ne 'Undefined') { 'GroupPolicy' } else { Get-ExecutionPolicy -Scope CurrentUser }",
     )
     .ok()?
     .output()
@@ -993,63 +806,8 @@ mod tests {
         assert!(super::self_cleanup_command(Path::new("relative.exe"), None, None).is_err());
     }
 
-    use super::{
-        looks_like_onedrive_path, looks_like_redirected_path, policy_state, PolicyState,
-        POWERSHELL_ADDITIONS,
-    };
-    use crate::install::shared::{AUTORUN_SENTINEL_VAR, BINARY_NAME, MARKER_END, MARKER_START};
+    use super::{looks_like_onedrive_path, looks_like_redirected_path, policy_state, PolicyState};
     use std::path::Path;
-
-    #[test]
-    fn powershell_additions_contains_shared_markers() {
-        // Pins the contract that the literal snippet uses the same
-        // marker text as `super::shared` exposes. A drift here breaks
-        // both the block parser and the marker-balance pre-check.
-        assert!(POWERSHELL_ADDITIONS.contains(MARKER_START));
-        assert!(POWERSHELL_ADDITIONS.contains(MARKER_END));
-        assert!(!POWERSHELL_ADDITIONS.contains("Set-Alias"));
-        assert!(POWERSHELL_ADDITIONS.contains(BINARY_NAME));
-    }
-
-    #[test]
-    fn powershell_additions_has_path_guard() {
-        // F4 hardening: must check Get-Command before invoking tr300.
-        // Without this, every new PowerShell session prints "The
-        // term 'tr300' is not recognized..." once the binary is
-        // uninstalled.
-        assert!(POWERSHELL_ADDITIONS.contains("Get-Command tr300"));
-        assert!(POWERSHELL_ADDITIONS.contains("SilentlyContinue"));
-    }
-
-    #[test]
-    fn powershell_additions_has_recursion_sentinel() {
-        // F4 hardening: must set + check TR300_AUTORUN_RAN to break
-        // recursion in nested PowerShell sessions (pwsh -Command, VS
-        // Code integrated terminal child, Windows Terminal nested tab).
-        assert!(POWERSHELL_ADDITIONS.contains(AUTORUN_SENTINEL_VAR));
-        assert!(POWERSHELL_ADDITIONS.contains("$env:TR300_AUTORUN_RAN = '1'"));
-    }
-
-    #[test]
-    fn powershell_additions_gates_on_user_interactive() {
-        // F4 hardening: replaces the prior `$Host.Name -eq
-        // 'ConsoleHost'` check which passed in non-interactive
-        // `pwsh -Command "..."` invocations (CI steps, scripted
-        // profile introspection), dumping the table into logs.
-        // `[Environment]::UserInteractive` is the documented check
-        // for a real user session.
-        assert!(POWERSHELL_ADDITIONS.contains("[Environment]::UserInteractive"));
-    }
-
-    #[test]
-    fn powershell_additions_uses_crlf() {
-        // PowerShell profiles are conventionally CRLF on Windows.
-        // The snippet was a Rust raw string literal pre-3.15.3 (LF
-        // line endings); now it's an escaped concatenation that
-        // explicitly uses `\r\n` so the install-time format!() above
-        // doesn't mix line endings.
-        assert!(POWERSHELL_ADDITIONS.contains("\r\n"));
-    }
 
     #[test]
     fn restricted_is_blocked_default() {

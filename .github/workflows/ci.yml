@@ -122,6 +122,16 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --locked --workspace --all-targets
       - run: cargo build --locked --release --workspace
+      - name: Exercise native terminal and OpenSSH startup sessions
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-15'
+        shell: bash
+        run: |
+          python3 scripts/test-startup-unix.py local target/release/tr300
+          bash scripts/test-startup-unix-ssh.sh target/release/tr300
+      - name: Exercise Windows OpenSSH login and command startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-startup-windows-ssh.ps1 target/release/tr300.exe
       - name: Smoke both commands and measure the existing release binary
         env:
           CI_BENCHMARK: ${{ matrix.benchmark }}
@@ -1365,6 +1375,8 @@ jobs:
           & target\release\report.exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'report help failed' }
           $global:LASTEXITCODE = 0
+      - name: Validate visible startup reports in Windows console windows
+        run: python scripts/test-startup-windows.py target/release/tr300.exe
       - name: Validate managed transactions with the real paired commands in both PowerShell hosts
         shell: pwsh
         run: |

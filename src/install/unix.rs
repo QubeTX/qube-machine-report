@@ -11,38 +11,8 @@ use std::path::{Path, PathBuf};
 
 use super::shared::{MARKER_END, MARKER_START};
 
-/// Shell profile content to add.
-///
-/// The auto-run block has three load-bearing guards inside the
-/// interactive-shell check:
-/// - `command -v tr300` — silently skip when the binary is no longer
-///   on PATH (post-uninstall, cargo-uninstall, manual rm). Without
-///   this, every new shell would print `bash: tr300: command not
-///   found` until the user found and removed this block.
-/// - `[ -z "${TR300_AUTORUN_RAN-}" ]` + `export TR300_AUTORUN_RAN=1`
-///   — recursion sentinel. Nested interactive shells (`bash -i -c`,
-///   vim `:term`, a Makefile's nested shell) inherit the env var and
-///   the guard short-circuits so the table doesn't render multiple
-///   times per top-level session.
-/// - The whole `case "$-" in *i*)` wrapper restricts firing to
-///   interactive shells (POSIX way to detect this).
-///
-/// The literal marker lines `# TR-300 Machine Report` and `# End
-/// TR-300` MUST appear at the boundaries — they're matched by
-/// `super::shared::remove_delimited_block` and the
-/// `super::check_marker_balance` pre-write sanity check. The test
-/// `shell_additions_contains_shared_markers` below pins this contract.
-const SHELL_ADDITIONS: &str = r#"# TR-300 Machine Report
-# Auto-run on interactive shell; guards prevent spam-on-every-prompt
-# when the binary is missing, and recursion in nested shells.
-case "$-" in *i*)
-    if command -v tr300 >/dev/null 2>&1 && [ -z "${TR300_AUTORUN_RAN-}" ]; then
-        export TR300_AUTORUN_RAN=1
-        tr300 --fast
-    fi
-    ;;
-esac
-# End TR-300"#;
+mod startup;
+use startup::profile_candidates;
 
 /// Get the installation path for Unix systems
 pub fn install_path() -> PathBuf {
@@ -70,40 +40,7 @@ pub fn install() -> Result<()> {
     // tmux auto-attach, etc.).
     warn_if_report_already_defined(&home);
 
-    let mut modified_files = Vec::new();
-
-    // Try to update .bashrc
-    let bashrc = home.join(".bashrc");
-    if bashrc.exists() && update_shell_profile(&bashrc)? {
-        modified_files.push(bashrc.display().to_string());
-    }
-
-    // Try to update .zshrc
-    let zshrc = home.join(".zshrc");
-    if zshrc.exists() && update_shell_profile(&zshrc)? {
-        modified_files.push(zshrc.display().to_string());
-    }
-
-    // If neither rc file exists, create the default for this platform.
-    // macOS has defaulted to zsh since 10.15 (Catalina, 2019) — creating
-    // `.bashrc` there would silently never fire because the user's
-    // actual zsh shell wouldn't source it. Linux defaults remain
-    // `.bashrc`.
-    if modified_files.is_empty() && !bashrc.exists() && !zshrc.exists() {
-        let default_rc = if cfg!(target_os = "macos") {
-            &zshrc
-        } else {
-            &bashrc
-        };
-        super::atomic_write(default_rc, SHELL_ADDITIONS).map_err(|e| {
-            AppError::platform(format!("Failed to create {}: {}", default_rc.display(), e))
-        })?;
-        modified_files.push(default_rc.display().to_string());
-    }
-
-    if modified_files.is_empty() {
-        return Err(AppError::platform("No shell profile found to update"));
-    }
+    let modified_files = install_profiles(&home, &env::current_exe()?)?;
 
     println!("Modified shell profiles:");
     for file in &modified_files {
@@ -575,23 +512,29 @@ fn cleaned_profile_contents(content: &str) -> Result<Option<String>> {
     }
     super::check_marker_balance(content, MARKER_START, MARKER_END).map_err(AppError::platform)?;
 
-    let lines: Vec<&str> = content.lines().collect();
-    let mut new_lines = super::shared::remove_delimited_block(&lines, MARKER_START, MARKER_END);
-    while new_lines
-        .last()
-        .map(|line| line.is_empty())
-        .unwrap_or(false)
-    {
-        new_lines.pop();
+    let mut output = String::new();
+    let mut inside = false;
+    for line in content.split_inclusive('\n') {
+        match line.trim_end_matches(['\r', '\n']) {
+            MARKER_START if !inside => inside = true,
+            MARKER_END if inside => inside = false,
+            MARKER_START | MARKER_END => {
+                return Err(profile_error("mutilated TR-300 shell profile markers"))
+            }
+            _ if !inside => output.push_str(line),
+            _ => {}
+        }
     }
-    Ok(Some(new_lines.join("\n") + "\n"))
+    if inside {
+        return Err(profile_error("mutilated TR-300 shell profile markers"));
+    }
+    Ok((output != content).then_some(output))
 }
 
 fn prepare_profile_cleanup_for_home(home: &Path) -> Result<ProfileCleanupPlan> {
     let mut entries: Vec<ProfileCleanupEntry> = Vec::new();
     let mut missing_paths = Vec::new();
-    for profile_name in [".bashrc", ".zshrc"] {
-        let display_path = home.join(profile_name);
+    for (display_path, _, _) in profile_candidates(home) {
         match fs::symlink_metadata(&display_path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing_paths.push(display_path);
@@ -1156,61 +1099,84 @@ pub fn uninstall() -> Result<()> {
     Ok(())
 }
 
-/// Update a shell profile with TR-300 additions
-fn update_shell_profile(path: &PathBuf) -> Result<bool> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| AppError::platform(format!("Failed to read {}: {}", path.display(), e)))?;
-
-    // Refuse to mutate a mutilated marker block; otherwise
-    // `remove_delimited_block` would silently drop everything from
-    // `MARKER_START` to EOF.
-    super::check_marker_balance(&content, MARKER_START, MARKER_END).map_err(AppError::platform)?;
-
-    // One-time backup of the original rc file before any modification.
-    let _ = super::backup_once(path);
-
-    let cleaned_content = remove_tr300_block(&content);
-
-    // Append TR-300 config to cleaned content
-    let new_content = if cleaned_content.trim().is_empty() {
-        format!("{}\n", SHELL_ADDITIONS)
-    } else {
-        format!("{}\n\n{}\n", cleaned_content.trim_end(), SHELL_ADDITIONS)
-    };
-
-    super::atomic_write(path, &new_content)
-        .map_err(|e| AppError::platform(format!("Failed to write {}: {}", path.display(), e)))?;
-
-    Ok(true)
-}
-
-/// Remove existing TR-300 blocks from content
-fn remove_tr300_block(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let lines = super::shared::remove_delimited_block(&lines, MARKER_START, MARKER_END);
-
-    // Clean up multiple consecutive blank lines
-    let mut result = Vec::new();
-    let mut prev_blank = false;
-    for line in lines {
-        let is_blank = line.trim().is_empty();
-        if is_blank && prev_blank {
+/// Reuse the reversible profile transaction for existing files. Publish any
+/// new profiles with a no-clobber link and keep the staging handle alive
+/// until the full operation succeeds.
+fn install_profiles(home: &Path, executable: &Path) -> Result<Vec<String>> {
+    let candidates = profile_candidates(home);
+    let mut plan = prepare_profile_cleanup_for_home(home)?;
+    let mut additions = Vec::new();
+    for (path, shell, selected) in &candidates {
+        if !selected {
             continue;
         }
-        result.push(line);
-        prev_blank = is_blank;
+        let block = shell.block(executable)?;
+        if plan.missing_paths.contains(path) {
+            let parent = path.parent().expect("profile has a parent");
+            fs::create_dir_all(parent)?;
+            let mut file = tempfile::NamedTempFile::new_in(parent)?;
+            writeln!(file, "{block}")?;
+            file.as_file().sync_all()?;
+            additions.push((path.clone(), file));
+            continue;
+        }
+        let entry = plan
+            .entries
+            .iter_mut()
+            .find(|entry| {
+                entry.original.display_path == *path
+                    || entry
+                        .additional_displays
+                        .iter()
+                        .any(|binding| binding.path == *path)
+            })
+            .ok_or_else(|| profile_error("shell profile disappeared during configuration"))?;
+        let original = &entry.original.contents;
+        let mut updated = cleaned_profile_contents(original)?.unwrap_or_else(|| original.clone());
+        if !updated.is_empty() && !updated.ends_with('\n') {
+            updated.push('\n');
+        }
+        updated.push_str(&block);
+        updated.push('\n');
+        if original.contains("# SIG # Begin signature block") && updated != *original {
+            return Err(profile_error(format!(
+                "cannot change signed profile {}",
+                path.display()
+            )));
+        }
+        entry.cleaned_contents = (updated != *original).then_some(updated);
     }
-
-    // Remove trailing blank lines
-    while result.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
-        result.pop();
+    for entry in &plan.entries {
+        if entry.cleaned_contents.is_some() {
+            super::backup_once(&entry.original.display_path)?;
+        }
     }
-
-    if result.is_empty() {
-        String::new()
-    } else {
-        result.join("\n") + "\n"
+    let mut modified = plan.displayed_paths();
+    let applied = apply_profile_cleanup(plan)?;
+    for (index, (path, file)) in additions.iter().enumerate() {
+        if let Err(error) = fs::hard_link(file.path(), path) {
+            for (created, staged) in additions[..index].iter().rev() {
+                if let (Ok(actual), Ok(expected)) =
+                    (fs::symlink_metadata(created), staged.as_file().metadata())
+                {
+                    if actual.dev() == expected.dev() && actual.ino() == expected.ino() {
+                        if let Err(restore) = fs::remove_file(created) {
+                            eprintln!("could not rollback {}: {restore}", created.display());
+                        }
+                    }
+                }
+            }
+            for warning in applied.rollback() {
+                eprintln!("{warning}");
+            }
+            return Err(error.into());
+        }
+        modified.push(path.display().to_string());
     }
+    for warning in applied.finalize() {
+        eprintln!("{warning}");
+    }
+    Ok(modified)
 }
 
 /// Remove TR-300 additions from a shell profile
@@ -1430,52 +1396,22 @@ pub fn uninstall_complete() -> Result<()> {
     uninstall_complete_prepared(preview)
 }
 
+#[cfg(target_os = "macos")]
+pub fn configure_machine_startup() -> Result<()> {
+    startup::change_machine_startup(true)
+}
+
+#[cfg(target_os = "macos")]
+pub fn remove_machine_startup() -> Result<()> {
+    startup::change_machine_startup(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         apply_profile_cleanup_with, prepare_complete_uninstall_with,
-        prepare_profile_cleanup_for_home, remove_from_profile, update_shell_profile, MARKER_END,
-        MARKER_START, SHELL_ADDITIONS,
+        prepare_profile_cleanup_for_home, remove_from_profile, MARKER_END, MARKER_START,
     };
-    use crate::install::shared::{AUTORUN_SENTINEL_VAR, BINARY_NAME};
-
-    #[test]
-    fn shell_additions_contains_shared_markers() {
-        // Pins the contract that the literal snippet uses the same
-        // marker text as `super::shared` exposes. A drift here
-        // breaks both the install-time block parser and the
-        // uninstall-time cleanup path.
-        assert!(SHELL_ADDITIONS.contains(MARKER_START));
-        assert!(SHELL_ADDITIONS.contains(MARKER_END));
-        assert!(!SHELL_ADDITIONS.contains("alias report="));
-        assert!(SHELL_ADDITIONS.contains(BINARY_NAME));
-    }
-
-    #[test]
-    fn shell_additions_has_path_guard() {
-        // F4 hardening: must not invoke `tr300` unconditionally.
-        // `command -v` is the POSIX-standard "is this on PATH?"
-        // primitive. Without it, every new shell prints a "command
-        // not found" error after the binary is uninstalled.
-        assert!(SHELL_ADDITIONS.contains("command -v tr300"));
-    }
-
-    #[test]
-    fn shell_additions_has_recursion_sentinel() {
-        // F4 hardening: must set + check `TR300_AUTORUN_RAN` to
-        // break recursion into nested shells (vim :term, bash -i,
-        // make).
-        assert!(SHELL_ADDITIONS.contains(AUTORUN_SENTINEL_VAR));
-        assert!(SHELL_ADDITIONS.contains("export TR300_AUTORUN_RAN=1"));
-    }
-
-    #[test]
-    fn shell_additions_gates_on_interactive_shell() {
-        // `case "$-" in *i*)` is the POSIX-standard check for the
-        // shell's interactive flag. Required to keep the table from
-        // rendering in non-interactive script invocations.
-        assert!(SHELL_ADDITIONS.contains(r#"case "$-" in *i*"#));
-    }
 
     #[test]
     fn complete_uninstall_stops_when_current_executable_cannot_be_resolved() {
@@ -1497,8 +1433,13 @@ mod tests {
         let profile = dir.path().join(".zshrc");
         std::fs::write(&profile, "export KEEP_ME=yes\n").unwrap();
 
-        assert!(update_shell_profile(&profile).unwrap());
-        assert!(update_shell_profile(&profile).unwrap());
+        let binary = std::path::Path::new("/opt/tr300");
+        assert!(!super::install_profiles(dir.path(), binary)
+            .unwrap()
+            .is_empty());
+        assert!(super::install_profiles(dir.path(), binary)
+            .unwrap()
+            .is_empty());
         let installed = std::fs::read_to_string(&profile).unwrap();
         assert_eq!(installed.matches(MARKER_START).count(), 1);
         assert_eq!(installed.matches(MARKER_END).count(), 1);

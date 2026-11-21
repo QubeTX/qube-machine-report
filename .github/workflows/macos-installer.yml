@@ -1522,6 +1522,10 @@ jobs:
           package_scripts="$work_directory/pkg-scripts"
           mkdir -m 0755 "$package_scripts"
           install -m 0755 "$PREPARED_DIRECTORY/preinstall" "$package_scripts/preinstall"
+          install -d -m 0755 "$payload/Library/PrivilegedHelperTools"
+          install -m 0755 "$tr300_universal" "$payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
+          printf '%s\n' '#!/bin/sh' 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' > "$package_scripts/postinstall"
+          chmod 0755 "$package_scripts/postinstall"
 
           package="$work_directory/tr300.pkg"
           pkgbuild --root "$payload" --scripts "$package_scripts" \
@@ -1546,6 +1550,8 @@ jobs:
           test -f "$bound_package/Scripts/preinstall"
           test ! -L "$bound_package/Scripts/preinstall"
           cmp "$PREPARED_DIRECTORY/preinstall" "$bound_package/Scripts/preinstall"
+          cmp "$package_scripts/postinstall" "$bound_package/Scripts/postinstall"
+          cmp "$tr300_universal" "$bound_package/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
           rm -rf "$bound_package"
           test ! -e "$bound_package"
           test ! -L "$bound_package"
@@ -1943,7 +1949,8 @@ jobs:
           test ! -L "$expanded_pkg/Bom"
           payload_inventory="$RUNNER_TEMP/tr300-direct-pkg-payload-inventory"
           lsbom -s -f "$expanded_pkg/Bom" | sed 's#^\./##' > "$payload_inventory"
-          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 2 ] ||
+          if [ "$(wc -l < "$payload_inventory" | tr -d '[:space:]')" -ne 3 ] ||
+            ! grep -Fqx 'Library/PrivilegedHelperTools/com.qubetx.tr300.startup' "$payload_inventory" ||
             ! grep -Fqx 'usr/local/bin/report' "$payload_inventory" ||
             ! grep -Fqx 'usr/local/bin/tr300' "$payload_inventory"; then
             echo 'unexpected direct-PKG payload inventory' >&2
@@ -1953,7 +1960,7 @@ jobs:
           test ! -L "$expanded_pkg/Scripts"
           script_member_count=$(find "$expanded_pkg/Scripts" \
             -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')
-          if [ "$script_member_count" -ne 1 ]; then
+          if [ "$script_member_count" -ne 2 ]; then
             echo 'unexpected direct-PKG Scripts inventory' >&2
             exit 1
           fi
@@ -1965,10 +1972,16 @@ jobs:
           install -m 0500 "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"
           cmp "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"
           for forbidden_package_script in \
-            postinstall tr300-pkg-rollback tr300-migration-probe; do
+            tr300-pkg-rollback tr300-migration-probe; do
             test ! -e "$expanded_pkg/Scripts/$forbidden_package_script"
             test ! -L "$expanded_pkg/Scripts/$forbidden_package_script"
           done
+          test -x "$expanded_pkg/Scripts/postinstall"
+          test ! -L "$expanded_pkg/Scripts/postinstall"
+          test -x "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
+          test ! -L "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
+          cmp "$expanded_pkg/Payload/usr/local/bin/tr300" "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
+          printf '%s\n' '#!/bin/sh' 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' | cmp - "$expanded_pkg/Scripts/postinstall"
           rm -f "$payload_inventory"
           rm -rf "$expanded_pkg"
           test ! -e "$expanded_pkg"
@@ -2394,6 +2407,19 @@ jobs:
           test "$(/usr/local/bin/report --version)" = "tr300 $RELEASE_VERSION"
           grep -Fqx "version: $RELEASE_VERSION" \
             < <(pkgutil --pkg-info com.qubetx.tr300.pkg)
+          # This read-only job runs the SSH fixture from this release's exact
+          # commit. Resolve its regular blob, then check the downloaded bytes.
+          ssh_fixture_dir=$(mktemp -d "$RUNNER_TEMP/tr300-native-ssh.XXXXXXXX")
+          gh api "repos/$REPOSITORY/git/trees/$EXPECTED_SHA?recursive=1" > "$ssh_fixture_dir/tree.json"
+          for member in test-startup-unix-ssh.sh test-startup-unix.py; do
+            ssh_blob=$(jq -er --arg path "scripts/$member" '.tree[] | select(.path == $path and .type == "blob" and (.mode == "100644" or .mode == "100755")) | .sha' "$ssh_fixture_dir/tree.json")
+            [[ "$ssh_blob" =~ ^[0-9a-f]{40}$ ]] || exit 1
+            gh api -H 'Accept: application/vnd.github.raw+json' "repos/$REPOSITORY/git/blobs/$ssh_blob" > "$ssh_fixture_dir/$member"
+            [[ "$(git hash-object "$ssh_fixture_dir/$member")" == "$ssh_blob" ]] || exit 1
+          done
+          env -u GH_TOKEN -u GITHUB_TOKEN /bin/bash "$ssh_fixture_dir/test-startup-unix-ssh.sh" /usr/local/bin/tr300 machine
+          sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup remove-startup-machine
+          sudo rm -f /Library/PrivilegedHelperTools/com.qubetx.tr300.startup
           sudo rm -f /usr/local/bin/report /usr/local/bin/tr300
           sudo pkgutil --forget com.qubetx.tr300.pkg >/dev/null
           test ! -e /usr/local/bin/tr300
@@ -3741,6 +3767,8 @@ jobs:
       - name: Remove the validation package
         shell: bash
         run: |
+          sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup remove-startup-machine
+          sudo rm -f /Library/PrivilegedHelperTools/com.qubetx.tr300.startup
           sudo rm -f /usr/local/bin/report /usr/local/bin/tr300
           sudo pkgutil --forget com.qubetx.tr300.pkg
           test ! -e /usr/local/bin/tr300

@@ -13,8 +13,100 @@ mod shared;
 
 use crate::error::Result;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
+#[cfg(any(windows, target_os = "macos", test))]
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+fn startup_preference() -> Result<PathBuf> {
+    dirs::config_dir()
+        .map(|dir| dir.join("tr300").join("startup-disabled"))
+        .ok_or_else(|| {
+            crate::AppError::config("Cannot locate the account's configuration directory")
+        })
+}
+
+/// Presence of the account's opt-out also suppresses machine-wide hooks.
+#[doc(hidden)]
+pub fn startup_disabled() -> Result<bool> {
+    match fs::symlink_metadata(startup_preference()?) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[doc(hidden)]
+pub fn set_startup_disabled(disabled: bool) -> Result<()> {
+    let path = startup_preference()?;
+    if disabled {
+        fs::create_dir_all(path.parent().expect("preference has a parent"))?;
+        // Exclusive creation preserves existing contents, including a user's marker.
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    } else {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+#[doc(hidden)]
+pub fn configure_startup_user() -> Result<()> {
+    if startup_disabled()? {
+        println!(
+            "Startup reports are disabled for this account. Run tr300 install to enable them."
+        );
+        return Ok(());
+    }
+    install()
+}
+
+#[doc(hidden)]
+pub fn check_machine_startup() -> Result<()> {
+    #[cfg(windows)]
+    {
+        windows::check_machine_startup()
+    }
+    #[cfg(not(windows))]
+    {
+        Err(crate::AppError::platform(
+            "This installer action is only used by Windows packages",
+        ))
+    }
+}
+
+#[doc(hidden)]
+pub fn machine_startup(enable: bool) -> Result<()> {
+    #[cfg(windows)]
+    if enable {
+        windows::install_machine_startup()
+    } else {
+        windows::remove_machine_startup()
+    }
+    #[cfg(target_os = "macos")]
+    if enable {
+        unix::configure_machine_startup()
+    } else {
+        unix::remove_machine_startup()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = enable;
+        Err(crate::AppError::platform(
+            "This installer action is unavailable on this platform",
+        ))
+    }
+}
 
 // ReplaceFileW is a multi-step identity/metadata merge and is not linearizable
 // across simultaneous callers. Serialize the complete Windows transaction so
@@ -101,7 +193,13 @@ fn replace_existing_windows_file(path: &Path, replacement: &Path) -> io::Result<
 /// parent directory (guaranteed same volume so `rename` is atomic), fsyncs,
 /// and atomically renames over the target. The target file ends up either
 /// fully replaced or completely untouched — never partial.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
+    atomic_write_bytes(path, content.as_bytes())
+}
+
+#[cfg(any(windows, target_os = "macos", test))]
+pub(crate) fn atomic_write_bytes(path: &Path, content: &[u8]) -> io::Result<()> {
     #[cfg(windows)]
     let _windows_write_guard = WINDOWS_ATOMIC_WRITE_LOCK.lock().map_err(|_| {
         io::Error::other("TR-300 Windows profile-write serialization lock was poisoned")
@@ -164,7 +262,7 @@ pub(crate) fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
         if let Some(permissions) = existing_permissions.as_ref() {
             tmp.as_file().set_permissions(permissions.clone())?;
         }
-        tmp.write_all(content.as_bytes())?;
+        tmp.write_all(content)?;
         tmp.as_file().sync_all()?;
         Ok(())
     })();
@@ -230,6 +328,7 @@ pub(crate) fn backup_once(path: &Path) -> io::Result<()> {
 /// This balance check refuses the write up-front with an actionable
 /// error message instead, leaving the file untouched so the user can
 /// repair it by hand.
+#[cfg(any(unix, test))]
 pub(crate) fn check_marker_balance(
     content: &str,
     start: &str,

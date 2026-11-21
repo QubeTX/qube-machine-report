@@ -481,7 +481,7 @@ After collection it:
 
 `--fast` is intended for shell startup auto-run and avoids slow subprocess-heavy checks where possible.
 
-Install profile auto-run uses `tr300 --fast`. Both bare `report` and bare
+Installed startup hooks use adaptive fast collection. The public `--startup` flag previews it in an interactive terminal. Both bare `report` and bare
 `tr300` use full mode; either command accepts `--fast`. Exact skipped work
 varies by platform collector, so check
 `src/collectors/platform/{linux,macos,windows}.rs` before changing fast-mode behavior.
@@ -791,68 +791,11 @@ fails closed.
 Do not bypass the prompt unless implementing a clearly requested
 non-interactive variant.
 
-### Unix install (`src/install/unix.rs`)
+### Shell integration
 
-Profiles touched:
-- `~/.bashrc` when present
-- `~/.zshrc` when present
-- creates `.zshrc` on macOS or `.bashrc` on other Unix when neither exists
+Managed wrappers configure the installing account after verifying both commands. Windows Global and the macOS PKG configure machine scope. Corporate packages require explicit opt-in. The startup renderer uses the visible viewport and prioritizes identity, power and the connected address in SSH sessions. Manual full, fast, JSON and Markdown retain their own output contracts.
 
-Injected block:
-
-```bash
-# TR-300 Machine Report
-# Auto-run on interactive shell; guards prevent spam-on-every-prompt
-# when the binary is missing, and recursion in nested shells.
-case "$-" in *i*)
-    if command -v tr300 >/dev/null 2>&1 && [ -z "${TR300_AUTORUN_RAN-}" ]; then
-        export TR300_AUTORUN_RAN=1
-        tr300 --fast
-    fi
-    ;;
-esac
-# End TR-300
-```
-
-Behavior:
-- validates marker balance before mutation, takes a one-time backup, removes the
-  existing TR-300 block, and atomically replaces the real target (including a
-  symlinked profile target)
-- uses POSIX-compatible `case "$-"` rather than bash-only `[[ ... ]]`
-- idempotent re-install behavior
-- refuses `sudo`/root profile installation
-
-### Windows install (`src/install/windows.rs`)
-
-Profile targets:
-- queries both Windows PowerShell and PowerShell 7 `$PROFILE` paths and updates
-  each distinct installed shell flavor
-- creates profile directories if needed
-
-Injected block:
-
-```powershell
-# TR-300 Machine Report
-# Auto-run on interactive shell; guards prevent error spam when the
-# binary is missing, recursion in nested shells, and rendering in
-# scripted (non-interactive) invocations.
-if (
-    (Get-Command tr300 -ErrorAction SilentlyContinue) -and
-    -not $env:TR300_AUTORUN_RAN -and
-    [Environment]::UserInteractive
-) {
-    $env:TR300_AUTORUN_RAN = '1'
-    tr300 --fast
-}
-# End TR-300
-```
-
-Behavior:
-- performs the conservative CurrentUser execution-policy preflight, then uses
-  the same marker-balance/backup/atomic-write pipeline as Unix
-- complete uninstall validates ownership of both command paths before profile
-  mutation, schedules their exact paths for deferred removal, and attempts to
-  remove an empty product parent directory when its path contains `tr300`
+Keep per-account opt-out, marker checks, profile ownership, atomic writes, idempotent repair, quiet scripted launches and per-terminal deduplication in sync across Bash, Zsh, Fish, PowerShell and Windows Command Prompt. See the implementation in `src/install/` for the current platform snippets.
 
 ### Managed installer contract (MIC-1)
 

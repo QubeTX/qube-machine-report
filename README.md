@@ -57,7 +57,7 @@ The high-level collection/report APIs remain available.
   blocks retain the current install, stop additional write-heavy fallbacks, and
   return actionable manual-release guidance
 - Conditional platform detail rows for machine model, CPU core topology, ZFS health, motherboard, BIOS, and RAM slots when the host exposes them
-- Optional shell-profile auto-run configuration via `tr300 install`
+- Adaptive startup reports for interactive local and SSH sessions, with persistent per-account opt-out
 
 ## Installation
 
@@ -303,7 +303,7 @@ tr300 update
 # Legacy form still works:
 tr300 --update
 
-# Install to shell profile (adds 'report' alias + auto-run)
+# Enable or repair the startup report for your account
 tr300 install
 # Legacy form still works:
 tr300 --install
@@ -372,6 +372,7 @@ exclusive with each other and with the legacy action flags.
 | `--json` | Output in JSON format |
 | `-t, --title <TITLE>` | Custom title for the report header |
 | `--no-color` | Disable colored output |
+| `--startup` | Fit a fast local or SSH report to the current interactive terminal |
 | `--fast` | Fast mode: skip slow collectors for quick auto-run |
 | `-f, --full` | Explicit full collection (already the default; conflicts with `--fast`) |
 | `-r, -s, --report, --save` | Save this full table report as Markdown in Downloads |
@@ -576,57 +577,15 @@ shell alias). The hint is rendered with ANSI dim, so respects `--no-color` as we
 The JSON output exposes this state under top-level keys `elevated` and
 `elevation_unlocks_more` for scripted consumers.
 
-## Installation to Shell Profile
+## Terminal startup reports
 
-Running `tr300 install` or `tr300 --install` will:
+The recommended managed installer configures both commands on your account’s PATH and enables the startup report. Windows Global and the macOS PKG enable it machine-wide. Windows Corporate, portable copies and Cargo installations can opt in by running `tr300 install` as the user. Open a fresh terminal after installing so it inherits the updated PATH.
 
-1. **Remove existing TR-300 configuration** (if present)
-2. Remove the legacy TR-300-owned `report` alias from that block
-3. Configure auto-run on new interactive shell sessions
+Each new interactive terminal or SSH login shows a fast report for the machine running TR-300. Locally, it prioritizes hardware, memory and disk. Over SSH it prioritizes hostname, the address reached on the server, and battery state. Short panes show fewer rows. The display reserves four rows for the prompt and shell messages. A terminal that cannot supply its size gets a short hostname line. Run `report` for the full table or `report --json` for scripts.
 
-The real `report` command is installed by every v4.4+ package beside `tr300`
-and does not depend on shell profiles. Existing users can rerun `tr300 install`
-once after upgrading to retire an old profile alias; foreign aliases or
-functions named `report` are warned about and preserved.
+To turn startup off for your account, run `tr300 uninstall` and choose **Remove auto-run only**. The preference survives repairs, upgrades, and machine-wide hooks. Run `tr300 install` to re-enable it. Both commands remain available on PATH.
 
-This means you can safely run `tr300 install` multiple times without duplicating profile blocks.
-
-**Safety (v3.15.2+):** every modification to your rc files / `$PROFILE`
-is written via a temp-then-atomic-rename. A Ctrl-C, power loss, or
-antivirus quarantine mid-write can no longer leave your profile
-truncated. The first install also writes a one-time `.tr300-backup`
-copy of your original profile so you have a recovery option. If the
-TR-300 marker block in your profile has been hand-edited into an
-unbalanced state (e.g. `# End TR-300` line accidentally removed),
-`tr300 install` refuses up-front with an actionable error rather
-than silently dropping the rest of your profile.
-
-**Auto-run guards (v3.15.2+):** the injected snippet now guards
-the `tr300 --fast` call with `command -v tr300` (POSIX) /
-`Get-Command tr300 -ErrorAction SilentlyContinue` (Windows), so a
-missing binary no longer prints an error at every new shell start.
-A `TR300_AUTORUN_RAN` sentinel prevents recursion in nested shells
-(vim `:term`, `bash -i -c …`, Windows Terminal nested tabs). On
-Windows, the snippet uses `[Environment]::UserInteractive` instead
-of the older `$Host.Name -eq 'ConsoleHost'` check, so scripted
-`pwsh -Command "..."` invocations from CI / VS Code / scheduled
-tasks no longer dump the table into log streams.
-
-**On Unix/macOS:** Modifies `~/.bashrc` and/or `~/.zshrc`. On a
-fresh-account macOS machine where neither file exists, `tr300
-install` creates `.zshrc` (macOS has defaulted to zsh since 10.15,
-Catalina, 2019). `sudo tr300 install` is refused — TR-300 modifies
-your personal shell profile, and running as root either targets
-root's profile (no benefit to your shell) or leaves root-owned
-files in your home that break subsequent non-sudo installs.
-
-**On Windows:** Modifies the PowerShell `$PROFILE`. When both
-Windows PowerShell 5.1 (`powershell`) and PowerShell 7 (`pwsh`)
-are installed, `tr300 install` writes to BOTH profile paths
-(`Documents\WindowsPowerShell\…` and `Documents\PowerShell\…`)
-since the two shell flavors don't cross-source each other.
-Pre-v3.15.2, pwsh-only users got a silent no-op install because
-the snippet went to a profile their actual shell never read.
+Integration covers Command Prompt, Windows PowerShell and PowerShell 7 on Windows, and Bash, Zsh, Fish and installed PowerShell on macOS/Linux. Shell policies, profile bypass options and custom shells can skip startup. Scripts and redirected output stay quiet. Profile updates preserve configuration outside TR-300’s own blocks.
 
 Fresh Windows machines default `ExecutionPolicy` to `Restricted`,
 which blocks every `.ps1` including the profile itself, so

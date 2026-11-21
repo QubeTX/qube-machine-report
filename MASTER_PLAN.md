@@ -4,8 +4,8 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-11-11
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.4 / 4.4.4 / 4.4.4
+**Last updated:** 2026-11-20
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.4 / 4.4.4 / 4.5.0
 
 Current release: immutable `v4.4.4` at
 `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release `441625880`

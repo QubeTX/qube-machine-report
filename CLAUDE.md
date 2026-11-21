@@ -290,7 +290,7 @@ etc.) — keep all surfaces working when refactoring.
 
 `tr300 install` and `report install` configure optional guarded shell auto-run;
 neither is required to make `report` available on PATH. Current profile blocks
-contain the `tr300 --fast` auto-run and no alias definition. Rewriting an owned
+request the adaptive startup report and contain no alias definition. Rewriting an owned
 legacy TR-300 block retires its old alias, while foreign aliases/functions are
 preserved and produce a shadowing warning when detected. Complete uninstall
 removes both commands only with matching ownership evidence; an old
@@ -386,7 +386,7 @@ Windows-specific accuracy rules are extensive — load the **`windows-accuracy`*
 ### Fast Mode (`CollectMode::Fast`)
 
 `--fast` skips many slow optional probes for sub-second startup. Auto-run uses
-`tr300 --fast`; bare `tr300` and `report` both use full mode, and either accepts
+the interactive startup renderer; bare `tr300` and `report` both use full mode, and either accepts
 `--fast`. What gets skipped varies by platform — see the table in each platform
 collector. `-f/--full` is the explicit counterpart to `--fast` (full collection
 is already the default; the two flags conflict).

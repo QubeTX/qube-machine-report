@@ -7607,13 +7607,15 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'install -m 0755 "$PREPARED_DIRECTORY/preinstall" "$package_scripts/preinstall"',
         'pkgutil --expand-full "$direct_package" "$bound_package"',
         'cmp "$PREPARED_DIRECTORY/preinstall" "$bound_package/Scripts/preinstall"',
+        'cmp "$tr300_universal" "$bound_package/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"',
+        'cmp "$package_scripts/postinstall" "$bound_package/Scripts/postinstall"',
     ):
         require(secret_step, needle, f"{label} inline system-tool builder")
     for forbidden in (
         "tr300-pkg-rollback",
         "tr300-migration-probe",
         "macos-pkg-rollback",
-        "$package_scripts/postinstall",
+
     ):
         if forbidden in prepare or forbidden in build:
             raise AssertionError(
@@ -7694,7 +7696,9 @@ def check_macos_publish_boundary(workflow: str) -> None:
         'signed_preinstall="$RUNNER_TEMP/tr300-direct-pkg-preinstall"',
         'install -m 0500 "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"',
         'cmp "$expanded_pkg/Scripts/preinstall" "$signed_preinstall"',
-        "postinstall tr300-pkg-rollback tr300-migration-probe",
+        "tr300-pkg-rollback tr300-migration-probe",
+        'cmp "$expanded_pkg/Payload/usr/local/bin/tr300" "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"',
+
         'rm -rf "$expanded_pkg"',
         'custom_fixture_home=$(mktemp -d \\',
         '"/private/tmp/tr300 signed pkg custom home.XXXXXXXX")',

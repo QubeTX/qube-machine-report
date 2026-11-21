@@ -283,7 +283,23 @@
             Execute='deferred'
             Impersonate='no'
             Return='check'/>
+        <!-- Execute only the package-installed binary at the fixed Global path.
+             Register the inverse operation first so a later MSI failure restores startup. -->
+        <CustomAction Id='CheckStartupDestination' Error='Global startup requires the standard Program Files installation directory.'/>
+        <CustomAction Id='ConfigureMachineStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-machine' Execute='deferred' Impersonate='no' Return='check'/>
+        <CustomAction Id='RemoveMachineStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-machine' Execute='deferred' Impersonate='no' Return='check'/>
+        <CustomAction Id='UndoConfigureStartup' BinaryKey='MigrationProbe' ExeCommand='remove-startup-machine' Execute='rollback' Impersonate='no' Return='check'/>
+        <CustomAction Id='UndoRemoveStartup' BinaryKey='MigrationProbe' ExeCommand='configure-startup-machine' Execute='rollback' Impersonate='no' Return='check'/>
+        <CustomAction Id='CheckMachineStartupPaths' BinaryKey='MigrationProbe' ExeCommand='check-startup-machine' Execute='immediate' Impersonate='yes' Return='check'/>
+        <CustomAction Id='ExpectedStartupFolder' Property='TR300EXPECTEDGLOBAL' Value='[ProgramFiles64Folder]tr300\bin\'/>
         <InstallExecuteSequence>
+            <Custom Action='ExpectedStartupFolder' After='CostFinalize'>1</Custom>
+            <Custom Action='CheckStartupDestination' After='ExpectedStartupFolder'><![CDATA[NOT (Bin ~= TR300EXPECTEDGLOBAL)]]></Custom>
+            <Custom Action='CheckMachineStartupPaths' Before='InstallInitialize'>1</Custom>
+            <Custom Action='UndoRemoveStartup' Before='RemoveMachineStartup'><![CDATA[REMOVE~="ALL"]]></Custom>
+            <Custom Action='RemoveMachineStartup' Before='RemoveFiles'><![CDATA[REMOVE~="ALL"]]></Custom>
+            <Custom Action='UndoConfigureStartup' After='InstallFiles'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
+            <Custom Action='ConfigureMachineStartup' After='UndoConfigureStartup'><![CDATA[NOT Installed AND NOT REMOVE~="ALL"]]></Custom>
             <Custom Action='PreflightCargoOwnership' Before='InstallInitialize'>
                 <![CDATA[NOT Installed]]>
             </Custom>
