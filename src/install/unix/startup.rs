@@ -10,6 +10,16 @@ pub(super) enum ProfileSyntax {
     PowerShell,
 }
 
+fn signed_user_profile(path: &Path) -> bool {
+    // Candidate discovery must not open a FIFO, device, or dangling link.
+    // The full plan later reports all unsafe paths before writing anything.
+    super::resolve_profile_target(path)
+        .and_then(|(resolved, _)| {
+            super::read_profile_snapshot(path, &resolved, "PowerShell profile")
+        })
+        .is_ok_and(|snapshot| snapshot.contents.contains("# SIG # Begin signature block"))
+}
+
 pub(super) fn profile_candidates(home: &Path) -> Vec<(PathBuf, ProfileSyntax, bool)> {
     let config = env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -19,6 +29,8 @@ pub(super) fn profile_candidates(home: &Path) -> Vec<(PathBuf, ProfileSyntax, bo
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .unwrap_or_else(|| home.to_owned());
+    let pwsh = config.join("powershell/profile.ps1");
+    let signed = signed_user_profile(&pwsh);
     let mut paths = vec![
         (home.join(".bashrc"), ProfileSyntax::Posix, true),
         (zdir.join(".zshrc"), ProfileSyntax::Posix, true),
@@ -27,10 +39,11 @@ pub(super) fn profile_candidates(home: &Path) -> Vec<(PathBuf, ProfileSyntax, bo
             ProfileSyntax::Fish,
             true,
         ),
+        (pwsh, ProfileSyntax::PowerShell, !signed),
         (
-            config.join("powershell/profile.ps1"),
+            config.join("powershell/Microsoft.PowerShell_profile.ps1"),
             ProfileSyntax::PowerShell,
-            true,
+            signed,
         ),
     ];
     if zdir != home {
@@ -104,13 +117,16 @@ end"#
     for ($i = 1; $i -lt $cli.Length; $i++) {
         switch -Regex ($cli[$i]) {
             '^--?$' { return }
-            '^-(?:login|l|nologo|nol|noexit|noe|noprofile|nop|sta|mta)$' { continue }
+            '^-(?:interactive|i|login|l|nologo|nol|noexit|noe|noprofile|nop|noprofileloadtime|sta|mta)$' { continue }
             '^-(?:workingdirectory|wd|configurationname|conf|settingsfile|custompipename|executionpolicy|ep|windowstyle|w)$' { $i++; continue }
             default { return }
         }
     }
 @PATH@
     $env:TR300_AUTORUN_RAN = '1'
+    # A skipped native hook exits 3. Keep it quiet under Stop and preserve
+    # the caller's preference by setting this only in our child scope.
+    $PSNativeCommandUseErrorActionPreference = $false
     $savedExit = Get-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
     $priorExit = if ($null -ne $savedExit) { $savedExit.Value }
     try {
@@ -499,7 +515,7 @@ fi"#;
             ));
         }
         let mut changes = Vec::new();
-        for (name, shell) in [
+        let mut profiles = vec![
             ("/private/etc/profile", ProfileSyntax::Posix),
             ("/private/etc/bashrc", ProfileSyntax::Posix),
             ("/private/etc/zshrc", ProfileSyntax::Posix),
@@ -512,7 +528,35 @@ fi"#;
                 "/usr/local/microsoft/powershell/7-preview/profile.ps1",
                 ProfileSyntax::PowerShell,
             ),
+        ];
+        for (primary, alternate) in [
+            (
+                "/usr/local/microsoft/powershell/7/profile.ps1",
+                "/usr/local/microsoft/powershell/7/Microsoft.PowerShell_profile.ps1",
+            ),
+            (
+                "/usr/local/microsoft/powershell/7-preview/profile.ps1",
+                "/usr/local/microsoft/powershell/7-preview/Microsoft.PowerShell_profile.ps1",
+            ),
         ] {
+            // Signed all-hosts profiles must retain their Authenticode bytes.
+            // Prefer PowerShell's existing console-host alternative in that case.
+            let path = Path::new(primary);
+            let signed = if protected(path)? {
+                super::super::read_profile_snapshot(path, path, "system PowerShell profile")?
+                    .contents
+                    .contains("# SIG # Begin signature block")
+            } else {
+                false
+            };
+            if signed {
+                profiles.retain(|(name, _)| *name != primary);
+            }
+            if signed || !enable {
+                profiles.push((alternate, ProfileSyntax::PowerShell));
+            }
+        }
+        for (name, shell) in profiles {
             let path = Path::new(name);
             let parent = path.parent().unwrap();
             if !protected(parent)? {
@@ -525,9 +569,10 @@ fi"#;
                 continue;
             }
             let before = match fs::symlink_metadata(path) {
-                Ok(metadata) if metadata.is_file() && protected(path)? => {
-                    Some(fs::read_to_string(path)?)
-                }
+                Ok(metadata) if metadata.is_file() && protected(path)? => Some(
+                    super::super::read_profile_snapshot(path, path, "machine shell profile")?
+                        .contents,
+                ),
                 Ok(_) => {
                     return Err(profile_error(format!(
                         "unsafe machine shell profile {name}"
@@ -538,6 +583,9 @@ fi"#;
             };
             let original = before.as_deref().unwrap_or("");
             if original.contains("# SIG # Begin signature block") {
+                if !enable && !original.lines().any(|line| line == START) {
+                    continue;
+                }
                 return Err(profile_error(format!(
                     "cannot edit signed shell profile {name}"
                 )));
@@ -681,3 +729,27 @@ esac"#
 
 #[cfg(target_os = "macos")]
 pub(super) use machine::change as change_machine_startup;
+
+#[cfg(test)]
+mod tests {
+    use super::signed_user_profile;
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn signature_discovery_skips_named_pipes() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("profile.ps1");
+        let name = CString::new(profile.as_os_str().as_bytes()).unwrap();
+        // The path is unique to this test and name remains live for the call.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(!signed_user_profile(&profile));
+    }
+
+    #[test]
+    fn preserve_signed_owned_profile_on_cleanup() {
+        let profile =
+            "# TR-300 Machine Report\ntr300 --fast\n# End TR-300\n# SIG # Begin signature block\n";
+        assert!(super::super::cleaned_profile_contents(profile).is_err());
+    }
+}

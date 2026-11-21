@@ -92,16 +92,24 @@ Host tr300-fixture
     } until ($ready -or (Get-Date) -ge $deadline)
     if (!$ready) { throw 'Disposable OpenSSH listener did not start.' }
     $base = @('-F',"$client\client.conf")
+    Write-Host "Installing startup hooks for the disposable non-admin SSH account"
     Invoke-Checked $ssh ($base + @('-T','tr300-fixture',"$dir\tr300.exe install"))
+    Write-Host "Checking interactive Windows OpenSSH console"
     Invoke-Checked python @("$PSScriptRoot\test-startup-windows-ssh.py",$ssh,"$client\client.conf","$client\error.txt")
     foreach ($tty in '-T','-tt') {
+        Write-Host "Checking Windows OpenSSH command ($tty)"
         $output = Invoke-Checked $ssh ($base + @($tty,'tr300-fixture','echo REMOTE_COMMAND_OK')) | Out-String
-        if ($output -notmatch 'REMOTE_COMMAND_OK' -or $output -match 'PROCESSOR|SERVER IP') { throw $output }
+        if ($output -notmatch 'REMOTE_COMMAND_OK' -or $output -match 'PROCESSOR|SERVER IP') { throw "Unexpected $tty command output [$output]" }
     }
     Write-Output 'Passed Windows OpenSSH shell, noninteractive command and forced-PTY command.'
 } catch {
-    if (Test-Path "$dir\server.log") { Get-Content "$dir\server.log" }
-    throw
+    $failure = $_
+    Write-Host "OpenSSH acceptance failed: $($failure.Exception.Message)"
+    Write-Host $failure.ScriptStackTrace
+    if ($registered) { Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue }
+    Get-Content -LiteralPath "$dir\server.log" -ErrorAction SilentlyContinue
+    Get-Content -LiteralPath "$client\error.txt" -ErrorAction SilentlyContinue
+    throw $failure
 } finally {
     if ($registered) {
         Stop-ScheduledTask -TaskName $task

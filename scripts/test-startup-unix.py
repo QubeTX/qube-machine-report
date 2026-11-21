@@ -95,6 +95,26 @@ def local(binary):
             if shutil.which(shell):
                 out = terminal([shell, "-i"], env, exchanges=EXIT)
                 assert out.count("PROCESSOR") == 1, out
+        # PSReadLine is an optional line editor. Use a simple fixture prompt
+        # so a raw PTY can drive the installed host without emulating an xterm.
+        with (home / ".config/powershell/profile.ps1").open("a") as stream:
+            stream.write("\nRemove-Module PSReadLine -ErrorAction SilentlyContinue\n"
+                         "function global:prompt { 'TR300_READY> ' }\n")
+        ps_env = {**env, "TERM": "dumb", "POWERSHELL_TELEMETRY_OPTOUT": "1"}
+        pwsh = shutil.which("pwsh")
+        assert pwsh, "PowerShell 7 is required on this hosted qualification runner"
+        for switches in [[], ["-i"]]:
+            out = terminal([pwsh, "-NoLogo", *switches], ps_env, exchanges=EXIT)
+            assert out.count("PROCESSOR") == 1, out
+        script = home / "command.ps1"
+        script.write_text("Write-Output 'PS_COMMAND_OK'\n")
+        for switches in [["-Command", "'PS_COMMAND_OK'"], ["-File", str(script)], [str(script)]]:
+            out = terminal([pwsh, "-NoLogo", *switches], ps_env)
+            assert "PS_COMMAND_OK" in out and "PROCESSOR" not in out, out
+        piped = subprocess.run([pwsh, "-NoLogo", "-i"], input=b"exit\n", env=ps_env,
+                               timeout=20, check=True, capture_output=True)
+        assert b"PROCESSOR" not in piped.stdout, piped.stdout
+        print("Passed native PowerShell interactive, -i, command/script and redirection cases")
         for width, height in [(80, 25), (26, 10), (11, 25), (80, 4), (0, 0)]:
             out = terminal([binary, "--ascii", "--startup"], env, (width, height))
             lines = out.splitlines()

@@ -757,6 +757,7 @@ try {
     if (-not $startupConfigured) {
         Write-Warning 'TR-300 installed, but shell startup setup was incomplete. Run tr300 install to retry.'
     }
+    $global:LASTEXITCODE = 0
     Write-Information "TR-300 $Tr300Version is installed through the managed PowerShell channel: $binary"
 } catch {
     $failure = $_.Exception.Message

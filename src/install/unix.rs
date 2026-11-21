@@ -531,6 +531,9 @@ fn cleaned_profile_contents(content: &str) -> Result<Option<String>> {
     if end.is_some() {
         return Err(profile_error("mutilated TR-300 shell profile markers"));
     }
+    if output != content && content.contains("# SIG # Begin signature block") {
+        return Err(profile_error("cannot remove a startup block from an Authenticode-signed profile without invalidating its signature"));
+    }
     Ok((output != content).then_some(output))
 }
 
