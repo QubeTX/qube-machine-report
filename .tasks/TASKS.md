@@ -10,9 +10,9 @@
 
 ## Active
 
-- [ ] **Release adaptive interactive startup reports** - local and SSH priorities, shell integration, native validation, and public release (owner codex) #startup
-
 ## Done
+
+- [x] **Release adaptive interactive startup reports** - local and SSH priorities, shell integration, verified public installers and production website (owner codex) (done 2026-11-21) #startup
 
 - [x] **Simplify CI and release qualification** - documentation builds skipped, native build work consolidated, and publication custody preserved; full/docs PR/main verification complete (owner codex) (done 2026-11-11) #cif
   - [x] Implement strict scope classification and required aggregate qualification

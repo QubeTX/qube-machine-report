@@ -7,9 +7,11 @@ as passed.
 
 ## Per-version verification log
 
-### v4.5.0 — Adaptive terminal startup (release candidate)
+### v4.5.0 — Adaptive terminal startup (published 2026-11-21)
 
-Disposable classic Windows consoles exercised CMD, Windows PowerShell 5.1 and PowerShell 7 at 80×25 and 42×12. The fixtures verified the top of the report, visible prompt space, one banner per console, and quiet command execution. ConPTY checks also covered 120×30, 80×75 and an 11-column pane. A real Linux loopback OpenSSH connection verified an interactive login, a command-only invocation and an explicit PTY command. Native installation, upgrade and public distribution records follow qualification of the final release source.
+Disposable classic Windows consoles exercised CMD, Windows PowerShell 5.1 and PowerShell 7 at 80×25 and 42×12. The fixtures verified the top of the report, visible prompt space, one banner per console, and quiet command execution. ConPTY checks also covered 120×30, 80×75 and an 11-column pane. A real Linux loopback OpenSSH connection verified an interactive login, a command-only invocation and an explicit PTY command. Final pre-tag CI passed on both the PR and the merged release source. Native package, account and repair checks, the crate checksum, Apple notarization, all 34 public asset checksums, post-public installer tests and the live website check are recorded in the [4.5.0 publication handoff](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md).
+
+The public installer audit matched all 34 assets by SHA-256. [macOS and Linux](https://github.com/QubeTX/qube-machine-report/actions/runs/44950226946) and [Windows](https://github.com/QubeTX/qube-machine-report/actions/runs/44951371137) passed their post-public tests. A workstation upgraded from the public 4.3.12 Global MSI to 4.5.0. Its actual profiles kept the heading and prompt visible at 80×25 and 42×12 in CMD and both PowerShell hosts. Native proof IDs, digests and production deployment details are in the handoff above.
 
 ### v4.4.4 — Complete security distribution and native PowerShell verification (2026-11-11)
 
