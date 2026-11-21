@@ -43,11 +43,58 @@ for obstacle in "$runtime" "$agent"; do
     if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then exit 1; fi
     sudo rm "$obstacle"
 done
+# Optional shell integration cannot turn a valid payload upgrade into a
+# failed PackageKit transaction. Make one profile refuse modification,
+# verify receipt plus commands, restore the fixture, and exercise recovery.
+sudo cp -p /private/etc/zshrc "$tmp/original-zshrc"
+printf '%s\n' '# TR-300 system startup' | sudo tee -a /private/etc/zshrc >/dev/null
 sudo installer -pkg "$tmp/test.pkg" -target /
+pkgutil --pkg-info com.qubetx.tr300.pkg
+/usr/local/bin/tr300 --version
+/usr/local/bin/report --version
+if grep -Fqx '# TR-300 system startup' /private/etc/profile; then exit 1; fi
+sudo cp -p "$tmp/original-zshrc" /private/etc/zshrc
+sudo "$runtime" configure-startup-machine
+if printf '2\n' | /usr/local/bin/tr300 uninstall >"$tmp/complete-output" 2>&1; then
+    echo 'Complete uninstall accepted a receipt-owned native package' >&2
+    exit 1
+fi
+pkgutil --pkg-info com.qubetx.tr300.pkg
+test -x /usr/local/bin/tr300
+test -x /usr/local/bin/report
 cmp "$runtime" target/release/tr300
 cmp "$agent" "$tmp/root$agent"
 grep -Fqx '# TR-300 system startup' /private/etc/zshrc
 grep -Fqx '# TR-300 package Bash startup' "$HOME/.bashrc"
+# A historic zsh profile sourced after the system hook must remain quiet
+# even when the current account is opted out and the current binary skips.
+legacy_home="$tmp/legacy-home"
+mkdir -p "$legacy_home/Library/Application Support/tr300"
+touch "$legacy_home/Library/Application Support/tr300/startup-disabled"
+cat > "$legacy_home/.zshrc" <<'LEGACY'
+# TR-300 Machine Report
+case "$-" in *i*)
+    if command -v tr300 >/dev/null 2>&1 && [ -z "${TR300_AUTORUN_RAN-}" ]; then
+        touch "$HOME/legacy-fired"
+        export TR300_AUTORUN_RAN=1
+        tr300 --fast
+    fi
+    ;;
+esac
+# End TR-300
+LEGACY
+python3 - "$legacy_home" <<'PY'
+import os, pty, subprocess, sys
+home = sys.argv[1]
+master, slave = pty.openpty()
+try:
+    env = dict(HOME=home, ZDOTDIR=home, PATH="/usr/local/bin:/usr/bin:/bin", TERM="xterm")
+    subprocess.run(["/bin/zsh", "-i", "-c", "true"], stdin=slave, stdout=slave, stderr=slave, env=env, timeout=30, check=True)
+    assert not os.path.exists(home + "/legacy-fired"), "legacy startup escaped account opt-out"
+finally:
+    os.close(master)
+    os.close(slave)
+PY
 bash scripts/test-startup-unix-ssh.sh /usr/local/bin/tr300 machine
 sudo "$runtime" configure-startup-machine
 [[ $(grep -Fxc '# TR-300 system startup' /private/etc/zshrc) -eq 1 ]]

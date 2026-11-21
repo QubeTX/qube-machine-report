@@ -88,6 +88,7 @@ fn priority(label: &str, remote: bool) -> usize {
             "DEFAULT IP",
             "BATTERY",
             "MODEL",
+            "MACHINE NAME",
             "OS",
             "PROCESSOR",
             "CORES",
@@ -331,6 +332,19 @@ mod tests {
         ] {
             assert!(output.contains(value), "{value}");
         }
+    }
+
+    #[test]
+    fn short_ssh_view_retains_distinct_machine_name() {
+        let info = fixture_info();
+        let mut session = Session::detect(Some("192.0.2.1 50500 192.0.2.7 22"), None, None);
+        session.alternate_name = Some("build-server.local".into());
+        let output = render(&info, &Config::default(), Some((80, 8)), &session);
+        let rows: Vec<_> = output.lines().collect();
+        assert_eq!(rows.len(), 4);
+        assert!(rows[1].starts_with("SERVER IP"));
+        assert!(rows[2].starts_with("MODEL"));
+        assert!(rows[3].starts_with("MACHINE NAME") && rows[3].contains("build-server.local"));
     }
 
     #[test]

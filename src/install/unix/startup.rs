@@ -48,11 +48,7 @@ pub(super) fn profile_candidates(home: &Path) -> Vec<(PathBuf, ProfileSyntax, bo
 }
 
 impl ProfileSyntax {
-    pub(super) fn block(self, executable: &Path) -> Result<String> {
-        self.render(executable, true)
-    }
-
-    fn render(self, executable: &Path, with_path: bool) -> Result<String> {
+    pub(super) fn render(self, executable: &Path, with_path: bool) -> Result<String> {
         if !executable.is_absolute() {
             return Err(profile_error("startup executable must be absolute"));
         }
@@ -77,6 +73,7 @@ impl ProfileSyntax {
         let body = match self {
             Self::Posix => {
                 r#"case "$-" in *i*)
+    export TR300_AUTORUN_RAN=1
     if [ -t 0 ] && [ -t 1 ] && [ -x @BIN@ ]; then
 @PATH@
         if _tr300_tty=$(/usr/bin/tty 2>/dev/null) && [ "${TR300_AUTORUN_TTY-}" != "$_tr300_tty" ]; then
@@ -89,6 +86,7 @@ esac"#
             }
             Self::Fish => {
                 r#"if status is-interactive; and test -t 0; and test -t 1; and test -x @BIN@
+    set -gx TR300_AUTORUN_RAN 1
 @PATH@
     set -l tr300_tty (/usr/bin/tty 2>/dev/null)
     if test $status -eq 0; and test "$TR300_AUTORUN_TTY" != "$tr300_tty"
@@ -112,6 +110,7 @@ end"#
         }
     }
 @PATH@
+    $env:TR300_AUTORUN_RAN = '1'
     $savedExit = Get-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
     $priorExit = if ($null -ne $savedExit) { $savedExit.Value }
     try {
@@ -163,10 +162,22 @@ mod machine {
     const BINARY: &str = "/Library/PrivilegedHelperTools/com.qubetx.tr300.startup";
 
     fn block(shell: ProfileSyntax) -> Result<String> {
-        Ok(shell
+        let entry = format!("'{BINARY}' --startup-hook");
+        let invocation =
+            format!("/usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin '{BINARY}' --startup-hook");
+        let block = shell
             .render(Path::new(BINARY), false)?
             .replace(super::MARKER_START, START)
-            .replace(super::MARKER_END, END))
+            .replace(super::MARKER_END, END);
+        Ok(match shell {
+            ProfileSyntax::PowerShell => block.replace(
+                &format!("& {entry}"),
+                &format!(
+                    "& /usr/bin/env 'PATH=/usr/bin:/bin:/usr/sbin:/sbin' '{BINARY}' --startup-hook"
+                ),
+            ),
+            _ => block.replace(&entry, &invocation),
+        })
     }
 
     // A root process must never follow links or write through a directory
@@ -378,9 +389,7 @@ fi"#;
     /// enrollment for users created after the package was installed.
     fn change_own_bash_profile(enable: bool) -> Result<bool> {
         let home = dirs::home_dir().ok_or_else(|| profile_error("cannot determine Bash home"))?;
-        if enable && crate::install::startup_disabled()? {
-            return Ok(false);
-        }
+        let disabled = enable && crate::install::startup_disabled()?;
         let path = home.join(".bashrc");
         let (path, before) = match fs::symlink_metadata(&path) {
             Ok(_) => {
@@ -393,8 +402,16 @@ fi"#;
             Err(error) => return Err(error.into()),
         };
         let before_text = before.as_deref().unwrap_or("");
-        let marker = "# TR-300 package Bash startup";
-        let end = "# End TR-300 package Bash startup";
+        if disabled {
+            // A stored opt-out also retires v4.4's user-owned --fast hook.
+            // Apple non-login Bash will never consult /etc/profile.
+            if let Some(cleaned) = super::super::cleaned_profile_contents(before_text)? {
+                super::super::super::atomic_write(&path, &cleaned)?;
+            }
+            return Ok(false);
+        }
+        let marker = super::super::PACKAGE_BASH_START;
+        let end = super::super::PACKAGE_BASH_END;
         let block = block(ProfileSyntax::Posix)?
             .replace(START, marker)
             .replace(END, end);
@@ -409,14 +426,62 @@ fi"#;
             }
             after = after.replace(&owned, "");
         } else if enable {
-            if !after.is_empty() && !after.ends_with('\n') {
-                after.push('\n');
-            }
-            after.push_str(&owned);
+            // Run before legacy user hooks so opting out suppresses their
+            // old tr300 --fast invocation even in non-login Apple Bash.
+            after.insert_str(0, &owned);
         } else {
             return Ok(false);
         }
         super::super::super::atomic_write(&path, &after)?;
+        Ok(true)
+    }
+
+    fn register_agent(uid: u32, enable: bool) -> Result<bool> {
+        const AGENT: &str = "/Library/LaunchAgents/com.qubetx.tr300.startup.plist";
+        if !protected(Path::new(AGENT))? {
+            return Err(profile_error("unprotected package LaunchAgent"));
+        }
+        let domain = format!("gui/{uid}");
+        let service = format!("{domain}/com.qubetx.tr300.startup");
+        let launchctl = |args: &[&str]| {
+            Command::new("/bin/launchctl")
+                .env_clear()
+                .args(args)
+                .output()
+        };
+        if !launchctl(&["print", &domain])?.status.success() {
+            return Ok(false);
+        }
+        let current = launchctl(&["print", &service])?;
+        if current.status.success()
+            && !String::from_utf8_lossy(&current.stdout)
+                .lines()
+                .any(|line| line.trim().strip_prefix("path = ") == Some(AGENT))
+        {
+            return Err(profile_error(format!(
+                "conflicting LaunchAgent for UID {uid}"
+            )));
+        }
+        if current.status.success() == enable {
+            return Ok(false);
+        }
+        let changed = if enable {
+            launchctl(&["bootstrap", &domain, AGENT])?
+        } else {
+            launchctl(&["bootout", &service])?
+        };
+        if !changed.status.success() {
+            // A GUI session may also disappear while PackageKit is working.
+            if launchctl(&["print", &domain])?.status.success()
+                && launchctl(&["print", &service])?.status.success() != enable
+            {
+                return Err(profile_error(format!(
+                    "could not reconcile LaunchAgent for UID {uid}: {}",
+                    String::from_utf8_lossy(&changed.stderr)
+                )));
+            }
+            return Ok(false);
+        }
         Ok(true)
     }
 
@@ -553,6 +618,7 @@ esac"#
         };
         let mut profiles_changed = 0;
         let mut accounts_changed = Vec::new();
+        let mut agents_changed = Vec::new();
         let mut fish_changed = Vec::new();
         let result = (|| {
             for (path, before, after) in &changes {
@@ -578,10 +644,18 @@ esac"#
                 if change_account_as(uid, gid, &home, enable)? {
                     accounts_changed.push((uid, gid, home));
                 }
+                if register_agent(uid, enable)? {
+                    agents_changed.push(uid);
+                }
             }
             Ok(())
         })();
         if let Err(error) = result {
+            for uid in agents_changed.into_iter().rev() {
+                if let Err(restore) = register_agent(uid, !enable) {
+                    eprintln!("TR-300: could not restore LaunchAgent for UID {uid}: {restore}");
+                }
+            }
             for (uid, gid, home) in accounts_changed.into_iter().rev() {
                 if let Err(restore) = change_account_as(uid, gid, &home, !enable) {
                     eprintln!("TR-300: could not restore Bash startup for UID {uid}: {restore}");

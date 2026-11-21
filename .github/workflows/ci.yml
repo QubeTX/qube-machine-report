@@ -1113,8 +1113,8 @@ jobs:
           fi
           # Validation names the retired members only to prove they are absent;
           # the executable provenance fixture forbids them in prep/build jobs.
-          grep -Fq 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' "$builder"
-          grep -Fq 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' "$workflow"
+          grep -Fq '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' "$builder"
+          grep -Fq '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' "$workflow"
           grep -Fq 'managed_state_present()' "$builder"
           # shellcheck disable=SC2016
           grep -Fq 'for home in /Users/* /Users/.[!.]* /Users/..?*; do' "$builder"

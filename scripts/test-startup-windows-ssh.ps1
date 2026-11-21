@@ -42,6 +42,10 @@ try {
     Invoke-Checked $keygen @('-q','-t','ed25519','-N','','-f',"$client\key")
     Invoke-Checked $keygen @('-q','-t','ed25519','-N','','-f',"$dir\host")
     Protect "$dir\host" @('*S-1-5-18:F','*S-1-5-32-544:F')
+    # ssh-keygen creates an explicit ACE for its caller. Removing inheritance
+    # does not remove this ACE; sshd runs as SYSTEM and rejects that extra SID.
+    $runnerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Invoke-Checked icacls.exe @("$dir\host", '/remove:g', "*$runnerSid") | Out-Null
     Copy-Item "$client\key.pub" "$dir\authorized_keys"
     Protect "$dir\authorized_keys" @('*S-1-5-18:F','*S-1-5-32-544:F',$reader)
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)

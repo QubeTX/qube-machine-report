@@ -2,6 +2,7 @@
 param([Parameter(Mandatory)][bool]$Registered)
 
 $ErrorActionPreference = 'Stop'
+Write-Host "Checking Global shell registration (expected registered: $Registered)"
 $systemDirectory = [Environment]::SystemDirectory
 $programs = [Environment]::GetFolderPath('ProgramFiles')
 $profiles = @((Join-Path $systemDirectory 'WindowsPowerShell\v1.0\profile.ps1'))
@@ -39,3 +40,9 @@ if ($Registered) {
         throw 'Global startup interfered with cmd.exe /c'
     }
 }
+
+Write-Host "Verified Global shell registration (registered: $Registered)"
+
+# The diagnostic children deliberately exit 37. Mark a successful assertion
+# script successful for the calling workflow's native-exit propagation.
+exit 0

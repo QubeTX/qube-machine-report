@@ -566,7 +566,7 @@ fi
 exit 0
 PREINSTALL
 chmod 755 "${pkg_scripts}/preinstall"
-printf '%s\n' '#!/bin/sh' 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' > "$pkg_scripts/postinstall"
+printf '%s\n' '#!/bin/sh' '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' '    echo "TR-300 installed. Shell startup setup was incomplete. After resolving the profile error, run sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine to retry." >&2' '}' 'exit 0' > "$pkg_scripts/postinstall"
 chmod 0755 "$pkg_scripts/postinstall"
 pkg="${work_dir}/tr300.pkg"
 pkgbuild --root "$payload" \

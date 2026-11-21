@@ -910,7 +910,7 @@ Behavior:
   wrappers provide the supported cross-scope/native convergence path. On Mac,
   an exact PKG may still transition to managed shell; the reverse transition
   requires receipt-aware Complete uninstall before the direct PKG runs. The
-  direct PKG has no postinstall and never mutates user-owned managed state. The
+  direct PKG postinstall registers shell startup through its protected helper. Managed install state remains under its original owner. The
   hidden bounded `migrate-cleanup` never deletes the running install, toolchain,
   shared Cargo PATH, or Downloads. Current Windows native packages always use
   its mandatory `--strict` mode with no cleanup opt-out; a present cargo-dist
@@ -974,9 +974,7 @@ native installer path is `.github/workflows/macos-installer.yml` plus
 tagged archives into one universal Mach-O, signs/notarizes it, and builds the
 signed, notarized, stapled system-wide `com.qubetx.tr300.pkg`. The direct PKG is
 the recommended native download and the v4.2+ updater payload because the PKG,
-  not a DMG, owns `/usr/local/bin/tr300` and supplies the stable receipt. Its only
-  package script is a non-mutating `preinstall` that refuses standard managed
-  ownership before payload placement; it contains no postinstall helper. A
+  not a DMG, owns `/usr/local/bin/tr300` and supplies the stable receipt. Its non-mutating `preinstall` refuses standard managed ownership and checks the startup payload destinations before placement. Its `postinstall` registers startup using the package-owned helper. A
   signed/notarized/stapled DMG containing the
 byte-identical PKG is still published only so immutable v4.1.x updaters can cross
 the transition; current clients never use that bridge.

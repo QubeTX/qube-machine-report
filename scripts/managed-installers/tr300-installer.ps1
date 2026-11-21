@@ -748,8 +748,13 @@ try {
     $committed = $true
     # At this point the paired commands, receipt and origin have been verified.
     # A profile blocked by endpoint policy is a separate, recoverable setup failure.
-    & $binary configure-startup-user
-    if ($global:LASTEXITCODE -ne 0) {
+    try {
+        & $binary configure-startup-user
+        $startupConfigured = $global:LASTEXITCODE -eq 0
+    } catch {
+        $startupConfigured = $false
+    }
+    if (-not $startupConfigured) {
         Write-Warning 'TR-300 installed, but shell startup setup was incomplete. Run tr300 install to retry.'
     }
     Write-Information "TR-300 $Tr300Version is installed through the managed PowerShell channel: $binary"

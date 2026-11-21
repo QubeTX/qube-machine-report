@@ -216,12 +216,15 @@ installs and v4.2.0+ self-updates never mount it.
 To remove the system package and its receipt:
 
 ```bash
-sudo rm -f /usr/local/bin/tr300 /usr/local/bin/report
-sudo pkgutil --forget com.qubetx.tr300.pkg
+# Starting with 4.5, remove the package's shell registrations first.
+sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup remove-startup-machine &&
+  sudo rm -f /Library/LaunchAgents/com.qubetx.tr300.startup.plist \
+    /Library/PrivilegedHelperTools/com.qubetx.tr300.startup \
+    /usr/local/bin/tr300 /usr/local/bin/report &&
+  sudo pkgutil --forget com.qubetx.tr300.pkg
 ```
 
-The PKG contains only those two versionless commands. The hosted uninstall gate
-checks the same inventory after every release.
+For older two-command packages, remove the two files under `/usr/local/bin` and forget the package receipt. Starting with 4.5, the PKG also owns the startup helper and a login agent for new accounts. The helper removes the shell entries before you delete the package files.
 
 ### Alternative install methods
 
@@ -586,6 +589,8 @@ Each new interactive terminal or SSH login shows a fast report for the machine r
 To turn startup off for your account, run `tr300 uninstall` and choose **Remove auto-run only**. The preference survives repairs, upgrades, and machine-wide hooks. Run `tr300 install` to re-enable it. Both commands remain available on PATH.
 
 Integration covers Command Prompt, Windows PowerShell and PowerShell 7 on Windows, and Bash, Zsh, Fish and installed PowerShell on macOS/Linux. Shell policies, profile bypass options and custom shells can skip startup. Scripts and redirected output stay quiet. Profile updates preserve configuration outside TR-300’s own blocks.
+
+Windows Global registers shared profiles for the installed system PowerShell hosts. Each account’s execution policy still applies. If policy blocks the profile, Command Prompt startup and both manual commands remain available.
 
 Fresh Windows machines default `ExecutionPolicy` to `Restricted`,
 which blocks every `.ps1` including the profile itself, so

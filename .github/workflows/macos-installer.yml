@@ -1527,7 +1527,7 @@ jobs:
           install -d -m 0755 "$payload/Library/LaunchAgents"
           printf '%s\n' '<plist version="1.0"><dict><key>Label</key><string>com.qubetx.tr300.startup</string><key>ProgramArguments</key><array><string>/Library/PrivilegedHelperTools/com.qubetx.tr300.startup</string><string>configure-startup-machine</string></array><key>LimitLoadToSessionType</key><string>Aqua</string><key>RunAtLoad</key><true/></dict></plist>' > "$payload/Library/LaunchAgents/com.qubetx.tr300.startup.plist"
           chmod 0644 "$payload/Library/LaunchAgents/com.qubetx.tr300.startup.plist"
-          printf '%s\n' '#!/bin/sh' 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' > "$package_scripts/postinstall"
+          printf '%s\n' '#!/bin/sh' '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' '    echo "TR-300 installed. Shell startup setup was incomplete. After resolving the profile error, run sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine to retry." >&2' '}' 'exit 0' > "$package_scripts/postinstall"
           chmod 0755 "$package_scripts/postinstall"
 
           package="$work_directory/tr300.pkg"
@@ -1985,7 +1985,7 @@ jobs:
           test -x "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
           test ! -L "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
           cmp "$expanded_pkg/Payload/usr/local/bin/tr300" "$expanded_pkg/Payload/Library/PrivilegedHelperTools/com.qubetx.tr300.startup"
-          printf '%s\n' '#!/bin/sh' 'exec /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine' | cmp - "$expanded_pkg/Scripts/postinstall"
+          printf '%s\n' '#!/bin/sh' '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' '    echo "TR-300 installed. Shell startup setup was incomplete. After resolving the profile error, run sudo /Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine to retry." >&2' '}' 'exit 0' | cmp - "$expanded_pkg/Scripts/postinstall"
           rm -f "$payload_inventory"
           rm -rf "$expanded_pkg"
           test ! -e "$expanded_pkg"
@@ -2563,7 +2563,7 @@ jobs:
           test ! -e /usr/local/bin/report
           test ! -e /Library/PrivilegedHelperTools/com.qubetx.tr300.startup
           test ! -e /Library/LaunchAgents/com.qubetx.tr300.startup.plist
-          ! grep -Fqx '# TR-300 system startup' /private/etc/zshrc
+          if grep -Fqx '# TR-300 system startup' /private/etc/zshrc; then exit 1; fi
           if pkgutil --pkg-info com.qubetx.tr300.pkg >/dev/null 2>&1; then
             echo 'managed takeover left the package receipt behind' >&2
             exit 1

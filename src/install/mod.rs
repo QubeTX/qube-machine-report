@@ -38,6 +38,8 @@ pub fn startup_disabled() -> Result<bool> {
 
 #[doc(hidden)]
 pub fn set_startup_disabled(disabled: bool) -> Result<()> {
+    #[cfg(unix)]
+    unix::refuse_root_install()?;
     let path = startup_preference()?;
     if disabled {
         fs::create_dir_all(path.parent().expect("preference has a parent"))?;
@@ -171,7 +173,7 @@ fn replace_existing_windows_file(path: &Path, replacement: &Path) -> io::Result<
     }
 }
 
-// ── Shared file-write safety primitives (v3.15.2+) ──────────────────
+// â”€â”€ Shared file-write safety primitives (v3.15.2+) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // The install/uninstall flow mutates user-edited config files (~/.bashrc,
 // ~/.zshrc, $PROFILE) that have no canonical copy elsewhere. A partial
@@ -183,7 +185,7 @@ fn replace_existing_windows_file(path: &Path, replacement: &Path) -> io::Result<
 /// Atomically write `content` to `path` via write-temp-then-rename.
 ///
 /// `std::fs::write` opens the target with `O_TRUNC` / `CREATE_ALWAYS` and
-/// then writes — if the process dies between the truncate and the write
+/// then writes â€” if the process dies between the truncate and the write
 /// completion (Ctrl-C, power loss, antivirus quarantine mid-write), the
 /// rc file is left empty or partial. For files the user has invested
 /// real time in (shell profiles), that loss is catastrophic and
@@ -192,7 +194,7 @@ fn replace_existing_windows_file(path: &Path, replacement: &Path) -> io::Result<
 /// This helper securely creates a randomized sibling temp file in the same
 /// parent directory (guaranteed same volume so `rename` is atomic), fsyncs,
 /// and atomically renames over the target. The target file ends up either
-/// fully replaced or completely untouched — never partial.
+/// fully replaced or completely untouched â€” never partial.
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
     atomic_write_bytes(path, content.as_bytes())
@@ -298,7 +300,7 @@ pub(crate) fn atomic_write_bytes(path: &Path, content: &[u8]) -> io::Result<()> 
 /// Idempotent: on second and subsequent install runs, the existing
 /// backup (which captures the rc file from BEFORE TR-300 ever touched
 /// it) is preserved. We never overwrite a backup with a TR-300-modified
-/// version — that would silently destroy the user's original config.
+/// version â€” that would silently destroy the user's original config.
 /// Best-effort: a failure here is non-fatal; the atomic write itself is
 /// the load-bearing safety net.
 pub(crate) fn backup_once(path: &Path) -> io::Result<()> {
@@ -320,8 +322,8 @@ pub(crate) fn backup_once(path: &Path) -> io::Result<()> {
 ///
 /// `remove_delimited_block` opens a block on any line containing
 /// `MARKER_START` and closes it on any line containing `MARKER_END`. If
-/// the user hand-edited `MARKER_END` out of their rc file — a real and
-/// plausible failure mode when tidying up shell config — the parser
+/// the user hand-edited `MARKER_END` out of their rc file â€” a real and
+/// plausible failure mode when tidying up shell config â€” the parser
 /// silently drops every line from `MARKER_START` to EOF on the next
 /// install run. That's user-data loss with no warning.
 ///

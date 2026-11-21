@@ -157,7 +157,7 @@ fn is_our_install(path: &Path) -> bool {
 /// want to install TR-300 system-wide should use the MSI/EXE installer
 /// (on Windows) or `cargo install tr300` (cross-platform) — the
 /// shell-profile flow is by design per-user.
-fn refuse_root_install() -> Result<()> {
+pub(super) fn refuse_root_install() -> Result<()> {
     let euid = unsafe { libc::geteuid() };
     if euid == 0 {
         return Err(AppError::platform(
@@ -506,26 +506,29 @@ fn read_profile_snapshot(
     })
 }
 
+const PACKAGE_BASH_START: &str = "# TR-300 package Bash startup";
+const PACKAGE_BASH_END: &str = "# TR-300 package Bash startup end";
+
 fn cleaned_profile_contents(content: &str) -> Result<Option<String>> {
-    if !content.contains(MARKER_START) {
+    if !content.contains(MARKER_START) && !content.contains(PACKAGE_BASH_START) {
         return Ok(None);
     }
     super::check_marker_balance(content, MARKER_START, MARKER_END).map_err(AppError::platform)?;
-
     let mut output = String::new();
-    let mut inside = false;
+    let mut end = None;
     for line in content.split_inclusive('\n') {
         match line.trim_end_matches(['\r', '\n']) {
-            MARKER_START if !inside => inside = true,
-            MARKER_END if inside => inside = false,
-            MARKER_START | MARKER_END => {
-                return Err(profile_error("mutilated TR-300 shell profile markers"))
+            MARKER_START if end.is_none() => end = Some(MARKER_END),
+            PACKAGE_BASH_START if end.is_none() => end = Some(PACKAGE_BASH_END),
+            marker if Some(marker) == end => end = None,
+            MARKER_START | MARKER_END | PACKAGE_BASH_START | PACKAGE_BASH_END => {
+                return Err(profile_error("mutilated TR-300 shell profile markers"));
             }
-            _ if !inside => output.push_str(line),
+            _ if end.is_none() => output.push_str(line),
             _ => {}
         }
     }
-    if inside {
+    if end.is_some() {
         return Err(profile_error("mutilated TR-300 shell profile markers"));
     }
     Ok((output != content).then_some(output))
@@ -1106,11 +1109,12 @@ fn install_profiles(home: &Path, executable: &Path) -> Result<Vec<String>> {
     let candidates = profile_candidates(home);
     let mut plan = prepare_profile_cleanup_for_home(home)?;
     let mut additions = Vec::new();
+    let with_path = crate::update::cargo_dist_modify_path(executable);
     for (path, shell, selected) in &candidates {
         if !selected {
             continue;
         }
-        let block = shell.block(executable)?;
+        let block = shell.render(executable, with_path)?;
         if plan.missing_paths.contains(path) {
             let parent = path.parent().expect("profile has a parent");
             fs::create_dir_all(parent)?;
@@ -1264,6 +1268,12 @@ fn prepare_complete_uninstall_with(
             "Could not resolve the running executable before Complete uninstall: {error}. Preserving the binary, receipt, and shell profiles."
         ))
     })?;
+    #[cfg(target_os = "macos")]
+    if crate::update::mac_pkg_owns_uninstall_path(&current_exe) {
+        return Err(AppError::platform(
+            "The macOS system package owns this copy. Follow the system package removal steps at https://github.com/QubeTX/qube-machine-report#macos-universal-pkg to remove its startup registrations, files and receipt. To disable startup just for this account, choose Remove auto-run only.",
+        ));
+    }
     let cargo_plan = crate::migrate::preflight_current_cargo_uninstall(&current_exe)?;
     let binary_plan = if cargo_plan.is_none() {
         Some(crate::migrate::preflight_current_binary_uninstall(

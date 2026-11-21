@@ -23,6 +23,7 @@
 
 ## Table of contents
 
+- [Adaptive terminal startup and installation scope (v4.5.0)](#adaptive-terminal-startup-and-installation-scope-v450)
 - [Decision ledger status (v4.3.12 complete distribution)](#decision-ledger-status-v4312-complete-distribution)
 - [Origin-preserving updates and native macOS package distribution (v4.1.0; v4.2.x addenda)](#origin-preserving-updates-and-native-macos-package-distribution-v410-v42x-addenda)
   - [Managed Installation Contract MIC-1](#managed-installation-contract-mic-1)
@@ -81,6 +82,14 @@
 - [PATH-level report companion and lifecycle ownership (v4.4.0)](#path-level-report-companion-and-lifecycle-ownership-v440)
 
 ---
+
+## Adaptive terminal startup and installation scope (v4.5.0)
+
+The startup report must fit on opening a default terminal, a small split pane or an interactive SSH session. Measure the visible terminal in character cells, reserve four rows for shell output and the prompt, and leave the last column free to prevent automatic wrapping. Use a short hostname line when geometry is unavailable. Manual table, JSON and saved reports keep their existing formats. Route identity and the server endpoint take priority over SSH. Local startup favors hardware and usage. The module uses the existing fast collection budget.
+
+Windows Global and the macOS PKG own machine-wide startup. The managed installers configure the installing account. Windows Corporate, Cargo and portable users can opt in with `tr300 install`. An account preference survives machine hooks and installer repairs. Hooks must be quiet in noninteractive shells and display once per terminal, including new SSH pseudo-terminals. User-owned configuration outside the marked sections must survive installation and removal.
+
+This revises the v4.3 macOS two-file packaging decision for startup. Shared shell hooks and the Aqua login agent invoke the signed copy in `/Library/PrivilegedHelperTools`. Registration of a user's non-login Bash profile executes with that account's identity. The existing preinstall ownership check still runs before payload placement. Windows Global uses protected installation and profile destinations and retains unrelated Command Processor AutoRun entries. Verify these decisions with actual terminal and OpenSSH sessions and both native installer lifecycles.
 
 ## Decision ledger status (v4.3.12 complete distribution)
 
