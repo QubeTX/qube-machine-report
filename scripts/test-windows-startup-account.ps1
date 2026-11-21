@@ -1,4 +1,8 @@
 # Invoked only by the hosted policy fixture under its new, disposable account.
+# The alternate-credential Windows PowerShell 5.1 child can inherit a
+# PowerShell 7 module search path from the Actions runner. Import native
+# cmdlets only from its own PSHOME, like the production policy probe.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME,'Modules')
 $ErrorActionPreference = 'Stop'
 $stage = 'checking the disposable account'
 trap {
@@ -12,12 +16,12 @@ $bin = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'tr300\bin\tr300
 $machineKey = 'Software\Microsoft\Active Setup\Installed Components\{3315638A-7A5F-4591-A9FE-79312ED7859B}'
 $profilePath = $PROFILE.CurrentUserCurrentHost
 $stage = 'testing explicit Restricted'
-Set-ExecutionPolicy -Scope CurrentUser Restricted -Force
+Microsoft.PowerShell.Security\Set-ExecutionPolicy -Scope CurrentUser Restricted -Force
 & $bin configure-startup-account
-if ($LASTEXITCODE -ne 0 -or (Get-ExecutionPolicy -Scope CurrentUser) -ne 'Restricted' -or (Test-Path -LiteralPath $profilePath)) { exit 42 }
+if ($LASTEXITCODE -ne 0 -or (Microsoft.PowerShell.Security\Get-ExecutionPolicy -Scope CurrentUser) -ne 'Restricted' -or (Test-Path -LiteralPath $profilePath)) { exit 42 }
 
 $stage = 'seeding legacy opt-in'
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+Microsoft.PowerShell.Security\Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
 [IO.Directory]::CreateDirectory((Split-Path -Parent $profilePath)) | Out-Null
 $newline = [Environment]::NewLine
 $legacy = @('# TR-300 Machine Report', 'if (-not $env:TR300_AUTORUN_RAN) { [Console]::WriteLine("legacy-full-report") }', '# End TR-300','') -join $newline
