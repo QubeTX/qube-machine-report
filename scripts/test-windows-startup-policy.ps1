@@ -76,8 +76,13 @@ try {
         $literal = $fixturePath.Replace("'", "''")
         $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('$literal')))"
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-        $p=Start-Process -FilePath $hosts[0] -Credential $credential -LoadUserProfile -WindowStyle Hidden -Wait -PassThru -WorkingDirectory ([Environment]::SystemDirectory) -ArgumentList @('-NoLogo','-NoProfile','-EncodedCommand',$encoded)
-        if ($p.ExitCode -ne 0) { throw "Standard account bootstrap failed at checkpoint $($p.ExitCode)" }
+        $stderr = Join-Path $env:RUNNER_TEMP "$name-stderr.txt"
+        $stdout = Join-Path $env:RUNNER_TEMP "$name-stdout.txt"
+        $p=Start-Process -RedirectStandardError $stderr -RedirectStandardOutput $stdout -FilePath $hosts[0] -Credential $credential -LoadUserProfile -WindowStyle Hidden -Wait -PassThru -WorkingDirectory ([Environment]::SystemDirectory) -ArgumentList @('-NoLogo','-NoProfile','-EncodedCommand',$encoded)
+        if ($p.ExitCode -ne 0) {
+            Get-Content -LiteralPath $stdout,$stderr -ErrorAction SilentlyContinue | Write-Host
+            throw "Standard account bootstrap failed at checkpoint $($p.ExitCode)"
+        }
     } finally {
         if ($fixturePath -and (Test-Path -LiteralPath $fixturePath)) { Remove-Item -LiteralPath $fixturePath }
         Remove-LocalUser -SID $account.SID
