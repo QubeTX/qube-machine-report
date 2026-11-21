@@ -225,6 +225,22 @@ jobs:
           fixture_expanded="$RUNNER_TEMP/tr300-preinstall-pkg-expanded"
           fixture_alt_image="$RUNNER_TEMP/tr300-preinstall-alt-target.sparseimage"
           fixture_alt_mount="$RUNNER_TEMP/tr300-preinstall-alt-target"
+          detach_fixture_image() {
+            local mountpoint=$1 attempt status
+            # PackageKit can still hold the rejected volume briefly after its
+            # installer process exits. Retry only the macOS EBUSY status.
+            for attempt in 1 2 3 4 5 6; do
+              if hdiutil detach "$mountpoint" >/dev/null; then
+                return 0
+              else
+                status=$?
+              fi
+              if [[ "$status" -ne 16 || "$attempt" -eq 6 ]]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
           fixture_alt_log="$RUNNER_TEMP/tr300-preinstall-alt-target.log"
           fixture_alt_attached=0
           fixture_phase='initial fixture setup'
@@ -571,7 +587,7 @@ jobs:
           rm -f "$casefold_binary"
           rmdir "$casefold_home/.CARGO/BIN" "$casefold_home/.CARGO" \
             "$casefold_home/.cargo/bin" "$casefold_home/.cargo"
-          hdiutil detach "$casefold_home" >/dev/null
+          detach_fixture_image "$casefold_home"
           casefold_attached=0
           sudo /bin/rmdir "$casefold_home"
           rm -f "$casefold_image"
@@ -914,7 +930,7 @@ jobs:
             echo 'alternate-volume rejection left a host receipt behind' >&2
             exit 1
           fi
-          hdiutil detach "$fixture_alt_mount" >/dev/null
+          detach_fixture_image "$fixture_alt_mount"
           fixture_alt_attached=0
           rmdir "$fixture_alt_mount"
           rm -f "$fixture_alt_image"
