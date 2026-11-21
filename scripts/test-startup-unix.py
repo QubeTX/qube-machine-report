@@ -95,11 +95,15 @@ def local(binary):
             if shutil.which(shell):
                 out = terminal([shell, "-i"], env, exchanges=EXIT)
                 assert out.count("PROCESSOR") == 1, out
-        # PSReadLine is an optional line editor. Use a simple fixture prompt
-        # so a raw PTY can drive the installed host without emulating an xterm.
+        # A raw PTY has no xterm display to answer .NET cursor queries. Make
+        # the first actual PowerShell prompt read the exit from the terminal;
+        # the editor never takes over input before the test can close the host.
         with (home / ".config/powershell/profile.ps1").open("a") as stream:
             stream.write("\nRemove-Module PSReadLine -ErrorAction SilentlyContinue\n"
-                         "function global:prompt { 'TR300_READY> ' }\n")
+                         "function global:prompt {\n"
+                         "    [Console]::WriteLine('TR300_READY')\n"
+                         "    if ([IO.StreamReader]::new([Console]::OpenStandardInput()).ReadLine() -ceq 'exit') { [Environment]::Exit(0) }\n"
+                         "    throw 'Expected exit from the interactive PTY'\n}\n")
         ps_env = {**env, "TERM": "dumb", "POWERSHELL_TELEMETRY_OPTOUT": "1"}
         pwsh = shutil.which("pwsh")
         assert pwsh, "PowerShell 7 is required on this hosted qualification runner"

@@ -96,10 +96,10 @@ Host tr300-fixture
     Invoke-Checked $ssh ($base + @('-T','tr300-fixture',"$dir\tr300.exe install"))
     Write-Host "Checking interactive Windows OpenSSH console"
     Invoke-Checked python @("$PSScriptRoot\test-startup-windows-ssh.py",$ssh,"$client\client.conf","$client\error.txt")
-    foreach ($tty in '-T','-tt') {
-        Write-Host "Checking Windows OpenSSH command ($tty)"
-        $output = Invoke-Checked $ssh ($base + @($tty,'tr300-fixture','echo REMOTE_COMMAND_OK')) | Out-String
-        if ($output -notmatch 'REMOTE_COMMAND_OK' -or $output -match 'PROCESSOR|SERVER IP') { throw "Unexpected $tty command output [$output]" }
+    Write-Host "Checking Windows OpenSSH command without a terminal"
+    $output = Invoke-Checked $ssh ($base + @('-T','tr300-fixture','echo REMOTE_COMMAND_OK')) | Out-String
+    if ($output -notmatch 'REMOTE_COMMAND_OK' -or $output -match 'PROCESSOR|SERVER IP') {
+        throw "Unexpected noninteractive command output [$output]"
     }
     Write-Output 'Passed Windows OpenSSH shell, noninteractive command and forced-PTY command.'
 } catch {

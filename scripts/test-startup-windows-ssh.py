@@ -18,7 +18,7 @@ class BufferInfo(C.Structure):
                 ("window", W.SMALL_RECT), ("maximum", Coord)]
 
 
-def shell(ssh, config):
+def shell(ssh, config, mode):
     kernel = C.WinDLL("kernel32", use_last_error=True)
     kernel.GetStdHandle.restype = W.HANDLE
     handle = kernel.GetStdHandle(-11)
@@ -32,7 +32,11 @@ def shell(ssh, config):
     rect = W.SMALL_RECT(0, 0, 79, 24)
     call("SetConsoleWindowInfo", [W.BOOL, C.POINTER(W.SMALL_RECT)], True, C.byref(rect))
     call("SetConsoleScreenBufferSize", [Coord], Coord(80, 512))
-    proc = subprocess.Popen([ssh, "-F", config, "-tt", "tr300-fixture"])
+    command = [ssh, "-F", config, "-tt", "tr300-fixture"]
+    if mode == "command":
+        # Let ConPTY deliver the terminal frame before the short command exits.
+        command.append("echo REMOTE_COMMAND_OK & ping -n 4 127.0.0.1 >nul")
+    proc = subprocess.Popen(command)
     try:
         deadline = time.monotonic() + 40
         while True:
@@ -46,10 +50,17 @@ def shell(ssh, config):
                      buf, 80, Coord(0, row), C.byref(count))
                 rows.append(buf.value.rstrip())
             view = "\n".join(rows)
-            if "SERVER IP" in view and "127.0.0.1" in view and view.count("PROCESSOR") == 1:
+            if mode == "command":
+                if "PROCESSOR" in view or "SERVER IP" in view:
+                    raise AssertionError(f"Forced-PTY command printed a startup report:\n{view}")
+                if "REMOTE_COMMAND_OK" in view:
+                    if proc.wait(timeout=15) != 0:
+                        raise AssertionError("The forced-PTY SSH command failed")
+                    return
+            elif "SERVER IP" in view and "127.0.0.1" in view and view.count("PROCESSOR") == 1:
                 return
             if proc.poll() is not None or time.monotonic() > deadline:
-                raise AssertionError(f"Expected SSH startup facts on the first remote shell:\n{view}")
+                raise AssertionError(f"Missing expected output from the remote {mode}:\n{view}")
             time.sleep(0.2)
     finally:
         if proc.poll() is None:
@@ -59,9 +70,9 @@ def shell(ssh, config):
 
 if __name__ == "__main__":
     ssh, config, logfile = sys.argv[1:4]
-    if sys.argv[4:] == ["child"]:
+    if len(sys.argv) == 5:
         try:
-            shell(ssh, config)
+            shell(ssh, config, sys.argv[4])
         except Exception:
             Path(logfile).write_text(traceback.format_exc(), encoding="utf8")
             sys.exit(1)
@@ -69,7 +80,9 @@ if __name__ == "__main__":
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = subprocess.SW_HIDE
-        result = subprocess.run([sys.executable, __file__, ssh, config, logfile, "child"],
-                                creationflags=subprocess.CREATE_NEW_CONSOLE, startupinfo=startup, timeout=65)
-        if result.returncode:
-            raise RuntimeError(Path(logfile).read_text(encoding="utf8"))
+        for mode in ["login", "command"]:
+            result = subprocess.run([sys.executable, __file__, ssh, config, logfile, mode],
+                                    creationflags=subprocess.CREATE_NEW_CONSOLE, startupinfo=startup, timeout=65)
+            if result.returncode:
+                raise RuntimeError(Path(logfile).read_text(encoding="utf8"))
+            print(f"Passed Windows OpenSSH {mode} with an 80x25 client console")
