@@ -19,11 +19,19 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 fn startup_preference() -> Result<PathBuf> {
-    dirs::config_dir()
-        .map(|dir| dir.join("tr300").join("startup-disabled"))
-        .ok_or_else(|| {
-            crate::AppError::config("Cannot locate the account's configuration directory")
-        })
+    // A first logon can precede creation of RoamingAppData. Ask for its
+    // registered path so an absent preference is still distinguishable from
+    // a failure to identify the user's configuration directory.
+    #[cfg(windows)]
+    let config = crate::trusted_process::windows_known_folder_with_flags(
+        &winapi::um::knownfolders::FOLDERID_RoamingAppData,
+        winapi::um::shlobj::KF_FLAG_DONT_VERIFY,
+    )?;
+    #[cfg(not(windows))]
+    let config = dirs::config_dir().ok_or_else(|| {
+        crate::AppError::config("Cannot locate the account's configuration directory")
+    })?;
+    Ok(config.join("tr300").join("startup-disabled"))
 }
 
 /// Presence of the account's opt-out also suppresses machine-wide hooks.
