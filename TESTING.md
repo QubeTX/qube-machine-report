@@ -7,9 +7,9 @@ as passed.
 
 ## Per-version verification log
 
-### v4.5.0 — Adaptive terminal startup (release candidate)
+### v4.5.0 — Adaptive terminal startup (crate published, native publication pending)
 
-Disposable classic Windows consoles exercised CMD, Windows PowerShell 5.1 and PowerShell 7 at 80×25 and 42×12. The fixtures verified the top of the report, visible prompt space, one banner per console, and quiet command execution. ConPTY checks also covered 120×30, 80×75 and an 11-column pane. A real Linux loopback OpenSSH connection verified an interactive login, a command-only invocation and an explicit PTY command. Native installation, upgrade and public distribution records follow qualification of the final release source.
+Disposable classic Windows consoles exercised CMD, Windows PowerShell 5.1 and PowerShell 7 at 80×25 and 42×12. The fixtures verified the top of the report, visible prompt space, one banner per console, and quiet command execution. ConPTY checks also covered 120×30, 80×75 and an 11-column pane. A real Linux loopback OpenSSH connection verified an interactive login, a command-only invocation and an explicit PTY command. Final pre-tag CI passed on both the PR and the merged release source. Real native package, account and repair checks, the public crate checksum, and the Apple agreement blocker are recorded in the [4.5.0 publication handoff](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md).
 
 ### v4.4.4 — Complete security distribution and native PowerShell verification (2026-11-11)
 

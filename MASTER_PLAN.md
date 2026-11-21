@@ -4,10 +4,12 @@
 > `CHANGELOG.md` / `TESTING.md`; architectural rationale belongs in
 > `docs/architecture-decisions.md`.
 
-**Last updated:** 2026-11-20
-**Complete public GitHub distribution / crates.io / working manifest:** 4.4.4 / 4.4.4 / 4.5.0
+**Last updated:** 2026-11-21
+**Complete public GitHub distribution / crates.io / working manifest:** 4.4.4 / 4.5.0 / 4.5.0
 
-Current release: immutable `v4.4.4` at
+The 4.5.0 crate is published. Native release signing is awaiting Apple notary access. [Publication checkpoint](docs/agents/handoff/2026-11-21-v4.5.0-terminal-startup.md)
+
+Current GitHub release: immutable `v4.4.4` at
 `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. Public release `441625880`
 became latest at `2026-11-11T12:29:18Z` with exactly 34 nonempty audited
 assets. Product publication, process qualification, and documentation closure are complete.
