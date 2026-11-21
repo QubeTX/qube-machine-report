@@ -14,15 +14,27 @@ if ($identity.Name -notmatch '\\TR3[0-9a-f]{12}$' -or
     [Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 41 }
 $bin = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'tr300\bin\tr300.exe'
 $machineKey = 'Software\Microsoft\Active Setup\Installed Components\{3315638A-7A5F-4591-A9FE-79312ED7859B}'
-$profilePath = $PROFILE.CurrentUserCurrentHost
+$profilePath = [string]$PROFILE.CurrentUserCurrentHost
+if (-not [IO.Path]::IsPathRooted($profilePath)) {
+    $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments,[Environment+SpecialFolderOption]::DoNotVerify)
+    if (-not [IO.Path]::IsPathRooted($documents)) { throw 'The disposable account has no registered Documents known folder' }
+    $profilePath = [IO.Path]::Combine($documents,'WindowsPowerShell','Microsoft.PowerShell_profile.ps1')
+}
 $stage = 'testing explicit Restricted'
 Microsoft.PowerShell.Security\Set-ExecutionPolicy -Scope CurrentUser Restricted -Force
 & $bin configure-startup-account
 if ($LASTEXITCODE -ne 0 -or (Microsoft.PowerShell.Security\Get-ExecutionPolicy -Scope CurrentUser) -ne 'Restricted' -or (Test-Path -LiteralPath $profilePath)) { exit 42 }
 
-$stage = 'seeding legacy opt-in'
+$stage = 'verifying first-use Documents enrollment'
 Microsoft.PowerShell.Security\Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
-[IO.Directory]::CreateDirectory((Split-Path -Parent $profilePath)) | Out-Null
+& $bin configure-startup-account
+if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($profilePath)) { exit 53 }
+$ps = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+$seen = @(& $ps -NoLogo -Command '[Console]::WriteLine($PROFILE.CurrentUserCurrentHost)' 2>&1)
+if ($LASTEXITCODE -ne 0 -or $seen.Count -ne 1 -or $seen[0] -ine $profilePath) { exit 54 }
+& $bin remove-startup-account
+if ($LASTEXITCODE -ne 0 -or [IO.File]::Exists($profilePath)) { exit 55 }
+$stage = 'seeding legacy opt-in'
 $newline = [Environment]::NewLine
 $legacy = @('# TR-300 Machine Report', 'if (-not $env:TR300_AUTORUN_RAN) { [Console]::WriteLine("legacy-full-report") }', '# End TR-300','') -join $newline
 [IO.File]::WriteAllText($profilePath,$legacy)
@@ -38,7 +50,9 @@ $ps = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powersh
 $output = @(& $ps -NoLogo -Command "[Console]::WriteLine('no-legacy'); exit 23" 2>&1)
 if ($LASTEXITCODE -ne 23 -or $output.Count -ne 1 -or $output[0] -cne 'no-legacy') { exit 45 }
 $stage = 'testing the per-account opt-out'
-$pref = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'tr300\startup-disabled'
+$roaming = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData,[Environment+SpecialFolderOption]::DoNotVerify)
+if (-not [IO.Path]::IsPathRooted($roaming)) { throw 'The disposable account has no registered roaming application data folder' }
+$pref = [IO.Path]::Combine($roaming,'tr300','startup-disabled')
 [IO.Directory]::CreateDirectory((Split-Path -Parent $pref)) | Out-Null
 [IO.File]::WriteAllText($pref,'disabled')
 & $bin configure-startup-account

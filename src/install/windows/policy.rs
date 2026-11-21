@@ -55,7 +55,18 @@ foreach ($scope in 'MachinePolicy','UserPolicy','CurrentUser','LocalMachine') {
 $product = [Microsoft.Win32.Registry]::GetValue('HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\ProductOptions','ProductType','')
 $default = switch ($product) { 'WinNT' { 'Restricted' } 'ServerNT' { 'RemoteSigned' } 'LanmanNT' { 'RemoteSigned' } default { 'Unknown' } }
 [Console]::WriteLine($default)
-[Console]::WriteLine($PROFILE.CurrentUserCurrentHost)
+$profilePath = [string]$PROFILE.CurrentUserCurrentHost
+if (-not [IO.Path]::IsPathRooted($profilePath)) {
+    # GetFolderPath without DoNotVerify returns an empty string for a newly
+    # created account until its Documents folder actually exists. Respect
+    # the OS destination, including OneDrive and network redirects.
+    $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments,[Environment+SpecialFolderOption]::DoNotVerify)
+    if ([IO.Path]::IsPathRooted($documents)) {
+        $directory = if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
+        $profilePath = [IO.Path]::Combine($documents,$directory,'Microsoft.PowerShell_profile.ps1')
+    }
+}
+[Console]::WriteLine($profilePath)
 "#;
 
 fn read(host: &str) -> Option<Policy> {
