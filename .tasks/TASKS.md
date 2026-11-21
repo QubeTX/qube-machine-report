@@ -10,9 +10,9 @@
 
 ## Active
 
-- [ ] **Separate related startup report facts** - render and verify adaptive section dividers in local and SSH sessions (owner codex) #dividers
-
 ## Done
+
+- [x] **Separate related startup report facts** - render and verify adaptive section dividers in local and SSH sessions (owner codex) (done 2026-11-21) #dividers
 
 - [x] **Release adaptive interactive startup reports** - local and SSH priorities, shell integration, verified public installers and production website (owner codex) (done 2026-11-21) #startup
 
