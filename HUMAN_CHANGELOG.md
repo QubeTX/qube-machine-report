@@ -13,6 +13,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-11-20
+
+### Added
+
+- Your startup report fits the terminal and leaves room for the prompt. A local window leads with hardware. An SSH login leads with the machine name, address, and battery when available.
+- Standard installers set up startup reports automatically. Each user can turn them off and keep using both report commands. Windows Corporate remains opt-in.
+
 ## [4.4.4] - 2026-11-11
 
 ### Fixed

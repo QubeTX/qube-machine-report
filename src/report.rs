@@ -11,6 +11,9 @@ use crate::config::{Config, OutputFormat, MAX_DATA_WIDTH};
 use crate::render::bar::render_bar;
 use crate::render::table::TableRenderer;
 
+mod startup;
+pub use startup::generate_startup;
+
 /// JSON output schema version. Bump on breaking renames or removals
 /// (additive changes — new keys — do not require a bump).
 pub const SCHEMA_VERSION: u32 = 1;
@@ -26,7 +29,6 @@ pub fn generate(info: &SystemInfo, config: &Config) -> String {
 /// Generate table format output
 fn generate_table(info: &SystemInfo, config: &Config) -> String {
     let chars = config.box_chars();
-    let (bar_filled, bar_empty) = config.bar_chars();
 
     // Use fixed column widths for stable terminal alignment.
     let label_width = 12; // "LAST LOGIN" is 10 chars, use 12 for padding
@@ -43,195 +45,10 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     output.push_str(&renderer.render_centered(config.subtitle()));
     output.push_str(&renderer.render_top_divider());
 
-    // OS Section
-    let os_display = format!("{} {}", info.os_name, info.os_version);
-    output.push_str(&renderer.render_row("OS", &os_display));
-    if let Some(ref edition) = info.os_edition {
-        output.push_str(&renderer.render_row("EDITION", edition));
-    }
-    if let Some(ref codename) = info.os_codename {
-        output.push_str(&renderer.render_row("CODENAME", codename));
-    }
-    if let Some(ref build) = info.os_build {
-        output.push_str(&renderer.render_row("BUILD", build));
-    }
-    output.push_str(&renderer.render_row("KERNEL", &info.kernel));
-    output.push_str(&renderer.render_row("ARCH", &info.architecture));
-    if let Some(ref model) = info.machine_model {
-        output.push_str(&renderer.render_row("MODEL", model));
-    }
-    if let Some(ref board) = info.motherboard {
-        output.push_str(&renderer.render_row("BOARD", board));
-    }
-    if let Some(ref bios) = info.bios {
-        output.push_str(&renderer.render_row("BIOS", bios));
-    }
-    if let Some(ref boot_mode) = info.boot_mode {
-        output.push_str(&renderer.render_row("BOOT MODE", boot_mode));
-    }
-    if let Some(ref desktop) = info.desktop_environment {
-        output.push_str(&renderer.render_row("DESKTOP", desktop));
-    }
-    if let Some(ref server) = info.display_server {
-        output.push_str(&renderer.render_row("SESSION", server));
-    }
-    if let Some(ref resolution) = info.display_resolution {
-        output.push_str(&renderer.render_row("DISPLAY", resolution));
-    }
-    output.push_str(&renderer.render_middle_divider());
-
-    // Network Section
-    output.push_str(&renderer.render_row("HOSTNAME", &info.hostname));
-    if let Some(ref ip) = info.machine_ip {
-        output.push_str(&renderer.render_row("DEFAULT IP", ip));
-    }
-    output.push_str(&renderer.render_row(
-        "SSH CLIENT",
-        info.client_ip.as_deref().unwrap_or("Not an SSH session"),
-    ));
-
-    // DNS servers (up to 5)
-    for (i, dns) in info.dns_servers.iter().take(5).enumerate() {
-        let label = format!("DNS  IP {}", i + 1);
-        output.push_str(&renderer.render_row(&label, dns));
-    }
-
-    output.push_str(&renderer.render_row("USER", &info.username));
-    output.push_str(&renderer.render_middle_divider());
-
-    // CPU Section
-    output.push_str(&renderer.render_row("PROCESSOR", &info.processor));
-    output.push_str(&renderer.render_row("CORES", &info.cores_str()));
-    if let Some(ref topology) = info.cpu_core_topology {
-        output.push_str(&renderer.render_row("CORE TYPE", topology));
-    }
-
-    // GPU display: if ≤3 GPUs, show each on own row; if >3, show as compact list
-    if !info.gpus.is_empty() {
-        if info.gpus.len() <= 3 {
-            for (i, gpu) in info.gpus.iter().enumerate() {
-                let label = if info.gpus.len() == 1 {
-                    "GPU".to_string()
-                } else {
-                    format!("GPU {}", i + 1)
-                };
-                output.push_str(&renderer.render_row(&label, gpu));
-            }
-        } else {
-            // Compact comma-separated list for >3 GPUs
-            let gpu_list = info.gpus.join(", ");
-            output.push_str(&renderer.render_row("GPUs", &gpu_list));
-        }
-    }
-
-    if let Some(ref hypervisor) = info.hypervisor {
-        output.push_str(&renderer.render_row("HYPERVISOR", hypervisor));
-    }
-    if info.cpu_freq_ghz > 0.0 && info.cpu_freq_ghz.is_finite() {
-        let label = if info.cpu_frequency_kind.as_deref() == Some("maximum") {
-            "MAX FREQ"
-        } else {
-            "REPORTED FREQ"
-        };
-        output.push_str(&renderer.render_row(label, &info.freq_str()));
-    }
-    if let Some(usage) = info.cpu_usage_percent {
-        output.push_str(&renderer.render_row(
-            "CPU USAGE",
-            &render_percent_bar(usage, data_width, bar_filled, bar_empty),
-        ));
-    }
-    // Thermal rows render only when a trusted sensor answered; absence is
-    // omitted rather than guessed.
-    if let Some(cpu_temp) = info.cpu_temp_celsius.filter(|t| t.is_finite()) {
-        output.push_str(
-            &renderer.render_row("CPU TEMP", &format_temperature(cpu_temp, config.is_ascii())),
-        );
-    }
-    if let Some(gpu_temp) = info.gpu_temp_celsius.filter(|t| t.is_finite()) {
-        output.push_str(
-            &renderer.render_row("GPU TEMP", &format_temperature(gpu_temp, config.is_ascii())),
-        );
-    }
-
-    // Load averages as bar graphs (only shown when available)
-    if let (Some(l1), Some(l5), Some(l15)) = (info.load_1m, info.load_5m, info.load_15m) {
-        output.push_str(&renderer.render_row(
-            "LOAD/CPU 1m",
-            &render_percent_bar(l1, data_width, bar_filled, bar_empty),
-        ));
-        output.push_str(&renderer.render_row(
-            "LOAD/CPU 5m",
-            &render_percent_bar(l5, data_width, bar_filled, bar_empty),
-        ));
-        output.push_str(&renderer.render_row(
-            "LOAD/CPU 15m",
-            &render_percent_bar(l15, data_width, bar_filled, bar_empty),
-        ));
-    }
-    output.push_str(&renderer.render_middle_divider());
-
-    // Disk Section
-    output.push_str(&renderer.render_row("VOLUME", &info.disk_usage_str()));
-    let disk_bar = render_percent_bar(info.disk_percent, data_width, bar_filled, bar_empty);
-    output.push_str(&renderer.render_row("DISK USAGE", &disk_bar));
-
-    // ZFS health if available
-    if let Some(ref zfs_health) = info.zfs_health {
-        output.push_str(&renderer.render_row("ZFS HEALTH", zfs_health));
-    }
-
-    output.push_str(&renderer.render_middle_divider());
-
-    // Memory Section
-    output.push_str(&renderer.render_row("MEMORY", &info.memory_usage_str()));
-    output.push_str(&renderer.render_row(
-        "AVAILABLE",
-        &format!("{} GiB", SystemInfo::format_gib(info.mem_available_bytes)),
-    ));
-    if info.swap_total_bytes > 0 {
-        output.push_str(&renderer.render_row("SWAP", &info.swap_usage_str()));
-    }
-    if let Some(ref ram_slots) = info.ram_slots {
-        output.push_str(&renderer.render_row("RAM SLOTS", ram_slots));
-    }
-    let mem_bar = render_percent_bar(info.mem_percent, data_width, bar_filled, bar_empty);
-    output.push_str(&renderer.render_row("USAGE", &mem_bar));
-    output.push_str(&renderer.render_middle_divider());
-
-    // Session Section
-    if let Some(ref last_login) = info.last_login {
-        output.push_str(&renderer.render_row("LAST LOGIN", last_login));
-        if let Some(ref ip) = info.last_login_ip {
-            output.push_str(&renderer.render_row("LOGIN ORIGIN", ip));
-        }
-    }
-    output.push_str(&renderer.render_row("UPTIME", &info.uptime_formatted()));
-
-    // Shell and Terminal (only show if available)
-    if let Some(ref shell) = info.shell {
-        output.push_str(&renderer.render_row("LOGIN SHELL", shell));
-    }
-    if let Some(ref terminal) = info.terminal {
-        output.push_str(&renderer.render_row("TERMINAL", terminal));
-    }
-    if let Some(ref locale) = info.locale {
-        output.push_str(&renderer.render_row("LOCALE", locale));
-    }
-    // Battery only shown if present (laptops)
-    if let Some(ref battery) = info.battery {
-        if let Some((status, health)) = battery.split_once("; ") {
-            output.push_str(&renderer.render_row("BATTERY", status));
-            output.push_str(&renderer.render_row("BAT HEALTH", health));
-        } else {
-            output.push_str(&renderer.render_row("BATTERY", battery));
-        }
-    }
-    // Encryption status (BitLocker / FileVault / LUKS) is shown only when a
-    // collector can establish it. Absence is unknown, not "unencrypted".
-    if let Some(ref enc) = info.encryption {
-        output.push_str(&renderer.render_row("ENCRYPTION", enc));
-    }
+    visit_table_rows(info, config, |entry| match entry {
+        Some((label, value)) => output.push_str(&renderer.render_row(label, value)),
+        None => output.push_str(&renderer.render_middle_divider()),
+    });
 
     // Simplified footer (single line, no bottom_divider)
     output.push_str(&renderer.render_footer());
@@ -249,6 +66,207 @@ fn generate_table(info: &SystemInfo, config: &Config) -> String {
     }
 
     output
+}
+
+/// Visit borrowed display values before terminal-specific clipping or layout.
+fn visit_table_rows(
+    info: &SystemInfo,
+    config: &Config,
+    mut emit: impl FnMut(Option<(&str, &str)>),
+) {
+    let (bar_filled, bar_empty) = config.bar_chars();
+    let data_width = MAX_DATA_WIDTH;
+    // OS Section
+    let os_display = format!("{} {}", info.os_name, info.os_version);
+    emit(Some(("OS", &os_display)));
+    if let Some(ref edition) = info.os_edition {
+        emit(Some(("EDITION", edition)));
+    }
+    if let Some(ref codename) = info.os_codename {
+        emit(Some(("CODENAME", codename)));
+    }
+    if let Some(ref build) = info.os_build {
+        emit(Some(("BUILD", build)));
+    }
+    emit(Some(("KERNEL", &info.kernel)));
+    emit(Some(("ARCH", &info.architecture)));
+    if let Some(ref model) = info.machine_model {
+        emit(Some(("MODEL", model)));
+    }
+    if let Some(ref board) = info.motherboard {
+        emit(Some(("BOARD", board)));
+    }
+    if let Some(ref bios) = info.bios {
+        emit(Some(("BIOS", bios)));
+    }
+    if let Some(ref boot_mode) = info.boot_mode {
+        emit(Some(("BOOT MODE", boot_mode)));
+    }
+    if let Some(ref desktop) = info.desktop_environment {
+        emit(Some(("DESKTOP", desktop)));
+    }
+    if let Some(ref server) = info.display_server {
+        emit(Some(("SESSION", server)));
+    }
+    if let Some(ref resolution) = info.display_resolution {
+        emit(Some(("DISPLAY", resolution)));
+    }
+    emit(None);
+
+    // Network Section
+    emit(Some(("HOSTNAME", &info.hostname)));
+    if let Some(ref ip) = info.machine_ip {
+        emit(Some(("DEFAULT IP", ip)));
+    }
+    emit(Some((
+        "SSH CLIENT",
+        info.client_ip.as_deref().unwrap_or("Not an SSH session"),
+    )));
+
+    // DNS servers (up to 5)
+    for (i, dns) in info.dns_servers.iter().take(5).enumerate() {
+        let label = format!("DNS  IP {}", i + 1);
+        emit(Some((&label, dns)));
+    }
+
+    emit(Some(("USER", &info.username)));
+    emit(None);
+
+    // CPU Section
+    emit(Some(("PROCESSOR", &info.processor)));
+    emit(Some(("CORES", &info.cores_str())));
+    if let Some(ref topology) = info.cpu_core_topology {
+        emit(Some(("CORE TYPE", topology)));
+    }
+
+    // GPU display: if ≤3 GPUs, show each on own row; if >3, show as compact list
+    if !info.gpus.is_empty() {
+        if info.gpus.len() <= 3 {
+            for (i, gpu) in info.gpus.iter().enumerate() {
+                let label = if info.gpus.len() == 1 {
+                    "GPU".to_string()
+                } else {
+                    format!("GPU {}", i + 1)
+                };
+                emit(Some((&label, gpu)));
+            }
+        } else {
+            // Compact comma-separated list for >3 GPUs
+            let gpu_list = info.gpus.join(", ");
+            emit(Some(("GPUs", &gpu_list)));
+        }
+    }
+
+    if let Some(ref hypervisor) = info.hypervisor {
+        emit(Some(("HYPERVISOR", hypervisor)));
+    }
+    if info.cpu_freq_ghz > 0.0 && info.cpu_freq_ghz.is_finite() {
+        let label = if info.cpu_frequency_kind.as_deref() == Some("maximum") {
+            "MAX FREQ"
+        } else {
+            "REPORTED FREQ"
+        };
+        emit(Some((label, &info.freq_str())));
+    }
+    if let Some(usage) = info.cpu_usage_percent {
+        emit(Some((
+            "CPU USAGE",
+            &render_percent_bar(usage, data_width, bar_filled, bar_empty),
+        )));
+    }
+    // Thermal rows render only when a trusted sensor answered; absence is
+    // omitted rather than guessed.
+    if let Some(cpu_temp) = info.cpu_temp_celsius.filter(|t| t.is_finite()) {
+        emit(Some((
+            "CPU TEMP",
+            &format_temperature(cpu_temp, config.is_ascii()),
+        )));
+    }
+    if let Some(gpu_temp) = info.gpu_temp_celsius.filter(|t| t.is_finite()) {
+        emit(Some((
+            "GPU TEMP",
+            &format_temperature(gpu_temp, config.is_ascii()),
+        )));
+    }
+
+    // Load averages as bar graphs (only shown when available)
+    if let (Some(l1), Some(l5), Some(l15)) = (info.load_1m, info.load_5m, info.load_15m) {
+        emit(Some((
+            "LOAD/CPU 1m",
+            &render_percent_bar(l1, data_width, bar_filled, bar_empty),
+        )));
+        emit(Some((
+            "LOAD/CPU 5m",
+            &render_percent_bar(l5, data_width, bar_filled, bar_empty),
+        )));
+        emit(Some((
+            "LOAD/CPU 15m",
+            &render_percent_bar(l15, data_width, bar_filled, bar_empty),
+        )));
+    }
+    emit(None);
+
+    // Disk Section
+    emit(Some(("VOLUME", &info.disk_usage_str())));
+    let disk_bar = render_percent_bar(info.disk_percent, data_width, bar_filled, bar_empty);
+    emit(Some(("DISK USAGE", &disk_bar)));
+
+    // ZFS health if available
+    if let Some(ref zfs_health) = info.zfs_health {
+        emit(Some(("ZFS HEALTH", zfs_health)));
+    }
+
+    emit(None);
+
+    // Memory Section
+    emit(Some(("MEMORY", &info.memory_usage_str())));
+    emit(Some((
+        "AVAILABLE",
+        &format!("{} GiB", SystemInfo::format_gib(info.mem_available_bytes)),
+    )));
+    if info.swap_total_bytes > 0 {
+        emit(Some(("SWAP", &info.swap_usage_str())));
+    }
+    if let Some(ref ram_slots) = info.ram_slots {
+        emit(Some(("RAM SLOTS", ram_slots)));
+    }
+    let mem_bar = render_percent_bar(info.mem_percent, data_width, bar_filled, bar_empty);
+    emit(Some(("USAGE", &mem_bar)));
+    emit(None);
+
+    // Session Section
+    if let Some(ref last_login) = info.last_login {
+        emit(Some(("LAST LOGIN", last_login)));
+        if let Some(ref ip) = info.last_login_ip {
+            emit(Some(("LOGIN ORIGIN", ip)));
+        }
+    }
+    emit(Some(("UPTIME", &info.uptime_formatted())));
+
+    // Shell and Terminal (only show if available)
+    if let Some(ref shell) = info.shell {
+        emit(Some(("LOGIN SHELL", shell)));
+    }
+    if let Some(ref terminal) = info.terminal {
+        emit(Some(("TERMINAL", terminal)));
+    }
+    if let Some(ref locale) = info.locale {
+        emit(Some(("LOCALE", locale)));
+    }
+    // Battery only shown if present (laptops)
+    if let Some(ref battery) = info.battery {
+        if let Some((status, health)) = battery.split_once("; ") {
+            emit(Some(("BATTERY", status)));
+            emit(Some(("BAT HEALTH", health)));
+        } else {
+            emit(Some(("BATTERY", battery)));
+        }
+    }
+    // Encryption status (BitLocker / FileVault / LUKS) is shown only when a
+    // collector can establish it. Absence is unknown, not "unencrypted".
+    if let Some(ref enc) = info.encryption {
+        emit(Some(("ENCRYPTION", enc)));
+    }
 }
 
 fn render_percent_bar(percent: f64, width: usize, filled: char, empty: char) -> String {
@@ -817,7 +835,7 @@ mod tests {
         assert_eq!(SCHEMA_VERSION, 1);
     }
 
-    fn fixture_info() -> SystemInfo {
+    pub(super) fn fixture_info() -> SystemInfo {
         SystemInfo {
             os_name: "TestOS".to_string(),
             os_version: "1.0".to_string(),

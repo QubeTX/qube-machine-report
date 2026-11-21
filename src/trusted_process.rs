@@ -314,6 +314,14 @@ pub(crate) fn windows_program_files_x64() -> io::Result<PathBuf> {
 
 #[cfg(windows)]
 pub(crate) fn windows_known_folder(id: &winapi::shared::guiddef::GUID) -> io::Result<PathBuf> {
+    windows_known_folder_with_flags(id, winapi::um::shlobj::KF_FLAG_DEFAULT)
+}
+
+#[cfg(windows)]
+pub(crate) fn windows_known_folder_with_flags(
+    id: &winapi::shared::guiddef::GUID,
+    flags: winapi::um::shlobj::KNOWN_FOLDER_FLAG,
+) -> io::Result<PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use winapi::um::combaseapi::CoTaskMemFree;
@@ -321,7 +329,7 @@ pub(crate) fn windows_known_folder(id: &winapi::shared::guiddef::GUID) -> io::Re
 
     let mut directory = std::ptr::null_mut();
     // SAFETY: Windows allocates a NUL-terminated path for the fixed known-folder ID.
-    let status = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut directory) };
+    let status = unsafe { SHGetKnownFolderPath(id, flags, std::ptr::null_mut(), &mut directory) };
     if directory.is_null() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,

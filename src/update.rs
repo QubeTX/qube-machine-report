@@ -2513,6 +2513,18 @@ fn cargo_dist_receipt_evidence() -> Option<std::time::SystemTime> {
         .flatten()
 }
 
+/// The official installer persists its --no-modify-path / environment choice
+/// in the receipt before it hands off to automatic profile configuration.
+#[cfg(unix)]
+pub(crate) fn cargo_dist_modify_path(exe: &std::path::Path) -> bool {
+    cargo_dist_receipt_path()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .filter(|receipt| cargo_dist_receipt_matches(receipt, exe))
+        .and_then(|receipt| receipt.get("modify_path")?.as_bool())
+        .unwrap_or(true)
+}
+
 fn cargo_dist_install_prefix() -> Option<String> {
     let contents = std::fs::read_to_string(cargo_dist_receipt_path()?).ok()?;
     let receipt: serde_json::Value = serde_json::from_str(&contents).ok()?;
@@ -2723,6 +2735,23 @@ fn mac_binary_signature_matches_current_product() -> bool {
         && String::from_utf8(display.stderr)
             .ok()
             .is_some_and(|details| mac_signature_metadata_matches(&details))
+}
+
+/// A native package owns shell registrations and a startup runtime in addition
+/// to the public commands. A portable two-file uninstall would strand them.
+#[cfg(target_os = "macos")]
+pub(crate) fn mac_pkg_owns_uninstall_path(executable: &std::path::Path) -> bool {
+    let pkg_path = std::path::Path::new("/usr/local/bin/tr300");
+    if executable != pkg_path
+        && !matches!((executable.canonicalize(), pkg_path.canonicalize()), (Ok(exe), Ok(pkg)) if exe == pkg)
+    {
+        return false;
+    }
+    pkgutil_text(&["--files", MAC_PKG_ID]).is_some_and(|files| {
+        files.lines().any(|line| {
+            line.trim_start_matches("./").trim_start_matches('/') == "usr/local/bin/tr300"
+        })
+    })
 }
 
 #[cfg(target_os = "macos")]

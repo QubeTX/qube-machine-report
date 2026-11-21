@@ -23,6 +23,7 @@
 #define MyAppPublisher "Emmett S"
 #define MyAppURL "https://github.com/QubeTX/qube-machine-report"
 #define MyAppExeName "tr300.exe"
+#define PayloadDigest GetSHA256OfFile(SourcePath + "\..\target\release\tr300.exe")
 
 [Setup]
 ; AppId is the immutable identity of the Global EXE installer.
@@ -42,7 +43,8 @@ DefaultDirName={commonpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 ; CLI tool — no start menu group, no desktop shortcut.
 DisableProgramGroupPage=yes
-DisableDirPage=auto
+DisableDirPage=yes
+UsePreviousAppDir=no
 ; Require admin (perMachine scope). Triggers UAC prompt at install start.
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=
@@ -89,6 +91,11 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}\bin"; Flags: ignore
 Source: "..\target\release\report.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 [Registry]
+; Active Setup enrolls each eligible Explorer user with their own token.
+Root: HKLM64; Subkey: "Software\Microsoft\Active Setup\Installed Components\{{3315638A-7A5F-4591-A9FE-79312ED7859B}"; ValueType: string; ValueData: "TR-300 shell startup"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKLM64; Subkey: "Software\Microsoft\Active Setup\Installed Components\{{3315638A-7A5F-4591-A9FE-79312ED7859B}"; ValueType: string; ValueName: "Version"; ValueData: "{#StringChange(MyAppVersion, ".", ",")},0"; Flags: uninsdeletevalue
+Root: HKLM64; Subkey: "Software\Microsoft\Active Setup\Installed Components\{{3315638A-7A5F-4591-A9FE-79312ED7859B}"; ValueType: string; ValueName: "StubPath"; ValueData: """{app}\bin\{#MyAppExeName}"" configure-startup-account"; Flags: uninsdeletevalue
+
 ; Install-source marker. tr300 update reads HKCU\Software\TR300\InstallSource
 ; and picks the matching installer to download for in-place upgrades. Value
 ; must match the `exe-global` arm in src/update.rs.
@@ -111,6 +118,10 @@ begin
   Result := '';
   ExtractTemporaryFile('{#MyAppExeName}');
   Binary := ExpandConstant('{tmp}\{#MyAppExeName}');
+  if CompareText(ExpandConstant('{app}'), ExpandConstant('{commonpf}\tr300')) <> 0 then begin
+    Result := 'Global startup requires the standard Program Files installation directory.';
+    exit;
+  end;
   if not ExecAsOriginalUser(Binary,
       'migrate-cleanup --quiet --strict --dry-run --cargo-copy --native-destination "' +
       ExpandConstant('{app}\bin\{#MyAppExeName}') + '"',
@@ -120,10 +131,17 @@ begin
       'Setup stopped before changing the existing installation.';
     exit;
   end;
-  if ExitCode <> 0 then
+  if ExitCode <> 0 then begin
     Result := 'The existing TR-300 managed/Cargo ownership evidence is ' +
       'ambiguous. Setup stopped before changing anything. Use ' +
       'https://github.com/QubeTX/qube-machine-report/releases/latest';
+    exit;
+  end;
+  if not Exec(Binary, 'check-startup-machine', ExpandConstant('{tmp}'),
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then begin
+    Result := 'The Global binary and PowerShell profile locations must be protected from unprivileged writes.';
+    exit;
+  end;
 end;
 
 #include "remove-conflicting-msi.pas"
@@ -212,7 +230,24 @@ begin
   RegWriteExpandStringValue(HKEY_LOCAL_MACHINE, EnvironmentKey, 'Path', Paths);
 end;
 
+procedure RunMachineStartup(Action: string; Helper: string);
+var
+  Expected: string;
+  ExitCode: Integer;
+begin
+  Expected := ExpandConstant('{commonpf}\tr300');
+  if CompareText(ExpandConstant('{app}'), Expected) <> 0 then
+    RaiseException('Global startup requires the standard Program Files installation directory.');
+  if not Exec(Helper, Action, ExpandConstant('{sys}'),
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Could not start the Global shell configuration helper.');
+  if ExitCode <> 0 then
+    RaiseException('Global shell configuration failed (exit ' + IntToStr(ExitCode) + ').');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ExitCode: Integer;
 begin
   if CurStep = ssPostInstall then begin
     { The non-mutating preflight already proved exact ownership. Final strict
@@ -220,11 +255,25 @@ begin
       identity exist, before PATH advertises the new channel. }
     ConsolidatePriorCli;
     EnvAddPath(ExpandConstant('{app}') + '\bin');
+    RunMachineStartup('configure-startup-machine', ExpandConstant('{tmp}\{#MyAppExeName}'));
+    if not ExecAsOriginalUser(ExpandConstant('{app}\bin\{#MyAppExeName}'), 'configure-startup-account',
+        ExpandConstant('{sys}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+      Log('Original-account startup enrollment deferred to Explorer Active Setup.');
   end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then begin
+    { The uninstaller runs elevated. Copy into its private temporary directory
+      and compare to the digest recorded in the package before execution. }
+    if not CopyFile(ExpandConstant('{app}\bin\{#MyAppExeName}'),
+        ExpandConstant('{tmp}\tr300-startup-cleanup.exe'), False) then
+      RaiseException('Could not read the installed Global startup helper.');
+    if CompareText(GetSHA256OfFile(ExpandConstant('{tmp}\tr300-startup-cleanup.exe')), '{#PayloadDigest}') <> 0 then
+      RaiseException('The Global startup helper differs from this installer.');
+    RunMachineStartup('remove-startup-machine', ExpandConstant('{tmp}\tr300-startup-cleanup.exe'));
+  end;
   if CurUninstallStep = usPostUninstall then
     EnvRemovePath(ExpandConstant('{app}') + '\bin');
 end;

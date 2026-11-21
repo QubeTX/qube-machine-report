@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-11-20
+
+### Added
+
+- Add a viewport-aware startup report with local hardware and SSH identity, power and endpoint priorities. (#startup)
+- Enable scoped shell integration during managed installs and Global native installs. Honor account-level opt-outs across repairs and upgrades.
+
 ## [4.4.4] - 2026-11-11
 
 ### Fixed

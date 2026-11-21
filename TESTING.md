@@ -7,6 +7,10 @@ as passed.
 
 ## Per-version verification log
 
+### v4.5.0 — Adaptive terminal startup (release candidate)
+
+Disposable classic Windows consoles exercised CMD, Windows PowerShell 5.1 and PowerShell 7 at 80×25 and 42×12. The fixtures verified the top of the report, visible prompt space, one banner per console, and quiet command execution. ConPTY checks also covered 120×30, 80×75 and an 11-column pane. A real Linux loopback OpenSSH connection verified an interactive login, a command-only invocation and an explicit PTY command. Native installation, upgrade and public distribution records follow qualification of the final release source.
+
 ### v4.4.4 — Complete security distribution and native PowerShell verification (2026-11-11)
 
 Published [v4.4.4](https://github.com/QubeTX/qube-machine-report/releases/tag/v4.4.4), release `441625880`, at `2026-11-11T12:29:18Z`, from immutable source/tag `9f5110a3e8665f5fa2eb2e1744778c8025dc241f`. The exact unyanked crate checksum is `bb22808f4434aadc6c70f19605619d7ecb6f74b75b4c1c182662c28d823d138f`. This is the complete public security distribution carrying the PR #35/#1/#2 hardening developed through v4.4.3; the earlier incomplete GitHub candidates remain private or unhosted and immutable.

@@ -122,6 +122,20 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --locked --workspace --all-targets
       - run: cargo build --locked --release --workspace
+      - name: Exercise native terminal and OpenSSH startup sessions
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-15'
+        shell: bash
+        run: |
+          python3 scripts/test-startup-unix.py local target/release/tr300
+          bash scripts/test-startup-unix-ssh.sh target/release/tr300
+      - name: Exercise fresh macOS package startup and first SSH login
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/test-macos-startup-package.sh
+      - name: Exercise Windows OpenSSH login and command startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-startup-windows-ssh.ps1 target/release/tr300.exe
       - name: Smoke both commands and measure the existing release binary
         env:
           CI_BENCHMARK: ${{ matrix.benchmark }}
@@ -211,6 +225,22 @@ jobs:
           fixture_expanded="$RUNNER_TEMP/tr300-preinstall-pkg-expanded"
           fixture_alt_image="$RUNNER_TEMP/tr300-preinstall-alt-target.sparseimage"
           fixture_alt_mount="$RUNNER_TEMP/tr300-preinstall-alt-target"
+          detach_fixture_image() {
+            local mountpoint=$1 attempt status
+            # PackageKit can still hold the rejected volume briefly after its
+            # installer process exits. Retry only the macOS EBUSY status.
+            for attempt in 1 2 3 4 5 6; do
+              if hdiutil detach "$mountpoint" >/dev/null; then
+                return 0
+              else
+                status=$?
+              fi
+              if [[ "$status" -ne 16 || "$attempt" -eq 6 ]]; then
+                return "$status"
+              fi
+              sleep "$attempt"
+            done
+          }
           fixture_alt_log="$RUNNER_TEMP/tr300-preinstall-alt-target.log"
           fixture_alt_attached=0
           fixture_phase='initial fixture setup'
@@ -557,7 +587,7 @@ jobs:
           rm -f "$casefold_binary"
           rmdir "$casefold_home/.CARGO/BIN" "$casefold_home/.CARGO" \
             "$casefold_home/.cargo/bin" "$casefold_home/.cargo"
-          hdiutil detach "$casefold_home" >/dev/null
+          detach_fixture_image "$casefold_home"
           casefold_attached=0
           sudo /bin/rmdir "$casefold_home"
           rm -f "$casefold_image"
@@ -900,7 +930,7 @@ jobs:
             echo 'alternate-volume rejection left a host receipt behind' >&2
             exit 1
           fi
-          hdiutil detach "$fixture_alt_mount" >/dev/null
+          detach_fixture_image "$fixture_alt_mount"
           fixture_alt_attached=0
           rmdir "$fixture_alt_mount"
           rm -f "$fixture_alt_image"
@@ -1093,16 +1123,14 @@ jobs:
           grep -Fq 'tr300_restore_managed_state' "$shell_wrapper"
           test ! -e scripts/macos-pkg-rollback.c
           test ! -e scripts/test-macos-pkg-rollback.sh
-          if grep -Eq 'tr300-migration-probe|tr300-pkg-rollback|macos-pkg-rollback|pkg_scripts.*/postinstall|POSTINSTALL' "$builder"; then
+          if grep -Eq 'tr300-migration-probe|tr300-pkg-rollback|macos-pkg-rollback' "$builder"; then
             echo 'direct PKG must not ship post-payload managed-state migration code' >&2
             exit 1
           fi
           # Validation names the retired members only to prove they are absent;
           # the executable provenance fixture forbids them in prep/build jobs.
-          if grep -Eq 'pkg_scripts.*/postinstall|POSTINSTALL' "$workflow"; then
-            echo 'direct PKG workflow must not prepare or install a postinstall script' >&2
-            exit 1
-          fi
+          grep -Fq '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' "$builder"
+          grep -Fq '/Library/PrivilegedHelperTools/com.qubetx.tr300.startup configure-startup-machine || {' "$workflow"
           grep -Fq 'managed_state_present()' "$builder"
           # shellcheck disable=SC2016
           grep -Fq 'for home in /Users/* /Users/.[!.]* /Users/..?*; do' "$builder"
@@ -1365,6 +1393,8 @@ jobs:
           & target\release\report.exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'report help failed' }
           $global:LASTEXITCODE = 0
+      - name: Validate visible startup reports in Windows console windows
+        run: python scripts/test-startup-windows.py target/release/tr300.exe
       - name: Validate managed transactions with the real paired commands in both PowerShell hosts
         shell: pwsh
         run: |
@@ -1585,8 +1615,13 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
           }
           foreach ($case in $cases) {
+            $globalStartup = $case.Name -eq 'global'
+            & scripts/test-windows-startup-registration.ps1 -Registered $false
             Install-Msi $case.Msi
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
+            if ($globalStartup) { & scripts/test-windows-startup-policy.ps1 -Package $case.Msi }
             Install-Exe $case.Exe $case.Name
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             $entries = @(Entries $case.Display)
             if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -eq 1) {
               Get-Content -LiteralPath $script:LastInnoLog -ErrorAction SilentlyContinue
@@ -1598,9 +1633,12 @@ jobs:
             $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
             if ($marker -notlike 'exe-*') { throw "current EXE marker did not win: $marker" }
             Remove-Entry $entries[0]
+            & scripts/test-windows-startup-registration.ps1 -Registered $false
 
             Install-Exe $case.Exe $case.Name
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             Install-Msi $case.Msi
+            & scripts/test-windows-startup-registration.ps1 -Registered $globalStartup
             $entries = @(Entries $case.Display)
             if ($entries.Count -ne 1 -or $entries[0].WindowsInstaller -ne 1) {
               $summary = $entries | ForEach-Object {
@@ -1611,6 +1649,7 @@ jobs:
             $marker = (Get-ItemProperty 'HKCU:\Software\TR300').PSObject.Properties[$case.Marker].Value
             if ($marker -notlike 'msi-*') { throw "current MSI marker did not win: $marker" }
             Remove-Entry $entries[0]
+            & scripts/test-windows-startup-registration.ps1 -Registered $false
           }
       - name: Prove cross-edition native choices fail before mutation
         shell: pwsh

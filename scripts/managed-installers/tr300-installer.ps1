@@ -746,6 +746,18 @@ try {
     Assert-Tr300ManagedPath $binary ([bool]$NoModifyPath)
     Assert-Tr300NoUnknownPathOwners @() $managedState
     $committed = $true
+    # At this point the paired commands, receipt and origin have been verified.
+    # A profile blocked by endpoint policy is a separate, recoverable setup failure.
+    try {
+        & $binary configure-startup-user
+        $startupConfigured = $global:LASTEXITCODE -eq 0
+    } catch {
+        $startupConfigured = $false
+    }
+    if (-not $startupConfigured) {
+        Write-Warning 'TR-300 installed, but shell startup setup was incomplete. Run tr300 install to retry.'
+    }
+    $global:LASTEXITCODE = 0
     Write-Information "TR-300 $Tr300Version is installed through the managed PowerShell channel: $binary"
 } catch {
     $failure = $_.Exception.Message

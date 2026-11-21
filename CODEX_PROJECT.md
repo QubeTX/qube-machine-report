@@ -335,7 +335,7 @@ and uses `unicode-width` for alignment.
 
 `CollectMode::Fast` is the shell-startup path. It keeps quick native/environment
 facts and skips slow optional probes. The installed profile block invokes
-`tr300 --fast`; the `report` alias and plain `tr300` use full mode. Optional
+the adaptive startup renderer; explicit `report --fast` keeps the normal table and bare commands use full mode. Optional
 collector failure is represented as absence, not a fabricated value or a whole
 report failure.
 

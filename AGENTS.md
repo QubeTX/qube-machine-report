@@ -481,7 +481,7 @@ After collection it:
 
 `--fast` is intended for shell startup auto-run and avoids slow subprocess-heavy checks where possible.
 
-Install profile auto-run uses `tr300 --fast`. Both bare `report` and bare
+Installed startup hooks use adaptive fast collection. The public `--startup` flag previews it in an interactive terminal. Both bare `report` and bare
 `tr300` use full mode; either command accepts `--fast`. Exact skipped work
 varies by platform collector, so check
 `src/collectors/platform/{linux,macos,windows}.rs` before changing fast-mode behavior.
@@ -791,68 +791,11 @@ fails closed.
 Do not bypass the prompt unless implementing a clearly requested
 non-interactive variant.
 
-### Unix install (`src/install/unix.rs`)
+### Shell integration
 
-Profiles touched:
-- `~/.bashrc` when present
-- `~/.zshrc` when present
-- creates `.zshrc` on macOS or `.bashrc` on other Unix when neither exists
+Managed wrappers configure the installing account after verifying both commands. Windows Global and the macOS PKG configure machine scope. Corporate packages require explicit opt-in. The startup renderer uses the visible viewport and prioritizes identity, power and the connected address in SSH sessions. Manual full, fast, JSON and Markdown retain their own output contracts.
 
-Injected block:
-
-```bash
-# TR-300 Machine Report
-# Auto-run on interactive shell; guards prevent spam-on-every-prompt
-# when the binary is missing, and recursion in nested shells.
-case "$-" in *i*)
-    if command -v tr300 >/dev/null 2>&1 && [ -z "${TR300_AUTORUN_RAN-}" ]; then
-        export TR300_AUTORUN_RAN=1
-        tr300 --fast
-    fi
-    ;;
-esac
-# End TR-300
-```
-
-Behavior:
-- validates marker balance before mutation, takes a one-time backup, removes the
-  existing TR-300 block, and atomically replaces the real target (including a
-  symlinked profile target)
-- uses POSIX-compatible `case "$-"` rather than bash-only `[[ ... ]]`
-- idempotent re-install behavior
-- refuses `sudo`/root profile installation
-
-### Windows install (`src/install/windows.rs`)
-
-Profile targets:
-- queries both Windows PowerShell and PowerShell 7 `$PROFILE` paths and updates
-  each distinct installed shell flavor
-- creates profile directories if needed
-
-Injected block:
-
-```powershell
-# TR-300 Machine Report
-# Auto-run on interactive shell; guards prevent error spam when the
-# binary is missing, recursion in nested shells, and rendering in
-# scripted (non-interactive) invocations.
-if (
-    (Get-Command tr300 -ErrorAction SilentlyContinue) -and
-    -not $env:TR300_AUTORUN_RAN -and
-    [Environment]::UserInteractive
-) {
-    $env:TR300_AUTORUN_RAN = '1'
-    tr300 --fast
-}
-# End TR-300
-```
-
-Behavior:
-- performs the conservative CurrentUser execution-policy preflight, then uses
-  the same marker-balance/backup/atomic-write pipeline as Unix
-- complete uninstall validates ownership of both command paths before profile
-  mutation, schedules their exact paths for deferred removal, and attempts to
-  remove an empty product parent directory when its path contains `tr300`
+Keep per-account opt-out, marker checks, profile ownership, atomic writes, idempotent repair, quiet scripted launches and per-terminal deduplication in sync across Bash, Zsh, Fish, PowerShell and Windows Command Prompt. See the implementation in `src/install/` for the current platform snippets.
 
 ### Managed installer contract (MIC-1)
 
@@ -967,7 +910,7 @@ Behavior:
   wrappers provide the supported cross-scope/native convergence path. On Mac,
   an exact PKG may still transition to managed shell; the reverse transition
   requires receipt-aware Complete uninstall before the direct PKG runs. The
-  direct PKG has no postinstall and never mutates user-owned managed state. The
+  direct PKG postinstall registers shell startup through its protected helper. Managed install state remains under its original owner. The
   hidden bounded `migrate-cleanup` never deletes the running install, toolchain,
   shared Cargo PATH, or Downloads. Current Windows native packages always use
   its mandatory `--strict` mode with no cleanup opt-out; a present cargo-dist
@@ -1031,9 +974,7 @@ native installer path is `.github/workflows/macos-installer.yml` plus
 tagged archives into one universal Mach-O, signs/notarizes it, and builds the
 signed, notarized, stapled system-wide `com.qubetx.tr300.pkg`. The direct PKG is
 the recommended native download and the v4.2+ updater payload because the PKG,
-  not a DMG, owns `/usr/local/bin/tr300` and supplies the stable receipt. Its only
-  package script is a non-mutating `preinstall` that refuses standard managed
-  ownership before payload placement; it contains no postinstall helper. A
+  not a DMG, owns `/usr/local/bin/tr300` and supplies the stable receipt. Its non-mutating `preinstall` refuses standard managed ownership and checks the startup payload destinations before placement. Its `postinstall` registers startup using the package-owned helper. A
   signed/notarized/stapled DMG containing the
 byte-identical PKG is still published only so immutable v4.1.x updaters can cross
 the transition; current clients never use that bridge.

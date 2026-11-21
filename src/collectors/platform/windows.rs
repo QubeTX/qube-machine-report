@@ -200,6 +200,20 @@ struct Win32PhysicalMemory {
     capacity: Option<u64>,
 }
 
+/// Add inexpensive native facts used by the automatic shell summary.
+#[doc(hidden)]
+pub fn supplement_startup(info: &mut crate::SystemInfo) {
+    info.battery = info.battery.take().or_else(get_battery_native);
+    info.machine_model = info.machine_model.take().or_else(|| {
+        let bios = RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey(r"HARDWARE\DESCRIPTION\System\BIOS")
+            .ok()?;
+        let manufacturer: Option<String> = bios.get_value("SystemManufacturer").ok();
+        let model: Option<String> = bios.get_value("SystemProductName").ok();
+        compose_machine_model(manufacturer.as_deref(), model.as_deref())
+    });
+}
+
 /// Collect Windows-specific information
 pub fn collect(mode: CollectMode) -> PlatformInfo {
     // Cheap native registry walk serves both modes.
