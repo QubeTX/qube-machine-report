@@ -13,6 +13,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-11-21
+
+### Changed
+
+- Thin horizontal lines separate related information when you open a terminal. Small windows still leave room for the prompt, and SSH sessions show the remote machine’s connection details first.
+
 ## [4.5.0] - 2026-11-20
 
 ### Added
