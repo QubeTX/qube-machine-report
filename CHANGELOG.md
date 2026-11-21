@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-11-21
+
+### Changed
+
+- The adaptive startup report budgets thin section dividers alongside its rows. Hardware, operating system, resource usage and session details stay together. Interactive SSH keeps connection details first, and short panes retain space for the prompt.
+
 ## [4.5.0] - 2026-11-20
 
 ### Added

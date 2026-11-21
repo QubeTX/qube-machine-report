@@ -584,6 +584,8 @@ The JSON output exposes this state under top-level keys `elevated` and
 
 ## Terminal startup reports
 
+Thin rules separate groups of related facts when the terminal has room. Short panes give those rows to the highest-priority facts and the prompt.
+
 The recommended managed installer configures both commands on your account’s PATH and enables the startup report. Windows Global and the macOS PKG enable it machine-wide. Windows Corporate, portable copies and Cargo installations can opt in by running `tr300 install` as the user. Open a fresh terminal after installing so it inherits the updated PATH.
 
 Each new interactive terminal or SSH login shows a fast report for the machine running TR-300. Locally, it prioritizes hardware, memory and disk. Over SSH it prioritizes hostname, the address reached on the server, and battery state. Short panes show fewer rows. The display reserves four rows for the prompt and shell messages. A terminal that cannot supply its size gets a short hostname line. Run `report` for the full table or `report --json` for scripts.

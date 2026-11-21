@@ -120,16 +120,32 @@ fn priority(label: &str, remote: bool) -> usize {
     }
 }
 
-// Select by importance first; group the selected local facts for reading.
-fn section(label: &str) -> u8 {
+// Display order is separate from the priority used to select facts.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Section {
+    RemoteIdentity,
+    Hardware,
+    System,
+    Resources,
+    Session,
+}
+
+fn section(label: &str, remote: bool) -> Section {
     match label {
+        "SERVER IP" | "DEFAULT IP" | "MACHINE NAME" | "BATTERY" | "BAT HEALTH" if remote => {
+            Section::RemoteIdentity
+        }
+        "OS" | "EDITION" | "CODENAME" | "BUILD" | "KERNEL" | "BOOT MODE" | "DESKTOP"
+        | "SESSION" | "ENCRYPTION" => Section::System,
         "MEMORY" | "VOLUME" | "AVAILABLE" | "SWAP" | "CPU USAGE" | "CPU TEMP" | "GPU TEMP"
-        | "ZFS HEALTH" | "UPTIME" => 1,
-        l if l.starts_with("LOAD/CPU") => 1,
-        "MACHINE NAME" | "HOSTNAME" | "SERVER IP" | "DEFAULT IP" | "SSH CLIENT" | "USER" => 2,
-        l if l.starts_with("DNS ") => 2,
-        "LAST LOGIN" | "LOGIN ORIGIN" | "LOGIN SHELL" | "TERMINAL" | "LOCALE" | "ENCRYPTION" => 3,
-        _ => 0,
+        | "ZFS HEALTH" | "BATTERY" | "BAT HEALTH" => Section::Resources,
+        l if l.starts_with("LOAD/CPU") => Section::Resources,
+        "MACHINE NAME" | "HOSTNAME" | "SERVER IP" | "DEFAULT IP" | "SSH CLIENT" | "USER"
+        | "LAST LOGIN" | "LOGIN ORIGIN" | "UPTIME" | "LOGIN SHELL" | "TERMINAL" | "LOCALE" => {
+            Section::Session
+        }
+        l if l.starts_with("DNS ") => Section::Session,
+        _ => Section::Hardware,
     }
 }
 
@@ -221,10 +237,42 @@ fn render(
         }
     });
 
-    facts.truncate(budget - 1);
-    if !session.remote {
-        facts.sort_by_key(|(label, _)| section(label));
+    let body_rows = budget - 1; // The hostname always takes one row.
+    let group = |label: &str| section(label, session.remote);
+    // In a short or very narrow pane every row goes to a fact. In normal panes,
+    // charge one row for each new section while selecting in priority order.
+    let divided = body_rows >= 13 && available >= 26;
+    if divided {
+        // Keep the compact frame when the original facts already fit inside one.
+        let spare = body_rows.saturating_sub(facts.len());
+        let frame_rows = if available >= 38 && spare >= 2 {
+            spare.min(3)
+        } else {
+            0
+        };
+        let mut sections = std::collections::BTreeSet::new();
+        let count = facts
+            .iter()
+            .enumerate()
+            .take_while(|(i, (label, _))| {
+                sections.insert(group(label));
+                // i + 1 facts and sections.len() - 1 dividers.
+                i + sections.len() <= body_rows - frame_rows
+            })
+            .count();
+        facts.truncate(count);
+    } else {
+        facts.truncate(body_rows);
     }
+
+    if divided || !session.remote {
+        facts.sort_by_key(|(label, _)| group(label));
+    }
+    let section_changes = |a: &str, b: &str| divided && group(a) != group(b);
+    let dividers = facts
+        .windows(2)
+        .filter(|pair| section_changes(&pair[0].0, &pair[1].0))
+        .count();
     let data_width = facts
         .iter()
         .map(|(_, value)| value.width())
@@ -232,18 +280,10 @@ fn render(
         .unwrap_or(32)
         .clamp(32, 64);
     let width = available.min(19 + data_width);
-    // Spend spare rows on a closed frame only after selecting useful facts.
-    // The hostname itself always costs one row.
-    let spare = budget - facts.len() - 1;
+    let spare = body_rows - facts.len() - dividers;
     let framed = width >= 38 && spare >= 2;
     let full_header = framed && spare >= 6;
     let renderer = TableRenderer::new(12, width.saturating_sub(19), config.box_chars());
-    let section_changes = |a: &str, b: &str| !session.remote && section(a) != section(b);
-    let dividers = facts
-        .windows(2)
-        .filter(|pair| section_changes(&pair[0].0, &pair[1].0))
-        .count();
-    let divided = full_header && spare >= 6 + dividers;
     let mut output = String::new();
     let heading_width = if framed { width - 2 } else { width };
     let branded = format!("TR-300 | {}", info.hostname);
@@ -285,8 +325,13 @@ fn render(
     };
     let mut previous = None;
     for (label, value) in &facts {
-        if divided && previous.is_some_and(|p| section_changes(p, label)) {
-            output.push_str(&renderer.render_middle_divider());
+        if previous.is_some_and(|p| section_changes(p, label)) {
+            if framed {
+                output.push_str(&renderer.render_middle_divider());
+            } else {
+                output.extend(std::iter::repeat_n(config.box_chars().horizontal, width));
+                output.push('\n');
+            }
         }
         previous = Some(label.as_str());
         if framed {
@@ -412,7 +457,42 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("SHAGHV-PC") && out.contains("TR-300"));
+        assert!(
+            out.lines()
+                .any(|line| line.starts_with('├') && line.contains('┼')),
+            "{out}"
+        );
         assert!(out.lines().count() <= 26);
+    }
+
+    #[test]
+    fn thin_rules_group_facts_without_consuming_prompt_rows() {
+        let mut info = fixture_info();
+        info.battery = Some("63% (Discharging)".into());
+        for config in [Config::default(), Config::default().with_ascii()] {
+            let rule_char = config.box_chars().horizontal;
+            let plain_rule = |line: &str| !line.is_empty() && line.chars().all(|c| c == rule_char);
+            let local = render(&info, &config, Some((80, 25)), &Session::default());
+            let groups: Vec<_> = local.lines().collect();
+            let groups: Vec<_> = groups.split(|line| plain_rule(line)).collect();
+            assert_eq!(groups.len(), 4, "{local}");
+            for (group, label) in groups.iter().zip(["PROCESSOR", "OS", "MEMORY", "UPTIME"]) {
+                assert!(group.iter().any(|line| line.starts_with(label)), "{local}");
+            }
+            assert!(local.lines().count() <= 21);
+
+            let ssh = Session::detect(Some("192.0.2.1 1025 192.0.2.7 22"), None, None);
+            let remote = render(&info, &config, Some((80, 25)), &ssh);
+            let first: Vec<_> = remote
+                .lines()
+                .take_while(|line| !plain_rule(line))
+                .collect();
+            assert!(first[1].starts_with("SERVER IP") && first[2].starts_with("BATTERY"));
+            assert!(remote.lines().any(|line| line.starts_with("PROCESSOR")));
+            let short = render(&info, &config, Some((42, 12)), &ssh);
+            assert!(!short.lines().any(plain_rule));
+            assert!(short.lines().count() <= 8 && short.contains("PROCESSOR"));
+        }
     }
 
     #[test]
